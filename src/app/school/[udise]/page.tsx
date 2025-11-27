@@ -20,6 +20,7 @@ interface Student {
   gender: string | null;
   program_name: string | null;
   grade: number | null;
+  status: string | null;
 }
 
 interface School {
@@ -57,6 +58,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       s.apaar_id,
       s.category,
       s.stream,
+      s.status,
       gr.number as grade,
       p.name as program_name
     FROM group_user gu
@@ -143,7 +145,11 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
-  const students = await getStudents(school.id);
+  const allStudents = await getStudents(school.id);
+
+  // Separate active and dropout students
+  const activeStudents = allStudents.filter(s => s.status !== 'dropout');
+  const dropoutStudents = allStudents.filter(s => s.status === 'dropout');
 
   // Check if user can edit students (not read-only)
   const canEdit = isPasscodeUser
@@ -188,13 +194,28 @@ export default async function SchoolPage({ params }: PageProps) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4">
           <h2 className="text-xl font-semibold text-gray-900">
-            Students ({students.length})
+            Active Students ({activeStudents.length})
           </h2>
         </div>
 
-        <StudentTable students={students} canEdit={canEdit} />
+        <StudentTable students={activeStudents} canEdit={canEdit} />
+
+        {dropoutStudents.length > 0 && (
+          <>
+            <div className="mt-10 mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Dropout Students ({dropoutStudents.length})
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Students marked as dropout
+              </p>
+            </div>
+
+            <StudentTable students={dropoutStudents} canEdit={canEdit} />
+          </>
+        )}
       </main>
     </div>
   );

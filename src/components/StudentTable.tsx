@@ -18,6 +18,7 @@ interface Student {
   gender: string | null;
   program_name: string | null;
   grade: number | null;
+  status: string | null;
 }
 
 interface StudentTableProps {

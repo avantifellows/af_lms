@@ -15,6 +15,7 @@ interface Student {
   stream: string | null;
   gender: string | null;
   program_name: string | null;
+  status: string | null;
 }
 
 interface EditStudentModalProps {
@@ -27,6 +28,7 @@ interface EditStudentModalProps {
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
 const STREAM_OPTIONS = ["engineering", "medical", "pcmb", "foundation", "clat", "ca", "pcb", "pcm"];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
+const STATUS_OPTIONS = ["enrolled", "dropout"];
 
 const inputClassName = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const labelClassName = "block text-sm font-medium text-gray-700";
@@ -46,6 +48,7 @@ export default function EditStudentModal({
     apaar_id: student.apaar_id || "",
     category: student.category || "",
     stream: student.stream || "",
+    status: student.status || "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -240,6 +243,23 @@ export default function EditStudentModal({
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className={labelClassName}>Status</label>
+              <select
+                name="status"
+                value={formData.status}
+                onChange={handleChange}
+                className={inputClassName}
+              >
+                <option value="">Select...</option>
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
