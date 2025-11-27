@@ -19,6 +19,7 @@ interface Student {
   stream: string | null;
   gender: string | null;
   program_name: string | null;
+  grade: number | null;
 }
 
 interface School {
@@ -56,11 +57,13 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       s.apaar_id,
       s.category,
       s.stream,
+      gr.number as grade,
       p.name as program_name
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
+    LEFT JOIN grade gr ON s.grade_id = gr.id
     LEFT JOIN LATERAL (
       SELECT p.name
       FROM group_user gu_batch
@@ -71,7 +74,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       LIMIT 1
     ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1
-    ORDER BY u.first_name, u.last_name`,
+    ORDER BY gr.number, u.first_name, u.last_name`,
     [schoolId]
   );
 }
