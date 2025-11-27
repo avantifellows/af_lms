@@ -5,6 +5,7 @@ import { getAccessibleSchoolCodes, getUserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
 import SearchBox from "./SearchBox";
+import StudentSearch from "@/components/StudentSearch";
 
 interface School {
   id: string;
@@ -152,7 +153,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6">
-          <SearchBox defaultValue={searchQuery} />
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Search Students
+            </label>
+            <StudentSearch />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Search Schools
+            </label>
+            <SearchBox defaultValue={searchQuery} />
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
