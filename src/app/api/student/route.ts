@@ -14,6 +14,7 @@ interface StudentUpdatePayload {
   gender?: string;
   category?: string;
   stream?: string;
+  status?: string;
 }
 
 export async function POST(request: NextRequest) {
