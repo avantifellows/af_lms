@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessSchool } from "@/lib/permissions";
+import { canAccessSchool, canEditStudents } from "@/lib/permissions";
+import StudentTable from "@/components/StudentTable";
 
 interface Student {
   group_user_id: string;
@@ -13,9 +14,11 @@ interface Student {
   phone: string | null;
   email: string | null;
   student_id: string | null;
+  apaar_id: string | null;
   category: string | null;
   stream: string | null;
   gender: string | null;
+  program_name: string | null;
 }
 
 interface School {
@@ -32,7 +35,8 @@ async function getSchoolByCode(code: string): Promise<School | null> {
   const schools = await query<School>(
     `SELECT id, name, code, udise_code, district, state, region
      FROM school
-     WHERE udise_code = $1 OR code = $1`,
+     WHERE af_school_category = 'JNV'
+       AND (udise_code = $1 OR code = $1)`,
     [code]
   );
   return schools[0] || null;
@@ -49,12 +53,23 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       u.email,
       u.gender,
       s.student_id,
+      s.apaar_id,
       s.category,
-      s.stream
+      s.stream,
+      p.name as program_name
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
+    LEFT JOIN LATERAL (
+      SELECT p.name
+      FROM group_user gu_batch
+      JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
+      JOIN batch b ON g_batch.child_id = b.id
+      JOIN program p ON b.program_id = p.id
+      WHERE gu_batch.user_id = u.id
+      LIMIT 1
+    ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY u.first_name, u.last_name`,
     [schoolId]
@@ -102,7 +117,7 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   } else {
     // For Google users, check permissions
-    const hasAccess = canAccessSchool(
+    const hasAccess = await canAccessSchool(
       session.user?.email || null,
       school.code,
       school.region || undefined
@@ -126,6 +141,11 @@ export default async function SchoolPage({ params }: PageProps) {
   }
 
   const students = await getStudents(school.id);
+
+  // Check if user can edit students (not read-only)
+  const canEdit = isPasscodeUser
+    ? true  // Passcode users can edit by default
+    : await canEditStudents(session.user?.email || "");
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -171,80 +191,7 @@ export default async function SchoolPage({ params }: PageProps) {
           </h2>
         </div>
 
-        <div className="overflow-hidden bg-white shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
-          <table className="min-w-full divide-y divide-gray-300">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">
-                  Name
-                </th>
-                <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                  Student ID
-                </th>
-                <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                  Phone
-                </th>
-                <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                  Gender
-                </th>
-                <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                  Category
-                </th>
-                <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                  Stream
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
-              {students.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-sm text-gray-500">
-                    No students enrolled in this school
-                  </td>
-                </tr>
-              ) : (
-                students.map((student) => (
-                  <tr key={student.group_user_id} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                      {[student.first_name, student.last_name]
-                        .filter(Boolean)
-                        .join(" ") || "—"}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                      {student.student_id || "—"}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                      {student.phone || "—"}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                      {student.gender || "—"}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                      <span
-                        className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
-                          student.category === "Gen"
-                            ? "bg-green-100 text-green-800"
-                            : student.category === "OBC"
-                            ? "bg-blue-100 text-blue-800"
-                            : student.category === "SC"
-                            ? "bg-purple-100 text-purple-800"
-                            : student.category === "ST"
-                            ? "bg-orange-100 text-orange-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {student.category || "—"}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 capitalize">
-                      {student.stream || "—"}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <StudentTable students={students} canEdit={canEdit} />
       </main>
     </div>
   );

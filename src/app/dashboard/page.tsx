@@ -26,7 +26,8 @@ async function getSchools(
       return query<School>(
         `SELECT id, code, name, district, state, region
          FROM school
-         WHERE name ILIKE $1 OR code ILIKE $1 OR district ILIKE $1
+         WHERE af_school_category = 'JNV'
+           AND (name ILIKE $1 OR code ILIKE $1 OR district ILIKE $1)
          ORDER BY name
          LIMIT 100`,
         [searchPattern]
@@ -35,6 +36,7 @@ async function getSchools(
     return query<School>(
       `SELECT id, code, name, district, state, region
        FROM school
+       WHERE af_school_category = 'JNV'
        ORDER BY name
        LIMIT 100`
     );
@@ -46,7 +48,8 @@ async function getSchools(
     return query<School>(
       `SELECT id, code, name, district, state, region
        FROM school
-       WHERE code = ANY($1)
+       WHERE af_school_category = 'JNV'
+         AND code = ANY($1)
          AND (name ILIKE $2 OR code ILIKE $2 OR district ILIKE $2)
        ORDER BY name`,
       [codes, searchPattern]
@@ -56,7 +59,8 @@ async function getSchools(
   return query<School>(
     `SELECT id, code, name, district, state, region
      FROM school
-     WHERE code = ANY($1)
+     WHERE af_school_category = 'JNV'
+       AND code = ANY($1)
      ORDER BY name`,
     [codes]
   );
@@ -79,7 +83,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect(`/school/${(session as any).schoolCode}`);
   }
 
-  const permission = getUserPermission(session.user.email);
+  const permission = await getUserPermission(session.user.email);
 
   if (!permission) {
     return (
@@ -102,7 +106,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     );
   }
 
-  const schoolCodes = getAccessibleSchoolCodes(session.user.email);
+  const schoolCodes = await getAccessibleSchoolCodes(session.user.email);
   const schools = await getSchools(schoolCodes, searchQuery);
 
   // If user has access to only one school and no search, redirect directly
@@ -117,7 +121,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Schools</h1>
             <p className="mt-1 text-sm text-gray-500">
-              {permission.level === 3
+              {permission.level === 4
+                ? "Admin access"
+                : permission.level === 3
                 ? "All schools access"
                 : permission.level === 2
                 ? `Region access: ${permission.regions?.join(", ")}`
@@ -125,6 +131,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            {permission.level === 4 && (
+              <Link
+                href="/admin"
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Admin
+              </Link>
+            )}
             <span className="text-sm text-gray-500">{session.user.email}</span>
             <Link
               href="/api/auth/signout"
