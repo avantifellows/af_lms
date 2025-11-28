@@ -17,6 +17,8 @@ This document outlines the architecture changes needed to support multiple produ
 | 2 | Schools in specific regions |
 | 1 | Specific school codes |
 
+*Note: Currently Level 4 is product-specific. There's no "super admin" that spans all products.*
+
 ### User Flow
 ```
 Login → Dashboard (list of schools) → School Page (list of students)
@@ -83,10 +85,13 @@ CREATE TABLE user_permission (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
   
-  -- Product scope
-  product_code VARCHAR(50),           -- NULL = all products, 'jnv', 'stp'
+  -- Global admin flag (supersedes all other permissions)
+  is_super_admin BOOLEAN DEFAULT false,
   
-  -- Access level
+  -- Product scope (ignored if is_super_admin = true)
+  product_code VARCHAR(50),           -- NULL = all products user has access to, 'jnv', 'stp'
+  
+  -- Access level within product
   level INTEGER NOT NULL CHECK (level IN (1, 2, 3, 4)),
   
   -- JNV-specific access (level 1-2)
@@ -105,12 +110,27 @@ CREATE TABLE user_permission (
 
 ### 4. Permission Level Meanings (Updated)
 
-| Level | JNV Access | STP Access |
-|-------|------------|------------|
-| 4 | Admin (all + user mgmt) | Admin (all + user mgmt) |
-| 3 | All JNV schools | All STP programs |
-| 2 | Schools in regions[] | (Future: program categories) |
-| 1 | Specific school_codes[] | Specific program_ids[] |
+| Level | Scope | JNV Access | STP Access |
+|-------|-------|------------|------------|
+| **Super Admin** | Global | All products + all user management | All products + all user management |
+| 4 | Product | Admin (all + user mgmt for product) | Admin (all + user mgmt for product) |
+| 3 | Product | All JNV schools | All STP programs |
+| 2 | Product | Schools in regions[] | (Future: program categories) |
+| 1 | Product | Specific school_codes[] | Specific program_ids[] |
+
+### 5. Super Admin vs Product Admin
+
+| Capability | Super Admin | Product Admin (Level 4) |
+|------------|-------------|-------------------------|
+| View all products | Yes | Only their product |
+| Manage users for all products | Yes | Only their product |
+| Create other super admins | Yes | No |
+| Create product admins | Yes | Yes (for their product) |
+| Access all entities | Yes (all products) | Yes (their product only) |
+
+**Use cases:**
+- **Super Admin**: Engineering team, CTO, platform owner
+- **Product Admin**: JNV program lead, STP program lead
 
 ---
 
@@ -125,6 +145,12 @@ CREATE TABLE user_permission (
 export async function getAccessibleSchoolCodes(email: string): Promise<string[] | "all">
 
 // New: Product-aware permissions
+export async function getUserPermission(email: string): Promise<UserPermission | null>
+
+export async function isSuperAdmin(email: string): Promise<boolean>
+
+export async function getAccessibleProducts(email: string): Promise<Product[]>
+
 export async function getAccessibleEntities(
   email: string,
   product: 'jnv' | 'stp'
@@ -136,6 +162,46 @@ export async function getAccessibleEntities(
 
 export async function canAccessSchool(email: string, schoolCode: string): Promise<boolean>
 export async function canAccessProgram(email: string, programId: number): Promise<boolean>
+
+// Admin checks
+export async function canManageUsers(email: string, product?: string): Promise<boolean> {
+  const permission = await getUserPermission(email);
+  if (!permission) return false;
+  
+  // Super admins can manage all users
+  if (permission.is_super_admin) return true;
+  
+  // Product admins can only manage users for their product
+  if (permission.level === 4) {
+    return !product || permission.product_code === product;
+  }
+  
+  return false;
+}
+
+export async function canCreateAdmin(
+  email: string, 
+  targetLevel: number,
+  targetProduct?: string
+): Promise<boolean> {
+  const permission = await getUserPermission(email);
+  if (!permission) return false;
+  
+  // Only super admins can create other super admins
+  if (targetLevel === 5 || !targetProduct) {  // 5 = super admin
+    return permission.is_super_admin;
+  }
+  
+  // Super admins can create any product admin
+  if (permission.is_super_admin) return true;
+  
+  // Product admins can create lower-level users for their product
+  if (permission.level === 4 && permission.product_code === targetProduct) {
+    return targetLevel < 4;
+  }
+  
+  return false;
+}
 ```
 
 ### 2. Add Product Context
