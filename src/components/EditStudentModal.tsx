@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Grade } from "./StudentTable";
 
 interface Student {
   group_user_id: string;
@@ -18,6 +19,7 @@ interface Student {
   gender: string | null;
   program_name: string | null;
   grade: number | null;
+  grade_id: string | null;
   status: string | null;
 }
 
@@ -26,6 +28,7 @@ interface EditStudentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
+  grades: Grade[];
 }
 
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
@@ -40,7 +43,6 @@ const STREAM_OPTIONS = [
   "pcm",
 ];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
-const GRADE_OPTIONS = [9, 10, 11, 12];
 
 function getCurrentAcademicYear(): string {
   const now = new Date();
@@ -66,6 +68,7 @@ export default function EditStudentModal({
   isOpen,
   onClose,
   onSave,
+  grades,
 }: EditStudentModalProps) {
   const [formData, setFormData] = useState({
     first_name: student.first_name || "",
@@ -75,7 +78,7 @@ export default function EditStudentModal({
     date_of_birth: student.date_of_birth || "",
     category: student.category || "",
     stream: student.stream || "",
-    grade: student.grade?.toString() || "",
+    grade_id: student.grade_id || "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -252,15 +255,15 @@ export default function EditStudentModal({
               <div>
                 <label className={labelClassName}>Grade</label>
                 <select
-                  name="grade"
-                  value={formData.grade}
+                  name="grade_id"
+                  value={formData.grade_id}
                   onChange={handleChange}
                   className={inputClassName}
                 >
                   <option value="">Select...</option>
-                  {GRADE_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      Grade {opt}
+                  {grades.map((grade) => (
+                    <option key={grade.id} value={grade.id}>
+                      Grade {grade.number}
                     </option>
                   ))}
                 </select>

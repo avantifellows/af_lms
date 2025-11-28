@@ -22,7 +22,13 @@ interface Student {
   gender: string | null;
   program_name: string | null;
   grade: number | null;
+  grade_id: string | null;
   status: string | null;
+}
+
+interface Grade {
+  id: string;
+  number: number;
 }
 
 interface School {
@@ -46,6 +52,10 @@ async function getSchoolByCode(code: string): Promise<School | null> {
   return schools[0] || null;
 }
 
+async function getGrades(): Promise<Grade[]> {
+  return query<Grade>(`SELECT id, number FROM grade ORDER BY number`, []);
+}
+
 async function getStudents(schoolId: string): Promise<Student[]> {
   return query<Student>(
     `SELECT
@@ -63,6 +73,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       s.category,
       s.stream,
       s.status,
+      s.grade_id,
       gr.number as grade,
       p.name as program_name
     FROM group_user gu
@@ -157,6 +168,7 @@ export default async function SchoolPage({ params }: PageProps) {
   }
 
   const allStudents = await getStudents(school.id);
+  const grades = await getGrades();
 
   // Separate active and dropout students
   const activeStudents = allStudents.filter((s) => s.status !== "dropout");
@@ -225,7 +237,11 @@ export default async function SchoolPage({ params }: PageProps) {
           </h2>
         </div>
 
-        <StudentTable students={activeStudents} canEdit={canEdit} />
+        <StudentTable
+          students={activeStudents}
+          canEdit={canEdit}
+          grades={grades}
+        />
 
         {dropoutStudents.length > 0 && (
           <>
@@ -238,7 +254,11 @@ export default async function SchoolPage({ params }: PageProps) {
               </p>
             </div>
 
-            <StudentTable students={dropoutStudents} canEdit={canEdit} />
+            <StudentTable
+              students={dropoutStudents}
+              canEdit={canEdit}
+              grades={grades}
+            />
           </>
         )}
       </main>

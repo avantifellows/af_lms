@@ -20,24 +20,32 @@ interface Student {
   gender: string | null;
   program_name: string | null;
   grade: number | null;
+  grade_id: string | null;
   status: string | null;
+}
+
+export interface Grade {
+  id: string;
+  number: number;
 }
 
 interface StudentTableProps {
   students: Student[];
   canEdit?: boolean;
+  grades: Grade[];
 }
 
 export default function StudentTable({
   students,
   canEdit = true,
+  grades,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const router = useRouter();
 
-  // Get unique grades from students
-  const grades = [
+  // Get unique grades from students for filtering
+  const studentGrades = [
     ...new Set(
       students.map((s) => s.grade).filter((g): g is number => g !== null),
     ),
@@ -69,7 +77,7 @@ export default function StudentTable({
           className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           <option value="all">All Grades ({students.length})</option>
-          {grades.map((grade) => (
+          {studentGrades.map((grade) => (
             <option key={grade} value={grade}>
               Grade {grade} ({students.filter((s) => s.grade === grade).length})
             </option>
@@ -216,6 +224,7 @@ export default function StudentTable({
           isOpen={!!editingStudent}
           onClose={() => setEditingStudent(null)}
           onSave={handleSave}
+          grades={grades}
         />
       )}
     </>
