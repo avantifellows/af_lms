@@ -32,6 +32,29 @@ interface EditStudentModalProps {
 }
 
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
+
+// Parse category to extract base category and PWD status
+function parseCategory(category: string | null): {
+  baseCategory: string;
+  isPWD: boolean;
+} {
+  if (!category) return { baseCategory: "", isPWD: false };
+
+  if (category.startsWith("PWD-")) {
+    const base = category.replace("PWD-", "");
+    // Normalize variations like "PWD-General" to "Gen"
+    const normalizedBase = base === "General" ? "Gen" : base;
+    return { baseCategory: normalizedBase, isPWD: true };
+  }
+
+  return { baseCategory: category, isPWD: false };
+}
+
+// Combine base category and PWD status
+function combineCategory(baseCategory: string, isPWD: boolean): string {
+  if (!baseCategory) return "";
+  return isPWD ? `PWD-${baseCategory}` : baseCategory;
+}
 const STREAM_OPTIONS = [
   "engineering",
   "medical",
@@ -70,13 +93,16 @@ export default function EditStudentModal({
   onSave,
   grades,
 }: EditStudentModalProps) {
+  const { baseCategory, isPWD } = parseCategory(student.category);
+
   const [formData, setFormData] = useState({
     first_name: student.first_name || "",
     last_name: student.last_name || "",
     phone: student.phone || "",
     gender: student.gender || "",
     date_of_birth: student.date_of_birth || "",
-    category: student.category || "",
+    baseCategory: baseCategory,
+    isPWD: isPWD,
     stream: student.stream || "",
     grade_id: student.grade_id || "",
   });
@@ -102,12 +128,19 @@ export default function EditStudentModal({
     }
 
     try {
+      // Combine category and PWD status before sending
+      const { baseCategory, isPWD, ...rest } = formData;
+      const dataToSend = {
+        ...rest,
+        category: combineCategory(baseCategory, isPWD),
+      };
+
       const response = await fetch(`/api/student/${student.student_pk_id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(dataToSend),
       });
 
       if (!response.ok) {
@@ -127,8 +160,13 @@ export default function EditStudentModal({
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type } = e.target;
+    if (type === "checkbox") {
+      const checked = (e.target as HTMLInputElement).checked;
+      setFormData((prev) => ({ ...prev, [name]: checked }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleMarkAsDropout = async () => {
@@ -313,8 +351,8 @@ export default function EditStudentModal({
               <div>
                 <label className={labelClassName}>Category</label>
                 <select
-                  name="category"
-                  value={formData.category}
+                  name="baseCategory"
+                  value={formData.baseCategory}
                   onChange={handleChange}
                   className={inputClassName}
                 >
@@ -342,6 +380,21 @@ export default function EditStudentModal({
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="isPWD"
+                  checked={formData.isPWD}
+                  onChange={handleChange}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className={labelClassName}>
+                  Person with Disability (PWD)
+                </span>
+              </label>
             </div>
 
             {!isDropout && !showDropoutConfirm && (
