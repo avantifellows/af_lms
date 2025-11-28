@@ -5,6 +5,7 @@ import { useState } from "react";
 interface Student {
   group_user_id: string;
   user_id: string;
+  student_pk_id: string | null;
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
@@ -26,7 +27,16 @@ interface EditStudentModalProps {
 }
 
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
-const STREAM_OPTIONS = ["engineering", "medical", "pcmb", "foundation", "clat", "ca", "pcb", "pcm"];
+const STREAM_OPTIONS = [
+  "engineering",
+  "medical",
+  "pcmb",
+  "foundation",
+  "clat",
+  "ca",
+  "pcb",
+  "pcm",
+];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 
 function getCurrentAcademicYear(): string {
@@ -41,10 +51,11 @@ function getCurrentAcademicYear(): string {
 }
 
 function formatDateForAPI(date: Date): string {
-  return date.toISOString().split('T')[0];
+  return date.toISOString().split("T")[0];
 }
 
-const inputClassName = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
+const inputClassName =
+  "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const labelClassName = "block text-sm font-medium text-gray-700";
 
 export default function EditStudentModal({
@@ -78,15 +89,15 @@ export default function EditStudentModal({
     setError("");
     setLoading(true);
 
-    if (!formData.apaar_id && !formData.student_id) {
-      setError("Either APAAR ID or Student ID is required");
+    if (!student.student_pk_id) {
+      setError("Cannot update student: missing student record ID");
       setLoading(false);
       return;
     }
 
     try {
-      const response = await fetch("/api/student", {
-        method: "POST",
+      const response = await fetch(`/api/student/${student.student_pk_id}`, {
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
@@ -108,7 +119,7 @@ export default function EditStudentModal({
   };
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -342,7 +353,8 @@ export default function EditStudentModal({
                   </div>
                 </div>
                 <p className="text-sm text-red-700 mb-3">
-                  Are you sure you want to mark this student as dropout? This action cannot be undone.
+                  Are you sure you want to mark this student as dropout? This
+                  action cannot be undone.
                 </p>
                 <div className="flex gap-3">
                   <button

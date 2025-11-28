@@ -9,6 +9,7 @@ import StudentTable from "@/components/StudentTable";
 interface Student {
   group_user_id: string;
   user_id: string;
+  student_pk_id: string | null;
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
@@ -39,7 +40,7 @@ async function getSchoolByCode(code: string): Promise<School | null> {
      FROM school
      WHERE af_school_category = 'JNV'
        AND (udise_code = $1 OR code = $1)`,
-    [code]
+    [code],
   );
   return schools[0] || null;
 }
@@ -49,6 +50,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
     `SELECT
       gu.id as group_user_id,
       u.id as user_id,
+      s.id as student_pk_id,
       u.first_name,
       u.last_name,
       u.phone,
@@ -77,7 +79,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
     ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
-    [schoolId]
+    [schoolId],
   );
 }
 
@@ -109,7 +111,9 @@ export default async function SchoolPage({ params }: PageProps) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">Access Denied</h1>
+            <h1 className="text-xl font-bold text-red-600 mb-2">
+              Access Denied
+            </h1>
             <p className="text-gray-600 mb-4">
               Your passcode only grants access to a different school.
             </p>
@@ -125,18 +129,23 @@ export default async function SchoolPage({ params }: PageProps) {
     const hasAccess = await canAccessSchool(
       session.user?.email || null,
       school.code,
-      school.region || undefined
+      school.region || undefined,
     );
 
     if (!hasAccess) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">Access Denied</h1>
+            <h1 className="text-xl font-bold text-red-600 mb-2">
+              Access Denied
+            </h1>
             <p className="text-gray-600 mb-4">
               You don&apos;t have permission to view this school.
             </p>
-            <Link href="/dashboard" className="text-blue-600 hover:text-blue-800">
+            <Link
+              href="/dashboard"
+              className="text-blue-600 hover:text-blue-800"
+            >
               Return to dashboard
             </Link>
           </div>
@@ -148,12 +157,12 @@ export default async function SchoolPage({ params }: PageProps) {
   const allStudents = await getStudents(school.id);
 
   // Separate active and dropout students
-  const activeStudents = allStudents.filter(s => s.status !== 'dropout');
-  const dropoutStudents = allStudents.filter(s => s.status === 'dropout');
+  const activeStudents = allStudents.filter((s) => s.status !== "dropout");
+  const dropoutStudents = allStudents.filter((s) => s.status === "dropout");
 
   // Check if user can edit students (not read-only)
   const canEdit = isPasscodeUser
-    ? true  // Passcode users can edit by default
+    ? true // Passcode users can edit by default
     : await canEditStudents(session.user?.email || "");
 
   return (
@@ -166,12 +175,24 @@ export default async function SchoolPage({ params }: PageProps) {
                 href={isPasscodeUser ? "/" : "/dashboard"}
                 className="text-gray-500 hover:text-gray-700"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
                 </svg>
               </Link>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">{school.name}</h1>
+                <h1 className="text-3xl font-bold text-gray-900">
+                  {school.name}
+                </h1>
                 <p className="mt-1 text-sm text-gray-500">
                   {school.district}, {school.state} | Code: {school.code}
                   {school.udise_code && ` | UDISE: ${school.udise_code}`}
@@ -180,7 +201,9 @@ export default async function SchoolPage({ params }: PageProps) {
             </div>
             <div className="flex items-center gap-4">
               <span className="text-sm text-gray-500">
-                {isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email}
+                {isPasscodeUser
+                  ? `School ${passcodeSchoolCode}`
+                  : session.user?.email}
               </span>
               <Link
                 href="/api/auth/signout"

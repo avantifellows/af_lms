@@ -7,6 +7,7 @@ import EditStudentModal from "./EditStudentModal";
 interface Student {
   group_user_id: string;
   user_id: string;
+  student_pk_id: string | null;
   first_name: string | null;
   last_name: string | null;
   phone: string | null;
@@ -26,18 +27,26 @@ interface StudentTableProps {
   canEdit?: boolean;
 }
 
-export default function StudentTable({ students, canEdit = true }: StudentTableProps) {
+export default function StudentTable({
+  students,
+  canEdit = true,
+}: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const router = useRouter();
 
   // Get unique grades from students
-  const grades = [...new Set(students.map(s => s.grade).filter((g): g is number => g !== null))].sort((a, b) => a - b);
+  const grades = [
+    ...new Set(
+      students.map((s) => s.grade).filter((g): g is number => g !== null),
+    ),
+  ].sort((a, b) => a - b);
 
   // Filter students by selected grade
-  const filteredStudents = selectedGrade === "all"
-    ? students
-    : students.filter(s => s.grade === parseInt(selectedGrade));
+  const filteredStudents =
+    selectedGrade === "all"
+      ? students
+      : students.filter((s) => s.grade === parseInt(selectedGrade));
 
   const handleSave = () => {
     router.refresh();
@@ -46,7 +55,10 @@ export default function StudentTable({ students, canEdit = true }: StudentTableP
   return (
     <>
       <div className="mb-4 flex items-center gap-4">
-        <label htmlFor="gradeFilter" className="text-sm font-medium text-gray-700">
+        <label
+          htmlFor="gradeFilter"
+          className="text-sm font-medium text-gray-700"
+        >
           Filter by Grade:
         </label>
         <select
@@ -58,7 +70,7 @@ export default function StudentTable({ students, canEdit = true }: StudentTableP
           <option value="all">All Grades ({students.length})</option>
           {grades.map((grade) => (
             <option key={grade} value={grade}>
-              Grade {grade} ({students.filter(s => s.grade === grade).length})
+              Grade {grade} ({students.filter((s) => s.grade === grade).length})
             </option>
           ))}
         </select>
@@ -110,8 +122,13 @@ export default function StudentTable({ students, canEdit = true }: StudentTableP
           <tbody className="divide-y divide-gray-200 bg-white">
             {filteredStudents.length === 0 ? (
               <tr>
-                <td colSpan={canEdit ? 10 : 9} className="py-8 text-center text-sm text-gray-500">
-                  {students.length === 0 ? "No students enrolled in this school" : "No students match the selected filter"}
+                <td
+                  colSpan={canEdit ? 10 : 9}
+                  className="py-8 text-center text-sm text-gray-500"
+                >
+                  {students.length === 0
+                    ? "No students enrolled in this school"
+                    : "No students match the selected filter"}
                 </td>
               </tr>
             ) : (
@@ -143,12 +160,12 @@ export default function StudentTable({ students, canEdit = true }: StudentTableP
                         student.category === "Gen"
                           ? "bg-green-100 text-green-800"
                           : student.category === "OBC"
-                          ? "bg-blue-100 text-blue-800"
-                          : student.category === "SC"
-                          ? "bg-purple-100 text-purple-800"
-                          : student.category === "ST"
-                          ? "bg-orange-100 text-orange-800"
-                          : "bg-gray-100 text-gray-800"
+                            ? "bg-blue-100 text-blue-800"
+                            : student.category === "SC"
+                              ? "bg-purple-100 text-purple-800"
+                              : student.category === "ST"
+                                ? "bg-orange-100 text-orange-800"
+                                : "bg-gray-100 text-gray-800"
                       }`}
                     >
                       {student.category || "—"}
