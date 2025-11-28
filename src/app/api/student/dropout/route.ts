@@ -43,29 +43,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build query parameters - DB service accepts either student_id or apaar_id
-    const queryParams = new URLSearchParams({
+    // Build request body - DB service accepts either student_id or apaar_id
+    const requestBody: Record<string, string> = {
       start_date: body.start_date,
       academic_year: body.academic_year,
-    });
+    };
 
     if (body.student_id) {
-      queryParams.set("student_id", body.student_id);
+      requestBody.student_id = body.student_id;
     } else if (body.apaar_id) {
-      queryParams.set("apaar_id", body.apaar_id);
+      requestBody.apaar_id = body.apaar_id;
     }
 
-    // Call DB service to mark student as dropout using query parameters
-    const response = await fetch(
-      `${DB_SERVICE_URL}/dropout?${queryParams.toString()}`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
-        },
+    // Call DB service to mark student as dropout (PATCH /dropout with body)
+    const response = await fetch(`${DB_SERVICE_URL}/dropout`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
       },
-    );
+      body: JSON.stringify(requestBody),
+    });
 
     if (response.status === 200) {
       return NextResponse.json({ success: true });
