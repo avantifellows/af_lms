@@ -3,7 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessSchool, canEditStudents } from "@/lib/permissions";
+import {
+  canAccessSchool,
+  canEditStudents,
+  getAccessibleSchoolCodes,
+} from "@/lib/permissions";
 import StudentTable from "@/components/StudentTable";
 
 interface Student {
@@ -179,13 +183,23 @@ export default async function SchoolPage({ params }: PageProps) {
     ? true // Passcode users can edit by default
     : await canEditStudents(session.user?.email || "");
 
+  // Check if user has access to multiple schools (to show/hide back arrow)
+  let hasMultipleSchools = false;
+  if (!isPasscodeUser) {
+    const accessibleSchools = await getAccessibleSchoolCodes(
+      session.user?.email || "",
+    );
+    hasMultipleSchools =
+      accessibleSchools === "all" || accessibleSchools.length > 1;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              {!isPasscodeUser && (
+              {hasMultipleSchools && (
                 <Link
                   href="/dashboard"
                   className="text-gray-500 hover:text-gray-700"
