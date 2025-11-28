@@ -1,96 +1,104 @@
-# TODO: Setting Up Staging and Production Environments
+# Setting Up Staging and Production Environments
 
-## What I Need From You
+## Status
 
-### 1. Production Database Credentials
-- `DATABASE_HOST` - Production DB host
-- `DATABASE_PORT` - Production DB port
-- `DATABASE_USER` - Production DB user
-- `DATABASE_PASSWORD` - Production DB password
-- `DATABASE_NAME` - Production DB name
-
-### 2. Production DB Service
-- `DB_SERVICE_URL` - Production DB service URL (e.g., `https://db.avantifellows.org/api`)
-- `DB_SERVICE_TOKEN` - Production DB service token
-
-### 3. Vercel Project Setup
-- Do you want **two separate Vercel projects** (recommended) or **one project with preview/production branches**?
-- Production domain (e.g., `lms.avantifellows.org`)
-- Staging domain (e.g., `staging-lms.avantifellows.org` or keep current)
-
-### 4. Google OAuth
-- Do you need separate Google OAuth credentials for production, or can you add the production domain to the existing OAuth app's authorized domains?
+| Item | Status |
+|------|--------|
+| Production database credentials | Done |
+| Production DB service URL | Done |
+| Production DB service token | **Pending** (need from admin) |
+| Vercel setup decision | Option A (two projects) |
+| Domain names | **Pending** (decide later) |
 
 ---
 
-## Implementation Steps
+## Environment Files Created
 
-### Option A: Two Separate Vercel Projects (Recommended)
-
-1. **Create new Vercel project for production**
-   - Link to same GitHub repo
-   - Set environment variables for production DB
-
-2. **Configure branches**
-   - Production project deploys from `main` branch
-   - Staging project deploys from `staging` branch (or `main` with different env vars)
-
-3. **Set environment variables in Vercel dashboard**
-   - Each project has its own env vars
-
-### Option B: Single Vercel Project with Environment-based Config
-
-1. **Use Vercel's environment system**
-   - "Production" environment → production DB
-   - "Preview" environment → staging DB
-
-2. **Set different env vars per environment in Vercel dashboard**
-
----
-
-## Environment Variables to Configure
-
-### Staging (Current)
-```env
-DATABASE_HOST=staging-af-db.ct2k2vwmh0ce.ap-south-1.rds.amazonaws.com
-DATABASE_PORT=1357
-DATABASE_USER=postgres
-DATABASE_PASSWORD=***
-DATABASE_NAME=staging_af_db
-DB_SERVICE_URL=https://staging-db.avantifellows.org/api
-DB_SERVICE_TOKEN=***
-NEXTAUTH_URL=https://staging-lms.avantifellows.org  # Update this
 ```
-
-### Production (Need from you)
-```env
-DATABASE_HOST=???
-DATABASE_PORT=???
-DATABASE_USER=???
-DATABASE_PASSWORD=???
-DATABASE_NAME=???
-DB_SERVICE_URL=???
-DB_SERVICE_TOKEN=???
-NEXTAUTH_URL=https://lms.avantifellows.org  # Or your production domain
+.env.example              # Generic template for local development
+.env.staging.example      # Reference for staging Vercel project
+.env.production.example   # Reference for production Vercel project
 ```
 
 ---
 
-## Permissions Table
+## Configuration Values
 
-The `user_permission` table needs to be created in **both** databases:
+### Staging
+| Variable | Value |
+|----------|-------|
+| DATABASE_HOST | staging-af-db.ct2k2vwmh0ce.ap-south-1.rds.amazonaws.com |
+| DATABASE_PORT | 1357 |
+| DATABASE_USER | postgres |
+| DATABASE_NAME | staging_af_db |
+| DB_SERVICE_URL | https://staging-db.avantifellows.org/api |
+| NEXTAUTH_URL | https://staging-lms.avantifellows.org (TBD) |
 
-### For Staging
-Already done - table exists with test users.
+### Production
+| Variable | Value |
+|----------|-------|
+| DATABASE_HOST | af-database.ct2k2vwmh0ce.ap-south-1.rds.amazonaws.com |
+| DATABASE_PORT | 1357 |
+| DATABASE_USER | postgres |
+| DATABASE_NAME | prod_af_db |
+| DB_SERVICE_URL | https://db.avantifellows.org/api |
+| NEXTAUTH_URL | https://lms.avantifellows.org (TBD) |
 
-### For Production
-Run the setup script against production DB:
+---
+
+## Setup Steps
+
+### Step 1: Create Vercel Projects
+
+#### Staging Project
+1. Go to [Vercel Dashboard](https://vercel.com/dashboard)
+2. Import the GitHub repo (if not already done)
+3. Name it: `crud-ui-staging` (or similar)
+4. Set environment variables from `.env.staging.example`
+
+#### Production Project
+1. Create new project in Vercel
+2. Link to the **same GitHub repo**
+3. Name it: `crud-ui-production` (or similar)
+4. Set environment variables from `.env.production.example`
+5. Configure to deploy from `main` branch only
+
+### Step 2: Set Environment Variables in Vercel
+
+For each project, add these in **Settings > Environment Variables**:
+
+```
+DATABASE_HOST
+DATABASE_PORT
+DATABASE_USER
+DATABASE_PASSWORD
+DATABASE_NAME
+DB_SERVICE_URL
+DB_SERVICE_TOKEN
+NEXTAUTH_URL
+NEXTAUTH_SECRET
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+```
+
+Generate `NEXTAUTH_SECRET` with:
 ```bash
-# Update .env.local with production credentials temporarily, then:
-npm run db:setup-permissions
+openssl rand -base64 32
 ```
 
-Or manually create the table and add production admin users:
+### Step 3: Create Permission Table in Production
+
+Run against production database:
+
+```bash
+# Option 1: Use the setup script
+# First, temporarily update .env.local with production credentials
+npm run db:setup-permissions
+
+# Option 2: Run SQL directly via psql or database client
+```
+
+SQL to run:
 ```sql
 CREATE TABLE IF NOT EXISTS user_permission (
   id SERIAL PRIMARY KEY,
@@ -106,31 +114,75 @@ CREATE TABLE IF NOT EXISTS user_permission (
 CREATE INDEX IF NOT EXISTS idx_user_permission_email
 ON user_permission (LOWER(email));
 
--- Add production admin users
+-- Add production admin users (update emails as needed)
 INSERT INTO user_permission (email, level) VALUES
-  ('admin1@avantifellows.org', 4),
-  ('admin2@avantifellows.org', 4);
+  ('admin@avantifellows.org', 4)
+ON CONFLICT (email) DO NOTHING;
 ```
 
----
+### Step 4: Update Google OAuth
 
-## References
+In [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
 
-- [Vercel Environment Variables](https://vercel.com/docs/projects/environment-variables)
-- [Vercel Environments (Production/Preview/Development)](https://vercel.com/docs/deployments/environments)
-- [Next.js Environment Variables](https://nextjs.org/docs/app/building-your-application/configuring/environment-variables)
+1. Open your OAuth 2.0 Client
+2. Add to **Authorized JavaScript origins**:
+   - `https://lms.avantifellows.org` (production)
+   - `https://staging-lms.avantifellows.org` (staging)
+3. Add to **Authorized redirect URIs**:
+   - `https://lms.avantifellows.org/api/auth/callback/google`
+   - `https://staging-lms.avantifellows.org/api/auth/callback/google`
+
+### Step 5: Configure Custom Domains (Optional)
+
+In each Vercel project:
+1. Go to **Settings > Domains**
+2. Add custom domain
+3. Configure DNS as instructed by Vercel
 
 ---
 
 ## Checklist
 
-- [ ] Get production database credentials
-- [ ] Get production DB service URL and token
-- [ ] Decide on Vercel setup (one project vs two)
-- [ ] Create/configure Vercel project(s)
-- [ ] Set environment variables in Vercel
+- [x] Get production database credentials
+- [x] Get production DB service URL
+- [ ] Get production DB service token (waiting on admin)
+- [x] Decide on Vercel setup (Option A: two projects)
+- [ ] Decide on domain names
+- [ ] Create staging Vercel project
+- [ ] Create production Vercel project
+- [ ] Set environment variables in both projects
 - [ ] Create `user_permission` table in production DB
 - [ ] Add production admin users
-- [ ] Update Google OAuth authorized domains (if needed)
+- [ ] Update Google OAuth authorized domains
 - [ ] Test staging deployment
 - [ ] Test production deployment
+
+---
+
+## Scripts
+
+### Setup permissions table
+```bash
+npm run db:setup-permissions
+```
+
+### Test database connection
+```bash
+npm run db:test-connection
+```
+
+---
+
+## Troubleshooting
+
+### "Invalid credentials" error
+- Verify DATABASE_PASSWORD is correct
+- Check if your IP is whitelisted in AWS RDS security group
+
+### "NEXTAUTH_URL mismatch" error
+- Ensure NEXTAUTH_URL matches the actual deployment URL exactly
+- Include https:// and no trailing slash
+
+### Google OAuth redirect error
+- Verify redirect URI is added in Google Cloud Console
+- URI must match exactly: `https://your-domain.com/api/auth/callback/google`
