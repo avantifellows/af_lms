@@ -185,24 +185,26 @@ export default async function SchoolPage({ params }: PageProps) {
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Link
-                href={isPasscodeUser ? "/" : "/dashboard"}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              {!isPasscodeUser && (
+                <Link
+                  href="/dashboard"
+                  className="text-gray-500 hover:text-gray-700"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-              </Link>
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                </Link>
+              )}
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">
                   {school.name}
