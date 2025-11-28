@@ -133,13 +133,18 @@ export default function EditStudentModal({
     setLoading(true);
 
     try {
+      // Use student_id if available, otherwise fall back to apaar_id
+      const identifier = student.student_id
+        ? { student_id: student.student_id }
+        : { apaar_id: student.apaar_id };
+
       const response = await fetch("/api/student/dropout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          student_id: student.student_id,
+          ...identifier,
           start_date: dropoutDate,
           academic_year: dropoutYear,
         }),
