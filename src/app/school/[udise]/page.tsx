@@ -119,8 +119,8 @@ export default async function SchoolPage({ params }: PageProps) {
   }
 
   // Check permissions
-  const isPasscodeUser = (session as any).isPasscodeUser;
-  const passcodeSchoolCode = (session as any).schoolCode;
+  const isPasscodeUser = session.isPasscodeUser;
+  const passcodeSchoolCode = session.schoolCode;
 
   // For passcode users, only allow access to their school
   if (isPasscodeUser) {

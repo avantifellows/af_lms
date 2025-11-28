@@ -18,7 +18,7 @@ interface School {
 
 async function getSchools(
   codes: string[] | "all",
-  search?: string
+  search?: string,
 ): Promise<School[]> {
   const searchPattern = search ? `%${search}%` : null;
 
@@ -31,7 +31,7 @@ async function getSchools(
            AND (name ILIKE $1 OR code ILIKE $1 OR district ILIKE $1)
          ORDER BY name
          LIMIT 100`,
-        [searchPattern]
+        [searchPattern],
       );
     }
     return query<School>(
@@ -39,7 +39,7 @@ async function getSchools(
        FROM school
        WHERE af_school_category = 'JNV'
        ORDER BY name
-       LIMIT 100`
+       LIMIT 100`,
     );
   }
 
@@ -53,7 +53,7 @@ async function getSchools(
          AND code = ANY($1)
          AND (name ILIKE $2 OR code ILIKE $2 OR district ILIKE $2)
        ORDER BY name`,
-      [codes, searchPattern]
+      [codes, searchPattern],
     );
   }
 
@@ -63,7 +63,7 @@ async function getSchools(
      WHERE af_school_category = 'JNV'
        AND code = ANY($1)
      ORDER BY name`,
-    [codes]
+    [codes],
   );
 }
 
@@ -80,8 +80,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   // Check if passcode user - redirect to their school
-  if ((session as any).isPasscodeUser && (session as any).schoolCode) {
-    redirect(`/school/${(session as any).schoolCode}`);
+  if (session.isPasscodeUser && session.schoolCode) {
+    redirect(`/school/${session.schoolCode}`);
   }
 
   const permission = await getUserPermission(session.user.email);
@@ -98,8 +98,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <div className="rounded-lg bg-yellow-50 p-4 border border-yellow-200">
             <p className="text-yellow-800">
-              Your account ({session.user.email}) does not have access to any schools.
-              Please contact an administrator.
+              Your account ({session.user.email}) does not have access to any
+              schools. Please contact an administrator.
             </p>
           </div>
         </main>
@@ -125,10 +125,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               {permission.level === 4
                 ? "Admin access"
                 : permission.level === 3
-                ? "All schools access"
-                : permission.level === 2
-                ? `Region access: ${permission.regions?.join(", ")}`
-                : `${schools.length} school(s)`}
+                  ? "All schools access"
+                  : permission.level === 2
+                    ? `Region access: ${permission.regions?.join(", ")}`
+                    : `${schools.length} school(s)`}
             </p>
           </div>
           <div className="flex items-center gap-4">

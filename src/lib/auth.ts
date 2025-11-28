@@ -43,8 +43,8 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       // Add school code to session for passcode users
       if (token.schoolCode) {
-        (session as any).schoolCode = token.schoolCode;
-        (session as any).isPasscodeUser = true;
+        session.schoolCode = token.schoolCode as string;
+        session.isPasscodeUser = true;
       }
       return session;
     },
