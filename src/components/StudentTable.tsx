@@ -12,6 +12,7 @@ interface Student {
   last_name: string | null;
   phone: string | null;
   email: string | null;
+  date_of_birth: string | null;
   student_id: string | null;
   apaar_id: string | null;
   category: string | null;
@@ -101,6 +102,9 @@ export default function StudentTable({
                 Phone
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                Date of Birth
+              </th>
+              <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                 Gender
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
@@ -123,7 +127,7 @@ export default function StudentTable({
             {filteredStudents.length === 0 ? (
               <tr>
                 <td
-                  colSpan={canEdit ? 10 : 9}
+                  colSpan={canEdit ? 11 : 10}
                   className="py-8 text-center text-sm text-gray-500"
                 >
                   {students.length === 0
@@ -150,6 +154,18 @@ export default function StudentTable({
                   </td>
                   <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                     {student.phone || "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                    {student.date_of_birth
+                      ? new Date(student.date_of_birth).toLocaleDateString(
+                          "en-IN",
+                          {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          },
+                        )
+                      : "—"}
                   </td>
                   <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                     {student.gender || "—"}

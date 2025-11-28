@@ -14,6 +14,7 @@ interface Student {
   last_name: string | null;
   phone: string | null;
   email: string | null;
+  date_of_birth: string | null;
   student_id: string | null;
   apaar_id: string | null;
   category: string | null;
@@ -55,6 +56,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       u.last_name,
       u.phone,
       u.email,
+      u.date_of_birth,
       u.gender,
       s.student_id,
       s.apaar_id,

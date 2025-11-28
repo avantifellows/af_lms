@@ -10,12 +10,14 @@ interface Student {
   last_name: string | null;
   phone: string | null;
   email: string | null;
+  date_of_birth: string | null;
   student_id: string | null;
   apaar_id: string | null;
   category: string | null;
   stream: string | null;
   gender: string | null;
   program_name: string | null;
+  grade: number | null;
   status: string | null;
 }
 
@@ -38,6 +40,7 @@ const STREAM_OPTIONS = [
   "pcm",
 ];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
+const GRADE_OPTIONS = [9, 10, 11, 12];
 
 function getCurrentAcademicYear(): string {
   const now = new Date();
@@ -69,10 +72,10 @@ export default function EditStudentModal({
     last_name: student.last_name || "",
     phone: student.phone || "",
     gender: student.gender || "",
-    student_id: student.student_id || "",
-    apaar_id: student.apaar_id || "",
+    date_of_birth: student.date_of_birth || "",
     category: student.category || "",
     stream: student.stream || "",
+    grade: student.grade?.toString() || "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -136,7 +139,7 @@ export default function EditStudentModal({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          student_id: formData.student_id,
+          student_id: student.student_id,
           start_date: dropoutDate,
           academic_year: dropoutYear,
         }),
@@ -224,18 +227,45 @@ export default function EditStudentModal({
                 <label className={labelClassName}>Student ID</label>
                 <input
                   type="text"
-                  name="student_id"
-                  value={formData.student_id}
-                  onChange={handleChange}
-                  className={inputClassName}
+                  value={student.student_id || "—"}
+                  disabled
+                  className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
                 />
               </div>
               <div>
                 <label className={labelClassName}>APAAR ID</label>
                 <input
                   type="text"
-                  name="apaar_id"
-                  value={formData.apaar_id}
+                  value={student.apaar_id || "—"}
+                  disabled
+                  className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelClassName}>Grade</label>
+                <select
+                  name="grade"
+                  value={formData.grade}
+                  onChange={handleChange}
+                  className={inputClassName}
+                >
+                  <option value="">Select...</option>
+                  {GRADE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      Grade {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClassName}>Date of Birth</label>
+                <input
+                  type="date"
+                  name="date_of_birth"
+                  value={formData.date_of_birth}
                   onChange={handleChange}
                   className={inputClassName}
                 />
