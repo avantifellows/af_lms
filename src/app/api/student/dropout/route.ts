@@ -85,6 +85,18 @@ export async function POST(request: NextRequest) {
 
     const errorText = await response.text();
     console.error("DB service error:", errorText);
+
+    // Check for duplicate student error
+    if (errorText.includes("expected at most one result but got")) {
+      const identifier = body.student_id || body.apaar_id;
+      return NextResponse.json(
+        {
+          error: `Multiple students found with the same ID (${identifier}). Please contact an administrator to resolve this duplicate record issue.`,
+        },
+        { status: 400 },
+      );
+    }
+
     return NextResponse.json(
       { error: "Failed to mark student as dropout", details: errorText },
       { status: response.status },
