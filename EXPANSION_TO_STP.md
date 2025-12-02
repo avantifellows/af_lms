@@ -49,7 +49,7 @@ STP Product:
 
 ## Database Changes
 
-### 1. Add Product Table
+### 1. Add Product Table (NOT NEEDED - ALREADY IN DB)
 
 ```sql
 CREATE TABLE product (
