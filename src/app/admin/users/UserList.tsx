@@ -8,6 +8,7 @@ interface UserPermission {
   id: number;
   email: string;
   level: number;
+  role: string;
   school_codes: string[] | null;
   regions: string[] | null;
   read_only: boolean;
@@ -31,6 +32,18 @@ const LEVEL_COLORS: Record<number, string> = {
   3: "bg-blue-100 text-blue-800",
   2: "bg-green-100 text-green-800",
   1: "bg-gray-100 text-gray-800",
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  program_manager: "Program Manager",
+  teacher: "Teacher",
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  admin: "bg-purple-100 text-purple-800",
+  program_manager: "bg-indigo-100 text-indigo-800",
+  teacher: "bg-gray-100 text-gray-800",
 };
 
 export default function UserList({ initialUsers, regions, currentUserEmail }: UserListProps) {
@@ -102,6 +115,9 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                 Email
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                Role
+              </th>
+              <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                 Level
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
@@ -120,6 +136,11 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                   {user.email.toLowerCase() === currentUserEmail.toLowerCase() && (
                     <span className="ml-2 text-xs text-gray-400">(you)</span>
                   )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 text-sm">
+                  <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${ROLE_COLORS[user.role] || ROLE_COLORS.teacher}`}>
+                    {ROLE_LABELS[user.role] || "Teacher"}
+                  </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
                   <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${LEVEL_COLORS[user.level]}`}>

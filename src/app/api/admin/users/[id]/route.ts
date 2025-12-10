@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   try {
     const body = await request.json();
-    const { level, school_codes, regions, read_only } = body;
+    const { level, role, school_codes, regions, read_only } = body;
 
     if (level && (level < 1 || level > 4)) {
       return NextResponse.json(
@@ -65,15 +65,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const validRoles = ["teacher", "program_manager", "admin"];
+    const userRole = role && validRoles.includes(role) ? role : undefined;
+
     await query(
       `UPDATE user_permission
        SET level = COALESCE($1, level),
-           school_codes = $2,
-           regions = $3,
-           read_only = COALESCE($4, read_only),
+           role = COALESCE($2, role),
+           school_codes = $3,
+           regions = $4,
+           read_only = COALESCE($5, read_only),
            updated_at = NOW()
-       WHERE id = $5`,
-      [level, school_codes || null, regions || null, read_only, id]
+       WHERE id = $6`,
+      [level, userRole, school_codes || null, regions || null, read_only, id]
     );
 
     return NextResponse.json({ success: true });

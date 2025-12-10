@@ -21,15 +21,16 @@ export async function GET() {
     id: number;
     email: string;
     level: number;
+    role: string;
     school_codes: string[] | null;
     regions: string[] | null;
     read_only: boolean;
     created_at: string;
     updated_at: string;
   }>(
-    `SELECT id, email, level, school_codes, regions, read_only, created_at, updated_at
+    `SELECT id, email, level, role, school_codes, regions, read_only, created_at, updated_at
      FROM user_permission
-     ORDER BY level DESC, email`
+     ORDER BY level DESC, role, email`
   );
 
   return NextResponse.json(users);
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { email, level, school_codes, regions, read_only } = body;
+    const { email, level, role, school_codes, regions, read_only } = body;
 
     if (!email || !level) {
       return NextResponse.json(
@@ -66,17 +67,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const validRoles = ["teacher", "program_manager", "admin"];
+    const userRole = validRoles.includes(role) ? role : "teacher";
+
     const result = await query<{ id: number }>(
-      `INSERT INTO user_permission (email, level, school_codes, regions, read_only)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO user_permission (email, level, role, school_codes, regions, read_only)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (email) DO UPDATE SET
          level = EXCLUDED.level,
+         role = EXCLUDED.role,
          school_codes = EXCLUDED.school_codes,
          regions = EXCLUDED.regions,
          read_only = EXCLUDED.read_only,
          updated_at = NOW()
        RETURNING id`,
-      [email, level, school_codes || null, regions || null, read_only || false]
+      [email, level, userRole, school_codes || null, regions || null, read_only || false]
     );
 
     return NextResponse.json({ id: result[0].id, success: true });

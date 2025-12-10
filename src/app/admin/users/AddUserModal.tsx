@@ -6,6 +6,7 @@ interface UserPermission {
   id: number;
   email: string;
   level: number;
+  role: string;
   school_codes: string[] | null;
   regions: string[] | null;
   read_only: boolean;
@@ -30,6 +31,7 @@ const labelClassName = "block text-sm font-medium text-gray-700";
 export default function AddUserModal({ user, regions, onClose, onSave }: AddUserModalProps) {
   const [email, setEmail] = useState(user?.email || "");
   const [level, setLevel] = useState(user?.level || 1);
+  const [role, setRole] = useState(user?.role || "teacher");
   const [selectedRegions, setSelectedRegions] = useState<string[]>(user?.regions || []);
   const [selectedSchools, setSelectedSchools] = useState<string[]>(user?.school_codes || []);
   const [readOnly, setReadOnly] = useState(user?.read_only || false);
@@ -64,7 +66,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
     setLoading(true);
 
     try {
-      const body: Record<string, unknown> = { level, read_only: readOnly };
+      const body: Record<string, unknown> = { level, role, read_only: readOnly };
 
       if (!isEditing) {
         body.email = email;
@@ -152,6 +154,24 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                 required
                 className={`${inputClassName} ${isEditing ? "bg-gray-100" : ""}`}
               />
+            </div>
+
+            <div>
+              <label className={labelClassName}>Role</label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className={inputClassName}
+              >
+                <option value="teacher">Teacher - Student management view</option>
+                <option value="program_manager">Program Manager - School visits + student management</option>
+                <option value="admin">Admin - Full access + user management</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools at /pm"}
+                {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
+                {role === "admin" && "Admins have full access to all features including user management"}
+              </p>
             </div>
 
             <div>
