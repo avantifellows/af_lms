@@ -7,9 +7,13 @@ export type AccessLevel = 1 | 2 | 3 | 4;
 // 3 = All schools access
 // 4 = Admin (all schools + user management)
 
+// User roles
+export type UserRole = "teacher" | "program_manager" | "admin";
+
 export interface UserPermission {
   email: string;
   level: AccessLevel;
+  role: UserRole;
   school_codes?: string[] | null;
   regions?: string[] | null;
   read_only?: boolean;
@@ -34,11 +38,12 @@ export async function getUserPermission(
   const results = await query<{
     email: string;
     level: number;
+    role: string;
     school_codes: string[] | null;
     regions: string[] | null;
     read_only: boolean;
   }>(
-    `SELECT email, level, school_codes, regions, read_only
+    `SELECT email, level, role, school_codes, regions, read_only
      FROM user_permission
      WHERE LOWER(email) = LOWER($1)`,
     [email]
@@ -50,6 +55,7 @@ export async function getUserPermission(
   return {
     email: row.email,
     level: row.level as AccessLevel,
+    role: (row.role || "teacher") as UserRole,
     school_codes: row.school_codes,
     regions: row.regions,
     read_only: row.read_only,
@@ -118,4 +124,20 @@ export async function isAdmin(email: string): Promise<boolean> {
 export async function canEditStudents(email: string): Promise<boolean> {
   const permission = await getUserPermission(email);
   return permission !== null && !permission.read_only;
+}
+
+export async function isProgramManager(email: string): Promise<boolean> {
+  const permission = await getUserPermission(email);
+  return permission?.role === "program_manager" || permission?.role === "admin";
+}
+
+export async function getUserRole(email: string): Promise<UserRole | null> {
+  const permission = await getUserPermission(email);
+  return permission?.role || null;
+}
+
+export async function canAccessPMFeatures(email: string): Promise<boolean> {
+  const permission = await getUserPermission(email);
+  if (!permission) return false;
+  return permission.role === "program_manager" || permission.role === "admin";
 }
