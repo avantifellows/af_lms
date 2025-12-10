@@ -34,8 +34,7 @@ async function getPMSchools(codes: string[] | "all"): Promise<School[]> {
        LEFT JOIN group_user gu ON gu.group_id = g.id
        WHERE s.af_school_category = 'JNV'
        GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
-       ORDER BY s.name
-       LIMIT 50`
+       ORDER BY s.name`
     );
   }
 

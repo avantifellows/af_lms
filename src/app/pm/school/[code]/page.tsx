@@ -1,29 +1,39 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { canAccessSchool, getUserPermission } from "@/lib/permissions";
+import { canAccessSchool, canEditStudents, getUserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
+import StudentTable, { Grade } from "@/components/StudentTable";
 
 interface School {
   id: string;
   code: string;
   name: string;
+  udise_code: string | null;
   district: string;
   state: string;
-  region: string;
+  region: string | null;
 }
 
 interface Student {
-  user_id: number;
-  student_id: string;
-  first_name: string;
-  last_name: string;
-  phone: string;
-  email: string;
-  gender: string;
-  category: string;
-  stream: string;
+  group_user_id: string;
+  user_id: string;
+  student_pk_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  email: string | null;
+  date_of_birth: string | null;
+  student_id: string | null;
+  apaar_id: string | null;
+  category: string | null;
+  stream: string | null;
+  gender: string | null;
+  program_name: string | null;
+  grade: number | null;
+  grade_id: string | null;
+  status: string | null;
 }
 
 interface Visit {
@@ -35,7 +45,7 @@ interface Visit {
 
 async function getSchool(code: string): Promise<School | null> {
   const results = await query<School>(
-    `SELECT id, code, name, district, state, region
+    `SELECT id, code, name, udise_code, district, state, region
      FROM school
      WHERE code = $1`,
     [code]
@@ -43,19 +53,47 @@ async function getSchool(code: string): Promise<School | null> {
   return results[0] || null;
 }
 
-async function getStudents(schoolCode: string): Promise<Student[]> {
+async function getGrades(): Promise<Grade[]> {
+  return query<Grade>(`SELECT id, number FROM grade ORDER BY number`, []);
+}
+
+async function getStudents(schoolId: string): Promise<Student[]> {
   return query<Student>(
-    `SELECT u.id as user_id, s.student_id, u.first_name, u.last_name,
-            u.phone, u.email, u.gender, s.category, s.stream
-     FROM "user" u
-     JOIN student s ON s.user_id = u.id
-     JOIN group_user gu ON gu.user_id = u.id
-     JOIN "group" g ON g.id = gu.group_id
-     JOIN school sc ON sc.id = g.child_id AND g.type = 'school'
-     WHERE sc.code = $1
-     ORDER BY u.first_name, u.last_name
-     LIMIT 100`,
-    [schoolCode]
+    `SELECT
+      gu.id as group_user_id,
+      u.id as user_id,
+      s.id as student_pk_id,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.email,
+      u.date_of_birth,
+      u.gender,
+      s.student_id,
+      s.apaar_id,
+      s.category,
+      s.stream,
+      s.status,
+      s.grade_id,
+      gr.number as grade,
+      p.name as program_name
+    FROM group_user gu
+    JOIN "group" g ON gu.group_id = g.id
+    JOIN "user" u ON gu.user_id = u.id
+    LEFT JOIN student s ON s.user_id = u.id
+    LEFT JOIN grade gr ON s.grade_id = gr.id
+    LEFT JOIN LATERAL (
+      SELECT p.name
+      FROM group_user gu_batch
+      JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
+      JOIN batch b ON g_batch.child_id = b.id
+      JOIN program p ON b.program_id = p.id
+      WHERE gu_batch.user_id = u.id
+      LIMIT 1
+    ) p ON true
+    WHERE g.type = 'school' AND g.child_id = $1
+    ORDER BY gr.number, u.first_name, u.last_name`,
+    [schoolId]
   );
 }
 
@@ -98,7 +136,7 @@ export default async function PMSchoolPage({ params }: PageProps) {
     );
   }
 
-  const canAccess = await canAccessSchool(session.user.email, school.code, school.region);
+  const canAccess = await canAccessSchool(session.user.email, school.code, school.region || undefined);
   if (!canAccess) {
     return (
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -109,8 +147,18 @@ export default async function PMSchoolPage({ params }: PageProps) {
     );
   }
 
-  const students = await getStudents(code);
-  const visits = await getSchoolVisits(code, session.user.email);
+  const [allStudents, grades, visits] = await Promise.all([
+    getStudents(school.id),
+    getGrades(),
+    getSchoolVisits(code, session.user.email),
+  ]);
+
+  // Separate active and dropout students
+  const activeStudents = allStudents.filter((s) => s.status !== "dropout");
+  const dropoutStudents = allStudents.filter((s) => s.status === "dropout");
+
+  // Check if user can edit students
+  const canEdit = await canEditStudents(session.user.email);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -130,7 +178,9 @@ export default async function PMSchoolPage({ params }: PageProps) {
               {school.district}, {school.state}
             </p>
             <p className="mt-1 text-sm text-gray-400">
-              Region: {school.region} | Code: {school.code}
+              Code: {school.code}
+              {school.udise_code && ` | UDISE: ${school.udise_code}`}
+              {school.region && ` | Region: ${school.region}`}
             </p>
           </div>
           <Link
@@ -144,8 +194,12 @@ export default async function PMSchoolPage({ params }: PageProps) {
         {/* Stats */}
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Students</div>
-            <div className="text-2xl font-semibold">{students.length}</div>
+            <div className="text-sm text-gray-500">Active Students</div>
+            <div className="text-2xl font-semibold">{activeStudents.length}</div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-4">
+            <div className="text-sm text-gray-500">Dropout</div>
+            <div className="text-2xl font-semibold">{dropoutStudents.length}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-4">
             <div className="text-sm text-gray-500">Visits</div>
@@ -157,12 +211,6 @@ export default async function PMSchoolPage({ params }: PageProps) {
               {visits.length > 0
                 ? new Date(visits[0].visit_date).toLocaleDateString()
                 : "Never"}
-            </div>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">In Progress</div>
-            <div className="text-2xl font-semibold">
-              {visits.filter((v) => v.status === "in_progress").length}
             </div>
           </div>
         </div>
@@ -204,73 +252,38 @@ export default async function PMSchoolPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Students Table */}
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-gray-900">Students</h2>
-            <span className="text-sm text-gray-500">{students.length} total</span>
-          </div>
-        </div>
-        {students.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Student ID
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Gender
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Category
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Stream
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contact
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {students.map((student) => (
-                  <tr key={student.user_id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {student.first_name} {student.last_name}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.student_id || "-"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.gender || "-"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.category || "-"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.stream || "-"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.phone || student.email || "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="px-6 py-12 text-center text-gray-500">
-            No students enrolled in this school.
-          </div>
-        )}
+      {/* Active Students */}
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold text-gray-900">
+          Active Students ({activeStudents.length})
+        </h2>
       </div>
+
+      <StudentTable
+        students={activeStudents}
+        canEdit={canEdit}
+        grades={grades}
+      />
+
+      {/* Dropout Students */}
+      {dropoutStudents.length > 0 && (
+        <>
+          <div className="mt-10 mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">
+              Dropout Students ({dropoutStudents.length})
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Students marked as dropout
+            </p>
+          </div>
+
+          <StudentTable
+            students={dropoutStudents}
+            canEdit={canEdit}
+            grades={grades}
+          />
+        </>
+      )}
     </main>
   );
 }
