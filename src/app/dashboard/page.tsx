@@ -4,17 +4,9 @@ import { redirect } from "next/navigation";
 import { getAccessibleSchoolCodes, getUserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
-import SearchBox from "./SearchBox";
+import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
-
-interface School {
-  id: string;
-  code: string;
-  name: string;
-  district: string;
-  state: string;
-  region: string;
-}
+import SchoolCard, { School } from "@/components/SchoolCard";
 
 async function getSchools(
   codes: string[] | "all",
@@ -163,23 +155,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Search Schools
             </label>
-            <SearchBox defaultValue={searchQuery} />
+            <SchoolSearch defaultValue={searchQuery} />
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {schools.map((school) => (
-            <Link
+            <SchoolCard
               key={school.id}
+              school={school}
               href={`/school/${school.code}`}
-              className="block rounded-lg bg-white p-6 shadow hover:shadow-md transition-shadow"
-            >
-              <h3 className="font-semibold text-gray-900">{school.name}</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                {school.district}, {school.state}
-              </p>
-              <p className="mt-2 text-xs text-gray-400">Code: {school.code}</p>
-            </Link>
+            />
           ))}
         </div>
 

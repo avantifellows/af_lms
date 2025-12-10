@@ -5,6 +5,7 @@ import { canAccessSchool, canEditStudents, getUserPermission } from "@/lib/permi
 import { query } from "@/lib/db";
 import Link from "next/link";
 import StudentTable, { Grade } from "@/components/StudentTable";
+import SchoolHeader from "@/components/SchoolHeader";
 
 interface School {
   id: string;
@@ -160,61 +161,33 @@ export default async function PMSchoolPage({ params }: PageProps) {
   // Check if user can edit students
   const canEdit = await canEditStudents(session.user.email);
 
+  const stats = [
+    { label: "Active Students", value: activeStudents.length },
+    { label: "Dropout", value: dropoutStudents.length },
+    { label: "Visits", value: visits.length },
+    {
+      label: "Last Visit",
+      value: visits.length > 0
+        ? new Date(visits[0].visit_date).toLocaleDateString()
+        : "Never",
+    },
+  ];
+
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      {/* Back link */}
-      <div className="mb-4">
-        <Link href="/pm" className="text-sm text-gray-500 hover:text-gray-700">
-          &larr; Back to Dashboard
-        </Link>
-      </div>
-
-      {/* School Header */}
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{school.name}</h1>
-            <p className="mt-1 text-gray-500">
-              {school.district}, {school.state}
-            </p>
-            <p className="mt-1 text-sm text-gray-400">
-              Code: {school.code}
-              {school.udise_code && ` | UDISE: ${school.udise_code}`}
-              {school.region && ` | Region: ${school.region}`}
-            </p>
-          </div>
+      <SchoolHeader
+        school={school}
+        stats={stats}
+        backHref="/pm"
+        actions={
           <Link
             href={`/pm/school/${code}/visit/new`}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
           >
             Start New Visit
           </Link>
-        </div>
-
-        {/* Stats */}
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Active Students</div>
-            <div className="text-2xl font-semibold">{activeStudents.length}</div>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Dropout</div>
-            <div className="text-2xl font-semibold">{dropoutStudents.length}</div>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Visits</div>
-            <div className="text-2xl font-semibold">{visits.length}</div>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Last Visit</div>
-            <div className="text-lg font-semibold">
-              {visits.length > 0
-                ? new Date(visits[0].visit_date).toLocaleDateString()
-                : "Never"}
-            </div>
-          </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Visit History */}
       {visits.length > 0 && (

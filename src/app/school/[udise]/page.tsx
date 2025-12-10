@@ -8,7 +8,8 @@ import {
   canEditStudents,
   getAccessibleSchoolCodes,
 } from "@/lib/permissions";
-import StudentTable from "@/components/StudentTable";
+import StudentTable, { Grade } from "@/components/StudentTable";
+import PageHeader from "@/components/PageHeader";
 
 interface Student {
   group_user_id: string;
@@ -28,11 +29,6 @@ interface Student {
   grade: number | null;
   grade_id: string | null;
   status: string | null;
-}
-
-interface Grade {
-  id: string;
-  number: number;
 }
 
 interface School {
@@ -193,58 +189,16 @@ export default async function SchoolPage({ params }: PageProps) {
       accessibleSchools === "all" || accessibleSchools.length > 1;
   }
 
+  const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              {hasMultipleSchools && (
-                <Link
-                  href="/dashboard"
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <svg
-                    className="h-5 w-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 19l-7-7 7-7"
-                    />
-                  </svg>
-                </Link>
-              )}
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">
-                  {school.name}
-                </h1>
-                <p className="mt-1 text-sm text-gray-500">
-                  {school.district}, {school.state} | Code: {school.code}
-                  {school.udise_code && ` | UDISE: ${school.udise_code}`}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500">
-                {isPasscodeUser
-                  ? `School ${passcodeSchoolCode}`
-                  : session.user?.email}
-              </span>
-              <Link
-                href="/api/auth/signout"
-                className="text-sm text-red-600 hover:text-red-800"
-              >
-                Sign out
-              </Link>
-            </div>
-          </div>
-        </div>
-      </header>
+      <PageHeader
+        title={school.name}
+        subtitle={subtitle}
+        backHref={hasMultipleSchools ? "/dashboard" : undefined}
+        userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
+      />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-4">

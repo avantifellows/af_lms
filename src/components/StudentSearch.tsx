@@ -14,7 +14,11 @@ interface StudentSearchResult {
   grade: number | null;
 }
 
-export default function StudentSearch() {
+interface StudentSearchProps {
+  schoolBasePath?: string; // e.g., "/school" or "/pm/school"
+}
+
+export default function StudentSearch({ schoolBasePath = "/school" }: StudentSearchProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<StudentSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -97,7 +101,7 @@ export default function StudentSearch() {
                 {results.map((student) => (
                   <li key={`${student.user_id}-${student.school_code}`}>
                     <Link
-                      href={`/school/${student.school_code}`}
+                      href={`${schoolBasePath}/${student.school_code}`}
                       onClick={() => setShowResults(false)}
                       className="block px-4 py-3 hover:bg-gray-50"
                     >

@@ -3,11 +3,17 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
 
-interface SearchBoxProps {
+interface SchoolSearchProps {
   defaultValue?: string;
+  basePath?: string; // e.g., "/dashboard" or "/pm"
+  placeholder?: string;
 }
 
-export default function SearchBox({ defaultValue }: SearchBoxProps) {
+export default function SchoolSearch({
+  defaultValue,
+  basePath = "/dashboard",
+  placeholder = "Search schools by name, code, or district...",
+}: SchoolSearchProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
@@ -22,10 +28,10 @@ export default function SearchBox({ defaultValue }: SearchBoxProps) {
         params.delete("q");
       }
       startTransition(() => {
-        router.push(`/dashboard?${params.toString()}`);
+        router.push(`${basePath}?${params.toString()}`);
       });
     },
-    [router, searchParams]
+    [router, searchParams, basePath]
   );
 
   return (
@@ -52,7 +58,7 @@ export default function SearchBox({ defaultValue }: SearchBoxProps) {
           setValue(e.target.value);
           handleSearch(e.target.value);
         }}
-        placeholder="Search schools by name, code, or district..."
+        placeholder={placeholder}
         className="block w-full rounded-lg border border-gray-300 bg-white py-3 pl-10 pr-4 text-sm text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       {isPending && (

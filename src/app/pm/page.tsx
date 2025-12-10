@@ -4,16 +4,9 @@ import { redirect } from "next/navigation";
 import { getUserPermission, getAccessibleSchoolCodes } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
-
-interface School {
-  id: string;
-  code: string;
-  name: string;
-  district: string;
-  state: string;
-  region: string;
-  student_count?: number;
-}
+import SchoolCard, { School } from "@/components/SchoolCard";
+import SchoolSearch from "@/components/SchoolSearch";
+import StudentSearch from "@/components/StudentSearch";
 
 interface Visit {
   id: number;
@@ -24,8 +17,27 @@ interface Visit {
   created_at: string;
 }
 
-async function getPMSchools(codes: string[] | "all"): Promise<School[]> {
+async function getPMSchools(
+  codes: string[] | "all",
+  search?: string
+): Promise<School[]> {
+  const searchPattern = search ? `%${search}%` : null;
+
   if (codes === "all") {
+    if (searchPattern) {
+      return query<School>(
+        `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
+                COUNT(DISTINCT gu.user_id) as student_count
+         FROM school s
+         LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
+         LEFT JOIN group_user gu ON gu.group_id = g.id
+         WHERE s.af_school_category = 'JNV'
+           AND (s.name ILIKE $1 OR s.code ILIKE $1 OR s.district ILIKE $1 OR s.region ILIKE $1)
+         GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+         ORDER BY s.name`,
+        [searchPattern]
+      );
+    }
     return query<School>(
       `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
               COUNT(DISTINCT gu.user_id) as student_count
@@ -39,6 +51,22 @@ async function getPMSchools(codes: string[] | "all"): Promise<School[]> {
   }
 
   if (codes.length === 0) return [];
+
+  if (searchPattern) {
+    return query<School>(
+      `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
+              COUNT(DISTINCT gu.user_id) as student_count
+       FROM school s
+       LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
+       LEFT JOIN group_user gu ON gu.group_id = g.id
+       WHERE s.af_school_category = 'JNV'
+         AND s.code = ANY($1)
+         AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2 OR s.region ILIKE $2)
+       GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+       ORDER BY s.name`,
+      [codes, searchPattern]
+    );
+  }
 
   return query<School>(
     `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
@@ -55,7 +83,7 @@ async function getPMSchools(codes: string[] | "all"): Promise<School[]> {
 }
 
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
-  const visits = await query<Visit>(
+  return query<Visit>(
     `SELECT v.id, v.school_code, v.visit_date, v.status, v.created_at,
             s.name as school_name
      FROM lms_pm_school_visits v
@@ -65,7 +93,6 @@ async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visi
      LIMIT $2`,
     [pmEmail, limit]
   );
-  return visits;
 }
 
 async function getOpenIssuesCount(pmEmail: string): Promise<number> {
@@ -80,8 +107,13 @@ async function getOpenIssuesCount(pmEmail: string): Promise<number> {
   return parseInt(result[0]?.count || "0", 10);
 }
 
-export default async function PMDashboardPage() {
+interface PageProps {
+  searchParams: Promise<{ q?: string }>;
+}
+
+export default async function PMDashboardPage({ searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
+  const { q: searchQuery } = await searchParams;
 
   if (!session?.user?.email) {
     redirect("/");
@@ -93,7 +125,7 @@ export default async function PMDashboardPage() {
   }
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email);
-  const schools = await getPMSchools(schoolCodes);
+  const schools = await getPMSchools(schoolCodes, searchQuery);
   const recentVisits = await getRecentVisits(session.user.email);
   const openIssues = await getOpenIssuesCount(session.user.email);
 
@@ -118,6 +150,22 @@ export default async function PMDashboardPage() {
           <div className="mt-1 text-3xl font-semibold text-gray-900">
             {openIssues}
           </div>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="mb-6 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Search Students
+          </label>
+          <StudentSearch schoolBasePath="/pm/school" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Search Schools
+          </label>
+          <SchoolSearch defaultValue={searchQuery} basePath="/pm" />
         </div>
       </div>
 
@@ -194,44 +242,38 @@ export default async function PMDashboardPage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {schools.map((school) => (
-            <div
+            <SchoolCard
               key={school.id}
-              className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow"
-            >
-              <h3 className="font-semibold text-gray-900">{school.name}</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                {school.district}, {school.state}
-              </p>
-              <p className="mt-1 text-xs text-gray-400">
-                Region: {school.region} | Code: {school.code}
-              </p>
-              {school.student_count !== undefined && (
-                <p className="mt-2 text-sm text-gray-600">
-                  {school.student_count} students
-                </p>
-              )}
-              <div className="mt-4 flex gap-2">
-                <Link
-                  href={`/pm/school/${school.code}`}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  View Details
-                </Link>
-                <span className="text-gray-300">|</span>
-                <Link
-                  href={`/pm/school/${school.code}/visit/new`}
-                  className="text-sm text-green-600 hover:text-green-800"
-                >
-                  Start Visit
-                </Link>
-              </div>
-            </div>
+              school={school}
+              href={`/pm/school/${school.code}`}
+              showStudentCount
+              showRegion
+              actions={
+                <>
+                  <Link
+                    href={`/pm/school/${school.code}`}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    View Details
+                  </Link>
+                  <span className="text-gray-300">|</span>
+                  <Link
+                    href={`/pm/school/${school.code}/visit/new`}
+                    className="text-sm text-green-600 hover:text-green-800"
+                  >
+                    Start Visit
+                  </Link>
+                </>
+              }
+            />
           ))}
         </div>
 
         {schools.length === 0 && (
           <div className="text-center py-12 text-gray-500">
-            No schools assigned. Contact an administrator.
+            {searchQuery
+              ? `No schools found matching "${searchQuery}"`
+              : "No schools assigned. Contact an administrator."}
           </div>
         )}
       </div>
