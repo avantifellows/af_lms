@@ -78,21 +78,6 @@ const STREAM_OPTIONS = [
 ];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 
-function getCurrentAcademicYear(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth(); // 0-indexed
-  // Academic year starts in April (month 3)
-  if (month >= 3) {
-    return `${year}-${year + 1}`;
-  }
-  return `${year - 1}-${year}`;
-}
-
-function formatDateForAPI(date: Date): string {
-  return date.toISOString().split("T")[0];
-}
-
 // Format a date string from the database to YYYY-MM-DD for HTML date input
 function formatDateForInput(dateString: string | null): string {
   if (!dateString) return "";
@@ -145,11 +130,6 @@ export default function EditStudentModal({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [showDropoutConfirm, setShowDropoutConfirm] = useState(false);
-  const [dropoutDate, setDropoutDate] = useState(formatDateForAPI(new Date()));
-  const [dropoutYear, setDropoutYear] = useState(getCurrentAcademicYear());
-
-  const isDropout = student.status === "dropout";
 
   // Check if stream has changed
   const streamChanged = formData.stream !== originalStream && formData.stream !== "";
@@ -187,6 +167,13 @@ export default function EditStudentModal({
 
     if (!student.student_pk_id) {
       setError("Cannot update student: missing student record ID");
+      setLoading(false);
+      return;
+    }
+
+    // Validate phone number (10 digits if provided)
+    if (formData.phone && !/^\d{10}$/.test(formData.phone.replace(/\s/g, ""))) {
+      setError("Phone number must be exactly 10 digits");
       setLoading(false);
       return;
     }
@@ -253,43 +240,6 @@ export default function EditStudentModal({
       setFormData((prev) => ({ ...prev, [name]: checked }));
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
-    }
-  };
-
-  const handleMarkAsDropout = async () => {
-    setError("");
-    setLoading(true);
-
-    try {
-      // Use student_id if available, otherwise fall back to apaar_id
-      const identifier = student.student_id
-        ? { student_id: student.student_id }
-        : { apaar_id: student.apaar_id };
-
-      const response = await fetch("/api/student/dropout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...identifier,
-          start_date: dropoutDate,
-          academic_year: dropoutYear,
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to mark student as dropout");
-      }
-
-      onSave();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setLoading(false);
-      setShowDropoutConfirm(false);
     }
   };
 
@@ -517,76 +467,6 @@ export default function EditStudentModal({
                 </span>
               </label>
             </div>
-
-            {!isDropout && !showDropoutConfirm && (
-              <div className="border-t pt-4 mt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowDropoutConfirm(true)}
-                  className="text-sm text-red-600 hover:text-red-800"
-                >
-                  Mark as Dropout...
-                </button>
-              </div>
-            )}
-
-            {isDropout && (
-              <div className="border-t pt-4 mt-4">
-                <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-800">
-                  Student is marked as Dropout
-                </span>
-              </div>
-            )}
-
-            {showDropoutConfirm && (
-              <div className="border-t pt-4 mt-4 bg-red-50 -mx-6 px-6 pb-4 rounded-b-lg">
-                <h3 className="text-sm font-semibold text-red-800 mb-3">
-                  Confirm Dropout
-                </h3>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <label className={labelClassName}>Dropout Date</label>
-                    <input
-                      type="date"
-                      value={dropoutDate}
-                      onChange={(e) => setDropoutDate(e.target.value)}
-                      className={inputClassName}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClassName}>Academic Year</label>
-                    <input
-                      type="text"
-                      value={dropoutYear}
-                      onChange={(e) => setDropoutYear(e.target.value)}
-                      placeholder="e.g., 2025-2026"
-                      className={inputClassName}
-                    />
-                  </div>
-                </div>
-                <p className="text-sm text-red-700 mb-3">
-                  Are you sure you want to mark this student as dropout? This
-                  action cannot be undone.
-                </p>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowDropoutConfirm(false)}
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleMarkAsDropout}
-                    disabled={loading}
-                    className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
-                  >
-                    {loading ? "Processing..." : "Confirm Dropout"}
-                  </button>
-                </div>
-              </div>
-            )}
 
             <div className="mt-6 flex justify-end gap-3">
               <button

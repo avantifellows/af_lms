@@ -258,40 +258,14 @@ export default async function PMSchoolPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Active Students */}
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">
-          Active Students ({activeStudents.length})
-        </h2>
-      </div>
-
+      {/* Students */}
       <StudentTable
         students={activeStudents}
+        dropoutStudents={dropoutStudents}
         canEdit={canEdit}
         grades={grades}
         batches={batches}
       />
-
-      {/* Dropout Students */}
-      {dropoutStudents.length > 0 && (
-        <>
-          <div className="mt-10 mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">
-              Dropout Students ({dropoutStudents.length})
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Students marked as dropout
-            </p>
-          </div>
-
-          <StudentTable
-            students={dropoutStudents}
-            canEdit={canEdit}
-            grades={grades}
-            batches={batches}
-          />
-        </>
-      )}
     </main>
   );
 }

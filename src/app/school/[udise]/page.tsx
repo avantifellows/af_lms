@@ -236,38 +236,13 @@ export default async function SchoolPage({ params }: PageProps) {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold text-gray-900">
-            Active Students ({activeStudents.length})
-          </h2>
-        </div>
-
         <StudentTable
           students={activeStudents}
+          dropoutStudents={dropoutStudents}
           canEdit={canEdit}
           grades={grades}
           batches={batches}
         />
-
-        {dropoutStudents.length > 0 && (
-          <>
-            <div className="mt-10 mb-4">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Dropout Students ({dropoutStudents.length})
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Students marked as dropout
-              </p>
-            </div>
-
-            <StudentTable
-              students={dropoutStudents}
-              canEdit={canEdit}
-              grades={grades}
-              batches={batches}
-            />
-          </>
-        )}
       </main>
     </div>
   );
