@@ -50,6 +50,16 @@ export default async function AdminPage() {
               Add, edit, and remove users. Assign permission levels.
             </p>
           </Link>
+
+          <Link
+            href="/admin/batches"
+            className="block rounded-lg bg-white p-6 shadow hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Batch Metadata</h3>
+            <p className="mt-2 text-sm text-gray-500">
+              Configure stream and grade metadata for program batches.
+            </p>
+          </Link>
         </div>
       </main>
     </div>

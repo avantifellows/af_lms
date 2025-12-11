@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import EditStudentModal from "./EditStudentModal";
+import EditStudentModal, { Batch } from "./EditStudentModal";
 
 interface Student {
   group_user_id: string;
@@ -19,6 +19,7 @@ interface Student {
   stream: string | null;
   gender: string | null;
   program_name: string | null;
+  program_id: number | null;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
@@ -27,18 +28,21 @@ interface Student {
 export interface Grade {
   id: string;
   number: number;
+  group_id: string;
 }
 
 interface StudentTableProps {
   students: Student[];
   canEdit?: boolean;
   grades: Grade[];
+  batches?: Batch[];
 }
 
 export default function StudentTable({
   students,
   canEdit = true,
   grades,
+  batches = [],
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
@@ -225,6 +229,7 @@ export default function StudentTable({
           onClose={() => setEditingStudent(null)}
           onSave={handleSave}
           grades={grades}
+          batches={batches}
         />
       )}
     </>

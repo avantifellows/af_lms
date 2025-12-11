@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Grade } from "./StudentTable";
 
 interface Student {
@@ -18,9 +18,19 @@ interface Student {
   stream: string | null;
   gender: string | null;
   program_name: string | null;
+  program_id: number | null;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
+}
+
+export interface Batch {
+  id: number;
+  name: string;
+  batch_id: string;
+  program_id: number;
+  group_id: string;
+  metadata: { stream?: string; grade?: number } | null;
 }
 
 interface EditStudentModalProps {
@@ -29,6 +39,7 @@ interface EditStudentModalProps {
   onClose: () => void;
   onSave: () => void;
   grades: Grade[];
+  batches?: Batch[];
 }
 
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
@@ -82,6 +93,22 @@ function formatDateForAPI(date: Date): string {
   return date.toISOString().split("T")[0];
 }
 
+// Format a date string from the database to YYYY-MM-DD for HTML date input
+function formatDateForInput(dateString: string | null): string {
+  if (!dateString) return "";
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "";
+    // Use UTC methods to avoid timezone shifts
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  } catch {
+    return "";
+  }
+}
+
 const inputClassName =
   "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const labelClassName = "block text-sm font-medium text-gray-700";
@@ -92,19 +119,29 @@ export default function EditStudentModal({
   onClose,
   onSave,
   grades,
+  batches = [],
 }: EditStudentModalProps) {
   const { baseCategory, isPWD } = parseCategory(student.category);
+
+  // Find the group_id for the student's current grade
+  // Use String() to handle potential type mismatches (number vs string)
+  const currentGrade = grades.find(
+    (g) => String(g.id) === String(student.grade_id)
+  );
+  const initialGroupId = currentGrade?.group_id || "";
+  const originalStream = student.stream || "";
 
   const [formData, setFormData] = useState({
     first_name: student.first_name || "",
     last_name: student.last_name || "",
     phone: student.phone || "",
     gender: student.gender || "",
-    date_of_birth: student.date_of_birth || "",
+    date_of_birth: formatDateForInput(student.date_of_birth),
     baseCategory: baseCategory,
     isPWD: isPWD,
     stream: student.stream || "",
-    grade_id: student.grade_id || "",
+    group_id: initialGroupId,
+    batch_group_id: "", // Will be set when stream changes
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -113,6 +150,33 @@ export default function EditStudentModal({
   const [dropoutYear, setDropoutYear] = useState(getCurrentAcademicYear());
 
   const isDropout = student.status === "dropout";
+
+  // Check if stream has changed
+  const streamChanged = formData.stream !== originalStream && formData.stream !== "";
+
+  // Get the current grade number from the selected group_id
+  const selectedGradeObj = grades.find((g) => g.group_id === formData.group_id);
+  const currentGradeNumber = selectedGradeObj?.number || student.grade;
+
+  // Filter batches by program, grade, and stream when stream changes
+  const availableBatches = useMemo(() => {
+    if (!streamChanged || !currentGradeNumber || !student.program_id) return [];
+    return batches.filter(
+      (b) =>
+        b.program_id === student.program_id &&
+        b.metadata?.grade === currentGradeNumber &&
+        b.metadata?.stream === formData.stream
+    );
+  }, [streamChanged, currentGradeNumber, formData.stream, batches, student.program_id]);
+
+  // Auto-select batch if only one option
+  useMemo(() => {
+    if (availableBatches.length === 1 && formData.batch_group_id !== availableBatches[0].group_id) {
+      setFormData((prev) => ({ ...prev, batch_group_id: availableBatches[0].group_id }));
+    } else if (availableBatches.length === 0 && formData.batch_group_id !== "") {
+      setFormData((prev) => ({ ...prev, batch_group_id: "" }));
+    }
+  }, [availableBatches]);
 
   if (!isOpen) return null;
 
@@ -127,13 +191,36 @@ export default function EditStudentModal({
       return;
     }
 
+    // Validate: if stream changed, batch must be selected
+    if (streamChanged && !formData.batch_group_id) {
+      setError("Please select a batch for the new stream");
+      setLoading(false);
+      return;
+    }
+
     try {
       // Combine category and PWD status before sending
-      const { baseCategory, isPWD, ...rest } = formData;
-      const dataToSend = {
+      const { baseCategory, isPWD, group_id, batch_group_id, ...rest } = formData;
+
+      // Find the grade_id (grade table ID) from the selected group_id
+      const selectedGrade = grades.find((g) => g.group_id === group_id);
+      const gradeId = selectedGrade?.id || null;
+
+      const dataToSend: Record<string, unknown> = {
         ...rest,
         category: combineCategory(baseCategory, isPWD),
+        // Include user_id for grade/batch enrollment updates
+        user_id: student.user_id,
+        // group_id for enrollment_record update (via PATCH /update-group-user-by-type)
+        group_id: group_id,
+        // grade_id for student table update (via PATCH /student)
+        grade_id: gradeId,
       };
+
+      // Include batch_group_id if stream changed
+      if (streamChanged && batch_group_id) {
+        dataToSend.batch_group_id = batch_group_id;
+      }
 
       const response = await fetch(`/api/student/${student.student_pk_id}`, {
         method: "PATCH",
@@ -293,14 +380,14 @@ export default function EditStudentModal({
               <div>
                 <label className={labelClassName}>Grade</label>
                 <select
-                  name="grade_id"
-                  value={formData.grade_id}
+                  name="group_id"
+                  value={formData.group_id}
                   onChange={handleChange}
                   className={inputClassName}
                 >
                   <option value="">Select...</option>
                   {grades.map((grade) => (
-                    <option key={grade.id} value={grade.id}>
+                    <option key={grade.id} value={grade.group_id}>
                       Grade {grade.number}
                     </option>
                   ))}
@@ -381,6 +468,40 @@ export default function EditStudentModal({
                 </select>
               </div>
             </div>
+
+            {/* Batch selection - shown when stream changes */}
+            {streamChanged && batches.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+                <label className={`${labelClassName} text-blue-800`}>
+                  New Batch (required for stream change)
+                </label>
+                {availableBatches.length === 0 ? (
+                  <p className="mt-1 text-sm text-red-600">
+                    No batch found for Grade {currentGradeNumber} + {formData.stream}.
+                    Please contact admin.
+                  </p>
+                ) : (
+                  <select
+                    name="batch_group_id"
+                    value={formData.batch_group_id}
+                    onChange={handleChange}
+                    className={`${inputClassName} mt-1`}
+                  >
+                    <option value="">Select batch...</option>
+                    {availableBatches.map((batch) => (
+                      <option key={batch.id} value={batch.group_id}>
+                        {batch.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {availableBatches.length === 1 && (
+                  <p className="mt-1 text-xs text-blue-600">
+                    Auto-selected: {availableBatches[0].name}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -477,8 +598,8 @@ export default function EditStudentModal({
               </button>
               <button
                 type="submit"
-                disabled={loading}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
+                disabled={loading || (streamChanged && availableBatches.length === 0)}
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
                 {loading ? "Saving..." : "Save Changes"}
               </button>

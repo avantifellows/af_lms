@@ -10,6 +10,7 @@ import {
 } from "@/lib/permissions";
 import StudentTable, { Grade } from "@/components/StudentTable";
 import PageHeader from "@/components/PageHeader";
+import { Batch } from "@/components/EditStudentModal";
 
 interface Student {
   group_user_id: string;
@@ -26,6 +27,7 @@ interface Student {
   stream: string | null;
   gender: string | null;
   program_name: string | null;
+  program_id: number | null;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
@@ -53,7 +55,33 @@ async function getSchoolByCode(code: string): Promise<School | null> {
 }
 
 async function getGrades(): Promise<Grade[]> {
-  return query<Grade>(`SELECT id, number FROM grade ORDER BY number`, []);
+  return query<Grade>(
+    `SELECT gr.id, gr.number, g.id as group_id
+     FROM grade gr
+     JOIN "group" g ON g.child_id = gr.id AND g.type = 'grade'
+     ORDER BY gr.number`,
+    []
+  );
+}
+
+// Fetch all batches with metadata and group_ids for stream change functionality
+async function getBatchesWithMetadata(): Promise<Batch[]> {
+  const batches = await query<{
+    id: number;
+    name: string;
+    batch_id: string;
+    program_id: number;
+    metadata: { stream?: string; grade?: number } | null;
+    group_id: string;
+  }>(
+    `SELECT b.id, b.name, b.batch_id, b.program_id, b.metadata, g.id as group_id
+     FROM batch b
+     JOIN "group" g ON g.child_id = b.id AND g.type = 'batch'
+     WHERE b.metadata IS NOT NULL
+     ORDER BY b.name`,
+    []
+  );
+  return batches;
 }
 
 async function getStudents(schoolId: string): Promise<Student[]> {
@@ -73,16 +101,20 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       s.category,
       s.stream,
       s.status,
-      s.grade_id,
+      er_grade.group_id as grade_id,
       gr.number as grade,
-      p.name as program_name
+      p.program_name,
+      p.program_id
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
-    LEFT JOIN grade gr ON s.grade_id = gr.id
+    LEFT JOIN enrollment_record er_grade ON er_grade.user_id = u.id
+      AND er_grade.group_type = 'grade'
+      AND er_grade.is_current = true
+    LEFT JOIN grade gr ON er_grade.group_id = gr.id
     LEFT JOIN LATERAL (
-      SELECT p.name
+      SELECT p.name as program_name, p.id as program_id
       FROM group_user gu_batch
       JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
       JOIN batch b ON g_batch.child_id = b.id
@@ -167,8 +199,11 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
-  const allStudents = await getStudents(school.id);
-  const grades = await getGrades();
+  const [allStudents, grades, batches] = await Promise.all([
+    getStudents(school.id),
+    getGrades(),
+    getBatchesWithMetadata(),
+  ]);
 
   // Separate active and dropout students
   const activeStudents = allStudents.filter((s) => s.status !== "dropout");
@@ -211,6 +246,7 @@ export default async function SchoolPage({ params }: PageProps) {
           students={activeStudents}
           canEdit={canEdit}
           grades={grades}
+          batches={batches}
         />
 
         {dropoutStudents.length > 0 && (
@@ -228,6 +264,7 @@ export default async function SchoolPage({ params }: PageProps) {
               students={dropoutStudents}
               canEdit={canEdit}
               grades={grades}
+              batches={batches}
             />
           </>
         )}
