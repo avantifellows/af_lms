@@ -115,6 +115,7 @@ export default function EditStudentModal({
   );
   const initialGroupId = currentGrade?.group_id || "";
   const originalStream = student.stream || "";
+  const originalGradeGroupId = initialGroupId;
 
   const [formData, setFormData] = useState({
     first_name: student.first_name || "",
@@ -131,23 +132,25 @@ export default function EditStudentModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Check if stream has changed
+  // Check if stream or grade has changed
   const streamChanged = formData.stream !== originalStream && formData.stream !== "";
+  const gradeChanged = formData.group_id !== originalGradeGroupId && formData.group_id !== "";
+  const needsBatchUpdate = streamChanged || gradeChanged;
 
   // Get the current grade number from the selected group_id
   const selectedGradeObj = grades.find((g) => g.group_id === formData.group_id);
   const currentGradeNumber = selectedGradeObj?.number || student.grade;
 
-  // Filter batches by program, grade, and stream when stream changes
+  // Filter batches by program, grade, and stream when either changes
   const availableBatches = useMemo(() => {
-    if (!streamChanged || !currentGradeNumber || !student.program_id) return [];
+    if (!needsBatchUpdate || !currentGradeNumber || !student.program_id) return [];
     return batches.filter(
       (b) =>
         b.program_id === student.program_id &&
         b.metadata?.grade === currentGradeNumber &&
         b.metadata?.stream === formData.stream
     );
-  }, [streamChanged, currentGradeNumber, formData.stream, batches, student.program_id]);
+  }, [needsBatchUpdate, currentGradeNumber, formData.stream, batches, student.program_id]);
 
   // Auto-select batch if only one option
   useMemo(() => {
@@ -178,9 +181,9 @@ export default function EditStudentModal({
       return;
     }
 
-    // Validate: if stream changed, batch must be selected
-    if (streamChanged && !formData.batch_group_id) {
-      setError("Please select a batch for the new stream");
+    // Validate: if stream or grade changed, batch must be selected
+    if (needsBatchUpdate && !formData.batch_group_id) {
+      setError("Please select a batch for the new stream/grade combination");
       setLoading(false);
       return;
     }
@@ -204,8 +207,8 @@ export default function EditStudentModal({
         grade_id: gradeId,
       };
 
-      // Include batch_group_id if stream changed
-      if (streamChanged && batch_group_id) {
+      // Include batch_group_id if stream or grade changed
+      if (needsBatchUpdate && batch_group_id) {
         dataToSend.batch_group_id = batch_group_id;
       }
 
@@ -419,11 +422,11 @@ export default function EditStudentModal({
               </div>
             </div>
 
-            {/* Batch selection - shown when stream changes */}
-            {streamChanged && batches.length > 0 && (
+            {/* Batch selection - shown when stream or grade changes */}
+            {needsBatchUpdate && batches.length > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
                 <label className={`${labelClassName} text-blue-800`}>
-                  New Batch (required for stream change)
+                  New Batch (required for {streamChanged && gradeChanged ? "stream and grade change" : streamChanged ? "stream change" : "grade change"})
                 </label>
                 {availableBatches.length === 0 ? (
                   <p className="mt-1 text-sm text-red-600">
@@ -478,7 +481,7 @@ export default function EditStudentModal({
               </button>
               <button
                 type="submit"
-                disabled={loading || (streamChanged && availableBatches.length === 0)}
+                disabled={loading || (needsBatchUpdate && availableBatches.length === 0)}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
                 {loading ? "Saving..." : "Save Changes"}
