@@ -4,9 +4,10 @@ import { redirect } from "next/navigation";
 import { getUserPermission, getAccessibleSchoolCodes } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
-import SchoolCard, { School } from "@/components/SchoolCard";
+import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
+import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 
 interface Visit {
   id: number;
@@ -23,30 +24,35 @@ async function getPMSchools(
 ): Promise<School[]> {
   const searchPattern = search ? `%${search}%` : null;
 
+  // Query to get schools with both total student count and NVS student count
+  // NVS students are those enrolled in a batch with program_id = JNV_NVS_PROGRAM_ID
+  const baseQuery = `
+    SELECT s.id, s.code, s.name, s.district, s.state, s.region,
+           COUNT(DISTINCT gu.user_id) as student_count,
+           COUNT(DISTINCT CASE WHEN b.program_id = $1 THEN gu_batch.user_id END) as nvs_student_count
+    FROM school s
+    LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
+    LEFT JOIN group_user gu ON gu.group_id = g.id
+    LEFT JOIN group_user gu_batch ON gu_batch.user_id = gu.user_id
+    LEFT JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
+    LEFT JOIN batch b ON g_batch.child_id = b.id
+    WHERE s.af_school_category = 'JNV'`;
+
   if (codes === "all") {
     if (searchPattern) {
       return query<School>(
-        `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
-                COUNT(DISTINCT gu.user_id) as student_count
-         FROM school s
-         LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
-         LEFT JOIN group_user gu ON gu.group_id = g.id
-         WHERE s.af_school_category = 'JNV'
-           AND (s.name ILIKE $1 OR s.code ILIKE $1 OR s.district ILIKE $1 OR s.region ILIKE $1)
+        `${baseQuery}
+           AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2 OR s.region ILIKE $2)
          GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
          ORDER BY s.name`,
-        [searchPattern]
+        [JNV_NVS_PROGRAM_ID, searchPattern]
       );
     }
     return query<School>(
-      `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
-              COUNT(DISTINCT gu.user_id) as student_count
-       FROM school s
-       LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
-       LEFT JOIN group_user gu ON gu.group_id = g.id
-       WHERE s.af_school_category = 'JNV'
+      `${baseQuery}
        GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
-       ORDER BY s.name`
+       ORDER BY s.name`,
+      [JNV_NVS_PROGRAM_ID]
     );
   }
 
@@ -54,31 +60,21 @@ async function getPMSchools(
 
   if (searchPattern) {
     return query<School>(
-      `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
-              COUNT(DISTINCT gu.user_id) as student_count
-       FROM school s
-       LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
-       LEFT JOIN group_user gu ON gu.group_id = g.id
-       WHERE s.af_school_category = 'JNV'
-         AND s.code = ANY($1)
-         AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2 OR s.region ILIKE $2)
+      `${baseQuery}
+         AND s.code = ANY($2)
+         AND (s.name ILIKE $3 OR s.code ILIKE $3 OR s.district ILIKE $3 OR s.region ILIKE $3)
        GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
        ORDER BY s.name`,
-      [codes, searchPattern]
+      [JNV_NVS_PROGRAM_ID, codes, searchPattern]
     );
   }
 
   return query<School>(
-    `SELECT s.id, s.code, s.name, s.district, s.state, s.region,
-            COUNT(DISTINCT gu.user_id) as student_count
-     FROM school s
-     LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
-     LEFT JOIN group_user gu ON gu.group_id = g.id
-     WHERE s.af_school_category = 'JNV'
-       AND s.code = ANY($1)
+    `${baseQuery}
+       AND s.code = ANY($2)
      GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
      ORDER BY s.name`,
-    [codes]
+    [JNV_NVS_PROGRAM_ID, codes]
   );
 }
 
@@ -107,6 +103,43 @@ async function getOpenIssuesCount(pmEmail: string): Promise<number> {
   return parseInt(result[0]?.count || "0", 10);
 }
 
+// Get grade-wise NVS student counts for all schools
+async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
+  if (schoolIds.length === 0) return new Map();
+
+  const results = await query<{ school_id: string; grade: number; count: string }>(
+    `SELECT
+       s.id as school_id,
+       gr.number as grade,
+       COUNT(DISTINCT gu_batch.user_id) as count
+     FROM school s
+     JOIN "group" g_school ON g_school.type = 'school' AND g_school.child_id = s.id
+     JOIN group_user gu_school ON gu_school.group_id = g_school.id
+     JOIN group_user gu_batch ON gu_batch.user_id = gu_school.user_id
+     JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
+     JOIN batch b ON g_batch.child_id = b.id AND b.program_id = $1
+     LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
+       AND er.group_type = 'grade' AND er.is_current = true
+     LEFT JOIN grade gr ON er.group_id = gr.id
+     WHERE s.id = ANY($2) AND gr.number IS NOT NULL
+     GROUP BY s.id, gr.number
+     ORDER BY gr.number`,
+    [JNV_NVS_PROGRAM_ID, schoolIds]
+  );
+
+  const gradeMap = new Map<string, GradeCount[]>();
+  results.forEach((row) => {
+    if (!gradeMap.has(row.school_id)) {
+      gradeMap.set(row.school_id, []);
+    }
+    gradeMap.get(row.school_id)!.push({
+      grade: row.grade,
+      count: parseInt(row.count, 10),
+    });
+  });
+  return gradeMap;
+}
+
 interface PageProps {
   searchParams: Promise<{ q?: string }>;
 }
@@ -128,6 +161,16 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
   const schools = await getPMSchools(schoolCodes, searchQuery);
   const recentVisits = await getRecentVisits(session.user.email);
   const openIssues = await getOpenIssuesCount(session.user.email);
+
+  // Fetch grade-wise counts for NVS students in each school
+  const schoolIds = schools.map((s) => s.id);
+  const gradeCounts = await getSchoolGradeCounts(schoolIds);
+
+  // Merge grade counts into schools
+  const schoolsWithGrades = schools.map((school) => ({
+    ...school,
+    grade_counts: gradeCounts.get(school.id) || [],
+  }));
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -241,12 +284,13 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
           <h2 className="text-lg font-semibold text-gray-900">My Schools</h2>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {schools.map((school) => (
+          {schoolsWithGrades.map((school) => (
             <SchoolCard
               key={school.id}
               school={school}
               href={`/pm/school/${school.code}`}
-              showStudentCount
+              showNVSCount
+              showGradeBreakdown
               showRegion
               actions={
                 <>
@@ -269,7 +313,7 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
           ))}
         </div>
 
-        {schools.length === 0 && (
+        {schoolsWithGrades.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             {searchQuery
               ? `No schools found matching "${searchQuery}"`

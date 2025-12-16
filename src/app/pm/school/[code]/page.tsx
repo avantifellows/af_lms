@@ -7,6 +7,7 @@ import Link from "next/link";
 import StudentTable, { Grade } from "@/components/StudentTable";
 import SchoolHeader from "@/components/SchoolHeader";
 import { Batch } from "@/components/EditStudentModal";
+import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 
 interface School {
   id: string;
@@ -37,6 +38,7 @@ interface Student {
   grade: number | null;
   grade_id: string | null;
   status: string | null;
+  updated_at: string | null;
 }
 
 interface Visit {
@@ -66,7 +68,7 @@ async function getGrades(): Promise<Grade[]> {
   );
 }
 
-// Fetch all batches with metadata and group_ids for stream change functionality
+// Fetch NVS program batches with metadata and group_ids for stream change functionality
 async function getBatchesWithMetadata(): Promise<Batch[]> {
   const batches = await query<{
     id: number;
@@ -79,11 +81,22 @@ async function getBatchesWithMetadata(): Promise<Batch[]> {
     `SELECT b.id, b.name, b.batch_id, b.program_id, b.metadata, g.id as group_id
      FROM batch b
      JOIN "group" g ON g.child_id = b.id AND g.type = 'batch'
-     WHERE b.metadata IS NOT NULL
+     WHERE b.metadata IS NOT NULL AND b.program_id = $1
      ORDER BY b.name`,
-    []
+    [JNV_NVS_PROGRAM_ID]
   );
   return batches;
+}
+
+// Extract distinct streams from NVS program batches
+function getDistinctNVSStreams(batches: Batch[]): string[] {
+  const streams = new Set<string>();
+  batches.forEach((b) => {
+    if (b.metadata?.stream) {
+      streams.add(b.metadata.stream);
+    }
+  });
+  return Array.from(streams).sort();
 }
 
 async function getStudents(schoolId: string): Promise<Student[]> {
@@ -106,7 +119,8 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       er_grade.group_id as grade_id,
       gr.number as grade,
       p.program_name,
-      p.program_id
+      p.program_id,
+      GREATEST(s.updated_at, u.updated_at) as updated_at
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
@@ -191,6 +205,9 @@ export default async function PMSchoolPage({ params }: PageProps) {
   const activeStudents = allStudents.filter((s) => s.status !== "dropout");
   const dropoutStudents = allStudents.filter((s) => s.status === "dropout");
 
+  // Extract distinct streams from NVS batches
+  const nvsStreams = getDistinctNVSStreams(batches);
+
   // Check if user can edit students
   const canEdit = await canEditStudents(session.user.email);
 
@@ -265,6 +282,7 @@ export default async function PMSchoolPage({ params }: PageProps) {
         canEdit={canEdit}
         grades={grades}
         batches={batches}
+        nvsStreams={nvsStreams}
       />
     </main>
   );

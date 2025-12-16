@@ -22,6 +22,7 @@ interface Student {
   grade: number | null;
   grade_id: string | null;
   status: string | null;
+  updated_at: string | null;
 }
 
 export interface Batch {
@@ -40,6 +41,7 @@ interface EditStudentModalProps {
   onSave: () => void;
   grades: Grade[];
   batches?: Batch[];
+  nvsStreams?: string[];
 }
 
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
@@ -66,16 +68,6 @@ function combineCategory(baseCategory: string, isPWD: boolean): string {
   if (!baseCategory) return "";
   return isPWD ? `PWD-${baseCategory}` : baseCategory;
 }
-const STREAM_OPTIONS = [
-  "engineering",
-  "medical",
-  "pcmb",
-  "foundation",
-  "clat",
-  "ca",
-  "pcb",
-  "pcm",
-];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 
 // Format a date string from the database to YYYY-MM-DD for HTML date input
@@ -105,6 +97,7 @@ export default function EditStudentModal({
   onSave,
   grades,
   batches = [],
+  nvsStreams = [],
 }: EditStudentModalProps) {
   const { baseCategory, isPWD } = parseCategory(student.category);
 
@@ -329,6 +322,16 @@ export default function EditStudentModal({
               </div>
             </div>
 
+            <div>
+              <label className={labelClassName}>Program</label>
+              <input
+                type="text"
+                value={student.program_name || "—"}
+                disabled
+                className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelClassName}>Grade</label>
@@ -413,7 +416,7 @@ export default function EditStudentModal({
                   className={inputClassName}
                 >
                   <option value="">Select...</option>
-                  {STREAM_OPTIONS.map((opt) => (
+                  {nvsStreams.map((opt) => (
                     <option key={opt} value={opt}>
                       {opt.charAt(0).toUpperCase() + opt.slice(1)}
                     </option>
@@ -488,6 +491,19 @@ export default function EditStudentModal({
               </button>
             </div>
           </form>
+
+          {/* Last Updated */}
+          {student.updated_at && (
+            <p className="mt-4 text-xs text-gray-400 text-right">
+              Last updated: {new Date(student.updated_at).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+          )}
         </div>
       </div>
     </div>

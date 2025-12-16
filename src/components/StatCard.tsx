@@ -14,7 +14,7 @@ export default function StatCard({ label, value, size = "md" }: StatCardProps) {
   return (
     <div className="bg-gray-50 rounded-lg p-4">
       <div className="text-sm text-gray-500">{label}</div>
-      <div className={`${valueSize} font-semibold`}>{value}</div>
+      <div className={`${valueSize} font-semibold text-gray-900`}>{value}</div>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
+import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 
 interface Student {
   group_user_id: string;
@@ -23,6 +24,7 @@ interface Student {
   grade: number | null;
   grade_id: string | null;
   status: string | null;
+  updated_at: string | null;
 }
 
 export interface Grade {
@@ -37,6 +39,7 @@ interface StudentTableProps {
   canEdit?: boolean;
   grades: Grade[];
   batches?: Batch[];
+  nvsStreams?: string[];
 }
 
 function formatDate(dateString: string | null): string {
@@ -80,11 +83,12 @@ function formatDateForAPI(date: Date): string {
 interface StudentCardProps {
   student: Student;
   canEdit: boolean;
+  isNVSStudent: boolean;
   onEdit: () => void;
   onDropout: () => void;
 }
 
-function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) {
+function StudentCard({ student, canEdit, isNVSStudent, onEdit, onDropout }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = student.status === "dropout";
 
@@ -131,7 +135,7 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
 
           {/* Right side - Action buttons */}
           <div className="flex items-center gap-2 shrink-0">
-            {canEdit && !isDropout && (
+            {canEdit && !isDropout && isNVSStudent && (
               <>
                 <button
                   onClick={onEdit}
@@ -146,14 +150,6 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
                   Dropout
                 </button>
               </>
-            )}
-            {canEdit && isDropout && (
-              <button
-                onClick={onEdit}
-                className="px-4 py-2 text-sm font-medium text-white bg-gray-500 hover:bg-gray-600 rounded-md transition-colors shadow-sm"
-              >
-                View
-              </button>
             )}
             <button
               onClick={() => setExpanded(!expanded)}
@@ -336,6 +332,7 @@ export default function StudentTable({
   canEdit = true,
   grades,
   batches = [],
+  nvsStreams = [],
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -449,6 +446,7 @@ export default function StudentTable({
               key={student.group_user_id}
               student={student}
               canEdit={canEdit}
+              isNVSStudent={Number(student.program_id) === JNV_NVS_PROGRAM_ID}
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
             />
@@ -465,6 +463,7 @@ export default function StudentTable({
           onSave={handleSave}
           grades={grades}
           batches={batches}
+          nvsStreams={nvsStreams}
         />
       )}
 
