@@ -141,3 +141,15 @@ export async function canAccessPMFeatures(email: string): Promise<boolean> {
   if (!permission) return false;
   return permission.role === "program_manager" || permission.role === "admin";
 }
+
+// Check if user can edit curriculum (teachers and admins can, PMs cannot)
+export async function canEditCurriculum(email: string): Promise<boolean> {
+  const permission = await getUserPermission(email);
+  if (!permission) return false;
+  // Admins can always edit
+  if (permission.role === "admin") return true;
+  // Teachers can edit (not read_only)
+  if (permission.role === "teacher" && !permission.read_only) return true;
+  // PMs are view-only for curriculum
+  return false;
+}

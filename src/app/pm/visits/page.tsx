@@ -11,17 +11,17 @@ interface Visit {
   school_name?: string;
   visit_date: string;
   status: string;
-  created_at: string;
+  inserted_at: string;
 }
 
 async function getVisits(pmEmail: string): Promise<Visit[]> {
   return query<Visit>(
-    `SELECT v.id, v.school_code, v.visit_date, v.status, v.created_at,
+    `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      WHERE v.pm_email = $1
-     ORDER BY v.visit_date DESC, v.created_at DESC`,
+     ORDER BY v.visit_date DESC, v.inserted_at DESC`,
     [pmEmail]
   );
 }
@@ -88,10 +88,20 @@ export default async function VisitsListPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.visit_date).toLocaleDateString()}
+                      {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "Asia/Kolkata",
+                      })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.created_at).toLocaleDateString()}
+                      {new Date(visit.inserted_at).toLocaleDateString("en-IN", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "Asia/Kolkata",
+                      })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                       <Link
@@ -143,10 +153,20 @@ export default async function VisitsListPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.visit_date).toLocaleDateString()}
+                      {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "Asia/Kolkata",
+                      })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.created_at).toLocaleDateString()}
+                      {new Date(visit.inserted_at).toLocaleDateString("en-IN", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "Asia/Kolkata",
+                      })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                       <Link

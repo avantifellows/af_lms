@@ -6,13 +6,19 @@ import { authOptions } from "@/lib/auth";
 import {
   canAccessSchool,
   canEditStudents,
+  canEditCurriculum,
   getAccessibleSchoolCodes,
+  getUserPermission,
 } from "@/lib/permissions";
 import StudentTable, { Grade } from "@/components/StudentTable";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
+import QuizAnalyticsSection from "@/components/QuizAnalyticsSection";
+import SchoolTabs, { VisitHistorySection } from "@/components/SchoolTabs";
+import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
+import { getSchoolQuizSessions } from "@/lib/bigquery";
 
 interface Student {
   group_user_id: string;
@@ -44,6 +50,23 @@ interface School {
   district: string;
   state: string;
   region: string | null;
+}
+
+interface Visit {
+  id: number;
+  visit_date: string;
+  status: string;
+}
+
+async function getSchoolVisits(schoolCode: string, pmEmail: string): Promise<Visit[]> {
+  return query<Visit>(
+    `SELECT id, visit_date, status
+     FROM lms_pm_school_visits
+     WHERE school_code = $1 AND pm_email = $2
+     ORDER BY visit_date DESC
+     LIMIT 10`,
+    [schoolCode, pmEmail]
+  );
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -214,11 +237,31 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
-  const [allStudents, grades, batches] = await Promise.all([
+  // Check if user is a PM (for Google users only)
+  let isPM = false;
+  let visits: Visit[] = [];
+  if (!isPasscodeUser && session.user?.email) {
+    const permission = await getUserPermission(session.user.email);
+    isPM = permission?.role === "program_manager" || permission?.role === "admin";
+  }
+
+  // Fetch data in parallel
+  const dataPromises: [
+    Promise<Student[]>,
+    Promise<Grade[]>,
+    Promise<Batch[]>,
+    Promise<{ session_id: string; test_name: string; start_date: string; student_count: number }[]>,
+    Promise<Visit[]>
+  ] = [
     getStudents(school.id),
     getGrades(),
     getBatchesWithMetadata(),
-  ]);
+    getSchoolQuizSessions(school.udise_code || school.code),
+    isPM && session.user?.email ? getSchoolVisits(school.code, session.user.email) : Promise.resolve([]),
+  ];
+
+  const [allStudents, grades, batches, quizSessions, visitResults] = await Promise.all(dataPromises);
+  visits = visitResults;
 
   // Separate active and dropout students
   const activeStudents = allStudents.filter((s) => s.status !== "dropout");
@@ -252,6 +295,11 @@ export default async function SchoolPage({ params }: PageProps) {
     ? true // Passcode users can edit by default
     : await canEditStudents(session.user?.email || "");
 
+  // Check if user can edit curriculum (teachers and admins can, PMs view-only)
+  const canEditCurriculumFlag = isPasscodeUser
+    ? true // Passcode users (teachers) can edit
+    : await canEditCurriculum(session.user?.email || "");
+
   // Check if user has access to multiple schools (to show/hide back arrow)
   let hasMultipleSchools = false;
   if (!isPasscodeUser) {
@@ -264,35 +312,86 @@ export default async function SchoolPage({ params }: PageProps) {
 
   const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
 
+  // Determine back link based on role
+  const backHref = isPM ? "/pm" : hasMultipleSchools ? "/dashboard" : undefined;
+
+  // Build tabs
+  const enrollmentContent = (
+    <div>
+      {/* NVS Student Stats */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+          <StatCard label="Total NVS" value={totalNVSCount} />
+          {gradeCountsArray.map((gc) => (
+            <StatCard key={gc.grade} label={`Grade ${gc.grade}`} value={gc.count} size="sm" />
+          ))}
+        </div>
+      </div>
+
+      <StudentTable
+        students={activeStudents}
+        dropoutStudents={dropoutStudents}
+        canEdit={canEdit}
+        grades={grades}
+        batches={batches}
+        nvsStreams={nvsStreams}
+      />
+    </div>
+  );
+
+  const performanceContent = (
+    <div>
+      {quizSessions.length > 0 ? (
+        <QuizAnalyticsSection
+          sessions={quizSessions}
+          schoolUdise={school.udise_code || school.code}
+        />
+      ) : (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+          <p className="text-gray-500">No quiz data available for this school yet.</p>
+        </div>
+      )}
+    </div>
+  );
+
+  const mentorshipContent = (
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+      <p className="text-gray-500">Mentorship data coming soon.</p>
+    </div>
+  );
+
+  const visitsContent = (
+    <VisitHistorySection visits={visits} schoolCode={school.code} />
+  );
+
+  const curriculumContent = (
+    <CurriculumTab
+      schoolCode={school.code}
+      schoolName={school.name}
+      canEdit={canEditCurriculumFlag}
+    />
+  );
+
+  const tabs = [
+    { id: "enrollment", label: "Enrollment", content: enrollmentContent },
+    { id: "curriculum", label: "Curriculum", content: curriculumContent },
+    { id: "performance", label: "Performance", content: performanceContent },
+    { id: "mentorship", label: "Mentorship", content: mentorshipContent },
+    ...(isPM ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <PageHeader
         title={school.name}
         subtitle={subtitle}
-        backHref={hasMultipleSchools ? "/dashboard" : undefined}
+        backHref={backHref}
         userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* NVS Student Stats */}
-        <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-            <StatCard label="Total NVS" value={totalNVSCount} />
-            {gradeCountsArray.map((gc) => (
-              <StatCard key={gc.grade} label={`Grade ${gc.grade}`} value={gc.count} size="sm" />
-            ))}
-          </div>
-        </div>
-
-        <StudentTable
-          students={activeStudents}
-          dropoutStudents={dropoutStudents}
-          canEdit={canEdit}
-          grades={grades}
-          batches={batches}
-          nvsStreams={nvsStreams}
-        />
+        <SchoolTabs tabs={tabs} defaultTab="enrollment" />
       </main>
     </div>
   );

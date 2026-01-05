@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
   let queryText = `
     SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-           v.data, v.created_at, v.updated_at,
+           v.data, v.inserted_at, v.updated_at,
            s.name as school_name
     FROM lms_pm_school_visits v
     LEFT JOIN school s ON s.code = v.school_code
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     paramIndex++;
   }
 
-  queryText += ` ORDER BY v.visit_date DESC, v.created_at DESC LIMIT $${paramIndex}`;
+  queryText += ` ORDER BY v.visit_date DESC, v.inserted_at DESC LIMIT $${paramIndex}`;
   params.push(limit);
 
   const visits = await query(queryText, params);

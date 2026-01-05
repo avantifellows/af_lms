@@ -7,7 +7,10 @@ import Link from "next/link";
 import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
+import Pagination from "@/components/Pagination";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
+
+const SCHOOLS_PER_PAGE = 20;
 
 interface Visit {
   id: number;
@@ -15,14 +18,21 @@ interface Visit {
   school_name?: string;
   visit_date: string;
   status: string;
-  created_at: string;
+  inserted_at: string;
+}
+
+interface SchoolsResult {
+  schools: School[];
+  totalCount: number;
 }
 
 async function getPMSchools(
   codes: string[] | "all",
-  search?: string
-): Promise<School[]> {
+  search?: string,
+  page: number = 1
+): Promise<SchoolsResult> {
   const searchPattern = search ? `%${search}%` : null;
+  const offset = (page - 1) * SCHOOLS_PER_PAGE;
 
   // Query to get schools with both total student count and NVS student count
   // NVS students are those enrolled in a batch with program_id = JNV_NVS_PROGRAM_ID
@@ -38,54 +48,91 @@ async function getPMSchools(
     LEFT JOIN batch b ON g_batch.child_id = b.id
     WHERE s.af_school_category = 'JNV'`;
 
+  const countBaseQuery = `
+    SELECT COUNT(DISTINCT s.id) as total
+    FROM school s
+    WHERE s.af_school_category = 'JNV'`;
+
   if (codes === "all") {
     if (searchPattern) {
-      return query<School>(
-        `${baseQuery}
-           AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2 OR s.region ILIKE $2)
-         GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
-         ORDER BY s.name`,
-        [JNV_NVS_PROGRAM_ID, searchPattern]
-      );
+      const [schools, countResult] = await Promise.all([
+        query<School>(
+          `${baseQuery}
+             AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2 OR s.region ILIKE $2)
+           GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+           ORDER BY s.name
+           LIMIT $3 OFFSET $4`,
+          [JNV_NVS_PROGRAM_ID, searchPattern, SCHOOLS_PER_PAGE, offset]
+        ),
+        query<{ total: string }>(
+          `${countBaseQuery}
+             AND (s.name ILIKE $1 OR s.code ILIKE $1 OR s.district ILIKE $1 OR s.region ILIKE $1)`,
+          [searchPattern]
+        ),
+      ]);
+      return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
     }
-    return query<School>(
-      `${baseQuery}
-       GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
-       ORDER BY s.name`,
-      [JNV_NVS_PROGRAM_ID]
-    );
+    const [schools, countResult] = await Promise.all([
+      query<School>(
+        `${baseQuery}
+         GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+         ORDER BY s.name
+         LIMIT $2 OFFSET $3`,
+        [JNV_NVS_PROGRAM_ID, SCHOOLS_PER_PAGE, offset]
+      ),
+      query<{ total: string }>(countBaseQuery),
+    ]);
+    return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
   }
 
-  if (codes.length === 0) return [];
+  if (codes.length === 0) return { schools: [], totalCount: 0 };
 
   if (searchPattern) {
-    return query<School>(
-      `${baseQuery}
-         AND s.code = ANY($2)
-         AND (s.name ILIKE $3 OR s.code ILIKE $3 OR s.district ILIKE $3 OR s.region ILIKE $3)
-       GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
-       ORDER BY s.name`,
-      [JNV_NVS_PROGRAM_ID, codes, searchPattern]
-    );
+    const [schools, countResult] = await Promise.all([
+      query<School>(
+        `${baseQuery}
+           AND s.code = ANY($2)
+           AND (s.name ILIKE $3 OR s.code ILIKE $3 OR s.district ILIKE $3 OR s.region ILIKE $3)
+         GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+         ORDER BY s.name
+         LIMIT $4 OFFSET $5`,
+        [JNV_NVS_PROGRAM_ID, codes, searchPattern, SCHOOLS_PER_PAGE, offset]
+      ),
+      query<{ total: string }>(
+        `${countBaseQuery}
+           AND s.code = ANY($1)
+           AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2 OR s.region ILIKE $2)`,
+        [codes, searchPattern]
+      ),
+    ]);
+    return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
   }
 
-  return query<School>(
-    `${baseQuery}
-       AND s.code = ANY($2)
-     GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
-     ORDER BY s.name`,
-    [JNV_NVS_PROGRAM_ID, codes]
-  );
+  const [schools, countResult] = await Promise.all([
+    query<School>(
+      `${baseQuery}
+         AND s.code = ANY($2)
+       GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+       ORDER BY s.name
+       LIMIT $3 OFFSET $4`,
+      [JNV_NVS_PROGRAM_ID, codes, SCHOOLS_PER_PAGE, offset]
+    ),
+    query<{ total: string }>(
+      `${countBaseQuery} AND s.code = ANY($1)`,
+      [codes]
+    ),
+  ]);
+  return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
   return query<Visit>(
-    `SELECT v.id, v.school_code, v.visit_date, v.status, v.created_at,
+    `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      WHERE v.pm_email = $1
-     ORDER BY v.visit_date DESC, v.created_at DESC
+     ORDER BY v.visit_date DESC, v.inserted_at DESC
      LIMIT $2`,
     [pmEmail, limit]
   );
@@ -141,12 +188,13 @@ async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, Gr
 }
 
 interface PageProps {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }
 
 export default async function PMDashboardPage({ searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
-  const { q: searchQuery } = await searchParams;
+  const { q: searchQuery, page: pageParam } = await searchParams;
+  const currentPage = Math.max(1, parseInt(pageParam || "1", 10));
 
   if (!session?.user?.email) {
     redirect("/");
@@ -158,7 +206,8 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
   }
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email);
-  const schools = await getPMSchools(schoolCodes, searchQuery);
+  const { schools, totalCount } = await getPMSchools(schoolCodes, searchQuery, currentPage);
+  const totalPages = Math.ceil(totalCount / SCHOOLS_PER_PAGE);
   const recentVisits = await getRecentVisits(session.user.email);
   const openIssues = await getOpenIssuesCount(session.user.email);
 
@@ -179,7 +228,7 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="text-sm font-medium text-gray-500">My Schools</div>
           <div className="mt-1 text-3xl font-semibold text-gray-900">
-            {schools.length}
+            {totalCount}
           </div>
         </div>
         <div className="bg-white rounded-lg shadow p-6">
@@ -202,7 +251,7 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Search Students
           </label>
-          <StudentSearch schoolBasePath="/pm/school" />
+          <StudentSearch schoolBasePath="/school" />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -249,7 +298,12 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
                       {visit.school_name || visit.school_code}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.visit_date).toLocaleDateString()}
+                      {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "Asia/Kolkata",
+                      })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
@@ -288,26 +342,17 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
             <SchoolCard
               key={school.id}
               school={school}
-              href={`/pm/school/${school.code}`}
+              href={`/school/${school.code}`}
               showNVSCount
               showGradeBreakdown
               showRegion
               actions={
-                <>
-                  <Link
-                    href={`/pm/school/${school.code}`}
-                    className="text-sm text-blue-600 hover:text-blue-800"
-                  >
-                    View Details
-                  </Link>
-                  <span className="text-gray-300">|</span>
-                  <Link
-                    href={`/pm/school/${school.code}/visit/new`}
-                    className="text-sm text-green-600 hover:text-green-800"
-                  >
-                    Start Visit
-                  </Link>
-                </>
+                <Link
+                  href={`/pm/school/${school.code}/visit/new`}
+                  className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
+                >
+                  Start Visit
+                </Link>
               }
             />
           ))}
@@ -320,6 +365,13 @@ export default async function PMDashboardPage({ searchParams }: PageProps) {
               : "No schools assigned. Contact an administrator."}
           </div>
         )}
+
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          basePath="/pm"
+          searchParams={searchQuery ? { q: searchQuery } : {}}
+        />
       </div>
     </main>
   );

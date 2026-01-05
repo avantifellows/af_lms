@@ -11,7 +11,7 @@ interface Visit {
   visit_date: string;
   status: string;
   data: Record<string, unknown>;
-  created_at: string;
+  inserted_at: string;
   updated_at: string;
   school_name?: string;
 }
@@ -35,7 +35,7 @@ export async function GET(
 
   const visits = await query<Visit>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-            v.data, v.created_at, v.updated_at,
+            v.data, v.inserted_at, v.updated_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code

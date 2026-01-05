@@ -27,11 +27,23 @@ esac
 echo "Deploying to $ENV ($PROJECT)..."
 echo ""
 
+# Backup .env.local if it exists (vercel link overwrites it)
+if [ -f .env.local ]; then
+  cp .env.local .env.local.backup
+  echo "Backed up .env.local"
+fi
+
 # Link to the correct project
-vercel link --project "$PROJECT" --yes
+npx vercel link --project "$PROJECT" --yes
 
 # Deploy to production environment of that project
-vercel --prod
+npx vercel --prod
+
+# Restore .env.local
+if [ -f .env.local.backup ]; then
+  mv .env.local.backup .env.local
+  echo "Restored .env.local"
+fi
 
 echo ""
 echo "Deployed to $ENV: $URL"

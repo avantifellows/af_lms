@@ -26,7 +26,7 @@ interface Visit {
     teacherFeedback: unknown[];
     issueLog: unknown[];
   };
-  created_at: string;
+  inserted_at: string;
   updated_at: string;
   school_name?: string;
 }
@@ -34,7 +34,7 @@ interface Visit {
 async function getVisit(id: string): Promise<Visit | null> {
   const visits = await query<Visit>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-            v.data, v.created_at, v.updated_at,
+            v.data, v.inserted_at, v.updated_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
@@ -171,7 +171,12 @@ export default async function VisitDetailPage({ params }: PageProps) {
               {visit.school_name || visit.school_code}
             </h1>
             <p className="mt-1 text-gray-500">
-              Visit on {new Date(visit.visit_date).toLocaleDateString()}
+              Visit on {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+                timeZone: "Asia/Kolkata",
+              })}
             </p>
           </div>
           <span
