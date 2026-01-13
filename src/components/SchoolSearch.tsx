@@ -5,7 +5,7 @@ import { useCallback, useState, useTransition } from "react";
 
 interface SchoolSearchProps {
   defaultValue?: string;
-  basePath?: string; // e.g., "/dashboard" or "/pm"
+  basePath?: string; // e.g., "/dashboard"
   placeholder?: string;
 }
 

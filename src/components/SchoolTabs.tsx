@@ -58,7 +58,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6 text-center">
         <p className="text-gray-500">No visits recorded yet</p>
         <Link
-          href={`/pm/school/${schoolCode}/visit/new`}
+          href={`/school/${schoolCode}/visit/new`}
           className="inline-flex items-center mt-4 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
         >
           Start First Visit
@@ -72,7 +72,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Visit History</h2>
         <Link
-          href={`/pm/school/${schoolCode}/visit/new`}
+          href={`/school/${schoolCode}/visit/new`}
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
         >
           Start New Visit
@@ -104,7 +104,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
               </span>
             </div>
             <Link
-              href={`/pm/visits/${visit.id}`}
+              href={`/visits/${visit.id}`}
               className="text-sm text-blue-600 hover:text-blue-800"
             >
               {visit.status === "completed" ? "View" : "Continue"}

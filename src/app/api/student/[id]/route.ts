@@ -81,8 +81,6 @@ export async function PATCH(
         type: "grade",
       };
 
-      console.log("Grade update payload:", JSON.stringify(gradePayload));
-
       const gradeResponse = await fetch(
         `${DB_SERVICE_URL}/update-group-user-by-type`,
         {
@@ -115,8 +113,6 @@ export async function PATCH(
         user_id: user_id,
         type: "batch",
       };
-
-      console.log("Batch update payload:", JSON.stringify(batchPayload));
 
       const batchResponse = await fetch(
         `${DB_SERVICE_URL}/update-group-user-by-type`,

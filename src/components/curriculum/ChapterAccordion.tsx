@@ -37,8 +37,8 @@ export default function ChapterAccordion({
         const isExpanded = expandedChapterIds.includes(chapter.id);
         const completedCount = chapterProgress?.completedTopicIds.length || 0;
         const totalCount = chapter.topics.length;
-        const indicator = getProgressIndicator(chapterProgress, totalCount);
-        const colorClass = getProgressColorClass(chapterProgress, totalCount);
+        const indicator = getProgressIndicator(chapterProgress);
+        const colorClass = getProgressColorClass(chapterProgress);
 
         return (
           <div

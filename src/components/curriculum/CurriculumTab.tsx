@@ -15,7 +15,6 @@ import {
   saveProgress,
   calculateAllProgress,
   generateSessionId,
-  getTodayDate,
 } from "@/lib/curriculum-helpers";
 import ProgressSummary from "./ProgressSummary";
 import ChapterAccordion from "./ChapterAccordion";

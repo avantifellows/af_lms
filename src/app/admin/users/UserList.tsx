@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import AddUserModal from "./AddUserModal";
 
 interface UserPermission {
@@ -51,7 +50,6 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserPermission | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
-  const router = useRouter();
 
   const handleDelete = async (id: number, email: string) => {
     if (email.toLowerCase() === currentUserEmail.toLowerCase()) {

@@ -47,9 +47,7 @@ export default function QuizAnalyticsSection({ sessions, schoolUdise }: Props) {
   const validSessions = sessions.filter((s) => s.session_id);
 
   const fetchAnalytics = async (session: QuizSession) => {
-    console.log("fetchAnalytics called", session);
     if (!session.session_id) {
-      console.log("No session_id, returning");
       return;
     }
 
@@ -58,7 +56,6 @@ export default function QuizAnalyticsSection({ sessions, schoolUdise }: Props) {
     setAnalytics(null);
 
     try {
-      console.log("Fetching from API:", `/api/quiz-analytics/${schoolUdise}`);
       const response = await fetch(`/api/quiz-analytics/${schoolUdise}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,9 +82,7 @@ export default function QuizAnalyticsSection({ sessions, schoolUdise }: Props) {
 
   const handleSessionSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedValue = e.target.value;
-    console.log("handleSessionSelect called", selectedValue);
     const session = validSessions.find((s) => s.session_id === selectedValue);
-    console.log("Found session:", session);
     if (session) {
       setSelectedSession(session);
       fetchAnalytics(session);

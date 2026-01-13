@@ -313,7 +313,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
 
   // Determine back link based on role
-  const backHref = isPM ? "/pm" : hasMultipleSchools ? "/dashboard" : undefined;
+  const backHref = hasMultipleSchools ? "/dashboard" : undefined;
 
   // Build tabs
   const enrollmentContent = (

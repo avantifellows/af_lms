@@ -146,7 +146,7 @@ export function calculateAllProgress(
 }
 
 // Get progress indicator character
-export function getProgressIndicator(progress: ChapterProgress | undefined, totalTopics: number): string {
+export function getProgressIndicator(progress: ChapterProgress | undefined): string {
   if (!progress || progress.completedTopicIds.length === 0) {
     return "○"; // Empty
   }
@@ -160,7 +160,7 @@ export function getProgressIndicator(progress: ChapterProgress | undefined, tota
 }
 
 // Get progress color class
-export function getProgressColorClass(progress: ChapterProgress | undefined, totalTopics: number): string {
+export function getProgressColorClass(progress: ChapterProgress | undefined): string {
   if (!progress || progress.completedTopicIds.length === 0) {
     return "text-gray-400";
   }

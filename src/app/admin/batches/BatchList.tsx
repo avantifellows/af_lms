@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 interface BatchMetadata {
   stream?: string;
@@ -59,7 +58,6 @@ export default function BatchList({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const router = useRouter();
 
   const handleProgramChange = async (programId: number) => {
     setSelectedProgramId(programId);

@@ -15,7 +15,7 @@ interface StudentSearchResult {
 }
 
 interface StudentSearchProps {
-  schoolBasePath?: string; // e.g., "/school" or "/pm/school"
+  schoolBasePath?: string; // e.g., "/school"
 }
 
 export default function StudentSearch({ schoolBasePath = "/school" }: StudentSearchProps) {

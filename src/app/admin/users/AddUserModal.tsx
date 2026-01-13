@@ -168,7 +168,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                 <option value="admin">Admin - Full access + user management</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
-                {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools at /pm"}
+                {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools"}
                 {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
                 {role === "admin" && "Admins have full access to all features including user management"}
               </p>
