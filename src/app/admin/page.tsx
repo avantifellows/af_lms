@@ -60,6 +60,16 @@ export default async function AdminPage() {
               Configure stream and grade metadata for program batches.
             </p>
           </Link>
+
+          <Link
+            href="/admin/schools"
+            className="block rounded-lg bg-white p-6 shadow hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">School Programs</h3>
+            <p className="mt-2 text-sm text-gray-500">
+              Assign programs (CoE, Nodal, NVS) to schools.
+            </p>
+          </Link>
         </div>
       </main>
     </div>

@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
-// GET /api/admin/schools - Search schools for assignment
+// GET /api/admin/schools - List all JNV schools or search
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
 
@@ -19,7 +19,26 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const search = searchParams.get("q") || "";
+  const all = searchParams.get("all") === "true";
 
+  // If "all" param is set, return all JNV schools with program_ids
+  if (all) {
+    const schools = await query<{
+      id: number;
+      code: string;
+      name: string;
+      region: string;
+      program_ids: number[] | null;
+    }>(
+      `SELECT id, code, name, region, program_ids
+       FROM school
+       WHERE af_school_category = 'JNV'
+       ORDER BY name`
+    );
+    return NextResponse.json(schools);
+  }
+
+  // Otherwise, search for schools (for assignment dropdowns)
   const schools = await query<{ code: string; name: string; region: string }>(
     `SELECT code, name, region
      FROM school
