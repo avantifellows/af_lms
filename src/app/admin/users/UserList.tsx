@@ -10,6 +10,7 @@ interface UserPermission {
   role: string;
   school_codes: string[] | null;
   regions: string[] | null;
+  program_ids: number[] | null;
   read_only: boolean;
 }
 
@@ -43,6 +44,12 @@ const ROLE_COLORS: Record<string, string> = {
   admin: "bg-purple-100 text-purple-800",
   program_manager: "bg-indigo-100 text-indigo-800",
   teacher: "bg-gray-100 text-gray-800",
+};
+
+const PROGRAM_LABELS: Record<number, string> = {
+  1: "CoE",
+  2: "Nodal",
+  64: "NVS",
 };
 
 export default function UserList({ initialUsers, regions, currentUserEmail }: UserListProps) {
@@ -119,6 +126,9 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                 Level
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                Programs
+              </th>
+              <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                 Access
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
@@ -151,6 +161,22 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                   }`}>
                     {user.read_only ? "Read-only" : "Read/Write"}
                   </span>
+                </td>
+                <td className="px-3 py-4 text-sm">
+                  {user.program_ids && user.program_ids.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {user.program_ids.map((id) => (
+                        <span
+                          key={id}
+                          className="inline-flex px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800"
+                        >
+                          {PROGRAM_LABELS[id] || `Program ${id}`}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-red-500 text-xs">No programs</span>
+                  )}
                 </td>
                 <td className="px-3 py-4 text-sm text-gray-500">
                   {user.level === 4 || user.level === 3 ? (

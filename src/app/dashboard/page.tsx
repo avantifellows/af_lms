@@ -5,6 +5,7 @@ import {
   getAccessibleSchoolCodes,
   getUserPermission,
   canAccessPMFeatures,
+  getProgramContext,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
@@ -220,6 +221,29 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <p className="text-yellow-800">
               Your account ({session.user.email}) does not have access to any
               schools. Please contact an administrator.
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Check if user has program access
+  const programContext = await getProgramContext(session.user.email);
+  if (!programContext.hasAccess) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white shadow">
+          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+            <div className="text-sm text-gray-500">{session.user.email}</div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="rounded-lg bg-yellow-50 p-4 border border-yellow-200">
+            <p className="text-yellow-800">
+              Your account ({session.user.email}) is not assigned to any programs.
+              Please contact an administrator to get program access.
             </p>
           </div>
         </main>

@@ -56,13 +56,23 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   try {
     const body = await request.json();
-    const { level, role, school_codes, regions, read_only } = body;
+    const { level, role, school_codes, regions, program_ids, read_only } = body;
 
     if (level && (level < 1 || level > 4)) {
       return NextResponse.json(
         { error: "Level must be between 1 and 4" },
         { status: 400 }
       );
+    }
+
+    // Validate program_ids if provided
+    if (program_ids !== undefined) {
+      if (!Array.isArray(program_ids) || program_ids.length === 0) {
+        return NextResponse.json(
+          { error: "At least one program must be assigned" },
+          { status: 400 }
+        );
+      }
     }
 
     const validRoles = ["teacher", "program_manager", "admin"];
@@ -74,10 +84,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
            role = COALESCE($2, role),
            school_codes = $3,
            regions = $4,
-           read_only = COALESCE($5, read_only),
+           program_ids = COALESCE($5, program_ids),
+           read_only = COALESCE($6, read_only),
            updated_at = NOW()
-       WHERE id = $6`,
-      [level, userRole, school_codes || null, regions || null, read_only, id]
+       WHERE id = $7`,
+      [level, userRole, school_codes || null, regions || null, program_ids || null, read_only, id]
     );
 
     return NextResponse.json({ success: true });

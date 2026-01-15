@@ -9,6 +9,10 @@ import {
   canEditCurriculum,
   getAccessibleSchoolCodes,
   getUserPermission,
+  getProgramContext,
+  getStudentProgramFilter,
+  isAdmin,
+  ProgramPermissionContext,
 } from "@/lib/permissions";
 import StudentTable, { Grade } from "@/components/StudentTable";
 import PageHeader from "@/components/PageHeader";
@@ -237,6 +241,44 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
+  // Get program context for Google users
+  let programContext: ProgramPermissionContext = {
+    hasAccess: true,
+    programIds: [],
+    isNVSOnly: false,
+    hasCoEOrNodal: true,
+  };
+  let studentProgramFilter: number[] | null = null;
+
+  if (!isPasscodeUser && session.user?.email) {
+    programContext = await getProgramContext(session.user.email);
+
+    // Check if user has any program access
+    if (!programContext.hasAccess) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+            <h1 className="text-xl font-bold text-red-600 mb-2">
+              No Program Access
+            </h1>
+            <p className="text-gray-600 mb-4">
+              You are not assigned to any programs. Please contact an administrator.
+            </p>
+            <Link
+              href="/dashboard"
+              className="text-blue-600 hover:text-blue-800"
+            >
+              Return to dashboard
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    // Get student program filter
+    studentProgramFilter = await getStudentProgramFilter(session.user.email);
+  }
+
   // Check if user is a PM (for Google users only)
   let isPM = false;
   let visits: Visit[] = [];
@@ -244,6 +286,9 @@ export default async function SchoolPage({ params }: PageProps) {
     const permission = await getUserPermission(session.user.email);
     isPM = permission?.role === "program_manager" || permission?.role === "admin";
   }
+
+  // Check if user is admin - only admins can see tabs other than Enrollment
+  const userIsAdmin = !isPasscodeUser && session.user?.email ? await isAdmin(session.user.email) : false;
 
   // Fetch data in parallel
   const dataPromises: [
@@ -264,8 +309,18 @@ export default async function SchoolPage({ params }: PageProps) {
   visits = visitResults;
 
   // Separate active and dropout students
-  const activeStudents = allStudents.filter((s) => s.status !== "dropout");
-  const dropoutStudents = allStudents.filter((s) => s.status === "dropout");
+  let activeStudents = allStudents.filter((s) => s.status !== "dropout");
+  let dropoutStudents = allStudents.filter((s) => s.status === "dropout");
+
+  // Filter students by program if needed (NVS-only users see only NVS students)
+  if (studentProgramFilter !== null && studentProgramFilter.length > 0) {
+    activeStudents = activeStudents.filter(
+      (s) => s.program_id && studentProgramFilter.includes(Number(s.program_id))
+    );
+    dropoutStudents = dropoutStudents.filter(
+      (s) => s.program_id && studentProgramFilter.includes(Number(s.program_id))
+    );
+  }
 
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
@@ -373,12 +428,13 @@ export default async function SchoolPage({ params }: PageProps) {
     />
   );
 
+  // Only admins can see tabs other than Enrollment (rolling out slowly)
   const tabs = [
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-    { id: "curriculum", label: "Curriculum", content: curriculumContent },
-    { id: "performance", label: "Performance", content: performanceContent },
-    { id: "mentorship", label: "Mentorship", content: mentorshipContent },
-    ...(isPM ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
+    ...(userIsAdmin ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
+    ...(userIsAdmin ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
+    ...(userIsAdmin ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
+    ...(userIsAdmin && isPM ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 
   return (

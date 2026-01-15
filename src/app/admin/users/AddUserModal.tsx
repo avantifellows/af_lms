@@ -9,8 +9,16 @@ interface UserPermission {
   role: string;
   school_codes: string[] | null;
   regions: string[] | null;
+  program_ids: number[] | null;
   read_only: boolean;
 }
+
+// Program definitions
+const PROGRAMS = [
+  { id: 1, name: "JNV CoE", description: "Center of Excellence program" },
+  { id: 2, name: "JNV Nodal", description: "Nodal schools program" },
+  { id: 64, name: "JNV NVS", description: "NVS schools (limited features)" },
+];
 
 interface AddUserModalProps {
   user: UserPermission | null;
@@ -34,11 +42,23 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
   const [role, setRole] = useState(user?.role || "teacher");
   const [selectedRegions, setSelectedRegions] = useState<string[]>(user?.regions || []);
   const [selectedSchools, setSelectedSchools] = useState<string[]>(user?.school_codes || []);
+  const [selectedPrograms, setSelectedPrograms] = useState<number[]>(user?.program_ids || []);
   const [readOnly, setReadOnly] = useState(user?.read_only || false);
   const [schoolSearch, setSchoolSearch] = useState("");
   const [searchResults, setSearchResults] = useState<School[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Check if only NVS is selected (for warning display)
+  const isNVSOnly = selectedPrograms.length === 1 && selectedPrograms.includes(64);
+
+  const toggleProgram = (programId: number) => {
+    setSelectedPrograms((prev) =>
+      prev.includes(programId)
+        ? prev.filter((id) => id !== programId)
+        : [...prev, programId]
+    );
+  };
 
   const isEditing = !!user;
 
@@ -66,7 +86,17 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
     setLoading(true);
 
     try {
-      const body: Record<string, unknown> = { level, role, read_only: readOnly };
+      // Validate program selection
+      if (selectedPrograms.length === 0) {
+        throw new Error("At least one program must be selected");
+      }
+
+      const body: Record<string, unknown> = {
+        level,
+        role,
+        read_only: readOnly,
+        program_ids: selectedPrograms,
+      };
 
       if (!isEditing) {
         body.email = email;
@@ -199,6 +229,44 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
               <label htmlFor="readOnly" className="ml-2 text-sm text-gray-800">
                 Read-only access (cannot edit students)
               </label>
+            </div>
+
+            <div>
+              <label className={labelClassName}>Assign Programs</label>
+              <p className="text-xs text-gray-500 mb-2">
+                Select which programs this user can access. At least one program is required.
+              </p>
+              <div className="mt-2 space-y-2 border rounded-md p-3">
+                {PROGRAMS.map((program) => (
+                  <label
+                    key={program.id}
+                    className="flex items-start p-2 hover:bg-gray-50 cursor-pointer rounded"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPrograms.includes(program.id)}
+                      onChange={() => toggleProgram(program.id)}
+                      className="h-4 w-4 text-blue-600 rounded border-gray-300 mt-0.5"
+                    />
+                    <div className="ml-3">
+                      <span className="text-sm font-medium text-gray-900">
+                        {program.name}
+                      </span>
+                      <p className="text-xs text-gray-500">{program.description}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              {isNVSOnly && (
+                <p className="mt-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
+                  Note: NVS-only users have limited access (students and analytics only, no visits/curriculum/mentorship).
+                </p>
+              )}
+              {selectedPrograms.length === 0 && (
+                <p className="mt-2 text-xs text-red-600">
+                  At least one program must be selected.
+                </p>
+              )}
             </div>
 
             {level === 2 && (
