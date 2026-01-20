@@ -10,7 +10,7 @@
 | Vercel setup decision | ✅ Option A (two projects) |
 | Domain names | ✅ Production: `lms.avantifellows.org` |
 | Production deployment | ✅ Done (2024-12-02) |
-| DNS configuration | ⏳ Pending (see below) |
+| DNS configuration | ✅ Done |
 
 ---
 
@@ -288,10 +288,10 @@ In each Vercel project:
 ### Phase 2: Deploy & Domain
 - [x] Deploy to production (`vercel --prod`)
 - [x] Add custom domain `lms.avantifellows.org`
-- [ ] Configure DNS (A record to `76.76.21.21`)
+- [x] Configure DNS (A record to `76.76.21.21`)
 
 ### Phase 3: External Services
-- [ ] Update Google OAuth authorized domains
+- [x] Update Google OAuth authorized domains
 - [ ] Create `user_permission` table in production DB (if not exists)
 - [ ] Add production admin users
 
