@@ -104,10 +104,12 @@ jobs:
       - name: Set preview branch name
         id: preview
         run: |
-          BRANCH_NAME="pr-${{ github.event.pull_request.number }}"
-          PREVIEW_URL="https://${BRANCH_NAME}.${AMPLIFY_APP_ID}.amplifyapp.com"
-          echo "branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          # Use the actual git branch name from the PR
+          GIT_BRANCH="${{ github.event.pull_request.head.ref }}"
+          PREVIEW_URL="https://${GIT_BRANCH}.${AMPLIFY_APP_ID}.amplifyapp.com"
+          echo "branch=${GIT_BRANCH}" >> $GITHUB_OUTPUT
           echo "url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
+          echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
       - name: Create or update preview branch in Amplify
         run: |
@@ -200,7 +202,8 @@ jobs:
 
       - name: Delete preview branch
         run: |
-          BRANCH="pr-${{ github.event.pull_request.number }}"
+          # Use the actual git branch name from the PR
+          BRANCH="${{ github.event.pull_request.head.ref }}"
 
           aws amplify delete-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
