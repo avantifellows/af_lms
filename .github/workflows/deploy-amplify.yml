@@ -229,7 +229,7 @@ jobs:
       - name: Generate production URL
         id: url
         run: |
-          URL="https://main.${AMPLIFY_APP_ID}.amplifyapp.com"
+          URL="https://lms.avantifellows.org"
           echo "value=${URL}" >> $GITHUB_OUTPUT
 
       - name: Sync production environment variables
