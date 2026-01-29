@@ -1,0 +1,193 @@
+name: Deploy to AWS Amplify
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+  AMPLIFY_APP_ID: dr1eqhpsk9y2d
+
+jobs:
+  # Deploy preview for PRs (uses Preview environment)
+  deploy-preview:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    environment: Preview
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set preview branch name
+        id: preview
+        run: |
+          BRANCH_NAME="pr-${{ github.event.pull_request.number }}"
+          PREVIEW_URL="https://${BRANCH_NAME}.${AMPLIFY_APP_ID}.amplifyapp.com"
+          echo "branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          echo "url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
+
+      - name: Create or update preview branch in Amplify
+        run: |
+          BRANCH="${{ steps.preview.outputs.branch }}"
+
+          # Check if branch exists
+          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" 2>/dev/null; then
+            echo "Branch $BRANCH already exists, updating..."
+          else
+            echo "Creating new branch $BRANCH..."
+            aws amplify create-branch \
+              --app-id ${{ env.AMPLIFY_APP_ID }} \
+              --branch-name "$BRANCH" \
+              --stage DEVELOPMENT \
+              --enable-auto-build false
+          fi
+
+      - name: Sync Preview environment variables
+        run: |
+          BRANCH="${{ steps.preview.outputs.branch }}"
+
+          aws amplify update-branch \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name "$BRANCH" \
+            --environment-variables "\
+              DATABASE_HOST=${{ secrets.DATABASE_HOST }},\
+              DATABASE_PORT=${{ secrets.DATABASE_PORT }},\
+              DATABASE_USER=${{ secrets.DATABASE_USER }},\
+              DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},\
+              DATABASE_NAME=${{ secrets.DATABASE_NAME }},\
+              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
+              GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
+              NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
+              NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
+
+      - name: Trigger preview build
+        run: |
+          aws amplify start-job \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name "${{ steps.preview.outputs.branch }}" \
+            --job-type RELEASE \
+            --commit-id ${{ github.event.pull_request.head.sha }}
+
+      - name: Comment preview URL on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const previewUrl = '${{ steps.preview.outputs.url }}';
+            const body = `## 🚀 Preview Deployment
+
+            | | |
+            |---|---|
+            | **URL** | ${previewUrl} |
+            | **Branch** | \`${{ steps.preview.outputs.branch }}\` |
+            | **Commit** | \`${{ github.event.pull_request.head.sha.substring(0, 7) }}\` |
+
+            > Preview uses **Preview** environment variables.
+            > May take 2-3 minutes to be ready.`;
+
+            // Check if we already commented
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Preview Deployment')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  # Cleanup preview when PR is closed
+  cleanup-preview:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete preview branch
+        run: |
+          BRANCH="pr-${{ github.event.pull_request.number }}"
+
+          aws amplify delete-branch \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name "$BRANCH" \
+            2>/dev/null || echo "Branch $BRANCH not found or already deleted"
+
+          echo "Cleaned up preview branch: $BRANCH"
+
+  # Deploy to production when merged to main
+  deploy-production:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Generate production URL
+        id: url
+        run: |
+          URL="https://main.${AMPLIFY_APP_ID}.amplifyapp.com"
+          echo "value=${URL}" >> $GITHUB_OUTPUT
+
+      - name: Sync production environment variables
+        run: |
+          aws amplify update-branch \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name main \
+            --environment-variables "\
+              DATABASE_HOST=${{ secrets.DATABASE_HOST }},\
+              DATABASE_PORT=${{ secrets.DATABASE_PORT }},\
+              DATABASE_USER=${{ secrets.DATABASE_USER }},\
+              DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},\
+              DATABASE_NAME=${{ secrets.DATABASE_NAME }},\
+              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
+              GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
+              NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
+              NEXTAUTH_URL=${{ steps.url.outputs.value }}"
+
+      - name: Trigger production build
+        run: |
+          aws amplify start-job \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name main \
+            --job-type RELEASE
+
+          echo "============================================"
+          echo "Production deployment triggered!"
+          echo "URL: ${{ steps.url.outputs.value }}"
+          echo "============================================"
