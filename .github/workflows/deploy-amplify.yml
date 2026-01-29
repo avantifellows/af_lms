@@ -62,7 +62,7 @@ jobs:
               --app-id ${{ env.AMPLIFY_APP_ID }} \
               --branch-name "$BRANCH" \
               --stage DEVELOPMENT \
-              --no-auto-build
+              --no-enable-auto-build
           fi
 
       - name: Sync Preview environment variables
@@ -131,7 +131,7 @@ jobs:
               --app-id ${{ env.AMPLIFY_APP_ID }} \
               --branch-name "$BRANCH" \
               --stage DEVELOPMENT \
-              --no-auto-build
+              --no-enable-auto-build
           fi
 
       - name: Sync Preview environment variables
