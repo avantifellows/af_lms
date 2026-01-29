@@ -72,16 +72,7 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "\
-              DATABASE_HOST=${{ secrets.DATABASE_HOST }},\
-              DATABASE_PORT=${{ secrets.DATABASE_PORT }},\
-              DATABASE_USER=${{ secrets.DATABASE_USER }},\
-              DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},\
-              DATABASE_NAME=${{ secrets.DATABASE_NAME }},\
-              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
-              GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
-              NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
-              NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
+            --environment-variables "DATABASE_HOST=${{ secrets.DATABASE_HOST }},DATABASE_PORT=${{ secrets.DATABASE_PORT }},DATABASE_USER=${{ secrets.DATABASE_USER }},DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},DATABASE_NAME=${{ secrets.DATABASE_NAME }},GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
 
       - name: Trigger preview build
         run: |
@@ -141,16 +132,7 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "\
-              DATABASE_HOST=${{ secrets.DATABASE_HOST }},\
-              DATABASE_PORT=${{ secrets.DATABASE_PORT }},\
-              DATABASE_USER=${{ secrets.DATABASE_USER }},\
-              DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},\
-              DATABASE_NAME=${{ secrets.DATABASE_NAME }},\
-              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
-              GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
-              NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
-              NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
+            --environment-variables "DATABASE_HOST=${{ secrets.DATABASE_HOST }},DATABASE_PORT=${{ secrets.DATABASE_PORT }},DATABASE_USER=${{ secrets.DATABASE_USER }},DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},DATABASE_NAME=${{ secrets.DATABASE_NAME }},GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
 
       - name: Trigger preview build
         run: |
@@ -252,16 +234,7 @@ jobs:
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name main \
-            --environment-variables "\
-              DATABASE_HOST=${{ secrets.DATABASE_HOST }},\
-              DATABASE_PORT=${{ secrets.DATABASE_PORT }},\
-              DATABASE_USER=${{ secrets.DATABASE_USER }},\
-              DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},\
-              DATABASE_NAME=${{ secrets.DATABASE_NAME }},\
-              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
-              GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
-              NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
-              NEXTAUTH_URL=${{ steps.url.outputs.value }}"
+            --environment-variables "DATABASE_HOST=${{ secrets.DATABASE_HOST }},DATABASE_PORT=${{ secrets.DATABASE_PORT }},DATABASE_USER=${{ secrets.DATABASE_USER }},DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},DATABASE_NAME=${{ secrets.DATABASE_NAME }},GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},NEXTAUTH_URL=${{ steps.url.outputs.value }}"
 
       - name: Trigger production build
         run: |
