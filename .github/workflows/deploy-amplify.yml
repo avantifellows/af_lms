@@ -7,12 +7,95 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
+    inputs:
+      deploy_type:
+        description: 'Deployment type'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+      preview_id:
+        description: 'Preview ID (for preview deploys, e.g. "test-1")'
+        required: false
+        default: 'manual-test'
 
 env:
   AWS_REGION: ap-south-1
   AMPLIFY_APP_ID: dr1eqhpsk9y2d
 
 jobs:
+  # Manual preview deployment (for testing)
+  deploy-manual-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_type == 'preview'
+    runs-on: ubuntu-latest
+    environment: Preview
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set preview branch name
+        id: preview
+        run: |
+          BRANCH_NAME="${{ inputs.preview_id }}"
+          PREVIEW_URL="https://${BRANCH_NAME}.${AMPLIFY_APP_ID}.amplifyapp.com"
+          echo "branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          echo "url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
+          echo "Preview URL will be: ${PREVIEW_URL}"
+
+      - name: Create or update preview branch in Amplify
+        run: |
+          BRANCH="${{ steps.preview.outputs.branch }}"
+
+          # Check if branch exists
+          if aws amplify get-branch --app-id ${{ env.AMPLIFY_APP_ID }} --branch-name "$BRANCH" 2>/dev/null; then
+            echo "Branch $BRANCH already exists, updating..."
+          else
+            echo "Creating new branch $BRANCH..."
+            aws amplify create-branch \
+              --app-id ${{ env.AMPLIFY_APP_ID }} \
+              --branch-name "$BRANCH" \
+              --stage DEVELOPMENT \
+              --enable-auto-build false
+          fi
+
+      - name: Sync Preview environment variables
+        run: |
+          BRANCH="${{ steps.preview.outputs.branch }}"
+
+          aws amplify update-branch \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name "$BRANCH" \
+            --environment-variables "\
+              DATABASE_HOST=${{ secrets.DATABASE_HOST }},\
+              DATABASE_PORT=${{ secrets.DATABASE_PORT }},\
+              DATABASE_USER=${{ secrets.DATABASE_USER }},\
+              DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},\
+              DATABASE_NAME=${{ secrets.DATABASE_NAME }},\
+              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
+              GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
+              NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},\
+              NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
+
+      - name: Trigger preview build
+        run: |
+          aws amplify start-job \
+            --app-id ${{ env.AMPLIFY_APP_ID }} \
+            --branch-name "${{ steps.preview.outputs.branch }}" \
+            --job-type RELEASE
+
+          echo "============================================"
+          echo "Preview deployment triggered!"
+          echo "URL: ${{ steps.preview.outputs.url }}"
+          echo "Console: https://console.aws.amazon.com/amplify/home#/${{ env.AMPLIFY_APP_ID }}/${{ steps.preview.outputs.branch }}"
+          echo "============================================"
+
   # Deploy preview for PRs (uses Preview environment)
   deploy-preview:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
