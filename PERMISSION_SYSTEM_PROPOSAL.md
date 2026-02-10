@@ -103,7 +103,7 @@ type FeatureAccess = "none" | "view" | "edit";
 
 const FEATURE_PERMISSIONS: Record<string, Record<UserRole, FeatureAccess>> = {
   students:        { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
-  visits:          { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
+  visits:          { teacher: "edit",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
   curriculum:      { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   mentorship:      { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   summary_stats:   { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
@@ -239,6 +239,38 @@ The `StudentTable` component shows edit buttons only on rows where `ownsRecord()
 
 This replaces the current `getStudentProgramFilter()` which hides students entirely. Seeing all students provides context (e.g., an NVS PM can see the full school roster) while ownership controls prevent accidental edits.
 
+### How Visits Work with the Three Layers
+
+Visits use all three layers, just like students. The `lms_pm_school_visits` table gets a new `program_id` column so visits are tied to a specific program:
+
+```sql
+ALTER TABLE lms_pm_school_visits ADD COLUMN program_id INTEGER;
+```
+
+The table is currently empty, so no data migration needed. When a PM creates a visit, `program_id` is set from their `program_ids` (auto-filled, since we start with one program per PM).
+
+All three layers apply:
+
+| Layer | Students | Visits |
+|-------|----------|--------|
+| **School scope** | Which schools you see | Which schools you see |
+| **Feature matrix** | Can your role edit students? | Can your role create/view visits? |
+| **Program scope** | Which students you can edit (per-row) | Which visits you can see/create (per-row) |
+
+The visit query changes based on role:
+
+| Role | What they see | Query behavior |
+|------|---------------|----------------|
+| `teacher` / `program_manager` | Their own visits at their schools, for their program | `WHERE school_code = $1 AND pm_email = $2 AND program_id = ANY($3)` |
+| `program_admin` | **All PMs' visits** for their program at their schools (read-only) | `WHERE school_code = $1 AND program_id = ANY($2)` (no `pm_email` filter) |
+| `admin` | All visits everywhere | `WHERE school_code = $1` (no filters) |
+
+This means:
+- A CoE PM at a shared school only sees CoE visits, not Nodal visits
+- A CoE program_admin sees all CoE PMs' visits across their schools
+- A Nodal PM at the same school sees only Nodal visits
+- An admin sees everything
+
 ---
 
 ## Roles
@@ -279,7 +311,8 @@ No DB schema change needed — `role` is already `varchar(50)` with no CHECK con
 
 **CoE Admin** (`program_admin`, `program_ids: {1}`):
 - Sees all CoE schools (level 3)
-- Can edit students, curriculum, mentorship, visits for CoE students
+- Can edit students, curriculum, mentorship for CoE students
+- Can **view** visits across all their schools (sees all PMs' visits, cannot create/edit)
 - Can view summary stats
 - Cannot edit NVS students at shared schools
 
@@ -302,9 +335,15 @@ No DB schema change needed — `role` is already `varchar(50)` with no CHECK con
 
 ## Database Changes Required
 
-### Schema: None
+### Schema: One Change
 
-The `user_permission` table already has `role` (varchar), `program_ids` (integer[]), `level`, `school_codes`, `regions`, and `read_only`. No ALTER needed.
+The `user_permission` table needs no changes — `role` (varchar), `program_ids` (integer[]), `level`, `school_codes`, `regions`, and `read_only` already exist.
+
+The `lms_pm_school_visits` table needs a `program_id` column so visits are tied to a program (the table is currently empty, so no data migration):
+
+```sql
+ALTER TABLE lms_pm_school_visits ADD COLUMN program_id INTEGER;
+```
 
 ### Data: Populate `program_ids` for Existing Users
 

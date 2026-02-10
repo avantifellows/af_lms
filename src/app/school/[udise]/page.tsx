@@ -4,15 +4,8 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
-  canAccessSchool,
-  canEditStudents,
-  canEditCurriculum,
-  getAccessibleSchoolCodes,
   getUserPermission,
-  getProgramContext,
-  getStudentProgramFilter,
-  isAdmin,
-  ProgramPermissionContext,
+  getProgramContextSync,
 } from "@/lib/permissions";
 import StudentTable, { Grade } from "@/components/StudentTable";
 import PageHeader from "@/components/PageHeader";
@@ -182,7 +175,9 @@ export default async function SchoolPage({ params }: PageProps) {
     redirect("/");
   }
 
+  const t0 = performance.now();
   const school = await getSchoolByCode(udise);
+  console.log(`[school] getSchoolByCode: ${(performance.now() - t0).toFixed(0)}ms`);
 
   if (!school) {
     notFound();
@@ -211,13 +206,52 @@ export default async function SchoolPage({ params }: PageProps) {
         </div>
       );
     }
-  } else {
-    // For Google users, check permissions
-    const hasAccess = await canAccessSchool(
-      session.user?.email || null,
-      school.code,
-      school.region || undefined,
-    );
+  }
+
+  // Single DB call for permission — reuse everywhere
+  const t1 = performance.now();
+  const permission = !isPasscodeUser && session.user?.email
+    ? await getUserPermission(session.user.email)
+    : null;
+  console.log(`[school] getUserPermission: ${(performance.now() - t1).toFixed(0)}ms`);
+
+  // For Google users, check school access
+  if (!isPasscodeUser) {
+    if (!permission) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+            <h1 className="text-xl font-bold text-red-600 mb-2">
+              Access Denied
+            </h1>
+            <p className="text-gray-600 mb-4">
+              You don&apos;t have permission to view this school.
+            </p>
+            <Link
+              href="/dashboard"
+              className="text-blue-600 hover:text-blue-800"
+            >
+              Return to dashboard
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    // Check school access using permission object directly
+    let hasAccess = false;
+    switch (permission.level) {
+      case 4:
+      case 3:
+        hasAccess = true;
+        break;
+      case 2:
+        hasAccess = permission.regions?.includes(school.region || "") || false;
+        break;
+      case 1:
+        hasAccess = permission.school_codes?.includes(school.code) || false;
+        break;
+    }
 
     if (!hasAccess) {
       return (
@@ -241,84 +275,70 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
-  // Get program context for Google users
-  let programContext: ProgramPermissionContext = {
-    hasAccess: true,
-    programIds: [],
-    isNVSOnly: false,
-    hasCoEOrNodal: true,
-  };
-  let studentProgramFilter: number[] | null = null;
+  // Derive everything from the single permission object — no extra DB calls
+  const programContext = getProgramContextSync(permission);
 
-  if (!isPasscodeUser && session.user?.email) {
-    programContext = await getProgramContext(session.user.email);
-
-    // Check if user has any program access
-    if (!programContext.hasAccess) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">
-              No Program Access
-            </h1>
-            <p className="text-gray-600 mb-4">
-              You are not assigned to any programs. Please contact an administrator.
-            </p>
-            <Link
-              href="/dashboard"
-              className="text-blue-600 hover:text-blue-800"
-            >
-              Return to dashboard
-            </Link>
-          </div>
+  if (!isPasscodeUser && !programContext.hasAccess) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+          <h1 className="text-xl font-bold text-red-600 mb-2">
+            No Program Access
+          </h1>
+          <p className="text-gray-600 mb-4">
+            You are not assigned to any programs. Please contact an administrator.
+          </p>
+          <Link
+            href="/dashboard"
+            className="text-blue-600 hover:text-blue-800"
+          >
+            Return to dashboard
+          </Link>
         </div>
-      );
-    }
-
-    // Get student program filter
-    studentProgramFilter = await getStudentProgramFilter(session.user.email);
+      </div>
+    );
   }
 
-  // Check if user is a PM (for Google users only)
-  let isPM = false;
-  let visits: Visit[] = [];
-  if (!isPasscodeUser && session.user?.email) {
-    const permission = await getUserPermission(session.user.email);
-    isPM = permission?.role === "program_manager" || permission?.role === "admin";
-  }
+  const isPM = permission?.role === "program_manager" || permission?.role === "admin";
+  const userIsAdmin = permission?.level === 4;
+  const canEdit = isPasscodeUser ? true : (permission !== null && !permission.read_only);
+  const canEditCurriculumFlag = isPasscodeUser ? true : (
+    permission?.role === "admin" ||
+    (permission?.role === "teacher" && !permission.read_only && programContext.hasCoEOrNodal)
+  );
 
-  // Check if user is admin - only admins can see tabs other than Enrollment
-  const userIsAdmin = !isPasscodeUser && session.user?.email ? await isAdmin(session.user.email) : false;
+  // Fetch data in parallel with individual timers
+  const t2 = performance.now();
+  const timed = <T,>(label: string, promise: Promise<T>): Promise<T> => {
+    const start = performance.now();
+    return promise.then((result) => {
+      console.log(`[school]   ${label}: ${(performance.now() - start).toFixed(0)}ms`);
+      return result;
+    });
+  };
 
-  // Fetch data in parallel
-  const dataPromises: [
-    Promise<Student[]>,
-    Promise<Grade[]>,
-    Promise<Batch[]>,
-    Promise<{ session_id: string; test_name: string; start_date: string; student_count: number }[]>,
-    Promise<Visit[]>
-  ] = [
-    getStudents(school.id),
-    getGrades(),
-    getBatchesWithMetadata(),
-    getSchoolQuizSessions(school.udise_code || school.code),
-    isPM && session.user?.email ? getSchoolVisits(school.code, session.user.email) : Promise.resolve([]),
-  ];
-
-  const [allStudents, grades, batches, quizSessions, visitResults] = await Promise.all(dataPromises);
-  visits = visitResults;
+  const [allStudents, grades, batches, quizSessions, visits] = await Promise.all([
+    timed("getStudents", getStudents(school.id)),
+    timed("getGrades", getGrades()),
+    timed("getBatches", getBatchesWithMetadata()),
+    timed("getQuizSessions", userIsAdmin ? getSchoolQuizSessions(school.udise_code || school.code) : Promise.resolve([])),
+    timed("getVisits", isPM && session.user?.email ? getSchoolVisits(school.code, session.user.email) : Promise.resolve([])),
+  ]);
+  console.log(`[school] parallel total: ${(performance.now() - t2).toFixed(0)}ms`);
+  console.log(`[school] total: ${(performance.now() - t0).toFixed(0)}ms`);
 
   // Separate active and dropout students
   let activeStudents = allStudents.filter((s) => s.status !== "dropout");
   let dropoutStudents = allStudents.filter((s) => s.status === "dropout");
 
   // Filter students by program if needed (NVS-only users see only NVS students)
+  const studentProgramFilter = programContext.isNVSOnly ? programContext.programIds : null;
   if (studentProgramFilter !== null && studentProgramFilter.length > 0) {
     activeStudents = activeStudents.filter(
-      (s) => s.program_id && studentProgramFilter.includes(Number(s.program_id))
+      (s) => s.program_id && studentProgramFilter!.includes(Number(s.program_id))
     );
     dropoutStudents = dropoutStudents.filter(
-      (s) => s.program_id && studentProgramFilter.includes(Number(s.program_id))
+      (s) => s.program_id && studentProgramFilter!.includes(Number(s.program_id))
     );
   }
 
@@ -345,24 +365,11 @@ export default async function SchoolPage({ params }: PageProps) {
     .map(([grade, count]) => ({ grade: parseInt(grade), count }))
     .sort((a, b) => a.grade - b.grade);
 
-  // Check if user can edit students (not read-only)
-  const canEdit = isPasscodeUser
-    ? true // Passcode users can edit by default
-    : await canEditStudents(session.user?.email || "");
-
-  // Check if user can edit curriculum (teachers and admins can, PMs view-only)
-  const canEditCurriculumFlag = isPasscodeUser
-    ? true // Passcode users (teachers) can edit
-    : await canEditCurriculum(session.user?.email || "");
-
   // Check if user has access to multiple schools (to show/hide back arrow)
   let hasMultipleSchools = false;
-  if (!isPasscodeUser) {
-    const accessibleSchools = await getAccessibleSchoolCodes(
-      session.user?.email || "",
-    );
-    hasMultipleSchools =
-      accessibleSchools === "all" || accessibleSchools.length > 1;
+  if (!isPasscodeUser && permission) {
+    hasMultipleSchools = permission.level >= 2 ||
+      (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1);
   }
 
   const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
