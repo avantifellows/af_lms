@@ -13,7 +13,6 @@ export interface School {
   state: string;
   region?: string | null;
   student_count?: number;
-  nvs_student_count?: number;
   grade_counts?: GradeCount[];
 }
 
@@ -21,7 +20,6 @@ interface SchoolCardProps {
   school: School;
   href: string;
   showStudentCount?: boolean;
-  showNVSCount?: boolean;
   showGradeBreakdown?: boolean;
   showRegion?: boolean;
   actions?: React.ReactNode;
@@ -31,7 +29,6 @@ export default function SchoolCard({
   school,
   href,
   showStudentCount = false,
-  showNVSCount = false,
   showGradeBreakdown = false,
   showRegion = false,
   actions,
@@ -52,9 +49,9 @@ export default function SchoolCard({
             {school.student_count} students
           </p>
         )}
-        {showNVSCount && school.nvs_student_count !== undefined && (
+        {showStudentCount && school.student_count !== undefined && (
           <p className="mt-2 text-sm font-medium text-blue-600">
-            {school.nvs_student_count} NVS students
+            {school.student_count} students
           </p>
         )}
         {showGradeBreakdown && school.grade_counts && school.grade_counts.length > 0 && (

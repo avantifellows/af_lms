@@ -115,9 +115,10 @@ export async function canAccessSchool(
 }
 
 export async function getAccessibleSchoolCodes(
-  email: string
+  email: string,
+  existingPermission?: UserPermission | null
 ): Promise<string[] | "all"> {
-  const permission = await getUserPermission(email);
+  const permission = existingPermission !== undefined ? existingPermission : await getUserPermission(email);
   if (!permission) return [];
 
   if (permission.level === 4 || permission.level === 3) return "all";
