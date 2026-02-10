@@ -10,12 +10,12 @@ import {
 import StudentTable, { Grade } from "@/components/StudentTable";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
-import QuizAnalyticsSection from "@/components/QuizAnalyticsSection";
-import SchoolTabs, { VisitHistorySection } from "@/components/SchoolTabs";
+import SchoolTabs from "@/components/SchoolTabs";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
+import PerformanceTab from "@/components/PerformanceTab";
+import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
-import { getSchoolQuizSessions } from "@/lib/bigquery";
 
 interface Student {
   group_user_id: string;
@@ -47,23 +47,6 @@ interface School {
   district: string;
   state: string;
   region: string | null;
-}
-
-interface Visit {
-  id: number;
-  visit_date: string;
-  status: string;
-}
-
-async function getSchoolVisits(schoolCode: string, pmEmail: string): Promise<Visit[]> {
-  return query<Visit>(
-    `SELECT id, visit_date, status
-     FROM lms_pm_school_visits
-     WHERE school_code = $1 AND pm_email = $2
-     ORDER BY visit_date DESC
-     LIMIT 10`,
-    [schoolCode, pmEmail]
-  );
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -175,9 +158,7 @@ export default async function SchoolPage({ params }: PageProps) {
     redirect("/");
   }
 
-  const t0 = performance.now();
   const school = await getSchoolByCode(udise);
-  console.log(`[school] getSchoolByCode: ${(performance.now() - t0).toFixed(0)}ms`);
 
   if (!school) {
     notFound();
@@ -209,11 +190,9 @@ export default async function SchoolPage({ params }: PageProps) {
   }
 
   // Single DB call for permission — reuse everywhere
-  const t1 = performance.now();
   const permission = !isPasscodeUser && session.user?.email
     ? await getUserPermission(session.user.email)
     : null;
-  console.log(`[school] getUserPermission: ${(performance.now() - t1).toFixed(0)}ms`);
 
   // For Google users, check school access
   if (!isPasscodeUser) {
@@ -307,25 +286,12 @@ export default async function SchoolPage({ params }: PageProps) {
     (permission?.role === "teacher" && !permission.read_only && programContext.hasCoEOrNodal)
   );
 
-  // Fetch data in parallel with individual timers
-  const t2 = performance.now();
-  const timed = <T,>(label: string, promise: Promise<T>): Promise<T> => {
-    const start = performance.now();
-    return promise.then((result) => {
-      console.log(`[school]   ${label}: ${(performance.now() - start).toFixed(0)}ms`);
-      return result;
-    });
-  };
-
-  const [allStudents, grades, batches, quizSessions, visits] = await Promise.all([
-    timed("getStudents", getStudents(school.id)),
-    timed("getGrades", getGrades()),
-    timed("getBatches", getBatchesWithMetadata()),
-    timed("getQuizSessions", userIsAdmin ? getSchoolQuizSessions(school.udise_code || school.code) : Promise.resolve([])),
-    timed("getVisits", isPM && session.user?.email ? getSchoolVisits(school.code, session.user.email) : Promise.resolve([])),
+  // Fetch enrollment data in parallel (other tabs lazy-load their own data)
+  const [allStudents, grades, batches] = await Promise.all([
+    getStudents(school.id),
+    getGrades(),
+    getBatchesWithMetadata(),
   ]);
-  console.log(`[school] parallel total: ${(performance.now() - t2).toFixed(0)}ms`);
-  console.log(`[school] total: ${(performance.now() - t0).toFixed(0)}ms`);
 
   // Separate active and dropout students
   let activeStudents = allStudents.filter((s) => s.status !== "dropout");
@@ -403,18 +369,7 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const performanceContent = (
-    <div>
-      {quizSessions.length > 0 ? (
-        <QuizAnalyticsSection
-          sessions={quizSessions}
-          schoolUdise={school.udise_code || school.code}
-        />
-      ) : (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-          <p className="text-gray-500">No quiz data available for this school yet.</p>
-        </div>
-      )}
-    </div>
+    <PerformanceTab schoolUdise={school.udise_code || school.code} />
   );
 
   const mentorshipContent = (
@@ -424,7 +379,7 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const visitsContent = (
-    <VisitHistorySection visits={visits} schoolCode={school.code} />
+    <VisitsTab schoolCode={school.code} />
   );
 
   const curriculumContent = (
