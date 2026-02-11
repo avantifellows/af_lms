@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { canAccessPMFeatures } from "@/lib/permissions";
+import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
 
@@ -116,8 +116,8 @@ export default async function VisitDetailPage({ params }: PageProps) {
     redirect("/");
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canView) {
     redirect("/dashboard");
   }
 
@@ -134,11 +134,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
   }
 
   // Only allow PM who created the visit or admins to view
-  const permission = await query<{ role: string }>(
-    `SELECT role FROM user_permission WHERE LOWER(email) = LOWER($1)`,
-    [session.user.email]
-  );
-  const isAdmin = permission.length > 0 && permission[0].role === "admin";
+  const isAdmin = permission?.role === "admin";
 
   if (visit.pm_email !== session.user.email && !isAdmin) {
     return (
