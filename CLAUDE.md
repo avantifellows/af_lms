@@ -71,4 +71,4 @@ NEXTAUTH_SECRET, NEXTAUTH_URL
 
 ## Deployment
 
-Deployed on Vercel (see `vercel.json`). Database SSL is enabled with `rejectUnauthorized: false`.
+Deployed on AWS Amplify. Database SSL is enabled with `rejectUnauthorized: false`.

@@ -245,83 +245,24 @@ VALUES ('user@example.com', 3, NULL, NULL, false);
 
 ## Deployment
 
-The app uses two separate Vercel projects:
+The app is deployed on **AWS Amplify**. Pushes to `main` trigger automatic deployments via GitHub Actions.
 
-| Environment | Vercel Project | URL | Branch |
-|-------------|----------------|-----|--------|
-| **Staging** | `af-lms` | https://af-lms.vercel.app | `main` |
-| **Production** | `af-lms-production` | https://lms.avantifellows.org | `deploy-production` |
+| Environment | URL |
+|-------------|-----|
+| **Production** | https://lms.avantifellows.org |
 
-### Quick Deploy
-
-```bash
-# Deploy to staging
-./scripts/deploy.sh staging
-
-# Deploy to production
-./scripts/deploy.sh production
-```
-
-### Manual Deploy
-
-If you prefer manual steps:
-
-```bash
-# Staging
-vercel link --project af-lms --yes
-vercel --prod
-
-# Production
-vercel link --project af-lms-production --yes
-vercel --prod
-```
+See [AMPLIFY_DEPLOYMENT.md](./AMPLIFY_DEPLOYMENT.md) for full deployment setup and instructions.
 
 ### Environment Variables
 
-Each Vercel project has its own environment variables. To view/edit:
-
-```bash
-# Link to the project first
-vercel link --project af-lms-production --yes
-
-# List env vars
-vercel env ls production
-
-# Pull env vars locally (for debugging)
-vercel env pull .env.local
-
-# Add a new env var
-echo -n "value" | vercel env add VAR_NAME production
-
-# Remove an env var
-vercel env rm VAR_NAME production --yes
-```
-
-**Required environment variables:**
-
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_HOST` | PostgreSQL host |
-| `DATABASE_PORT` | PostgreSQL port |
-| `DATABASE_USER` | PostgreSQL user |
-| `DATABASE_PASSWORD` | PostgreSQL password |
-| `DATABASE_NAME` | PostgreSQL database name |
-| `DB_SERVICE_URL` | DB Service API URL |
-| `DB_SERVICE_TOKEN` | DB Service API token |
-| `NEXTAUTH_URL` | App URL (e.g., `https://lms.avantifellows.org`) |
-| `NEXTAUTH_SECRET` | Random secret for NextAuth |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
-
-**Important:** When adding env vars, use `echo -n` to avoid trailing newlines which can cause auth errors.
+Environment variables are managed via **GitHub Secrets** and synced to Amplify by GitHub Actions. See `.env.example` for the full list.
 
 ### Google OAuth Setup
 
-The Google OAuth client must have authorized redirect URIs for both environments:
+The Google OAuth client must have the authorized redirect URI:
 
 ```
-https://af-lms.vercel.app/api/auth/callback/google
 https://lms.avantifellows.org/api/auth/callback/google
 ```
 
-Configure these in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+Configure this in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
