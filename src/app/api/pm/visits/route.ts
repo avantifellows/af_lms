@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessPMFeatures, canAccessSchool, getUserPermission } from "@/lib/permissions";
+import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // GET /api/pm/visits - List visits for current PM
@@ -12,8 +12,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canView) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -61,8 +61,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canView) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -76,29 +76,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify PM has access to this school
-  const permission = await getUserPermission(session.user.email);
+  // Verify PM has access to this school using already-fetched permission
   if (!permission) {
     return NextResponse.json({ error: "No permission record" }, { status: 403 });
   }
 
-  // Get school region for access check
-  const schoolResult = await query<{ region: string }>(
-    `SELECT region FROM school WHERE code = $1`,
-    [school_code]
-  );
-
-  if (schoolResult.length === 0) {
-    return NextResponse.json({ error: "School not found" }, { status: 404 });
+  // Inline school access check using permission object
+  let hasSchoolAccess = false;
+  switch (permission.level) {
+    case 4:
+    case 3:
+      hasSchoolAccess = true;
+      break;
+    case 2: {
+      const schoolResult = await query<{ region: string }>(
+        `SELECT region FROM school WHERE code = $1`,
+        [school_code]
+      );
+      if (schoolResult.length === 0) {
+        return NextResponse.json({ error: "School not found" }, { status: 404 });
+      }
+      hasSchoolAccess = permission.regions?.includes(schoolResult[0].region) || false;
+      break;
+    }
+    case 1:
+      hasSchoolAccess = permission.school_codes?.includes(school_code) || false;
+      break;
   }
 
-  const hasAccess = await canAccessSchool(
-    session.user.email,
-    school_code,
-    schoolResult[0].region
-  );
-
-  if (!hasAccess) {
+  if (!hasSchoolAccess) {
     return NextResponse.json(
       { error: "You do not have access to this school" },
       { status: 403 }

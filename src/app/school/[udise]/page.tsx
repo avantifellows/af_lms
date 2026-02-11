@@ -6,8 +6,9 @@ import { authOptions } from "@/lib/auth";
 import {
   getUserPermission,
   getProgramContextSync,
+  getFeatureAccess,
 } from "@/lib/permissions";
-import StudentTable, { Grade } from "@/components/StudentTable";
+import StudentTable, { Grade, DataIssue } from "@/components/StudentTable";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import SchoolTabs from "@/components/SchoolTabs";
@@ -37,6 +38,40 @@ interface Student {
   grade_id: string | null;
   status: string | null;
   updated_at: string | null;
+}
+
+function deduplicateStudents(students: Student[]): { students: Student[]; issues: DataIssue[] } {
+  const grouped = new Map<string, Student[]>();
+  for (const s of students) {
+    const existing = grouped.get(s.group_user_id);
+    if (existing) {
+      existing.push(s);
+    } else {
+      grouped.set(s.group_user_id, [s]);
+    }
+  }
+
+  const deduped: Student[] = [];
+  const issues: DataIssue[] = [];
+
+  for (const [, rows] of grouped) {
+    if (rows.length > 1) {
+      // Collect the distinct grades across duplicate rows
+      const grades = [...new Set(rows.map((r) => r.grade).filter((g): g is number => g !== null))].sort((a, b) => b - a);
+      const name = [rows[0].first_name, rows[0].last_name].filter(Boolean).join(" ") || "Unknown";
+      issues.push({
+        type: "duplicate_grade",
+        studentName: name,
+        groupUserId: rows[0].group_user_id,
+        details: `Multiple current grade enrollments: ${grades.map((g) => `Grade ${g}`).join(", ")}`,
+      });
+      // Keep the row with the highest grade (latest enrollment)
+      rows.sort((a, b) => (b.grade ?? 0) - (a.grade ?? 0));
+    }
+    deduped.push(rows[0]);
+  }
+
+  return { students: deduped, issues };
 }
 
 interface School {
@@ -278,13 +313,13 @@ export default async function SchoolPage({ params }: PageProps) {
     );
   }
 
-  const isPM = permission?.role === "program_manager" || permission?.role === "admin";
-  const userIsAdmin = permission?.level === 4;
-  const canEdit = isPasscodeUser ? true : (permission !== null && !permission.read_only);
-  const canEditCurriculumFlag = isPasscodeUser ? true : (
-    permission?.role === "admin" ||
-    (permission?.role === "teacher" && !permission.read_only && programContext.hasCoEOrNodal)
-  );
+  // Derive feature access from the permission matrix
+  const opts = { isPasscodeUser };
+  const studentsAccess = getFeatureAccess(permission, "students", opts);
+  const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
+  const performanceAccess = getFeatureAccess(permission, "performance", opts);
+  const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
+  const visitsAccess = getFeatureAccess(permission, "visits", opts);
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data)
   const [allStudents, grades, batches] = await Promise.all([
@@ -293,20 +328,12 @@ export default async function SchoolPage({ params }: PageProps) {
     getBatchesWithMetadata(),
   ]);
 
-  // Separate active and dropout students
-  let activeStudents = allStudents.filter((s) => s.status !== "dropout");
-  let dropoutStudents = allStudents.filter((s) => s.status === "dropout");
+  // Deduplicate students and detect data issues (e.g. multiple current grade enrollments)
+  const { students: dedupedStudents, issues: dataIssues } = deduplicateStudents(allStudents);
 
-  // Filter students by program if needed (NVS-only users see only NVS students)
-  const studentProgramFilter = programContext.isNVSOnly ? programContext.programIds : null;
-  if (studentProgramFilter !== null && studentProgramFilter.length > 0) {
-    activeStudents = activeStudents.filter(
-      (s) => s.program_id && studentProgramFilter!.includes(Number(s.program_id))
-    );
-    dropoutStudents = dropoutStudents.filter(
-      (s) => s.program_id && studentProgramFilter!.includes(Number(s.program_id))
-    );
-  }
+  // Separate active and dropout students (all students visible; editability is per-row)
+  const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
+  const dropoutStudents = dedupedStudents.filter((s) => s.status === "dropout");
 
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
@@ -360,10 +387,14 @@ export default async function SchoolPage({ params }: PageProps) {
       <StudentTable
         students={activeStudents}
         dropoutStudents={dropoutStudents}
-        canEdit={canEdit}
+        canEdit={studentsAccess.canEdit}
+        userProgramIds={permission?.program_ids ?? null}
+        isPasscodeUser={isPasscodeUser}
+        isAdmin={permission?.role === "admin"}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
+        dataIssues={dataIssues}
       />
     </div>
   );
@@ -386,17 +417,17 @@ export default async function SchoolPage({ params }: PageProps) {
     <CurriculumTab
       schoolCode={school.code}
       schoolName={school.name}
-      canEdit={canEditCurriculumFlag}
+      canEdit={curriculumAccess.canEdit}
     />
   );
 
-  // Only admins can see tabs other than Enrollment (rolling out slowly)
+  // Tab visibility driven by feature permission matrix
   const tabs = [
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-    ...(userIsAdmin ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
-    ...(userIsAdmin ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
-    ...(userIsAdmin ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
-    ...(userIsAdmin && isPM ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
+    ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
+    ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
+    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
+    ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 
   return (

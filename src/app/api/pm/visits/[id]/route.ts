@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canAccessPMFeatures } from "@/lib/permissions";
+import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 interface Visit {
@@ -28,8 +28,8 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canView) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -50,15 +50,8 @@ export async function GET(
   const visit = visits[0];
 
   // Only allow PM who created the visit or admins to view
-  if (visit.pm_email !== session.user.email) {
-    // Check if user is admin
-    const permission = await query<{ role: string }>(
-      `SELECT role FROM user_permission WHERE LOWER(email) = LOWER($1)`,
-      [session.user.email]
-    );
-    if (permission.length === 0 || permission[0].role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+  if (visit.pm_email !== session.user.email && permission?.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   return NextResponse.json({ visit });
@@ -76,8 +69,8 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canEdit) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

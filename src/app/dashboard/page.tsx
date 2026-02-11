@@ -5,6 +5,7 @@ import {
   getAccessibleSchoolCodes,
   getUserPermission,
   getProgramContextSync,
+  getFeatureAccess,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
@@ -239,7 +240,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     );
   }
 
-  const hasPMAccess = (permission.role === "program_manager" || permission.role === "admin") && programContext.hasCoEOrNodal;
+  const hasPMAccess = getFeatureAccess(permission, "pm_dashboard").canView;
 
   const t1 = performance.now();
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
