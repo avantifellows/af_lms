@@ -33,7 +33,7 @@ export interface Grade {
 }
 
 export interface DataIssue {
-  type: "duplicate_grade";
+  type: "duplicate_grade" | "multiple_schools";
   studentName: string;
   groupUserId: string;
   details: string;
