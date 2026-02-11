@@ -5,6 +5,8 @@
  * 1. Adds 'role' column to user_permission table
  * 2. Creates lms_pm_school_visits table
  *
+ * Note: The canonical schema for PM visits is defined in the db-service repo migrations.
+ *
  * Idempotent - safe to run multiple times.
  * Run with: npx ts-node scripts/setup-pm-tables.ts
  */
@@ -70,31 +72,62 @@ async function setup() {
         school_code VARCHAR(20) NOT NULL,
         pm_email VARCHAR(255) NOT NULL,
         visit_date DATE NOT NULL,
-        status VARCHAR(20) DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed')),
+        status VARCHAR(20) NOT NULL DEFAULT 'in_progress',
         data JSONB NOT NULL DEFAULT '{}',
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
+        inserted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        CONSTRAINT status_constraint CHECK (status IN ('in_progress', 'completed'))
       )
     `);
     console.log("   Done.\n");
 
+    // Step 4.1: Fix column drift from older setups (created_at -> inserted_at)
+    console.log("4.1 Checking for column drift (created_at vs inserted_at)...");
+    const visitsColumns = await client.query<{ column_name: string }>(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'lms_pm_school_visits'
+      `
+    );
+
+    const columnNames = new Set(visitsColumns.rows.map((row) => row.column_name));
+    if (columnNames.has("created_at") && !columnNames.has("inserted_at")) {
+      console.log("   Found created_at but missing inserted_at. Renaming created_at -> inserted_at...");
+      await client.query(`
+        ALTER TABLE lms_pm_school_visits
+        RENAME COLUMN created_at TO inserted_at
+      `);
+      console.log("   Rename complete.\n");
+    } else {
+      console.log("   No action needed.\n");
+    }
+
     // Step 5: Create indexes on school_visits
     console.log("5. Creating indexes on lms_pm_school_visits...");
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_pm_visits_school
+      CREATE INDEX IF NOT EXISTS lms_pm_school_visits_school_code_index
       ON lms_pm_school_visits(school_code)
     `);
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_pm_visits_pm_email
+      CREATE INDEX IF NOT EXISTS lms_pm_school_visits_pm_email_index
       ON lms_pm_school_visits(pm_email)
     `);
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_pm_visits_date
-      ON lms_pm_school_visits(visit_date DESC)
+      CREATE INDEX IF NOT EXISTS lms_pm_school_visits_visit_date_index
+      ON lms_pm_school_visits(visit_date)
     `);
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_pm_visits_status
+      CREATE INDEX IF NOT EXISTS lms_pm_school_visits_status_index
       ON lms_pm_school_visits(status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS lms_pm_school_visits_school_code_visit_date_index
+      ON lms_pm_school_visits(school_code, visit_date)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS lms_pm_school_visits_pm_email_visit_date_index
+      ON lms_pm_school_visits(pm_email, visit_date)
     `);
     console.log("   Done.\n");
 

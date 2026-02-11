@@ -180,7 +180,7 @@ If a deploy breaks:
 
 ## PR Preview Deployments
 
-Get temporary preview URLs when opening PRs (like Vercel).
+Get temporary preview URLs when opening PRs.
 
 ### Recommended: Hybrid Approach
 

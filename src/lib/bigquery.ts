@@ -4,7 +4,7 @@ let bigQueryClient: BigQuery | null = null;
 
 export function getBigQueryClient(): BigQuery {
   if (!bigQueryClient) {
-    // Option 1: Service account JSON string (for Vercel/Amplify deployment)
+    // Option 1: Service account JSON string (for Amplify deployment)
     const credentialsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
     if (credentialsJson) {
       try {
