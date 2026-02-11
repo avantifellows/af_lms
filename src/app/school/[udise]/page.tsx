@@ -40,6 +40,27 @@ interface Student {
   updated_at: string | null;
 }
 
+async function findMultiSchoolStudents(userIds: string[]): Promise<Map<string, string[]>> {
+  if (userIds.length === 0) return new Map();
+
+  const rows = await query<{ user_id: string; school_names: string[] }>(
+    `SELECT gu.user_id, array_agg(DISTINCT s.name) as school_names
+     FROM group_user gu
+     JOIN "group" g ON gu.group_id = g.id AND g.type = 'school'
+     JOIN school s ON g.child_id = s.id AND s.af_school_category = 'JNV'
+     WHERE gu.user_id = ANY($1)
+     GROUP BY gu.user_id
+     HAVING COUNT(DISTINCT g.child_id) > 1`,
+    [userIds]
+  );
+
+  const result = new Map<string, string[]>();
+  for (const row of rows) {
+    result.set(String(row.user_id), row.school_names);
+  }
+  return result;
+}
+
 function deduplicateStudents(students: Student[]): { students: Student[]; issues: DataIssue[] } {
   const grouped = new Map<string, Student[]>();
   for (const s of students) {
@@ -328,8 +349,30 @@ export default async function SchoolPage({ params }: PageProps) {
     getBatchesWithMetadata(),
   ]);
 
-  // Deduplicate students and detect data issues (e.g. multiple current grade enrollments)
-  const { students: dedupedStudents, issues: dataIssues } = deduplicateStudents(allStudents);
+  // Deduplicate students and detect data issues
+  const { students: dedupedStudents, issues: dedupeIssues } = deduplicateStudents(allStudents);
+
+  // Check for students enrolled in multiple schools (single batch query)
+  const userIds = [...new Set(dedupedStudents.map((s) => s.user_id))];
+  const multiSchoolMap = await findMultiSchoolStudents(userIds);
+
+  // Build a lookup from user_id → group_user_id for issue reporting
+  const userToGroupUser = new Map(dedupedStudents.map((s) => [s.user_id, s]));
+  const multiSchoolIssues: DataIssue[] = [];
+  for (const [userId, schoolNames] of multiSchoolMap) {
+    const student = userToGroupUser.get(userId);
+    if (student) {
+      const name = [student.first_name, student.last_name].filter(Boolean).join(" ") || "Unknown";
+      multiSchoolIssues.push({
+        type: "multiple_schools",
+        studentName: name,
+        groupUserId: student.group_user_id,
+        details: `Enrolled in ${schoolNames.length} schools: ${schoolNames.join(", ")}`,
+      });
+    }
+  }
+
+  const dataIssues = [...dedupeIssues, ...multiSchoolIssues];
 
   // Separate active and dropout students (all students visible; editability is per-row)
   const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
