@@ -8,7 +8,8 @@ import {
   getProgramContextSync,
   getFeatureAccess,
 } from "@/lib/permissions";
-import StudentTable, { Grade, DataIssue } from "@/components/StudentTable";
+import StudentTable, { Grade } from "@/components/StudentTable";
+import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import SchoolTabs from "@/components/SchoolTabs";
@@ -38,61 +39,6 @@ interface Student {
   grade_id: string | null;
   status: string | null;
   updated_at: string | null;
-}
-
-async function findMultiSchoolStudents(userIds: string[]): Promise<Map<string, string[]>> {
-  if (userIds.length === 0) return new Map();
-
-  const rows = await query<{ user_id: string; school_names: string[] }>(
-    `SELECT gu.user_id, array_agg(DISTINCT s.name) as school_names
-     FROM group_user gu
-     JOIN "group" g ON gu.group_id = g.id AND g.type = 'school'
-     JOIN school s ON g.child_id = s.id AND s.af_school_category = 'JNV'
-     WHERE gu.user_id = ANY($1)
-     GROUP BY gu.user_id
-     HAVING COUNT(DISTINCT g.child_id) > 1`,
-    [userIds]
-  );
-
-  const result = new Map<string, string[]>();
-  for (const row of rows) {
-    result.set(String(row.user_id), row.school_names);
-  }
-  return result;
-}
-
-function deduplicateStudents(students: Student[]): { students: Student[]; issues: DataIssue[] } {
-  const grouped = new Map<string, Student[]>();
-  for (const s of students) {
-    const existing = grouped.get(s.group_user_id);
-    if (existing) {
-      existing.push(s);
-    } else {
-      grouped.set(s.group_user_id, [s]);
-    }
-  }
-
-  const deduped: Student[] = [];
-  const issues: DataIssue[] = [];
-
-  for (const [, rows] of grouped) {
-    if (rows.length > 1) {
-      // Collect the distinct grades across duplicate rows
-      const grades = [...new Set(rows.map((r) => r.grade).filter((g): g is number => g !== null))].sort((a, b) => b - a);
-      const name = [rows[0].first_name, rows[0].last_name].filter(Boolean).join(" ") || "Unknown";
-      issues.push({
-        type: "duplicate_grade",
-        studentName: name,
-        groupUserId: rows[0].group_user_id,
-        details: `Multiple current grade enrollments: ${grades.map((g) => `Grade ${g}`).join(", ")}`,
-      });
-      // Keep the row with the highest grade (latest enrollment)
-      rows.sort((a, b) => (b.grade ?? 0) - (a.grade ?? 0));
-    }
-    deduped.push(rows[0]);
-  }
-
-  return { students: deduped, issues };
 }
 
 interface School {
@@ -349,30 +295,8 @@ export default async function SchoolPage({ params }: PageProps) {
     getBatchesWithMetadata(),
   ]);
 
-  // Deduplicate students and detect data issues
-  const { students: dedupedStudents, issues: dedupeIssues } = deduplicateStudents(allStudents);
-
-  // Check for students enrolled in multiple schools (single batch query)
-  const userIds = [...new Set(dedupedStudents.map((s) => s.user_id))];
-  const multiSchoolMap = await findMultiSchoolStudents(userIds);
-
-  // Build a lookup from user_id → group_user_id for issue reporting
-  const userToGroupUser = new Map(dedupedStudents.map((s) => [s.user_id, s]));
-  const multiSchoolIssues: DataIssue[] = [];
-  for (const [userId, schoolNames] of multiSchoolMap) {
-    const student = userToGroupUser.get(userId);
-    if (student) {
-      const name = [student.first_name, student.last_name].filter(Boolean).join(" ") || "Unknown";
-      multiSchoolIssues.push({
-        type: "multiple_schools",
-        studentName: name,
-        groupUserId: student.group_user_id,
-        details: `Enrolled in ${schoolNames.length} schools: ${schoolNames.join(", ")}`,
-      });
-    }
-  }
-
-  const dataIssues = [...dedupeIssues, ...multiSchoolIssues];
+  // Deduplicate students and detect all data issues
+  const { students: dedupedStudents, issues: dataIssues } = await processStudents(allStudents);
 
   // Separate active and dropout students (all students visible; editability is per-row)
   const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
@@ -416,6 +340,29 @@ export default async function SchoolPage({ params }: PageProps) {
   // Build tabs
   const enrollmentContent = (
     <div>
+      {/* Data Issues Banner */}
+      {dataIssues.length > 0 && (
+        <div className="max-w-3xl mx-auto mb-4">
+          <details className="bg-amber-50 border border-amber-200 rounded-lg">
+            <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
+              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
+            </summary>
+            <div className="px-4 pb-3 space-y-2">
+              {dataIssues.map((issue) => (
+                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
+                  <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </span>
+                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
+
       {/* NVS Student Stats */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
@@ -437,7 +384,6 @@ export default async function SchoolPage({ params }: PageProps) {
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
-        dataIssues={dataIssues}
       />
     </div>
   );
