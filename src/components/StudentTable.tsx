@@ -32,13 +32,6 @@ export interface Grade {
   group_id: string;
 }
 
-export interface DataIssue {
-  type: "duplicate_grade" | "multiple_schools";
-  studentName: string;
-  groupUserId: string;
-  details: string;
-}
-
 interface StudentTableProps {
   students: Student[];
   dropoutStudents?: Student[];
@@ -49,7 +42,6 @@ interface StudentTableProps {
   grades: Grade[];
   batches?: Batch[];
   nvsStreams?: string[];
-  dataIssues?: DataIssue[];
 }
 
 function formatDate(dateString: string | null): string {
@@ -93,12 +85,11 @@ function formatDateForAPI(date: Date): string {
 interface StudentCardProps {
   student: Student;
   canEdit: boolean;
-  hasDataIssue?: boolean;
   onEdit: () => void;
   onDropout: () => void;
 }
 
-function StudentCard({ student, canEdit, hasDataIssue, onEdit, onDropout }: StudentCardProps) {
+function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = student.status === "dropout";
 
@@ -122,11 +113,6 @@ function StudentCard({ student, canEdit, hasDataIssue, onEdit, onDropout }: Stud
               {isDropout && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
                   Dropout
-                </span>
-              )}
-              {hasDataIssue && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800" title="This student has a data issue">
-                  Data Issue
                 </span>
               )}
             </div>
@@ -351,16 +337,12 @@ export default function StudentTable({
   grades,
   batches = [],
   nvsStreams = [],
-  dataIssues = [],
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<"active" | "dropout">("active");
   const router = useRouter();
-
-  // Build a set of group_user_ids with data issues for O(1) lookup
-  const issueStudentIds = new Set(dataIssues.map((i) => i.groupUserId));
 
   // Per-row ownership check: combines feature-level canEdit with program ownership
   const canEditStudent = (student: Student): boolean => {
@@ -405,29 +387,6 @@ export default function StudentTable({
 
   return (
     <>
-      {/* Data Issues Banner */}
-      {dataIssues.length > 0 && (
-        <div className="max-w-3xl mx-auto mb-4">
-          <details className="bg-amber-50 border border-amber-200 rounded-lg">
-            <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
-              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
-            </summary>
-            <div className="px-4 pb-3 space-y-2">
-              {dataIssues.map((issue) => (
-                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
-                  <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                    </svg>
-                  </span>
-                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-      )}
-
       {/* Tabs - only show if there are dropout students */}
       {showTabs && (
         <div className="max-w-3xl mx-auto mb-4">
@@ -500,7 +459,6 @@ export default function StudentTable({
               key={student.group_user_id}
               student={student}
               canEdit={canEditStudent(student)}
-              hasDataIssue={issueStudentIds.has(student.group_user_id)}
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
             />
