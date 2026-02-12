@@ -60,18 +60,10 @@ export async function GET(
 
   // Only allow PM who created the visit or admins to view
   const isOwner = visit.pm_email === session.user.email;
-  const userIsAdmin = permission?.role === "admin";
+  const userIsAdmin = permission?.level === 4;
 
   if (!isOwner && !userIsAdmin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  // Privacy: only owner and admins see exact lat/lng
-  if (!isOwner && !userIsAdmin) {
-    visit.start_lat = null;
-    visit.start_lng = null;
-    visit.end_lat = null;
-    visit.end_lng = null;
   }
 
   return NextResponse.json({ visit });

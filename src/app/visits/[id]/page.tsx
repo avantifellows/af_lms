@@ -136,7 +136,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
   }
 
   // Only allow PM who created the visit or admins to view
-  const isAdmin = permission?.role === "admin";
+  const isAdmin = permission?.level === 4;
 
   if (visit.pm_email !== session.user.email && !isAdmin) {
     return (
@@ -150,7 +150,6 @@ export default async function VisitDetailPage({ params }: PageProps) {
 
   const sections = getSectionStatus(visit);
   const completedCount = sections.filter((s) => s.isComplete).length;
-  const allComplete = completedCount === sections.length;
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">

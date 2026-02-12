@@ -46,21 +46,21 @@ export async function POST(
 
   const visit = visits[0];
 
+  // Permission: PM can end own visit, admin can end any visit
+  const userIsAdmin = permission?.level === 4;
+  if (visit.pm_email !== session.user.email && !userIsAdmin) {
+    return NextResponse.json(
+      { error: "You can only end your own visits" },
+      { status: 403 }
+    );
+  }
+
   // Idempotent: if already ended, return success without changes
   if (visit.ended_at) {
     return NextResponse.json({
       message: "Visit already ended",
       ended_at: visit.ended_at,
     });
-  }
-
-  // Permission: PM can end own visit, admin can end any visit
-  const userIsAdmin = permission?.role === "admin";
-  if (visit.pm_email !== session.user.email && !userIsAdmin) {
-    return NextResponse.json(
-      { error: "You can only end your own visits" },
-      { status: 403 }
-    );
   }
 
   // End the visit: server-side timestamp + GPS
