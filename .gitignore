@@ -43,3 +43,5 @@ next-env.d.ts
 # temp scripts
 /temp_scripts/
 .env*.local
+
+.planning
