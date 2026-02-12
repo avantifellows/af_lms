@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { canAccessPMFeatures } from "@/lib/permissions";
+import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
 
@@ -33,8 +33,8 @@ export default async function VisitsListPage() {
     redirect("/");
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canView) {
     redirect("/dashboard");
   }
 

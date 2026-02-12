@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
-import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 
 interface Student {
   group_user_id: string;
@@ -36,7 +35,10 @@ export interface Grade {
 interface StudentTableProps {
   students: Student[];
   dropoutStudents?: Student[];
-  canEdit?: boolean;
+  canEdit?: boolean;                   // feature-level edit (from matrix)
+  userProgramIds?: number[] | null;    // null = owns all (admin/passcode)
+  isPasscodeUser?: boolean;
+  isAdmin?: boolean;
   grades: Grade[];
   batches?: Batch[];
   nvsStreams?: string[];
@@ -83,12 +85,11 @@ function formatDateForAPI(date: Date): string {
 interface StudentCardProps {
   student: Student;
   canEdit: boolean;
-  isNVSStudent: boolean;
   onEdit: () => void;
   onDropout: () => void;
 }
 
-function StudentCard({ student, canEdit, isNVSStudent, onEdit, onDropout }: StudentCardProps) {
+function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = student.status === "dropout";
 
@@ -135,7 +136,7 @@ function StudentCard({ student, canEdit, isNVSStudent, onEdit, onDropout }: Stud
 
           {/* Right side - Action buttons */}
           <div className="flex items-center gap-2 shrink-0">
-            {canEdit && !isDropout && isNVSStudent && (
+            {canEdit && !isDropout && (
               <>
                 <button
                   onClick={onEdit}
@@ -330,6 +331,9 @@ export default function StudentTable({
   students,
   dropoutStudents = [],
   canEdit = true,
+  userProgramIds = null,
+  isPasscodeUser = false,
+  isAdmin = false,
   grades,
   batches = [],
   nvsStreams = [],
@@ -339,6 +343,15 @@ export default function StudentTable({
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<"active" | "dropout">("active");
   const router = useRouter();
+
+  // Per-row ownership check: combines feature-level canEdit with program ownership
+  const canEditStudent = (student: Student): boolean => {
+    if (!canEdit) return false;
+    if (isPasscodeUser || isAdmin) return true;
+    if (student.program_id === null) return true;
+    if (!userProgramIds || userProgramIds.length === 0) return false;
+    return userProgramIds.includes(Number(student.program_id));
+  };
 
   // Determine which students to show based on tab
   const currentStudents = activeTab === "active" ? students : dropoutStudents;
@@ -445,8 +458,7 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
-              canEdit={canEdit}
-              isNVSStudent={Number(student.program_id) === JNV_NVS_PROGRAM_ID}
+              canEdit={canEditStudent(student)}
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
             />

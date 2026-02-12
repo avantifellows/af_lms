@@ -4,8 +4,8 @@ import { redirect } from "next/navigation";
 import {
   getAccessibleSchoolCodes,
   getUserPermission,
-  canAccessPMFeatures,
-  getProgramContext,
+  getProgramContextSync,
+  getFeatureAccess,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
@@ -13,7 +13,7 @@ import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
 import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
 import Pagination from "@/components/Pagination";
-import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
+
 
 const SCHOOLS_PER_PAGE = 20;
 
@@ -39,16 +39,9 @@ async function getSchools(
   const searchPattern = search ? `%${search}%` : null;
   const offset = (page - 1) * SCHOOLS_PER_PAGE;
 
-  // Query to get schools with NVS student count
   const baseQuery = `
-    SELECT s.id, s.code, s.name, s.district, s.state, s.region,
-           COUNT(DISTINCT CASE WHEN b.program_id = $1 THEN gu_batch.user_id END) as nvs_student_count
+    SELECT s.id, s.code, s.name, s.district, s.state, s.region
     FROM school s
-    LEFT JOIN "group" g ON g.type = 'school' AND g.child_id = s.id
-    LEFT JOIN group_user gu ON gu.group_id = g.id
-    LEFT JOIN group_user gu_batch ON gu_batch.user_id = gu.user_id
-    LEFT JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-    LEFT JOIN batch b ON g_batch.child_id = b.id
     WHERE s.af_school_category = 'JNV'`;
 
   const countBaseQuery = `
@@ -61,11 +54,10 @@ async function getSchools(
       const [schools, countResult] = await Promise.all([
         query<School>(
           `${baseQuery}
-             AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2)
-           GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+             AND (s.name ILIKE $1 OR s.code ILIKE $1 OR s.district ILIKE $1)
            ORDER BY s.name
-           LIMIT $3 OFFSET $4`,
-          [JNV_NVS_PROGRAM_ID, searchPattern, SCHOOLS_PER_PAGE, offset]
+           LIMIT $2 OFFSET $3`,
+          [searchPattern, SCHOOLS_PER_PAGE, offset]
         ),
         query<{ total: string }>(
           `${countBaseQuery} AND (s.name ILIKE $1 OR s.code ILIKE $1 OR s.district ILIKE $1)`,
@@ -77,10 +69,9 @@ async function getSchools(
     const [schools, countResult] = await Promise.all([
       query<School>(
         `${baseQuery}
-         GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
          ORDER BY s.name
-         LIMIT $2 OFFSET $3`,
-        [JNV_NVS_PROGRAM_ID, SCHOOLS_PER_PAGE, offset]
+         LIMIT $1 OFFSET $2`,
+        [SCHOOLS_PER_PAGE, offset]
       ),
       query<{ total: string }>(countBaseQuery),
     ]);
@@ -93,12 +84,11 @@ async function getSchools(
     const [schools, countResult] = await Promise.all([
       query<School>(
         `${baseQuery}
-           AND s.code = ANY($2)
-           AND (s.name ILIKE $3 OR s.code ILIKE $3 OR s.district ILIKE $3)
-         GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+           AND s.code = ANY($1)
+           AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2)
          ORDER BY s.name
-         LIMIT $4 OFFSET $5`,
-        [JNV_NVS_PROGRAM_ID, codes, searchPattern, SCHOOLS_PER_PAGE, offset]
+         LIMIT $3 OFFSET $4`,
+        [codes, searchPattern, SCHOOLS_PER_PAGE, offset]
       ),
       query<{ total: string }>(
         `${countBaseQuery} AND s.code = ANY($1) AND (s.name ILIKE $2 OR s.code ILIKE $2 OR s.district ILIKE $2)`,
@@ -111,11 +101,10 @@ async function getSchools(
   const [schools, countResult] = await Promise.all([
     query<School>(
       `${baseQuery}
-         AND s.code = ANY($2)
-       GROUP BY s.id, s.code, s.name, s.district, s.state, s.region
+         AND s.code = ANY($1)
        ORDER BY s.name
-       LIMIT $3 OFFSET $4`,
-      [JNV_NVS_PROGRAM_ID, codes, SCHOOLS_PER_PAGE, offset]
+       LIMIT $2 OFFSET $3`,
+      [codes, SCHOOLS_PER_PAGE, offset]
     ),
     query<{ total: string }>(
       `${countBaseQuery} AND s.code = ANY($1)`,
@@ -125,7 +114,7 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise NVS student counts for all schools
+// Get grade-wise student counts for loaded schools (all programs)
 async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
   if (schoolIds.length === 0) return new Map();
 
@@ -133,20 +122,17 @@ async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, Gr
     `SELECT
        s.id as school_id,
        gr.number as grade,
-       COUNT(DISTINCT gu_batch.user_id) as count
+       COUNT(DISTINCT gu_school.user_id) as count
      FROM school s
      JOIN "group" g_school ON g_school.type = 'school' AND g_school.child_id = s.id
      JOIN group_user gu_school ON gu_school.group_id = g_school.id
-     JOIN group_user gu_batch ON gu_batch.user_id = gu_school.user_id
-     JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-     JOIN batch b ON g_batch.child_id = b.id AND b.program_id = $1
      LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
        AND er.group_type = 'grade' AND er.is_current = true
      LEFT JOIN grade gr ON er.group_id = gr.id
-     WHERE s.id = ANY($2) AND gr.number IS NOT NULL
+     WHERE s.id = ANY($1) AND gr.number IS NOT NULL
      GROUP BY s.id, gr.number
      ORDER BY gr.number`,
-    [JNV_NVS_PROGRAM_ID, schoolIds]
+    [schoolIds]
   );
 
   const gradeMap = new Map<string, GradeCount[]>();
@@ -205,7 +191,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect(`/school/${session.schoolCode}`);
   }
 
+  // Single DB call for permission — reuse everywhere
+  const t0 = performance.now();
   const permission = await getUserPermission(session.user.email);
+  console.log(`[dashboard] getUserPermission: ${(performance.now() - t0).toFixed(0)}ms`);
 
   if (!permission) {
     return (
@@ -228,8 +217,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     );
   }
 
-  // Check if user has program access
-  const programContext = await getProgramContext(session.user.email);
+  // Derive everything from the single permission object — no extra DB calls
+  const programContext = getProgramContextSync(permission);
   if (!programContext.hasAccess) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -251,37 +240,45 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     );
   }
 
-  // Check if user has PM access for visits features
-  const hasPMAccess = await canAccessPMFeatures(session.user.email);
+  const hasPMAccess = getFeatureAccess(permission, "pm_dashboard").canView;
 
-  const schoolCodes = await getAccessibleSchoolCodes(session.user.email);
-  const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
-  const totalPages = Math.ceil(totalCount / SCHOOLS_PER_PAGE);
+  const t1 = performance.now();
+  const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
+  console.log(`[dashboard] getAccessibleSchoolCodes: ${(performance.now() - t1).toFixed(0)}ms`);
 
-  // Fetch grade-wise counts for NVS students in each school
-  const schoolIds = schools.map((s) => s.id);
-  const gradeCounts = await getSchoolGradeCounts(schoolIds);
-
-  // Merge grade counts into schools
-  const schoolsWithGrades = schools.map((school) => ({
-    ...school,
-    grade_counts: gradeCounts.get(school.id) || [],
-  }));
-
-  // Fetch PM-specific data only if user has PM access
-  let recentVisits: Visit[] = [];
-  let openIssues = 0;
-  if (hasPMAccess) {
-    [recentVisits, openIssues] = await Promise.all([
-      getRecentVisits(session.user.email),
-      getOpenIssuesCount(session.user.email),
-    ]);
-  }
-
-  // If user has access to only one school and no search, redirect directly
+  // If user has access to only one school and no search, redirect directly (skip heavy queries)
   if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery) {
     redirect(`/school/${schoolCodes[0]}`);
   }
+
+  // Fetch schools, then grade counts + PM data in parallel
+  const t2 = performance.now();
+  const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
+  console.log(`[dashboard] getSchools: ${(performance.now() - t2).toFixed(0)}ms`);
+  const totalPages = Math.ceil(totalCount / SCHOOLS_PER_PAGE);
+
+  const schoolIds = schools.map((s) => s.id);
+
+  // Run grade counts and PM-specific queries in parallel
+  const t3 = performance.now();
+  const [gradeCounts, recentVisits, openIssues] = await Promise.all([
+    getSchoolGradeCounts(schoolIds),
+    hasPMAccess ? getRecentVisits(session.user.email) : Promise.resolve([] as Visit[]),
+    hasPMAccess ? getOpenIssuesCount(session.user.email) : Promise.resolve(0),
+  ]);
+  console.log(`[dashboard] parallel (gradeCounts + visits): ${(performance.now() - t3).toFixed(0)}ms`);
+  console.log(`[dashboard] total: ${(performance.now() - t0).toFixed(0)}ms`);
+
+  // Merge grade counts into schools and derive total from grade counts
+  const schoolsWithGrades = schools.map((school) => {
+    const counts = gradeCounts.get(school.id) || [];
+    const total = counts.reduce((sum, gc) => sum + gc.count, 0);
+    return {
+      ...school,
+      grade_counts: counts,
+      student_count: total,
+    };
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -462,7 +459,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 key={school.id}
                 school={school}
                 href={`/school/${school.code}`}
-                showNVSCount
+                showStudentCount
                 showGradeBreakdown
                 showRegion={hasPMAccess}
                 actions={
