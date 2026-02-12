@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
   }
 
   const permission = await getUserPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canView) {
+  if (!getFeatureAccess(permission, "visits").canEdit) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
