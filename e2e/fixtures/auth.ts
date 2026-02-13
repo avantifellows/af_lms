@@ -1,4 +1,5 @@
 import { test as base, type Page } from "@playwright/test";
+import { addCoverageReport } from "monocart-reporter";
 import { encode } from "next-auth/jwt";
 import { TEST_USERS, type TestUserRole } from "../helpers/test-users";
 
@@ -51,13 +52,34 @@ function googleUserPayload(role: TestUserRole): TokenPayload {
   };
 }
 
-// Extend Playwright test with per-role page fixtures
+// Extend Playwright test with per-role page fixtures + auto-coverage
 export const test = base.extend<{
+  autoTestFixture: void;
   adminPage: Page;
   pmPage: Page;
   teacherPage: Page;
   passcodePage: Page;
 }>({
+  // Auto-fixture: collects V8 JS coverage per test (Chromium only)
+  autoTestFixture: [
+    async ({ page }, use, testInfo) => {
+      const isChromium = testInfo.project.name === "chromium";
+      if (isChromium) {
+        await page.coverage.startJSCoverage({ resetOnNavigation: false });
+      }
+
+      await use();
+
+      if (isChromium) {
+        const coverage = await page.coverage.stopJSCoverage();
+        if (coverage.length > 0) {
+          await addCoverageReport(coverage, testInfo);
+        }
+      }
+    },
+    { scope: "test", auto: true },
+  ],
+
   adminPage: async ({ page }, use) => {
     await authenticatedPage(page, googleUserPayload("admin"));
     await use(page);

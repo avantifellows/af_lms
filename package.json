@@ -10,7 +10,7 @@
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "deploy:staging": "./scripts/deploy.sh staging",
     "deploy:production": "./scripts/deploy.sh production",
-    "test:e2e": "playwright test",
+    "test:e2e": "NODE_V8_COVERAGE=.v8-coverage playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed"
   },
@@ -33,6 +33,8 @@
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.0.5",
+    "monocart-coverage-reports": "^2.12.9",
+    "monocart-reporter": "^2.10.0",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "typescript": "^5"

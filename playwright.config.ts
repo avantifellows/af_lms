@@ -9,7 +9,39 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: "html",
+  reporter: [
+    ["list"],
+    [
+      "monocart-reporter",
+      {
+        name: "E2E Coverage Report",
+        outputFile: "./monocart-report/index.html",
+        coverage: {
+          outputDir: "./coverage",
+          entryFilter: (entry: { url: string }) => {
+            const url = entry.url;
+            // Only include our app's chunks, not Next.js internals/HMR/devtools
+            if (url.includes("node_modules")) return false;
+            if (url.includes("[turbopack]")) return false;
+            if (url.includes("_next/static/chunks/webpack")) return false;
+            if (url.includes("_next/static/chunks/polyfills")) return false;
+            return url.includes("af_lms");
+          },
+          sourceFilter: (sourcePath: string) => {
+            // Only include our app's source files, not Next.js internals
+            if (sourcePath.startsWith("next/")) return false;
+            if (sourcePath.includes("node_modules")) return false;
+            return sourcePath.includes("af_lms/src/") || sourcePath.includes("/src/");
+          },
+          reports: [
+            ["console-details", { skipPercent: 80 }],
+            ["v8"],
+            ["json-summary"],
+          ],
+        },
+      },
+    ],
+  ],
   use: {
     baseURL: `http://localhost:${TEST_PORT}`,
     trace: "on-first-retry",
