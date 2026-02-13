@@ -1,0 +1,94 @@
+import { test as base, type Page } from "@playwright/test";
+import { encode } from "next-auth/jwt";
+import { TEST_USERS, type TestUserRole } from "../helpers/test-users";
+
+const NEXTAUTH_SECRET = "e2e-test-secret-at-least-32-chars-long";
+const COOKIE_NAME = "next-auth.session-token";
+
+interface TokenPayload {
+  name: string;
+  email: string;
+  sub: string;
+  schoolCode?: string;
+  isPasscodeUser?: boolean;
+  [key: string]: unknown;
+}
+
+async function createSessionCookie(payload: TokenPayload): Promise<string> {
+  const token = await encode({
+    token: payload,
+    secret: NEXTAUTH_SECRET,
+  });
+  return token;
+}
+
+async function authenticatedPage(
+  page: Page,
+  payload: TokenPayload
+): Promise<Page> {
+  const token = await createSessionCookie(payload);
+
+  await page.context().addCookies([
+    {
+      name: COOKIE_NAME,
+      value: token,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  return page;
+}
+
+function googleUserPayload(role: TestUserRole): TokenPayload {
+  const user = TEST_USERS[role];
+  return {
+    name: `E2E ${role}`,
+    email: user.email,
+    sub: `e2e-${role}-sub`,
+  };
+}
+
+// Extend Playwright test with per-role page fixtures
+export const test = base.extend<{
+  adminPage: Page;
+  pmPage: Page;
+  teacherPage: Page;
+  passcodePage: Page;
+}>({
+  adminPage: async ({ page }, use) => {
+    await authenticatedPage(page, googleUserPayload("admin"));
+    await use(page);
+  },
+  pmPage: async ({ browser }, use) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("pm"));
+    await use(page);
+    await context.close();
+  },
+  teacherPage: async ({ browser }, use) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("teacher"));
+    await use(page);
+    await context.close();
+  },
+  passcodePage: async ({ browser }, use) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, {
+      name: "School 70705",
+      email: "passcode-70705@school.local",
+      sub: "passcode-70705",
+      schoolCode: "70705",
+      isPasscodeUser: true,
+    });
+    await use(page);
+    await context.close();
+  },
+});
+
+export { expect } from "@playwright/test";

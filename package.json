@@ -9,7 +9,10 @@
     "lint": "eslint",
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "deploy:staging": "./scripts/deploy.sh staging",
-    "deploy:production": "./scripts/deploy.sh production"
+    "deploy:production": "./scripts/deploy.sh production",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^8.1.1",
@@ -22,6 +25,7 @@
     "recharts": "^3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -12,9 +12,15 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+e2e/fixtures/db-dump.sql
 
 # next.js
 /.next/
+/.next-test/
 /out/
 
 # production
@@ -35,6 +41,7 @@ yarn-error.log*
 !.env.example
 !.env.staging.example
 !.env.production.example
+!.env.test.example
 
 # typescript
 *.tsbuildinfo
