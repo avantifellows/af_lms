@@ -11,10 +11,22 @@
 !.yarn/versions
 
 # testing
-/coverage
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+e2e/fixtures/db-dump.sql
+
+# coverage (full reports gitignored, summary committed)
+/coverage/*
+!/coverage/coverage-summary.json
+/.v8-coverage/
+/monocart-report/
+/assets/
 
 # next.js
 /.next/
+/.next-test/
 /out/
 
 # production
@@ -35,6 +47,7 @@ yarn-error.log*
 !.env.example
 !.env.staging.example
 !.env.production.example
+!.env.test.example
 
 # typescript
 *.tsbuildinfo

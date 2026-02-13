@@ -34,6 +34,7 @@ This is not a public-facing product; it is an ops/admin tool.
 - **Analytics**: BigQuery via `@google-cloud/bigquery`
 - **Charts**: Recharts
 - **Lint**: ESLint v9 (`eslint.config.mjs`)
+- **E2E Tests**: Playwright (Chromium only); config in `playwright.config.ts`
 
 ---
 
@@ -254,6 +255,14 @@ App code:
 - `src/lib/`: auth/permissions/db/bigquery helpers
 - `src/types/`: shared TS types (NextAuth session typing, quiz, curriculum)
 
+E2E tests:
+- `e2e/`: Playwright test suite
+  - `e2e/fixtures/auth.ts`: session injection via NextAuth JWT; exports `adminPage`/`pmPage`/`teacherPage`/`passcodePage` fixtures
+  - `e2e/helpers/test-users.ts`: deterministic test personas upserted into `user_permission`
+  - `e2e/helpers/db.ts`: `resetDatabase()` loads dump into `af_lms_test`; `dropDatabase()` cleans up
+  - `e2e/tests/*.spec.ts`: smoke, dashboard, school, permissions specs
+  - `e2e/fixtures/db-dump.sql`: local dev DB dump (gitignored; developer creates via `pg_dump`)
+
 Planning notes:
 - `.planning/`: internal planning docs (not part of runtime app)
 
@@ -329,10 +338,30 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-### 8.3 Access gotchas
+### 8.3 Run E2E tests
+
+```bash
+# One-time: create DB dump from your local dev DB
+pg_dump --no-owner --no-privileges --clean --if-exists \
+  -U postgres -h localhost -f e2e/fixtures/db-dump.sql dbservice_dev
+
+cp .env.test.example .env.test   # defaults work for local postgres
+
+# Run tests (starts dev server on port 3001, won't conflict with npm run dev)
+npm run test:e2e
+npm run test:e2e:ui   # Playwright UI mode for debugging
+```
+
+Key details:
+- Tests run against a disposable `af_lms_test` database (created/dropped automatically)
+- Auth is injected via NextAuth JWT cookies — no real Google login needed
+- Uses `.next-test/` build dir so it coexists with a running dev server
+- Single worker, sequential execution (shared test DB)
+
+### 8.4 Access gotchas
 
 - If your Google email is not in `user_permission`, `/dashboard` will block you.
-- If you do have a row but no `program_ids` (and you’re not admin), `/dashboard` will block you.
+- If you do have a row but no `program_ids` (and you're not admin), `/dashboard` will block you.
 
 ---
 
@@ -382,7 +411,7 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - Visit completion (`PUT` with JSON `{ action: "complete" }`) exists in API but is **disabled in UI** for Phase 1 (geo-tracking uses separate Start/End flow)
 - Potential schema drift between scripts and production DB (timestamps + missing columns)
 - `src/proxy.ts` is treated as a **Next.js middleware** (build output shows `Proxy (Middleware)`) and redirects unauthenticated users away from protected routes; behavior overlaps with per-page `getServerSession()` guards.
-- No test suite is present in this repo (no `*.test.*`/`*.spec.*` found)
+- E2E tests exist (Playwright) but no unit/integration tests yet
 - `npm run lint` currently fails due to:
   - `scripts/check-metadata.js` using `require()` (rule `@typescript-eslint/no-require-imports`)
   - a hooks dependency warning in `src/components/EditStudentModal.tsx`
@@ -408,3 +437,5 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - Batch metadata admin: `src/app/admin/batches/**` + `src/app/api/batches/**`
 - Quiz analytics: `src/lib/bigquery.ts`, `src/app/api/quiz-analytics/**`, `src/components/QuizAnalyticsSection.tsx`
 - Curriculum POC: `src/components/curriculum/**`, `src/app/api/curriculum/**`
+- E2E tests: `e2e/tests/**`, auth fixtures in `e2e/fixtures/auth.ts`, test users in `e2e/helpers/test-users.ts`
+- Playwright config: `playwright.config.ts`

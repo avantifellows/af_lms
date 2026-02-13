@@ -9,10 +9,12 @@ Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that al
 ## Development Commands
 
 ```bash
-npm run dev      # Start development server at localhost:3000
-npm run build    # Production build
-npm run lint     # Run ESLint
-npm run start    # Start production server
+npm run dev          # Start development server at localhost:3000
+npm run build        # Production build
+npm run lint         # Run ESLint
+npm run start        # Start production server
+npm run test:e2e     # Run Playwright e2e tests (port 3001)
+npm run test:e2e:ui  # Playwright UI mode for debugging
 ```
 
 ## Architecture
@@ -22,6 +24,7 @@ npm run start    # Start production server
 - **Auth**: NextAuth.js v4 with Google OAuth + custom passcode provider
 - **Database**: PostgreSQL via `pg` pool
 - **Styling**: Tailwind CSS v4
+- **E2E Tests**: Playwright (Chromium)
 
 ### Directory Structure
 ```
@@ -36,6 +39,21 @@ src/
     ├── auth.ts             # NextAuth configuration
     ├── db.ts               # PostgreSQL connection pool
     └── permissions.ts      # Access control (hardcoded)
+
+e2e/                        # Playwright E2E tests
+├── fixtures/
+│   ├── auth.ts             # Session injection (per-role page fixtures)
+│   └── db-dump.sql         # Local DB dump (gitignored)
+├── helpers/
+│   ├── db.ts               # DB reset/teardown helpers
+│   └── test-users.ts       # Deterministic test user personas
+├── tests/                  # Test specs
+│   ├── smoke.spec.ts
+│   ├── dashboard.spec.ts
+│   ├── school.spec.ts
+│   └── permissions.spec.ts
+├── global-setup.ts         # Loads dump + inserts test users
+└── global-teardown.ts      # Drops test DB
 ```
 
 ### Authentication Flow
@@ -68,6 +86,29 @@ DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 NEXTAUTH_SECRET, NEXTAUTH_URL
 ```
+
+## E2E Tests
+
+Tests use Playwright with a local test Postgres DB (`af_lms_test`) loaded from a dump of the dev DB.
+
+### Setup (one-time)
+```bash
+cp .env.test.example .env.test                    # defaults are fine for local postgres
+pg_dump --no-owner --no-privileges --clean --if-exists \
+  -U postgres -h localhost -f e2e/fixtures/db-dump.sql dbservice_dev
+```
+
+### How it works
+- Runs on port **3001** with a separate `.next-test/` build dir (won't conflict with `npm run dev`)
+- Auth is injected via NextAuth JWT cookies — no real Google login needed
+- 3 test personas (admin, PM, teacher) + passcode user are upserted into `user_permission`
+- DB is reset from dump in `global-setup.ts`, dropped in `global-teardown.ts`
+- Single worker, sequential execution (shared DB)
+
+### Key conventions
+- Import `test`/`expect` from `e2e/fixtures/auth.ts` for authenticated tests
+- Use `adminPage`, `pmPage`, `teacherPage`, `passcodePage` fixtures for per-role pages
+- Import from `@playwright/test` for unauthenticated tests (smoke tests)
 
 ## Deployment
 
