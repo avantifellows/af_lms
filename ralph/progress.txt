@@ -537,3 +537,20 @@ Session: 21519b57-32b9-411a-996d-856825fb7955
   - Simplest possible test file — no mocks, no setup, just a single assertion on a constant export
   - Gap-closing for constants files is trivial — just import and assert
 ---
+
+## 2026-02-16T01:22 - US-041
+Session: 4b5a2e2e-17c9-4e1b-b62e-68aad84b0339
+- Final coverage verification: all 1013 tests pass across 64 test files
+- Coverage results: 99.28% lines (>= 90% threshold), 98.88% statements, 96.30% branches, 97.57% functions
+- Baseline was 98.72% lines (Phase 5) — US-039/US-040 pushed proxy.ts and constants.ts from 0% to 100%
+- No files at 0% coverage — all source files have test coverage
+- Only `src/app/api/auth/[...nextauth]/route.ts` lacks a direct test file (tested indirectly via `src/lib/auth.test.ts`)
+- Type files (`src/types/curriculum.ts`, `src/types/quiz.ts`) are not tracked in coverage (no executable code)
+- Lint: 810 pre-existing errors (down from 818, due to `any` → `unknown` fixes in US-034/US-035)
+- Build: pre-existing type error in `e2e/helpers/db.ts:152` still present (not related)
+- Files committed: `unit-coverage/coverage-summary.json`
+- **Learnings for future iterations:**
+  - Verification stories confirm the project meets its goals — run tests, check thresholds, commit
+  - Coverage ceiling for this codebase is ~99.3% lines — remaining uncovered lines are defensive guards, V8 short-circuit branches, and unreachable code paths
+  - The entire test suite (1013 tests, 64 files) runs in ~30 seconds, well within CI budgets
+---
