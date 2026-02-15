@@ -77,3 +77,15 @@ Session: 7afe42b0-8dba-4938-b9f5-a0b5dd0eaf0f
   - Verification stories are quick — just run coverage, check threshold, commit summary
   - Pre-existing `src/app/layout.tsx` change (suppressHydrationWarning) was present but not committed since it's unrelated
 ---
+
+## 2026-02-15T23:28 - US-006
+Session: 67608d82-1b1f-4de0-934e-1b2901cd7392
+- Implemented 27 unit tests for CurriculumTab.tsx
+- Files changed: `src/components/curriculum/CurriculumTab.test.tsx` (new, ~380 lines)
+- Test coverage areas: rendering (heading, school name, grade/subject selectors, canEdit gating for Log Session button and View Only badge), localStorage loading (loadSessions/loadProgress on mount with school code), fetching chapters (default grade=11/subject=Physics, recalculating progress after fetch, error states: non-ok response, network error, non-Error thrown), grade/subject selector changes trigger refetch (grade 12, Chemistry), tab switching (Chapters default → History → back to Chapters), modal lifecycle (open via button, close via onClose callback, not rendered when canEdit=false), saving sessions (with chapter completion, without chapter completion, canEdit guard, topic detail Unknown fallback for missing topics), chapter completion in progress (existing entry gets isChapterComplete=true, new entry created for chapter not yet in progress), ProgressSummary integration, chapter toggle callback, empty chapters array
+- **Learnings for future iterations:**
+  - CurriculumTab props include `schoolName` in addition to `schoolCode` and `canEdit` — PRD omitted `schoolName`
+  - Mock child components with `data-testid` + exposed callback buttons (e.g., `modal-save`, `modal-close`) to test parent integration cleanly
+  - When testing session save with "Unknown" topic fallback, use chapters with empty topics arrays so the topicId from the mock modal won't match any chapter topic
+  - `vi.stubGlobal("fetch", mockFetch)` pattern works well for curriculum fetch mocking — same pattern as other component tests
+---

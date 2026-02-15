@@ -106,8 +106,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "27 tests added. Props are { schoolCode, schoolName, canEdit } not { schoolCode, canEdit } as PRD stated. Covers: rendering (heading, school name, grade/subject selectors, canEdit gating for Log Session button and View Only badge), localStorage loading (loadSessions, loadProgress on mount), fetching chapters (default grade/subject, recalculating progress, error states for non-ok/network/non-Error), grade/subject selector changes trigger refetch, tab switching (Chapters/History/back), modal lifecycle (open, close, not rendered when canEdit=false), saving sessions (with/without chapter completion, topic detail Unknown fallback, canEdit guard), chapter completion progress (existing/new entries), ProgressSummary integration, chapter toggle, empty chapters."
     },
     {
       "id": "US-007",
