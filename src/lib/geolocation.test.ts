@@ -216,6 +216,81 @@ describe("getAccurateLocation", () => {
     expect(result.lat).toBe(23.1);
   });
 
+  it("ignores watchPosition TIMEOUT error (lets outer timeout handle it)", async () => {
+    setSecureOrigin(true);
+    let successCallback: PositionCallback;
+    let errorCallback: PositionErrorCallback;
+    mockWatchPosition.mockImplementation((success: PositionCallback, error: PositionErrorCallback) => {
+      successCallback = success;
+      errorCallback = error;
+      return 1;
+    });
+
+    const { promise } = getAccurateLocation();
+
+    // Fire a moderate reading first
+    successCallback!({
+      coords: { latitude: 23.0, longitude: 72.5, accuracy: 300 },
+    } as GeolocationPosition);
+
+    // Fire watchPosition TIMEOUT error (code 3) — should be ignored
+    errorCallback!({
+      code: 3,
+      PERMISSION_DENIED: 1,
+      POSITION_UNAVAILABLE: 2,
+      TIMEOUT: 3,
+      message: "timeout",
+    } as GeolocationPositionError);
+
+    // Our own setTimeout should still resolve with best reading
+    vi.advanceTimersByTime(60_000);
+    const result = await promise;
+    expect(result).toEqual({ lat: 23.0, lng: 72.5, accuracy: 300 });
+  });
+
+  it("allows 127.0.0.1 as secure origin", async () => {
+    vi.stubGlobal("window", {
+      location: { protocol: "http:", hostname: "127.0.0.1" },
+    });
+    mockWatchPosition.mockImplementation((success: PositionCallback) => {
+      Promise.resolve().then(() => {
+        success({
+          coords: { latitude: 10.0, longitude: 20.0, accuracy: 50 },
+        } as GeolocationPosition);
+      });
+      return 1;
+    });
+
+    const { promise } = getAccurateLocation();
+    const result = await promise;
+    expect(result).toEqual({ lat: 10.0, lng: 20.0, accuracy: 50 });
+  });
+
+  it("does not double-settle (second settle is ignored)", async () => {
+    setSecureOrigin(true);
+    let successCallback: PositionCallback;
+    mockWatchPosition.mockImplementation((success: PositionCallback) => {
+      successCallback = success;
+      return 1;
+    });
+
+    const { promise, cancel } = getAccurateLocation();
+
+    // Fire a good reading — resolves immediately
+    successCallback!({
+      coords: { latitude: 23.0, longitude: 72.5, accuracy: 50 },
+    } as GeolocationPosition);
+
+    const result = await promise;
+    expect(result).toEqual({ lat: 23.0, lng: 72.5, accuracy: 50 });
+
+    // Cancel after already resolved — should be a no-op (settled guard)
+    cancel();
+    // Advance timeout — also a no-op since already settled
+    vi.advanceTimersByTime(60_000);
+    // No error thrown, promise already resolved
+  });
+
   it("clears watch on resolve", async () => {
     setSecureOrigin(true);
     // Fire success async so watchId is assigned before cleanup runs
