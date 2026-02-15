@@ -3,7 +3,15 @@ import userEvent from "@testing-library/user-event";
 import StudentSearch from "./StudentSearch";
 
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...rest }: any) => (
+  default: ({
+    href,
+    children,
+    ...rest
+  }: {
+    href: string;
+    children: React.ReactNode;
+    [key: string]: unknown;
+  }) => (
     <a href={href} {...rest}>
       {children}
     </a>
@@ -33,10 +41,10 @@ const mockStudents = [
   },
 ];
 
-function mockFetchSuccess(data: any) {
+function mockFetchSuccess(data: unknown) {
   return vi.fn(() =>
     Promise.resolve({ ok: true, json: () => Promise.resolve(data) })
-  ) as any;
+  ) as unknown as typeof fetch;
 }
 
 describe("StudentSearch", () => {
@@ -217,5 +225,144 @@ describe("StudentSearch", () => {
     });
 
     expect(screen.queryByText("Amit Kumar")).not.toBeInTheDocument();
+  });
+
+  it("handles fetch error gracefully (catch branch)", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new Error("Network failure")))
+    );
+
+    render(<StudentSearch />);
+    const input = screen.getByPlaceholderText(
+      "Search students by name, ID, or phone..."
+    );
+
+    await act(async () => {
+      await userEvent
+        .setup({ advanceTimers: vi.advanceTimersByTime })
+        .type(input, "Am");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "Search error:",
+        expect.any(Error)
+      );
+    });
+
+    // Results should not be shown
+    expect(screen.queryByText("No students found")).not.toBeInTheDocument();
+    consoleSpy.mockRestore();
+  });
+
+  it("re-shows results on focus when query >= 2 chars", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<StudentSearch />);
+    const input = screen.getByPlaceholderText(
+      "Search students by name, ID, or phone..."
+    );
+
+    // Type query to fetch results
+    await act(async () => {
+      await user.type(input, "Am");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Amit Kumar")).toBeInTheDocument();
+    });
+
+    // Close via backdrop
+    const backdrop = document.querySelector(".fixed.inset-0")!;
+    await act(async () => {
+      await user.click(backdrop);
+    });
+    expect(screen.queryByText("Amit Kumar")).not.toBeInTheDocument();
+
+    // Focus input again — should re-show results
+    await act(async () => {
+      input.focus();
+    });
+    expect(screen.getByText("Amit Kumar")).toBeInTheDocument();
+  });
+
+  it("shows 'Unknown' when student has no first or last name", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchSuccess([
+        {
+          user_id: "u3",
+          first_name: null,
+          last_name: null,
+          student_id: null,
+          phone: null,
+          school_name: "Test School",
+          school_code: "TS001",
+          grade: null,
+        },
+      ])
+    );
+
+    render(<StudentSearch />);
+    const input = screen.getByPlaceholderText(
+      "Search students by name, ID, or phone..."
+    );
+
+    await act(async () => {
+      await userEvent
+        .setup({ advanceTimers: vi.advanceTimersByTime })
+        .type(input, "test");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown")).toBeInTheDocument();
+    });
+
+    // No grade, student_id, or phone should be shown
+    expect(screen.queryByText(/Grade/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ID:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Phone:/)).not.toBeInTheDocument();
+  });
+
+  it("does not show results when fetch returns non-ok response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: false, status: 500 }))
+    );
+
+    render(<StudentSearch />);
+    const input = screen.getByPlaceholderText(
+      "Search students by name, ID, or phone..."
+    );
+
+    await act(async () => {
+      await userEvent
+        .setup({ advanceTimers: vi.advanceTimersByTime })
+        .type(input, "Am");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // Wait for fetch to complete (loading finishes)
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalled();
+    });
+
+    // Results should NOT be shown — response.ok was false
+    expect(screen.queryByText("Amit Kumar")).not.toBeInTheDocument();
+    expect(screen.queryByText("No students found")).not.toBeInTheDocument();
   });
 });
