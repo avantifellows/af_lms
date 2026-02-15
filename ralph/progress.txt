@@ -241,3 +241,15 @@ Session: a017608a-dc0c-4a3a-8902-f1bc5f4f2462
   - The page's `getSchools()` function does a simple SQL query with WHERE `af_school_category = 'JNV'` and `ORDER BY name` — can assert on the SQL string via `mockQuery.mock.calls[0][0]`
   - Simplest server page pattern: auth checks → query → render child component with data
 ---
+
+## 2026-02-16T00:07 - US-019
+Session: 7d911665-45de-4fa5-9804-8b80af83135d
+- Implemented 5 unit tests for admin/users/page.tsx (server component)
+- Files changed: `src/app/admin/users/page.test.tsx` (new, 162 lines)
+- Test coverage areas: no session → redirect /, no email → redirect /, not admin → redirect /dashboard, admin → renders header + UserList with parallel-fetched users and regions (user count, email, sign out link, props: initialUsers, regions mapped to region strings, currentUserEmail, both SQL query assertions: user_permission ORDER BY level DESC + school WHERE af_school_category='JNV' GROUP BY region), empty users and regions (0 count)
+- All 840 tests pass across 56 files (835 previous + 5 new)
+- **Learnings for future iterations:**
+  - admin/users/page.tsx uses `Promise.all([getUsers(), getRegions()])` for parallel queries — use `mockQuery.mockResolvedValueOnce()` chaining (first call = users, second call = regions)
+  - The page maps `regions.map(r => r.region)` before passing to UserList — verify the mapped string array, not the raw Region objects
+  - Follows exact same pattern as admin/schools/page.tsx but with two queries instead of one
+---

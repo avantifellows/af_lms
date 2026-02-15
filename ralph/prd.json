@@ -329,8 +329,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "5 tests added. Covers: no session redirect, no email redirect, not admin redirect, admin renders UserList with parallel-fetched users and regions (header, user count, email, sign out link, props verification: initialUsers, regions mapped to strings, currentUserEmail, both SQL query assertions), empty users and regions. Uses mockQuery.mockResolvedValueOnce() chaining for parallel Promise.all queries. All 840 tests pass across 56 files."
     },
     {
       "id": "US-020",
