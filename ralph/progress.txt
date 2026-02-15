@@ -1,0 +1,52 @@
+# Ralph Progress Log
+Started: Sun Feb 15 23:07:30 IST 2026
+
+## Codebase Patterns
+- **Client component tests**: Use `@testing-library/react` + `userEvent.setup()` for interactions
+- **Email inputs**: `type="email"` inputs have no label-input `htmlFor`/`id` association; query with `document.querySelector('input[type="email"]')` instead of `getByRole("textbox", { name: /email/i })`
+- **Debounce testing**: Use `vi.useFakeTimers({ shouldAdvanceTime: true })` + `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })`, then `vi.advanceTimersByTime(delay)` wrapped in `act()`
+- **Fetch mocking**: `vi.stubGlobal("fetch", mockFetch)` with `mockFetch = vi.fn()` in `beforeEach`
+- **Pre-existing build failure**: `e2e/helpers/db.ts:152` has type error (`string | undefined` not assignable to `string`) — not caused by unit tests
+- **Pre-existing lint errors**: 818 errors exist in codebase; new test files should lint clean individually with `npx eslint <file>`
+- **AddUserModal props**: `{ user, regions, onClose, onSave }` — NOT `{ isOpen, onClose, onSave, editUser, currentUserEmail }` as PRD stated
+- **Multiple selects**: Use `screen.getAllByRole("combobox")` and index to target specific `<select>` elements
+- **PRD props often wrong**: Always read actual source component to get real props interface before writing tests
+- **Duplicate text in table+modal**: When a component shows the same text in a table row AND a modal, use `getAllByText()` or scope queries with `within()` to avoid `getByText` failing on multiple matches
+- **Stats card counts**: Use `within(card)` scoping to check stat values, since count numbers like "1" or "2" may appear multiple times on page
+
+---
+
+## 2026-02-15T23:12 - US-001
+Session: 6606318b-4916-45b2-a239-0ad1438f2162
+- Implemented 52 unit tests for AddUserModal.tsx
+- Files changed: `src/app/admin/users/AddUserModal.test.tsx` (new, 755 lines)
+- Test coverage areas: create/edit mode rendering, level-based UI visibility (levels 1-4), debounced school search with fake timers, region selection, program ID validation (NVS-only warning, no-programs error), form submission (POST create / PATCH edit), error handling (API error, network error, non-Error thrown), close/cancel behavior, read-only toggle
+- **Learnings for future iterations:**
+  - The PRD acceptance criteria listed incorrect props (`isOpen`, `editUser`, `currentUserEmail`) — always read the actual source component before writing tests
+  - `input[type="email"]` is not accessible by role+name in jsdom because the `<label>` lacks `htmlFor`/`id` pairing — use `document.querySelector` instead
+  - `vi.useFakeTimers({ shouldAdvanceTime: true })` is essential for debounce-within-useEffect testing, combined with `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })`
+  - The build (`npm run build`) has a pre-existing TS error in `e2e/helpers/db.ts:152` — this is NOT caused by unit test work
+---
+
+## 2026-02-15T23:15 - US-002
+Session: 954bc1e7-5d57-458b-b0d3-080836a54cbf
+- Implemented 26 unit tests for BatchList.tsx
+- Files changed: `src/app/admin/batches/BatchList.test.tsx` (new, 482 lines)
+- Test coverage areas: initial rendering (program selector, batch names/IDs, stream/grade labels, "Not set" badges, Edit buttons), empty state, program change (fetch new batches, loading state, fetch failure, network error), edit mode (enter, pre-fill stream/grade, defaults for null metadata, cancel), save edit (successful save, partial metadata, saving state, server error with message, generic error, network error, error clearing on re-edit), unknown stream fallback
+- **Learnings for future iterations:**
+  - BatchList props are `{ initialBatches, programs, initialProgramId }` — NOT `{ initialBatches, dbServiceUrl, dbServiceToken }` as PRD stated
+  - When a component has multiple `<select>` elements, use `screen.getAllByRole("combobox")` and index into the array to target specific ones
+  - For testing stream/grade labels with conditional styling, check both the labeled case (e.g., "Engineering") and the fallback case (unknown stream shows raw value)
+---
+
+## 2026-02-15T23:18 - US-003
+Session: 97a2666f-4ba9-40a8-a434-2350323fa6a2
+- Implemented 30 unit tests for SchoolList.tsx
+- Files changed: `src/app/admin/schools/SchoolList.test.tsx` (new, 546 lines)
+- Test coverage areas: rendering (school names, codes, regions, program badges, empty region dash, 'No programs' text, Edit buttons), stats display (CoE/Nodal/NVS/None counts with `within()` scoping), search by name (case-insensitive) and code, program filter dropdown (CoE/NVS/All), showing count updates, empty state, edit modal (open with school info, pre-selected programs, null program_ids, toggle checkboxes, close via Cancel/backdrop/X button), save (PATCH fetch with correct payload, Saving... state, server error message, generic error fallback, network error, non-Error thrown, error clearing on re-open), unknown program ID fallback
+- **Learnings for future iterations:**
+  - SchoolList props are `{ initialSchools }` — NOT `{ schools }` as PRD stated
+  - When modal shows the same school name that's already in the table, `getByText()` will fail with multiple matches — use `getAllByText()` and check length instead
+  - For stats cards with numeric counts, use `within(card)` scoping since values like "1" and "2" appear in multiple places on the page
+  - Backdrop click test: query the backdrop div via `document.querySelector(".bg-opacity-30")` since it has no accessible role
+---
