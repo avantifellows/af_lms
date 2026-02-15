@@ -257,4 +257,135 @@ describe("NewVisitForm", () => {
     const codeInput = screen.getByDisplayValue("12345678");
     expect(codeInput).toBeDisabled();
   });
+
+  it("Cancel button during acquiring transitions to idle state", async () => {
+    const user = userEvent.setup();
+    const mockCancel = vi.fn();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: new Promise(() => {}),
+      cancel: mockCancel,
+    });
+
+    render(<NewVisitForm udise="12345678" />);
+
+    expect(screen.getByText("Getting your location...")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mockCancel).toHaveBeenCalled();
+    expect(screen.getByText("Tap to get location")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Getting your location...")
+    ).not.toBeInTheDocument();
+  });
+
+  it("Tap to get location re-acquires GPS from idle state", async () => {
+    const user = userEvent.setup();
+    const mockCancel = vi.fn();
+    // First call: stays pending (acquiring), user will cancel
+    mockGetAccurateLocation.mockReturnValueOnce({
+      promise: new Promise(() => {}),
+      cancel: mockCancel,
+    });
+
+    render(<NewVisitForm udise="12345678" />);
+
+    // Cancel to go idle
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("Tap to get location")).toBeInTheDocument();
+
+    // Second call: resolves with location
+    mockGetAccurateLocation.mockReturnValueOnce({
+      promise: Promise.resolve({ lat: 28.7, lng: 77.1, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    await user.click(screen.getByText("Tap to get location"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Location acquired")).toBeInTheDocument();
+    });
+  });
+
+  it("shows moderate accuracy warning when accuracy is not good", async () => {
+    mockGetAccuracyStatus.mockReturnValue("moderate");
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 28.7, lng: 77.1, accuracy: 250 }),
+      cancel: vi.fn(),
+    });
+
+    render(<NewVisitForm udise="12345678" />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Location acquired (moderate accuracy)")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Accuracy: ~250m/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Reading accepted, but may be imprecise/)
+    ).toBeInTheDocument();
+  });
+
+  it("shows fallback error when API response has no error field", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 28.7, lng: 77.1, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({}),
+        })
+      ) as any
+    );
+
+    render(<NewVisitForm udise="12345678" />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Start Visit" })
+      ).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Start Visit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Failed to create visit")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows generic error when non-Error is thrown during submit", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 28.7, lng: 77.1, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject("network down")) as any
+    );
+
+    render(<NewVisitForm udise="12345678" />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Start Visit" })
+      ).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Start Visit" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("An error occurred")).toBeInTheDocument();
+    });
+  });
 });
