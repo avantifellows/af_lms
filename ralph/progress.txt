@@ -512,3 +512,16 @@ Session: 9534b55c-24ba-4268-94c4-b75fc50f10c5
   - Only `src/proxy.ts` (0% lines) and `src/lib/constants.ts` (0% lines) remain at 0% coverage — Phase 6 targets
   - Coverage ceiling is very high (98.72%) — remaining uncovered lines are mostly defensive guards, V8 short-circuit branches, and unreachable code paths
 ---
+
+## 2026-02-16T01:17 - US-039
+Session: 19492475-e6a6-43ac-8992-32fe81263bb3
+- Implemented 7 unit tests for proxy.ts (middleware)
+- Files changed: `src/proxy.test.ts` (new, 102 lines)
+- Test coverage areas: public route passthrough (unauthenticated login page, unauthenticated /api/auth/*), authenticated login page → redirect to /dashboard, protected route without token → redirect to /, protected route with token → next() (dashboard and school routes), config matcher export
+- All 1012 tests pass across 63 files
+- **Learnings for future iterations:**
+  - Middleware testing uses plain objects as request mocks (`{ nextUrl: { pathname }, url }`) — no need for real NextRequest constructor
+  - Mock `NextResponse.redirect` to return objects with `url` for assertion, and `NextResponse.next` to return objects for equality check
+  - `vi.hoisted()` + `vi.mock("next-auth/jwt")` pattern works for middleware just like API routes
+  - The `proxy` function (not `middleware`) is the export name — PRD acceptance criteria correctly noted to check the export name
+---

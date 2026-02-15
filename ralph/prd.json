@@ -663,8 +663,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 39,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "7 tests added. Covers: public route passthrough (unauthenticated login page → next(), unauthenticated /api/auth/* → next()), authenticated login page redirect to /dashboard, protected route without token → redirect to /, protected route with token → next() (dashboard and school routes), config matcher export verification. Mocks: next-auth/jwt (getToken), next/server (NextResponse.redirect/next). All 1012 tests pass across 63 files."
     },
     {
       "id": "US-040",
