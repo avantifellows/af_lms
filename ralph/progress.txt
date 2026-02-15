@@ -19,6 +19,7 @@ Started: Sun Feb 15 23:07:30 IST 2026
 - **Duplicate count badges**: When selecting topics changes a count badge and another chapter has the same count text, use `getAllByText()` and check `className` to distinguish blue (selected) vs gray (total) badges
 - **React 19 use(params) in client components**: Wrap component in `<Suspense>` and use `await act(async () => { render(...) })` to let the Promise resolve before assertions
 - **Server component test pattern**: Use `vi.hoisted()` for mock variables referenced in `vi.mock()` factories. Redirect sentinel: `mockRedirect = vi.fn((url) => { throw new Error('REDIRECT:' + url); })`. Test redirects: `await expect(Page()).rejects.toThrow("REDIRECT:/")`. Test rendering: `const jsx = await Page(); render(jsx);`. Mock `next/link` as `<a>` stub. Mock `next-auth`, `@/lib/auth`, `next/navigation`, and permission functions.
+- **Top-level env vars**: Pages that use `const X = process.env.X` at module top-level capture env vars at import time. Since `vi.mock()` is hoisted above `process.env` assignments, use pattern-matching (`expect(url).toContain(...)`) for fetch URL assertions instead of exact URL matching.
 
 ---
 
@@ -215,4 +216,16 @@ Session: 3a5f2afd-6a48-43f4-a82f-4de5211bdf8b
   - Server component pattern confirmed: call `Page()` as async function, `redirect` throws sentinel error caught by `rejects.toThrow()`, success case uses `const jsx = await Page(); render(jsx)`
   - Mock `next/link` as simple `<a href={href}>{children}</a>` stub — no need for complex mock
   - This pattern scales directly to more complex server pages (US-017 through US-025)
+---
+
+## 2026-02-16T00:02 - US-017
+Session: 73983afb-ac9e-489d-8c2c-95c073f789de
+- Implemented 5 unit tests for admin/batches/page.tsx (server component)
+- Files changed: `src/app/admin/batches/page.test.tsx` (new, 156 lines)
+- Test coverage areas: no session → redirect /, no email → redirect /, not admin → redirect /dashboard, admin → renders header + BatchList with fetched batches (verified props: initialBatches, programs, initialProgramId) + fetch URL/options, fetch failure → empty batches array
+- All 830 tests pass across 54 files (825 previous + 5 new)
+- **Learnings for future iterations:**
+  - Pages with top-level `const DB_SERVICE_URL = process.env.DB_SERVICE_URL` capture env vars at module import time. Since `vi.mock()` is hoisted above `process.env` assignments, the captured values are `undefined`. Use `expect(url).toContain("/batch?program_id=64")` instead of exact URL matching.
+  - Mock `./BatchList` as stub with `data-testid` + `data-props={JSON.stringify(props)}` to verify parent passes correct props without rendering child complexity
+  - The `getPrograms()` function returns a hardcoded array `[{ id: 64, name: "JNV NVS" }]` — no fetch needed for programs
 ---

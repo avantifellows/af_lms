@@ -295,8 +295,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "5 tests added. Covers: no session redirect, no email redirect, not admin redirect, admin renders BatchList with fetched batches (header, nav, props verification, fetch URL/options), empty batches on fetch failure. Env vars captured at module load time — use pattern-matching for fetch URL assertion. All 830 tests pass across 54 files."
     },
     {
       "id": "US-018",
