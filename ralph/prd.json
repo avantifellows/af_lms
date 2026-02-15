@@ -439,8 +439,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 25,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "3 tests added. Covers: rendering children inside Providers (RTL render with mock Providers stub), JSX tree inspection for font variables (--font-geist-sans, --font-geist-mono) and antialiased class on body + lang='en' and suppressHydrationWarning on html (via direct function call since jsdom flattens nested html/body), metadata export (title, description). Mocks: next/font/google (Geist, Geist_Mono return variable property), ./globals.css (empty), @/components/Providers (passthrough div with data-testid)."
     },
     {
       "id": "US-026",

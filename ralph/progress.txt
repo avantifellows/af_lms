@@ -320,3 +320,16 @@ Session: 4a3af1fa-7222-456f-8d0a-dc647d57a7df
   - `getDistinctNVSStreams` filters out batches with null/undefined stream metadata and returns sorted unique streams — test with mixed metadata (some null, some with stream)
   - For query verification, use `.find()` on `mockQuery.mock.calls` with SQL string matching (e.g., `call[0].includes("FROM batch b")`) since Promise.all makes call order non-deterministic
 ---
+
+## 2026-02-16T00:33 - US-025
+Session: 3d2cf571-0eb8-4e10-8b88-d040f3dfd904
+- Implemented 3 unit tests for layout.tsx (root layout server component)
+- Files changed: `src/app/layout.test.tsx` (new, 58 lines)
+- Test coverage areas: rendering children inside Providers (RTL render), JSX tree inspection for font variables and antialiased class on body + html attributes (direct function call), metadata export verification
+- All 971 tests pass across 62 files (968 previous + 3 new)
+- **Learnings for future iterations:**
+  - jsdom flattens nested `<html>` and `<body>` elements when rendered via RTL — they already exist in the document. To test attributes on these elements, call the component function directly and inspect the JSX tree (`jsx.props.lang`, `jsx.props.children.props.className`) instead of using RTL render
+  - `next/font/google` must be mocked to return objects with `variable` property: `Geist: () => ({ variable: "--font-geist-sans" })`
+  - CSS imports (`./globals.css`) must be mocked as empty objects to prevent parse errors
+  - Layout is the simplest server component to test — no auth, no DB, just rendering + metadata export
+---
