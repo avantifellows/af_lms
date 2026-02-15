@@ -473,3 +473,16 @@ Session: aa8aec90-19b1-46d2-bac6-c4fd225d26f1
   - The moderate accuracy branch (line 53-57) renders a yellow warning AND changes button text to "Ending visit..." — both are visible only during the submitting state before fetch resolves
   - Pre-existing lint `any` errors should always be fixed when touching a test file — use `unknown` type + `as unknown as typeof X` pattern for mock functions
 ---
+
+## 2026-02-16T01:10 - US-036
+Session: f4039aed-b6c1-4aa0-a45d-24da0bac0662
+- Closed coverage gaps in src/lib/geolocation.ts — added 3 tests (18 total)
+- Files changed: `src/lib/geolocation.test.ts` (modified, +75 lines)
+- Tests added: watchPosition TIMEOUT error (code 3) ignored by switch case — outer setTimeout resolves with best reading, 127.0.0.1 as secure origin (branch on line 28), double-settle prevention (cancel after resolve is no-op — settled guard line 79)
+- File now at 100% line coverage, 94.87% branch coverage (remaining: line 25 `typeof window === "undefined"` untestable in jsdom, line 69 cleanup guard false branch)
+- All 1004 tests pass across 62 files
+- **Learnings for future iterations:**
+  - The `case error.TIMEOUT: break;` in watchPosition error callback (line 143-145) deliberately does nothing — the outer `setTimeout` handles the timeout fallback. Test by firing both a success callback (to set bestReading) AND a TIMEOUT error, then advancing the timer to verify the outer timeout still resolves.
+  - `isSecureOrigin()` line 25 checks `typeof window === "undefined"` for SSR — this branch is unreachable in jsdom since `window` is always defined. Similarly, cleanup guard false branches (timeoutId/watchId already null) are V8 internal branch tracking.
+  - Branch coverage ceilings exist due to V8 counting short-circuit and null-check false branches — 94.87% is the practical maximum for this file.
+---
