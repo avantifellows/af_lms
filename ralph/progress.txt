@@ -525,3 +525,15 @@ Session: 19492475-e6a6-43ac-8992-32fe81263bb3
   - `vi.hoisted()` + `vi.mock("next-auth/jwt")` pattern works for middleware just like API routes
   - The `proxy` function (not `middleware`) is the export name — PRD acceptance criteria correctly noted to check the export name
 ---
+
+## 2026-02-16T01:19 - US-040
+Session: 21519b57-32b9-411a-996d-856825fb7955
+- Implemented 1 unit test for constants.ts
+- Files changed: `src/lib/constants.test.ts` (new, 8 lines)
+- Tests added: JNV_NVS_PROGRAM_ID === 64
+- File now at 100% coverage
+- All 1013 tests pass across 64 files
+- **Learnings for future iterations:**
+  - Simplest possible test file — no mocks, no setup, just a single assertion on a constant export
+  - Gap-closing for constants files is trivial — just import and assert
+---
