@@ -43,7 +43,8 @@ src/
 └── lib/
     ├── auth.ts             # NextAuth configuration
     ├── db.ts               # PostgreSQL connection pool
-    └── permissions.ts      # Access control (hardcoded)
+    ├── permissions.ts      # Access control (hardcoded)
+    └── *.test.ts           # Colocated unit tests (Vitest)
 
 e2e/                        # Playwright E2E tests
 ├── fixtures/
