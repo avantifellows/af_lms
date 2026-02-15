@@ -347,8 +347,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "5 tests added. Covers: no session redirect, no email redirect, no visit edit access redirect, no school access redirect to /school/{udise}, all checks pass renders NewVisitForm with correct udise prop. Uses server component pattern from US-016. All 845 tests pass across 57 files."
     },
     {
       "id": "US-021",

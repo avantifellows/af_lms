@@ -253,3 +253,16 @@ Session: 7d911665-45de-4fa5-9804-8b80af83135d
   - The page maps `regions.map(r => r.region)` before passing to UserList — verify the mapped string array, not the raw Region objects
   - Follows exact same pattern as admin/schools/page.tsx but with two queries instead of one
 ---
+
+## 2026-02-16T00:10 - US-020
+Session: cf5e73ae-a9be-4c04-8c9e-a7102ac8bd78
+- Implemented 5 unit tests for school/[udise]/visit/new/page.tsx (server component)
+- Files changed: `src/app/school/[udise]/visit/new/page.test.tsx` (new, 120 lines)
+- Test coverage areas: no session → redirect /, no email → redirect /, no visit edit access (canEdit=false) → redirect /, no school access → redirect /school/{udise}, all checks pass → renders NewVisitForm with correct udise prop
+- All 845 tests pass across 57 files (840 previous + 5 new)
+- **Learnings for future iterations:**
+  - This page uses three permission functions (getUserPermission, getFeatureAccess, canAccessSchool) — mock all three separately in vi.hoisted()
+  - getFeatureAccess is sync (not async) — use mockReturnValue not mockResolvedValue
+  - The redirect for no school access uses the udise param (`/school/${udise}`) — test with a different udise than the auth tests to verify param propagation
+  - Simplest visit-related server page — good stepping stone before visits/page.tsx and visits/[id]/page.tsx
+---
