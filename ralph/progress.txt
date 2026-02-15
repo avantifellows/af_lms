@@ -150,3 +150,16 @@ Session: 8f3f5fa6-cedc-44eb-8495-49ca4be488a6
   - All 6 branches are driven by a single boolean prop `isCompleted` — just need two render scenarios
   - Use `container.querySelector("span.bg-green-500")` to target Tailwind-styled elements without accessible roles
 ---
+
+## 2026-02-15T23:45 - US-012
+Session: 8abc77e4-1854-4ad0-a4dc-47b3ac09ec11
+- Verified Phase 2 coverage: all 781 tests pass across 50 test files
+- Coverage results: 81.84% lines (target >= 80%), 81.69% statements, 78.01% branches, 79.85% functions
+- Baseline was 73.99% lines (Phase 1) — Phase 2 added ~8% coverage from 6 curriculum component test files
+- Files committed: `unit-coverage/coverage-summary.json`
+- Lint: all 6 curriculum test files pass lint individually
+- Build: pre-existing type error in `e2e/helpers/db.ts:152` still present (not related to unit tests)
+- **Learnings for future iterations:**
+  - Verification stories are quick — just run coverage, check threshold, lint test files, commit summary
+  - Coverage jumped from 0% to ~97-100% on all 6 curriculum components (ChapterAccordion, CurriculumTab, LogSessionModal, ProgressSummary, SessionHistory, TopicRow)
+---
