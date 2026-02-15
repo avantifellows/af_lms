@@ -312,8 +312,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "5 tests added. Covers: no session redirect, no email redirect, not admin redirect, admin renders SchoolList with queried JNV schools (header, school count, email, sign out link, props verification, query SQL assertion), empty schools array. Uses query mock from @/lib/db. All 835 tests pass across 55 files."
     },
     {
       "id": "US-019",

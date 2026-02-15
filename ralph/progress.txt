@@ -229,3 +229,15 @@ Session: 73983afb-ac9e-489d-8c2c-95c073f789de
   - Mock `./BatchList` as stub with `data-testid` + `data-props={JSON.stringify(props)}` to verify parent passes correct props without rendering child complexity
   - The `getPrograms()` function returns a hardcoded array `[{ id: 64, name: "JNV NVS" }]` — no fetch needed for programs
 ---
+
+## 2026-02-16T00:04 - US-018
+Session: a017608a-dc0c-4a3a-8902-f1bc5f4f2462
+- Implemented 5 unit tests for admin/schools/page.tsx (server component)
+- Files changed: `src/app/admin/schools/page.test.tsx` (new, 127 lines)
+- Test coverage areas: no session → redirect /, no email → redirect /, not admin → redirect /dashboard, admin → renders header + SchoolList with queried JNV schools (school count, email, sign out link, initialSchools props, SQL query assertions for af_school_category='JNV' and ORDER BY name), empty schools array (0 count)
+- All 835 tests pass across 55 files (830 previous + 5 new)
+- **Learnings for future iterations:**
+  - admin/schools/page.tsx uses `query` from `@/lib/db` instead of `fetch` — mock `@/lib/db` with `mockQuery` instead of `vi.stubGlobal("fetch", ...)`
+  - The page's `getSchools()` function does a simple SQL query with WHERE `af_school_category = 'JNV'` and `ORDER BY name` — can assert on the SQL string via `mockQuery.mock.calls[0][0]`
+  - Simplest server page pattern: auth checks → query → render child component with data
+---
