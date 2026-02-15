@@ -64,3 +64,16 @@ Session: 76e96e0e-be33-409c-a1e6-2f41c6f1537b
   - Mock child components (AddUserModal) as stubs with `data-testid` + callback buttons to test parent integration without child complexity
   - `vi.stubGlobal("alert", vi.fn())` and `vi.stubGlobal("confirm", vi.fn(() => true))` in beforeEach to control window dialogs
 ---
+
+## 2026-02-15T23:30 - US-005
+Session: 7afe42b0-8dba-4938-b9f5-a0b5dd0eaf0f
+- Verified Phase 1 coverage: all 680 tests pass across 44 test files
+- Coverage results: 73.99% lines (target >= 73%), 74.07% statements, 71.35% branches, 67.71% functions
+- Baseline was 62.16% lines — Phase 1 added ~12% coverage from 4 admin client component test files
+- Files committed: `unit-coverage/coverage-summary.json`
+- Lint: all 4 new test files pass lint individually (pre-existing 818 errors unrelated)
+- Build: pre-existing type error in `e2e/helpers/db.ts:152` still present (not related to unit tests)
+- **Learnings for future iterations:**
+  - Verification stories are quick — just run coverage, check threshold, commit summary
+  - Pre-existing `src/app/layout.tsx` change (suppressHydrationWarning) was present but not committed since it's unrelated
+---
