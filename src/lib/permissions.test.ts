@@ -406,6 +406,30 @@ describe("canAccessSchool", () => {
     const result = await canAccessSchool("t@af.org", "99999");
     expect(result).toBe(false);
   });
+
+  it("returns false for level 1 with null school_codes", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { email: "t@af.org", level: 1, role: "teacher", school_codes: null, regions: null, program_ids: null, read_only: false },
+    ]);
+    const result = await canAccessSchool("t@af.org", "70705");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for level 2 with null regions", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { email: "pm@af.org", level: 2, role: "program_manager", school_codes: null, regions: null, program_ids: null, read_only: false },
+    ]);
+    const result = await canAccessSchool("pm@af.org", "12345", "West");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for unexpected permission level (default case)", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { email: "t@af.org", level: 99, role: "teacher", school_codes: null, regions: null, program_ids: null, read_only: false },
+    ]);
+    const result = await canAccessSchool("t@af.org", "70705");
+    expect(result).toBe(false);
+  });
 });
 
 describe("getAccessibleSchoolCodes", () => {
@@ -449,6 +473,18 @@ describe("getAccessibleSchoolCodes", () => {
 
   it("returns empty array for null permission", async () => {
     const result = await getAccessibleSchoolCodes("unknown@af.org", null);
+    expect(result).toEqual([]);
+  });
+
+  it("returns empty array for level 2 with null regions", async () => {
+    const perm = makePermission({ level: 2, regions: null });
+    const result = await getAccessibleSchoolCodes("pm@af.org", perm);
+    expect(result).toEqual([]);
+  });
+
+  it("returns empty array for level 2 with empty regions", async () => {
+    const perm = makePermission({ level: 2, regions: [] });
+    const result = await getAccessibleSchoolCodes("pm@af.org", perm);
     expect(result).toEqual([]);
   });
 
