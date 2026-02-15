@@ -364,8 +364,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "9 tests added. Covers: no session redirect, no email redirect, no visits canView redirect to /dashboard, in-progress visits with Continue links, completed visits with View links, both sections together, empty state with dashboard link, school_name fallback to school_code, SQL query verification (pm_email param). Uses server component pattern from US-016. All 854 tests pass across 58 files."
     },
     {
       "id": "US-022",

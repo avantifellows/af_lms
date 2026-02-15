@@ -266,3 +266,15 @@ Session: cf5e73ae-a9be-4c04-8c9e-a7102ac8bd78
   - The redirect for no school access uses the udise param (`/school/${udise}`) — test with a different udise than the auth tests to verify param propagation
   - Simplest visit-related server page — good stepping stone before visits/page.tsx and visits/[id]/page.tsx
 ---
+
+## 2026-02-16T00:13 - US-021
+Session: 63b7fb2b-6197-4e8f-b9f8-bf613154530f
+- Implemented 9 unit tests for visits/page.tsx (server component)
+- Files changed: `src/app/visits/page.test.tsx` (new, 214 lines)
+- Test coverage areas: no session → redirect /, no email → redirect /, no visits canView → redirect /dashboard, in-progress visits with Continue links (school name, code, date, link href), completed visits with View links (section heading, school info, link href, no In Progress section), both sections together (counts, headings, school names, actions), empty state (no visits message, dashboard link, no section headings), school_name fallback to school_code when null, SQL query verification (lms_pm_school_visits, pm_email=$1 param)
+- All 854 tests pass across 58 files (845 previous + 9 new)
+- **Learnings for future iterations:**
+  - The "Completed" text appears both as an `<h2>` section heading and a `<th>` table column header — use `getByRole("heading", { name: "Completed" })` to target the section heading specifically
+  - visits/page.tsx is a straightforward server page: auth checks → DB query → filter by status → conditional rendering of sections
+  - The page derives `inProgress` and `completed` arrays from a single query result, then conditionally renders sections based on `.length > 0` — test each combination (only in-progress, only completed, both, neither)
+---
