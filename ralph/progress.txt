@@ -403,3 +403,18 @@ Session: e4c9b16c-053c-4a4e-acd3-ed9b736a116b
   - Remaining uncovered branches (96.42%) are nullish coalescing and optional chaining operators (`?.` and `??`) on lines 74, 210, 225 — these are V8's branch counting for short-circuit operators, not meaningful logic gaps
   - Gap-closing stories for well-tested files are quick — identify uncovered lines via coverage, write targeted tests, verify
 ---
+
+## 2026-02-16T00:55 - US-031
+Session: 5252a427-542a-4ab1-bcad-00faa6e7968d
+- Closed coverage gaps in src/components/visits/NewVisitForm.tsx — added 5 tests (16 total)
+- Files changed: `src/components/visits/NewVisitForm.test.tsx` (modified, +131 lines)
+- Tests added: Cancel button during acquiring → idle state (lines 130-131), re-acquire from idle via 'Tap to get location', moderate accuracy display (yellow styling + imprecise warning), API error without .error field → 'Failed to create visit' fallback, non-Error thrown in catch → 'An error occurred'
+- File now at 100% line coverage, 100% function coverage, 97.14% statements, 97.22% branches
+- Remaining uncovered: line 55 (defensive early return `if (gpsState.status !== "acquired") return;` — unreachable since button is disabled in non-acquired states)
+- All 991 tests pass across 62 files
+- **Learnings for future iterations:**
+  - NewVisitForm uses a ref-based cancel pattern (`cancelRef.current?.()`) — the Cancel button during acquiring calls this and transitions to idle. Test by clicking Cancel and asserting "Tap to get location" appears
+  - The idle → re-acquire flow requires two mock setups: first `mockReturnValueOnce` (pending, for initial mount), cancel to idle, then `mockReturnValueOnce` (resolves, for re-acquire click)
+  - `getAccuracyStatus` returns "good" or "moderate" — mock to return "moderate" to cover the yellow-styled alternative branch (lines 143-168)
+  - Line 55 (`if (gpsState.status !== "acquired") return;`) is unreachable from UI because the Start Visit button is `disabled={gpsState.status !== "acquired"}` — defensive guard that can't be triggered
+---
