@@ -486,8 +486,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 28,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "2 tests added (17 total). Updated recharts mocks to render children and invoke callback props (label, formatter) so V8 covers lines 190/223. Added: network failure test (fetch throws), missing message fallback test (empty response body). File reaches 97.61% line coverage (only line 51 — unreachable defensive guard in fetchAnalytics — remains uncovered). Branch coverage: 97.36%. Function coverage: 100%."
     },
     {
       "id": "US-029",

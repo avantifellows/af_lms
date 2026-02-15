@@ -21,6 +21,7 @@ Started: Sun Feb 15 23:07:30 IST 2026
 - **Server component test pattern**: Use `vi.hoisted()` for mock variables referenced in `vi.mock()` factories. Redirect sentinel: `mockRedirect = vi.fn((url) => { throw new Error('REDIRECT:' + url); })`. Test redirects: `await expect(Page()).rejects.toThrow("REDIRECT:/")`. Test rendering: `const jsx = await Page(); render(jsx);`. Mock `next/link` as `<a>` stub. Mock `next-auth`, `@/lib/auth`, `next/navigation`, and permission functions.
 - **Top-level env vars**: Pages that use `const X = process.env.X` at module top-level capture env vars at import time. Since `vi.mock()` is hoisted above `process.env` assignments, use pattern-matching (`expect(url).toContain(...)`) for fetch URL assertions instead of exact URL matching.
 - **resetAllMocks for server pages**: Use `vi.resetAllMocks()` (not `clearAllMocks`) in `beforeEach` for server component tests with `mockResolvedValueOnce()` — `clearAllMocks` does NOT clear pending once-queues, causing mock leakage. After `resetAllMocks`, re-establish sentinel implementations for redirect/notFound.
+- **Recharts mock coverage**: Mock `Bar`/`Pie` to render `{children}` (not `() => null`) so `.map()` Cell callbacks execute. Mock `Tooltip`/`Pie` to invoke callback props (`formatter`, `label`) so those arrow functions get V8 coverage. Use typed interfaces (`type P = { children?: React.ReactNode }`) to avoid lint `any` errors.
 
 ---
 
@@ -359,4 +360,18 @@ Session: d5bb87e3-2698-41a0-aeec-16e2ab669aee
   - Uncovered lines 37, 65-67, 130-132 were: empty ID guard, student PATCH failure error extraction, batch PATCH failure error extraction
   - The existing "mixed success/failure" test only covered grade failure (lines 97-99), not student or batch failure paths — each error path in sequential fetch chains needs its own test
   - When only errors exist (no results), the route returns 400; when mixed results+errors, it returns 200 with warnings — two different response shapes to test
+---
+
+## 2026-02-16T00:43 - US-028
+Session: a938821c-5fe1-471c-8c34-61b063c42009
+- Closed coverage gaps in src/components/QuizAnalyticsSection.tsx — added 2 tests (17 total), updated recharts mocks
+- Files changed: `src/components/QuizAnalyticsSection.test.tsx` (modified, +56/-13 lines)
+- Tests added: network failure (fetch throws) → "Failed to load quiz analytics", missing message fallback (empty response body without message field) → "No data available"
+- Mock changes: updated `Bar` and `Pie` mocks to render children (covering Cell .map() callbacks), `Tooltip` mock invokes formatter prop, `Pie` mock invokes label prop
+- File now at 97.61% line coverage (only line 51 — unreachable defensive guard — remains), 97.36% branches, 100% functions
+- All 976 tests pass across 62 files
+- **Learnings for future iterations:**
+  - When recharts components (Pie, Bar, Tooltip) have callback props (label, formatter) or children with .map() calls, V8 won't cover those lines if the mock returns `null`. Change mocks to render `{children}` and invoke callback props to cover those function expressions.
+  - Line 51 (`return;` in `fetchAnalytics` for `!session.session_id`) is unreachable from the UI because `handleSessionSelect` filters via `validSessions.find()`, which only contains sessions WITH session_id. This defensive guard can never be triggered through the component's public API.
+  - Use typed mock interfaces (`type P = { children?: React.ReactNode }`) instead of `any` to avoid lint errors in vi.mock() factories
 ---
