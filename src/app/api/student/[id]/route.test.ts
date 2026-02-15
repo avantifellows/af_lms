@@ -129,6 +129,50 @@ describe("PATCH /api/student/[id]", () => {
     expect(json.warnings[0]).toContain("Failed to update grade");
   });
 
+  it("returns 400 when id param is empty", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    const req = jsonRequest("http://localhost/api/student/", {
+      method: "PATCH",
+      body: { first_name: "Jane" },
+    });
+    const res = await PATCH(req as never, routeParams({ id: "" }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("Student ID is required");
+  });
+
+  it("returns 400 when student update fails with no other successes", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(new Response("Student not found", { status: 404 }));
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { first_name: "Jane" },
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Failed to update student: Student not found");
+  });
+
+  it("returns partial results with warnings when batch update fails", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ s: true }), { status: 200 }))  // student ok
+      .mockResolvedValueOnce(new Response("Batch error", { status: 500 }));  // batch fails
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { first_name: "Jane", batch_group_id: "bg1", user_id: "u1" },
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.student).toBeDefined();
+    expect(json.warnings).toBeDefined();
+    expect(json.warnings[0]).toContain("Failed to update batch: Batch error");
+  });
+
   it("returns 500 on fetch exception", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockFetch.mockRejectedValue(new Error("network error"));
