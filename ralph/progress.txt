@@ -375,3 +375,18 @@ Session: a938821c-5fe1-471c-8c34-61b063c42009
   - Line 51 (`return;` in `fetchAnalytics` for `!session.session_id`) is unreachable from the UI because `handleSessionSelect` filters via `validSessions.find()`, which only contains sessions WITH session_id. This defensive guard can never be triggered through the component's public API.
   - Use typed mock interfaces (`type P = { children?: React.ReactNode }`) instead of `any` to avoid lint errors in vi.mock() factories
 ---
+
+## 2026-02-16T00:48 - US-029
+Session: 8e532859-02f3-4635-b180-b22de85e3295
+- Closed coverage gaps in src/components/StudentTable.tsx — added 5 tests (56 total)
+- Files changed: `src/components/StudentTable.test.tsx` (modified, +140 lines)
+- Tests added: dropout modal date/academic year input changes (covers onChange lines 290, 301), submit with changed academic year, getCurrentAcademicYear April+ branch (line 76 via fake timers June 2026), non-Error thrown in dropout catch (generic error), API error without message field (fallback message)
+- File now at 100% line coverage, 100% function coverage, 98.85% statements, 97.08% branches
+- Remaining uncovered: line 225 (isOpen guard — unreachable), lines 450-451 ("No dropout students" — unreachable since tabs only render when dropoutStudents.length > 0)
+- All 981 tests pass across 62 files
+- **Learnings for future iterations:**
+  - DropoutModal's `<label>` elements lack `htmlFor`/`id` association — same pattern as other inputs in codebase, use `document.querySelector('input[type="date"]')` or `input[placeholder="..."]` selectors
+  - `getCurrentAcademicYear()` is only called when DropoutModal renders (useState initializer). To cover the April+ branch (line 76), use `vi.useFakeTimers({ shouldAdvanceTime: true })` + `vi.setSystemTime(new Date(2026, 5, 15))` before rendering, then open the dropout modal and check the academic year input value
+  - Some code paths are unreachable from the component's public API (e.g., `isOpen=false` when parent only renders component when truthy, empty dropout tab when tabs only show when non-empty). These are defensive guards that can't be tested without bypassing the parent's render logic
+  - For non-Error thrown in catch blocks, use `vi.fn().mockImplementation(() => { throw "string" })` (synchronous throw) rather than `mockRejectedValueOnce("string")` — the latter creates a rejected promise which may cause timing issues with `vi.waitFor`
+---

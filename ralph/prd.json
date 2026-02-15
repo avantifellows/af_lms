@@ -502,8 +502,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 29,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "5 tests added (56 total). Covers: dropout modal date input change (onChange line 290), academic year input change (onChange line 301), submit with changed academic year, getCurrentAcademicYear April+ branch (line 76 via fake timers set to June), non-Error thrown in dropout catch (generic 'An error occurred'), API error without message (fallback 'Failed to mark student as dropout'). File now at 100% line coverage, 100% function coverage, 98.85% statements, 97.08% branches. Remaining uncovered: line 225 (isOpen guard unreachable since DropoutModal only rendered when truthy), lines 450-451 ('No dropout students' unreachable since tabs only show when dropoutStudents.length > 0)."
     },
     {
       "id": "US-030",
