@@ -430,3 +430,16 @@ Session: d4513987-61c9-4548-9e49-26f075c0fc6a
   - `extractEnglishName` has 3 fallback paths: (1) non-array parsed data → line 48, (2) JSON.parse failure → line 50, (3) array without matching lang_code or missing field → line 46. The first test already covered path (3) via the normal success path; paths (1) and (2) needed explicit non-array and invalid-JSON inputs
   - For V8 branch coverage, the remaining uncovered branches (91.66%) are likely the `typeof jsonbData === "string"` short-circuit and `english?.[field] ||` operator — hard to push higher without redundant tests
 ---
+
+## 2026-02-16T01:00 - US-033
+Session: 0edaf743-4388-4f9d-91e9-72ef1229e03f
+- Closed coverage gap in src/components/EditStudentModal.tsx — added 1 test (66 total)
+- Files changed: `src/components/EditStudentModal.test.tsx` (modified, +25 lines)
+- Tests added: Date constructor throwing triggers catch block (line 85) in formatDateForInput — mocked globalThis.Date to throw for specific date string
+- File now at 100% line/function/statement coverage, 99.07% branches
+- All 994 tests pass across 62 files
+- **Learnings for future iterations:**
+  - The `catch` block in `formatDateForInput` (line 84-86) is a defensive guard — `new Date(string)` never throws, nor do `getUTCFullYear()` etc. The only way to cover it is to mock `globalThis.Date` to throw for a specific input.
+  - Pattern for mocking Date constructor: create a `MockDate` function that delegates to `OriginalDate` except for the target input, copy static methods (now, parse, UTC) and prototype, then restore in `finally` block.
+  - Remaining uncovered branch (99.07%) is V8 optional chaining operator `?.` on line 190 — not a meaningful logic gap.
+---
