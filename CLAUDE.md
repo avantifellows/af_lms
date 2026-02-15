@@ -112,6 +112,24 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
+### Test files (8 files, 157 tests)
+- `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
+- `src/lib/curriculum-helpers.test.ts` — pure helpers + localStorage functions
+- `src/lib/geo-validation.test.ts` — GPS reading validation
+- `src/lib/geolocation.test.ts` — browser geolocation API (watchPosition/clearWatch mocks, fake timers)
+- `src/lib/school-student-list-data-issues.test.ts` — student deduplication and multi-school detection
+- `src/lib/auth.test.ts` — NextAuth callbacks (authorize, jwt, session)
+- `src/lib/bigquery.test.ts` — BigQuery client init + query functions (singleton reset via vi.resetModules)
+- `src/lib/db.test.ts` — pg Pool query wrapper
+
+### Mocking patterns
+- **DB queries**: `vi.mock("./db")` + `vi.mocked(query)` for return value control per test
+- **Constructors** (pg.Pool, BigQuery): `vi.hoisted()` + `vi.fn(function() { return {...} })` (arrow functions can't be `new`-ed)
+- **Browser APIs**: `vi.stubGlobal("navigator", {...})`, `vi.stubGlobal("localStorage", {...})`
+- **Timers**: `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for timeout-based tests
+- **Singletons**: `vi.resetModules()` + dynamic `import()` in each test to get fresh module instances
+- **NextAuth provider**: access user's authorize via `provider.options.authorize` (not `provider.authorize` which is the default `() => null`)
+
 ## E2E Tests
 
 Tests use Playwright with a local test Postgres DB (`af_lms_test`) loaded from a dump of the dev DB.

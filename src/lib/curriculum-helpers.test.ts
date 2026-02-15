@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   formatDuration,
   formatDate,
@@ -7,6 +7,12 @@ import {
   calculateChapterProgress,
   calculateStats,
   calculateAllProgress,
+  generateSessionId,
+  getTodayDate,
+  loadSessions,
+  saveSessions,
+  loadProgress,
+  saveProgress,
 } from "./curriculum-helpers";
 import type { Chapter, ChapterProgress, TeachingSession } from "@/types/curriculum";
 
@@ -295,5 +301,155 @@ describe("calculateStats", () => {
     expect(stats.chaptersCompleted).toBe(1);
     expect(stats.topicsCovered).toBe(2);
     expect(stats.totalTimeMinutes).toBe(60);
+  });
+});
+
+// --- New tests for localStorage functions and utilities ---
+
+describe("generateSessionId", () => {
+  it("returns a string matching session_* pattern", () => {
+    const id = generateSessionId();
+    expect(id).toMatch(/^session_\d+_[a-z0-9]+$/);
+  });
+
+  it("returns different IDs on successive calls", () => {
+    const id1 = generateSessionId();
+    const id2 = generateSessionId();
+    expect(id1).not.toBe(id2);
+  });
+});
+
+describe("getTodayDate", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns YYYY-MM-DD format", () => {
+    const result = getTodayDate();
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("returns correct date for a mocked time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-06-15T10:00:00Z"));
+    expect(getTodayDate()).toBe("2025-06-15");
+  });
+});
+
+describe("loadSessions", () => {
+  let mockGetItem: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockGetItem = vi.fn();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("localStorage", { getItem: mockGetItem, setItem: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns empty array when no stored data", () => {
+    mockGetItem.mockReturnValue(null);
+    expect(loadSessions("70705")).toEqual([]);
+  });
+
+  it("returns parsed sessions from valid JSON", () => {
+    const sessions = [{ id: "s1", topicIds: [1], durationMinutes: 30, date: "2025-01-01", topics: [] }];
+    mockGetItem.mockReturnValue(JSON.stringify(sessions));
+    expect(loadSessions("70705")).toEqual(sessions);
+  });
+
+  it("returns empty array for invalid JSON", () => {
+    mockGetItem.mockReturnValue("not-json{{{");
+    expect(loadSessions("70705")).toEqual([]);
+  });
+
+  it("uses correct storage key", () => {
+    mockGetItem.mockReturnValue(null);
+    loadSessions("70705");
+    expect(mockGetItem).toHaveBeenCalledWith("curriculum_sessions_70705");
+  });
+});
+
+describe("saveSessions", () => {
+  let mockSetItem: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockSetItem = vi.fn();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("localStorage", { getItem: vi.fn(), setItem: mockSetItem });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stores JSON at correct key", () => {
+    const sessions = [{ id: "s1" }] as unknown as TeachingSession[];
+    saveSessions("70705", sessions);
+    expect(mockSetItem).toHaveBeenCalledWith(
+      "curriculum_sessions_70705",
+      JSON.stringify(sessions)
+    );
+  });
+});
+
+describe("loadProgress", () => {
+  let mockGetItem: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockGetItem = vi.fn();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("localStorage", { getItem: mockGetItem, setItem: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns empty object when no stored data", () => {
+    mockGetItem.mockReturnValue(null);
+    expect(loadProgress("70705")).toEqual({});
+  });
+
+  it("returns parsed progress from valid JSON", () => {
+    const progress = { "1": { chapterId: 1, completedTopicIds: [10] } };
+    mockGetItem.mockReturnValue(JSON.stringify(progress));
+    expect(loadProgress("70705")).toEqual(progress);
+  });
+
+  it("returns empty object for invalid JSON", () => {
+    mockGetItem.mockReturnValue("bad-json");
+    expect(loadProgress("70705")).toEqual({});
+  });
+
+  it("uses correct storage key", () => {
+    mockGetItem.mockReturnValue(null);
+    loadProgress("70705");
+    expect(mockGetItem).toHaveBeenCalledWith("curriculum_progress_70705");
+  });
+});
+
+describe("saveProgress", () => {
+  let mockSetItem: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockSetItem = vi.fn();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("localStorage", { getItem: vi.fn(), setItem: mockSetItem });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stores JSON at correct key", () => {
+    const progress = { 1: { chapterId: 1 } } as unknown as Record<number, ChapterProgress>;
+    saveProgress("70705", progress);
+    expect(mockSetItem).toHaveBeenCalledWith(
+      "curriculum_progress_70705",
+      JSON.stringify(progress)
+    );
   });
 });
