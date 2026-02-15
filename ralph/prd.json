@@ -175,8 +175,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "5 tests added. Props are { chapters, progress }. Covers: chapters completed/total display, topics covered/total display, total time via formatDuration, calculateStats called with correct args, zero stats rendering."
     },
     {
       "id": "US-011",

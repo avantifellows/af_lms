@@ -127,3 +127,14 @@ Session: 05ce34ee-4fa6-448b-ac3a-242e1c501f5b
   - The `formatSessionDate` helper inside the component uses `toLocaleDateString("en-IN")` — test with partial text match (e.g., `/Jan/`) since exact locale output varies by environment
   - Only `formatDuration` from curriculum-helpers needs mocking; `formatSessionDate` is internal to the component
 ---
+
+## 2026-02-15T23:41 - US-010
+Session: 2d0487e0-5f72-446a-b7f7-f69e81d926bd
+- Implemented 5 unit tests for ProgressSummary.tsx
+- Files changed: `src/components/curriculum/ProgressSummary.test.tsx` (new, 77 lines)
+- Test coverage areas: chapters completed/total display, topics covered/total display, total time via formatDuration, calculateStats called with correct args, zero stats rendering
+- **Learnings for future iterations:**
+  - ProgressSummary is the simplest curriculum component — pure presentational, no state, no effects
+  - Mock both `calculateStats` and `formatDuration` from curriculum-helpers, then just assert rendered text
+  - Props match PRD exactly: `{ chapters, progress }`
+---
