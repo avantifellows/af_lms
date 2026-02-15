@@ -9,12 +9,16 @@ Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that al
 ## Development Commands
 
 ```bash
-npm run dev          # Start development server at localhost:3000
-npm run build        # Production build
-npm run lint         # Run ESLint
-npm run start        # Start production server
-npm run test:e2e     # Run Playwright e2e tests (port 3001) + V8 coverage
-npm run test:e2e:ui  # Playwright UI mode for debugging (no coverage)
+npm run dev              # Start development server at localhost:3000
+npm run build            # Production build
+npm run lint             # Run ESLint
+npm run start            # Start production server
+npm run test             # Run unit tests (Vitest)
+npm run test:unit        # Run unit tests (alias)
+npm run test:unit:watch  # Run unit tests in watch mode
+npm run test:unit:coverage # Run unit tests + V8 coverage
+npm run test:e2e         # Run Playwright e2e tests (port 3001) + V8 coverage
+npm run test:e2e:ui      # Playwright UI mode for debugging (no coverage)
 ```
 
 ## Architecture
@@ -24,6 +28,7 @@ npm run test:e2e:ui  # Playwright UI mode for debugging (no coverage)
 - **Auth**: NextAuth.js v4 with Google OAuth + custom passcode provider
 - **Database**: PostgreSQL via `pg` pool
 - **Styling**: Tailwind CSS v4
+- **Unit Tests**: Vitest + V8 coverage
 - **E2E Tests**: Playwright (Chromium) + V8 coverage via monocart-reporter
 
 ### Directory Structure
@@ -87,6 +92,24 @@ DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 NEXTAUTH_SECRET, NEXTAUTH_URL
 ```
+
+## Unit Tests
+
+Unit tests use Vitest with V8 coverage. Test files live alongside source files as `*.test.ts`.
+
+```bash
+npm run test               # Run all unit tests
+npm run test:unit:coverage # Run with V8 coverage report
+```
+
+### Key conventions
+- Test files: `src/**/*.test.ts` (colocated with source)
+- Config: `vitest.config.ts` (path alias `@/*` configured)
+- Coverage output:
+  - `unit-coverage/coverage-summary.json` — **committed** to repo; read by GitHub Actions
+  - `unit-coverage/index.html` — local coverage viewer (gitignored)
+- GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
+- Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
 ## E2E Tests
 
