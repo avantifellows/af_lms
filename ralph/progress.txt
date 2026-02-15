@@ -13,6 +13,8 @@ Started: Sun Feb 15 23:07:30 IST 2026
 - **PRD props often wrong**: Always read actual source component to get real props interface before writing tests
 - **Duplicate text in table+modal**: When a component shows the same text in a table row AND a modal, use `getAllByText()` or scope queries with `within()` to avoid `getByText` failing on multiple matches
 - **Stats card counts**: Use `within(card)` scoping to check stat values, since count numbers like "1" or "2" may appear multiple times on page
+- **Mock child components**: Use `vi.mock("./ChildComponent", ...)` with stub that exposes `data-testid` + callback buttons to test parent integration cleanly
+- **Window dialogs**: `vi.stubGlobal("alert", vi.fn())` + `vi.stubGlobal("confirm", vi.fn(() => true))` in `beforeEach` for components using `alert()`/`confirm()`
 
 ---
 
@@ -49,4 +51,16 @@ Session: 97a2666f-4ba9-40a8-a434-2350323fa6a2
   - When modal shows the same school name that's already in the table, `getByText()` will fail with multiple matches — use `getAllByText()` and check length instead
   - For stats cards with numeric counts, use `within(card)` scoping since values like "1" and "2" appear in multiple places on the page
   - Backdrop click test: query the backdrop div via `document.querySelector(".bg-opacity-30")` since it has no accessible role
+---
+
+## 2026-02-15T23:22 - US-004
+Session: 76e96e0e-be33-409c-a1e6-2f41c6f1537b
+- Implemented 32 unit tests for UserList.tsx
+- Files changed: `src/app/admin/users/UserList.test.tsx` (new, 506 lines)
+- Test coverage areas: rendering (all emails, (you) tag, role/level badges, program badges, No programs, read-only/read-write, access column for all 4 levels, No regions/schools assigned, unknown role/program fallback), Add User modal (create mode open, close, refetch on save, close on failed refetch), Edit modal (edit mode open, close), Delete (disabled for self case-insensitive, confirm dialog, successful removal, Deleting... loading, server error message, fallback error, network error), empty state (header-only table)
+- **Learnings for future iterations:**
+  - UserList props are `{ initialUsers, regions, currentUserEmail }` — matches PRD this time
+  - "Admin" text appears many times (role badge + level badge for multiple users) — use `getAllByText` for shared label strings
+  - Mock child components (AddUserModal) as stubs with `data-testid` + callback buttons to test parent integration without child complexity
+  - `vi.stubGlobal("alert", vi.fn())` and `vi.stubGlobal("confirm", vi.fn(() => true))` in beforeEach to control window dialogs
 ---

@@ -72,8 +72,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "32 tests added. Props are { initialUsers, regions, currentUserEmail }. Covers: rendering (emails, (you) tag, role/level badges, program badges, No programs, read-only/read-write, access column for all levels, fallback for unknown role/program), Add User modal (open in create mode, close, refetch on save, close on failed refetch), Edit modal (open in edit mode, close), Delete (self-delete disabled via case-insensitive check, confirm dialog, successful delete removes from list, Deleting... loading state, server error message, fallback error, network error), empty state."
     },
     {
       "id": "US-005",
