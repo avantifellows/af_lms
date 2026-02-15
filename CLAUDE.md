@@ -112,7 +112,9 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (8 files, 157 tests)
+### Test files (22 files, 301 tests)
+
+**Library tests** (8 files, 157 tests):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
 - `src/lib/curriculum-helpers.test.ts` — pure helpers + localStorage functions
 - `src/lib/geo-validation.test.ts` — GPS reading validation
@@ -122,6 +124,27 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/lib/bigquery.test.ts` — BigQuery client init + query functions (singleton reset via vi.resetModules)
 - `src/lib/db.test.ts` — pg Pool query wrapper
 
+**API route tests** (13 files, 144 tests):
+- `src/app/api/admin/schools/route.test.ts` — GET list/search schools
+- `src/app/api/admin/schools/[code]/route.test.ts` — PATCH update school program_ids
+- `src/app/api/admin/users/route.test.ts` — GET list users, POST create user
+- `src/app/api/admin/users/[id]/route.test.ts` — DELETE/PATCH user management
+- `src/app/api/curriculum/chapters/route.test.ts` — GET chapters with topics (uses NextRequest)
+- `src/app/api/students/search/route.test.ts` — GET student search with school access control
+- `src/app/api/pm/visits/route.test.ts` — GET/POST visits with GPS validation
+- `src/app/api/pm/visits/[id]/route.test.ts` — GET/PATCH/PUT visit details + completion
+- `src/app/api/pm/visits/[id]/end/route.test.ts` — POST end visit with GPS (idempotent)
+- `src/app/api/batches/route.test.ts` — GET batches (DB service proxy)
+- `src/app/api/batches/[id]/route.test.ts` — PATCH batch metadata (DB service proxy)
+- `src/app/api/student/route.test.ts` — POST student update (DB service proxy)
+- `src/app/api/student/[id]/route.test.ts` — PATCH student + grade + batch (multi-fetch)
+- `src/app/api/student/dropout/route.test.ts` — POST mark dropout (DB service proxy)
+- `src/app/api/quiz-analytics/[udise]/route.test.ts` — POST quiz analytics (BigQuery)
+- `src/app/api/quiz-analytics/[udise]/sessions/route.test.ts` — GET quiz sessions (BigQuery)
+
+**Shared test utilities:**
+- `src/app/api/__test-utils__/api-test-helpers.ts` — `jsonRequest()`, `routeParams()`, session constants
+
 ### Mocking patterns
 - **DB queries**: `vi.mock("./db")` + `vi.mocked(query)` for return value control per test
 - **Constructors** (pg.Pool, BigQuery): `vi.hoisted()` + `vi.fn(function() { return {...} })` (arrow functions can't be `new`-ed)
@@ -129,6 +152,9 @@ npm run test:unit:coverage # Run with V8 coverage report
 - **Timers**: `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for timeout-based tests
 - **Singletons**: `vi.resetModules()` + dynamic `import()` in each test to get fresh module instances
 - **NextAuth provider**: access user's authorize via `provider.options.authorize` (not `provider.authorize` which is the default `() => null`)
+- **API route auth**: `vi.mock("next-auth")` + `vi.mock("@/lib/auth", () => ({ authOptions: {} }))` — mock `getServerSession` directly
+- **External fetch**: `vi.stubGlobal("fetch", mockFetch)` for DB service proxy routes — chain with `mockResolvedValueOnce()`
+- **NextRequest**: Use `new NextRequest(new URL(url, "http://localhost"))` for routes that read `request.nextUrl.searchParams`
 
 ## E2E Tests
 
