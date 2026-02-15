@@ -3,19 +3,25 @@ import userEvent from "@testing-library/user-event";
 import type { QuizSummary } from "@/types/quiz";
 
 // Mock recharts — SVG components don't render in jsdom
-vi.mock("recharts", () => ({
-  BarChart: ({ children }: any) => <div data-testid="bar-chart">{children}</div>,
-  Bar: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-  CartesianGrid: () => null,
-  Tooltip: () => null,
-  ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
-  PieChart: ({ children }: any) => <div data-testid="pie-chart">{children}</div>,
-  Pie: () => null,
-  Cell: () => null,
-  Legend: () => null,
-}));
+// Bar and Pie render children so Cell map callbacks on lines 190/223 execute
+vi.mock("recharts", () => {
+  type P = { children?: React.ReactNode };
+  type FmtP = P & { formatter?: (v: number) => unknown };
+  type LblP = P & { label?: (d: { name: string; value: number }) => string };
+  return {
+    BarChart: ({ children }: P) => <div data-testid="bar-chart">{children}</div>,
+    Bar: ({ children }: P) => <div data-testid="bar">{children}</div>,
+    XAxis: () => null,
+    YAxis: () => null,
+    CartesianGrid: () => null,
+    Tooltip: ({ formatter }: FmtP) => { if (typeof formatter === "function") formatter(50); return null; },
+    ResponsiveContainer: ({ children }: P) => <div>{children}</div>,
+    PieChart: ({ children }: P) => <div data-testid="pie-chart">{children}</div>,
+    Pie: ({ children, label }: LblP) => <div data-testid="pie">{children}{typeof label === "function" && label({ name: "Test", value: 1 })}</div>,
+    Cell: () => null,
+    Legend: () => null,
+  };
+});
 
 // Import after mocks
 import QuizAnalyticsSection from "./QuizAnalyticsSection";
@@ -407,5 +413,42 @@ describe("QuizAnalyticsSection", () => {
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  // ---- Network error ----
+
+  it("shows error message on network failure (fetch throws)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
+    const user = userEvent.setup();
+    const sessions = makeSessions();
+
+    render(
+      <QuizAnalyticsSection sessions={sessions} schoolUdise="UDISE001" />,
+    );
+    await selectSession(user);
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load quiz analytics")).toBeInTheDocument();
+    });
+  });
+
+  // ---- Fallback message when data.message is missing ----
+
+  it('shows "No data available" when response has no summary and no message', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({}),
+    });
+    const user = userEvent.setup();
+    const sessions = makeSessions();
+
+    render(
+      <QuizAnalyticsSection sessions={sessions} schoolUdise="UDISE001" />,
+    );
+    await selectSession(user);
+
+    await waitFor(() => {
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
   });
 });
