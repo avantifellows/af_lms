@@ -106,6 +106,36 @@ describe("GET /api/curriculum/chapters", () => {
     expect(json.chapters[0].name).toBe("Optics");
   });
 
+  it("returns 'Unknown' when JSONB name is not an array", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    const chapters = [
+      { id: 3, code: "CH3", name: { not: "an array" }, grade_id: 3, grade_number: 11, subject_id: 4, subject_name: 42 },
+    ];
+    mockQuery
+      .mockResolvedValueOnce(chapters)
+      .mockResolvedValueOnce([]);
+
+    const res = await GET(nextReq("/api/curriculum/chapters?grade=11&subject=Physics"));
+    const json = await res.json();
+    expect(json.chapters[0].name).toBe("Unknown chapter");
+    expect(json.chapters[0].subjectName).toBe("Unknown subject");
+  });
+
+  it("returns 'Unknown' when JSONB string is invalid JSON", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    const chapters = [
+      { id: 4, code: "CH4", name: "not valid json{", grade_id: 3, grade_number: 11, subject_id: 4, subject_name: "also{bad" },
+    ];
+    mockQuery
+      .mockResolvedValueOnce(chapters)
+      .mockResolvedValueOnce([]);
+
+    const res = await GET(nextReq("/api/curriculum/chapters?grade=11&subject=Physics"));
+    const json = await res.json();
+    expect(json.chapters[0].name).toBe("Unknown chapter");
+    expect(json.chapters[0].subjectName).toBe("Unknown subject");
+  });
+
   it("returns 500 on query error", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockQuery.mockRejectedValue(new Error("DB error"));
