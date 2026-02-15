@@ -278,3 +278,16 @@ Session: 63b7fb2b-6197-4e8f-b9f8-bf613154530f
   - visits/page.tsx is a straightforward server page: auth checks → DB query → filter by status → conditional rendering of sections
   - The page derives `inProgress` and `completed` arrays from a single query result, then conditionally renders sections based on `.length > 0` — test each combination (only in-progress, only completed, both, neither)
 ---
+
+## 2026-02-16T00:17 - US-022
+Session: ff6bc6fa-7bbe-4667-9098-c82529524f8b
+- Implemented 27 unit tests for visits/[id]/page.tsx (server component)
+- Files changed: `src/app/visits/[id]/page.test.tsx` (new, 507 lines)
+- Test coverage areas: auth redirects (no session, no email, no canView), visit not found rendering, ownership check (PM non-owner sees 'no access', admin can view any visit), visit header (school name, school_code fallback, visit date, started/ended timestamps), status badges (In Progress, Ended, Completed — 3 conditional branches), all 6 visit sections with names and links, progress bar calculation (0/6, 2/6, 6/6 sections), section completion logic covering all data paths (principalMeeting, leadershipMeetings, classroomObservations.length, studentDiscussions group OR individual, staffMeetings teamMeeting, teacherFeedback OR issueLog), EndVisitButton stub (rendered for active only, not for ended/completed), ended confirmation message (ended+not-completed only), Back to Dashboard link, query verification (v.id=$1)
+- All 881 tests pass across 59 files (854 previous + 27 new)
+- **Learnings for future iterations:**
+  - visits/[id]/page.tsx has 36 branches — most come from the 6-section status calculation (getSectionStatus) with its various data paths, plus the 3-way status badge (completed vs ended vs in_progress) and conditional EndVisitButton/ended-confirmation rendering
+  - Test section completion independently: each section has different data checks (nullish coalescing, array length, nested object access with optional chaining), so test individual data path branches via separate `makeVisit({ data: {...} })` overrides
+  - The page checks ownership via `visit.pm_email !== session.user.email && !isAdmin` — need separate admin auth setup helper to test the admin bypass path
+  - EndVisitButton mock should expose props as data attributes for assertion (data-visit-id, data-already-ended)
+---

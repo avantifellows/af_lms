@@ -383,8 +383,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": "Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "27 tests added. Covers: no session redirect, no email redirect, no canView redirect to /dashboard, visit not found message, PM ownership check (non-owner sees 'no access'), admin can view any visit, visit header (school name, fallback to school_code, visit date, started/ended timestamps), status badges (In Progress, Ended, Completed), all 6 visit sections with names and links, progress bar (0/6, 2/6, 6/6), section completion logic (principalMeeting, leadershipMeetings, classroomObservations length, studentDiscussions groupDiscussions OR individualDiscussions, staffMeetings teamMeeting, teacherFeedback OR issueLog), EndVisitButton rendering (active visit only, not for ended/completed), ended confirmation (ended but not completed only), Back to Dashboard link, query verification (v.id=$1). All 881 tests pass across 59 files."
     },
     {
       "id": "US-023",
