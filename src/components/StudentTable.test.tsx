@@ -1083,3 +1083,143 @@ describe("StudentTable - dropdown reflects current tab grades", () => {
     expect(options[1]).toHaveTextContent("Grade 11");
   });
 });
+
+// ─── Dropout modal input changes (lines 290, 301) ──────────────────────────
+
+describe("StudentTable - Dropout modal form inputs", () => {
+  it("allows changing the dropout date and academic year inputs", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dropout" }));
+    expect(screen.getByText("Mark as Dropout")).toBeInTheDocument();
+
+    // Labels lack htmlFor/id association — use querySelector
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    expect(dateInput).toBeTruthy();
+    await user.clear(dateInput);
+    await user.type(dateInput, "2026-01-15");
+    expect(dateInput.value).toBe("2026-01-15");
+
+    const yearInput = document.querySelector('input[placeholder="e.g., 2025-2026"]') as HTMLInputElement;
+    expect(yearInput).toBeTruthy();
+    await user.clear(yearInput);
+    await user.type(yearInput, "2024-2025");
+    expect(yearInput.value).toBe("2024-2025");
+  });
+
+  it("submits changed academic year in the POST body", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <StudentTable
+        students={[makeStudent({ student_id: "STU-DATE" })]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dropout" }));
+
+    const yearInput = document.querySelector('input[placeholder="e.g., 2025-2026"]') as HTMLInputElement;
+    await user.clear(yearInput);
+    await user.type(yearInput, "2024-2025");
+
+    await user.click(screen.getByText("Confirm Dropout"));
+
+    await vi.waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.academic_year).toBe("2024-2025");
+  });
+});
+
+// ─── getCurrentAcademicYear branch coverage (line 76) ────────────────────────
+
+describe("StudentTable - getCurrentAcademicYear April+ branch", () => {
+  it("defaults academic year to current-next format when month >= April", async () => {
+    // Set fake date to June 2026 (month=5, >= 3) to cover line 76
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 5, 15)); // June 15, 2026
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dropout" }));
+
+    const yearInput = document.querySelector('input[placeholder="e.g., 2025-2026"]') as HTMLInputElement;
+    expect(yearInput.value).toBe("2026-2027");
+
+    vi.useRealTimers();
+  });
+});
+
+// ─── Dropout modal network error (non-Error thrown) ──────────────────────────
+
+describe("StudentTable - Dropout modal error edge cases", () => {
+  it("shows generic error when a non-Error is thrown in dropout submit", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockImplementation(() => {
+      throw "network failure string";
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dropout" }));
+    await user.click(screen.getByText("Confirm Dropout"));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText("An error occurred")).toBeInTheDocument();
+    });
+  });
+
+  it("shows fallback error message when API returns error without message", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({}),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dropout" }));
+    await user.click(screen.getByText("Confirm Dropout"));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText("Failed to mark student as dropout")).toBeInTheDocument();
+    });
+  });
+});
