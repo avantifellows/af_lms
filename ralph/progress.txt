@@ -15,6 +15,8 @@ Started: Sun Feb 15 23:07:30 IST 2026
 - **Stats card counts**: Use `within(card)` scoping to check stat values, since count numbers like "1" or "2" may appear multiple times on page
 - **Mock child components**: Use `vi.mock("./ChildComponent", ...)` with stub that exposes `data-testid` + callback buttons to test parent integration cleanly
 - **Window dialogs**: `vi.stubGlobal("alert", vi.fn())` + `vi.stubGlobal("confirm", vi.fn(() => true))` in `beforeEach` for components using `alert()`/`confirm()`
+- **Date inputs without htmlFor**: `type="date"` inputs may lack `htmlFor`/`id` association; query with `document.querySelector('input[type="date"]')` instead of `getByLabelText("Date")`
+- **Duplicate count badges**: When selecting topics changes a count badge and another chapter has the same count text, use `getAllByText()` and check `className` to distinguish blue (selected) vs gray (total) badges
 
 ---
 
@@ -88,4 +90,17 @@ Session: 67608d82-1b1f-4de0-934e-1b2901cd7392
   - Mock child components with `data-testid` + exposed callback buttons (e.g., `modal-save`, `modal-close`) to test parent integration cleanly
   - When testing session save with "Unknown" topic fallback, use chapters with empty topics arrays so the topicId from the mock modal won't match any chapter topic
   - `vi.stubGlobal("fetch", mockFetch)` pattern works well for curriculum fetch mocking — same pattern as other component tests
+---
+
+## 2026-02-15T23:33 - US-007
+Session: 5fd0976a-24a5-428b-9741-a244e5fcf133
+- Implemented 44 unit tests for LogSessionModal.tsx
+- Files changed: `src/components/curriculum/LogSessionModal.test.tsx` (new, ~660 lines)
+- Test coverage areas: rendering (header, date input pre-filled via getTodayDate, duration defaults 1h/0m, chapter list, Cancel/Save buttons, topic counts, placeholder text, disabled Save button), date input change, duration inputs (hours/minutes update, NaN→0 clamping), chapter expand/collapse (toggle expand/collapse, no-topics disabled button, no arrow for empty chapters), topic selection (toggle on/off, deselect, selected count badge, summary with chapter count, pluralization of "chapters", already-covered ✓ badge), chapter completion (mark/unmark complete, Will Complete badge, ✓ Complete badge for already-complete, disabled checkbox for already-complete, line-through style, completion summary count, enables Save button), form validation (disabled Save when nothing selected, zero duration alert), successful save (correct args with topics+chapters, multiple selections, duration calculation h*60+m), close/cancel (✕ button, Cancel button, backdrop click all call onClose), edge cases (empty chapters list, missing progress entry, chapter-only save without topics, placeholder hides on topic selection, placeholder hides on chapter completion)
+- **Learnings for future iterations:**
+  - LogSessionModal props `{ chapters, progress, onClose, onSave }` match PRD exactly — one of the rare cases where PRD props are correct
+  - `type="date"` inputs also lack `htmlFor`/`id` association in this codebase — same pattern as email inputs, use `document.querySelector('input[type="date"]')`
+  - When topic selection changes count badges, the same count text (e.g., "1 topics") may appear in both a blue selection badge and a gray total count for a different chapter — use `getAllByText()` and check `className` to distinguish
+  - Chapter completion checkboxes can be targeted via `screen.getAllByRole("checkbox")` when chapter is not expanded (only chapter-level checkboxes visible), but after expanding use `within(row)` scoping to find the right one
+  - The `checked={isMarkedComplete || isAlreadyComplete}` pattern means checking isAlreadyComplete requires the checkbox to be both checked AND disabled
 ---

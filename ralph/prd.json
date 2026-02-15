@@ -124,8 +124,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "44 tests added. Props are { chapters, progress, onClose, onSave } as PRD stated. Covers: rendering (header, date input pre-filled via getTodayDate, duration defaults 1h/0m, chapter list, Cancel/Save buttons, topic counts, placeholder text, disabled Save), date input change, duration inputs (hours/minutes update, NaN→0 clamping), chapter expand/collapse (toggle, no-topics disabled, no arrow for empty), topic selection (toggle on/off, deselect, selected count badge, summary with chapter count, pluralization, already-covered badge), chapter completion (mark/unmark complete, Will Complete/✓ Complete badges, disabled for already-complete, line-through style, completion summary, enables Save), form validation (disabled button when nothing selected, zero duration alert), successful save (correct args, multiple topics+chapters, duration calculation), close/cancel (✕ button, Cancel button, backdrop click), edge cases (empty chapters, missing progress entry, chapter-only save, placeholder hide on selection)."
     },
     {
       "id": "US-008",
