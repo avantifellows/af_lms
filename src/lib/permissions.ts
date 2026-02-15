@@ -197,9 +197,18 @@ export async function canAccessSchool(
     case 3:
       // Admin and All schools access
       return true;
-    case 2:
-      // Region access
-      return permission.regions?.includes(schoolRegion || "") || false;
+    case 2: {
+      // Region access — look up region from DB if not provided
+      let region = schoolRegion;
+      if (!region) {
+        const result = await query<{ region: string }>(
+          `SELECT region FROM school WHERE code = $1`,
+          [schoolCode]
+        );
+        region = result[0]?.region;
+      }
+      return permission.regions?.includes(region || "") || false;
+    }
     case 1:
       // Single school access
       return permission.school_codes?.includes(schoolCode) || false;

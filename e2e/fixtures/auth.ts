@@ -1,4 +1,4 @@
-import { test as base, type Page } from "@playwright/test";
+import { test as base, type Page, type TestInfo } from "@playwright/test";
 import { addCoverageReport } from "monocart-reporter";
 import { encode } from "next-auth/jwt";
 import { TEST_USERS, type TestUserRole } from "../helpers/test-users";
@@ -52,6 +52,21 @@ function googleUserPayload(role: TestUserRole): TokenPayload {
   };
 }
 
+async function startCoverage(page: Page, testInfo: TestInfo) {
+  if (testInfo.project.name === "chromium") {
+    await page.coverage.startJSCoverage({ resetOnNavigation: false });
+  }
+}
+
+async function stopCoverage(page: Page, testInfo: TestInfo) {
+  if (testInfo.project.name === "chromium") {
+    const coverage = await page.coverage.stopJSCoverage();
+    if (coverage.length > 0) {
+      await addCoverageReport(coverage, testInfo);
+    }
+  }
+}
+
 // Extend Playwright test with per-role page fixtures + auto-coverage
 export const test = base.extend<{
   autoTestFixture: void;
@@ -60,22 +75,12 @@ export const test = base.extend<{
   teacherPage: Page;
   passcodePage: Page;
 }>({
-  // Auto-fixture: collects V8 JS coverage per test (Chromium only)
+  // Auto-fixture: collects V8 JS coverage for default page (Chromium only)
   autoTestFixture: [
     async ({ page }, use, testInfo) => {
-      const isChromium = testInfo.project.name === "chromium";
-      if (isChromium) {
-        await page.coverage.startJSCoverage({ resetOnNavigation: false });
-      }
-
+      await startCoverage(page, testInfo);
       await use();
-
-      if (isChromium) {
-        const coverage = await page.coverage.stopJSCoverage();
-        if (coverage.length > 0) {
-          await addCoverageReport(coverage, testInfo);
-        }
-      }
+      await stopCoverage(page, testInfo);
     },
     { scope: "test", auto: true },
   ],
@@ -84,21 +89,25 @@ export const test = base.extend<{
     await authenticatedPage(page, googleUserPayload("admin"));
     await use(page);
   },
-  pmPage: async ({ browser }, use) => {
+  pmPage: async ({ browser }, use, testInfo) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, googleUserPayload("pm"));
+    await startCoverage(page, testInfo);
     await use(page);
+    await stopCoverage(page, testInfo);
     await context.close();
   },
-  teacherPage: async ({ browser }, use) => {
+  teacherPage: async ({ browser }, use, testInfo) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, googleUserPayload("teacher"));
+    await startCoverage(page, testInfo);
     await use(page);
+    await stopCoverage(page, testInfo);
     await context.close();
   },
-  passcodePage: async ({ browser }, use) => {
+  passcodePage: async ({ browser }, use, testInfo) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, {
@@ -108,7 +117,9 @@ export const test = base.extend<{
       schoolCode: "70705",
       isPasscodeUser: true,
     });
+    await startCoverage(page, testInfo);
     await use(page);
+    await stopCoverage(page, testInfo);
     await context.close();
   },
 });

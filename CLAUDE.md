@@ -13,8 +13,8 @@ npm run dev          # Start development server at localhost:3000
 npm run build        # Production build
 npm run lint         # Run ESLint
 npm run start        # Start production server
-npm run test:e2e     # Run Playwright e2e tests (port 3001)
-npm run test:e2e:ui  # Playwright UI mode for debugging
+npm run test:e2e     # Run Playwright e2e tests (port 3001) + V8 coverage
+npm run test:e2e:ui  # Playwright UI mode for debugging (no coverage)
 ```
 
 ## Architecture
@@ -24,7 +24,7 @@ npm run test:e2e:ui  # Playwright UI mode for debugging
 - **Auth**: NextAuth.js v4 with Google OAuth + custom passcode provider
 - **Database**: PostgreSQL via `pg` pool
 - **Styling**: Tailwind CSS v4
-- **E2E Tests**: Playwright (Chromium)
+- **E2E Tests**: Playwright (Chromium) + V8 coverage via monocart-reporter
 
 ### Directory Structure
 ```
@@ -51,7 +51,8 @@ e2e/                        # Playwright E2E tests
 │   ├── smoke.spec.ts
 │   ├── dashboard.spec.ts
 │   ├── school.spec.ts
-│   └── permissions.spec.ts
+│   ├── permissions.spec.ts
+│   └── visits.spec.ts
 ├── global-setup.ts         # Loads dump + inserts test users
 └── global-teardown.ts      # Drops test DB
 ```
@@ -109,6 +110,16 @@ pg_dump --no-owner --no-privileges --clean --if-exists \
 - Import `test`/`expect` from `e2e/fixtures/auth.ts` for authenticated tests
 - Use `adminPage`, `pmPage`, `teacherPage`, `passcodePage` fixtures for per-role pages
 - Import from `@playwright/test` for unauthenticated tests (smoke tests)
+
+### Coverage reports
+- `npm run test:e2e` collects V8 JS coverage automatically (all page fixtures in `e2e/fixtures/auth.ts` instrument coverage)
+- Coverage is filtered to only `src/` app files (no Next.js internals)
+- Output:
+  - `coverage/coverage-summary.json` — **committed** to repo; read by GitHub Actions
+  - `coverage/index.html` — local V8 coverage viewer (gitignored)
+  - `monocart-report/index.html` — local test report (gitignored)
+- GitHub Actions workflow (`.github/workflows/e2e-coverage-comment.yml`) posts a coverage table as a PR comment
+- Developer workflow: run tests locally, commit `coverage/coverage-summary.json`, push
 
 ## Deployment
 

@@ -26,7 +26,7 @@ function getMaintenancePool(): Pool {
   });
 }
 
-function getTestPool(): Pool {
+export function getTestPool(): Pool {
   return new Pool({
     host: "localhost",
     port: 5432,
@@ -102,4 +102,52 @@ export async function dropDatabase(): Promise<void> {
   } finally {
     await maintenance.end();
   }
+}
+
+/**
+ * Seed a test visit for the PM test user.
+ * Finds a school in AHMEDABAD region (or uses provided code) and inserts an in_progress visit.
+ */
+export async function seedTestVisit(
+  pool: Pool,
+  schoolCode?: string
+): Promise<{ visitId: number; schoolCode: string }> {
+  if (!schoolCode) {
+    const schoolResult = await pool.query(
+      `SELECT code FROM school WHERE region = 'AHMEDABAD' LIMIT 1`
+    );
+    if (schoolResult.rows.length === 0) {
+      throw new Error(
+        "No school found in AHMEDABAD region — check db-dump.sql"
+      );
+    }
+    schoolCode = schoolResult.rows[0].code;
+  }
+
+  const initialData = {
+    principalMeeting: null,
+    leadershipMeetings: null,
+    classroomObservations: [],
+    studentDiscussions: {
+      groupDiscussions: [],
+      individualDiscussions: [],
+    },
+    staffMeetings: {
+      individualMeetings: [],
+      teamMeeting: null,
+    },
+    teacherFeedback: [],
+    issueLog: [],
+  };
+
+  const result = await pool.query(
+    `INSERT INTO lms_pm_school_visits
+       (school_code, pm_email, visit_date, status, data,
+        start_lat, start_lng, start_accuracy)
+     VALUES ($1, $2, CURRENT_DATE, 'in_progress', $3, 23.0225, 72.5714, 50)
+     RETURNING id`,
+    [schoolCode, "e2e-pm@test.local", JSON.stringify(initialData)]
+  );
+
+  return { visitId: result.rows[0].id, schoolCode };
 }
