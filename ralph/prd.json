@@ -277,8 +277,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "This is the pattern validation story. Must be completed before US-017 through US-025."
+      "passes": true,
+      "notes": "5 tests added. Pattern validated: vi.hoisted() required for mock variables in vi.mock() factories; async Page() call + rejects.toThrow('REDIRECT:...') for redirect tests; await Page() + render(jsx) for success case. Mock next/link as simple <a> stub. All 825 tests pass across 53 files."
     },
     {
       "id": "US-017",
