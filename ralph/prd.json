@@ -582,8 +582,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 34,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "4 tests added (12 total), 3 pre-existing lint errors fixed. Covers: fetch error (catch branch, console.error), non-ok response (results not shown), re-show results on focus when query >= 2 chars (onFocus branch), 'Unknown' name when both first_name and last_name null + no grade/ID/phone display. File now at 100% line coverage, 100% function coverage, 91.3% branch coverage. Remaining uncovered branches: line 77 (loading && short-circuit false branch) and line 95 (unreachable ternary — dropdown hidden when query < 2)."
     },
     {
       "id": "US-035",

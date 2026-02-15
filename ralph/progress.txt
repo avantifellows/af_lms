@@ -443,3 +443,19 @@ Session: 0edaf743-4388-4f9d-91e9-72ef1229e03f
   - Pattern for mocking Date constructor: create a `MockDate` function that delegates to `OriginalDate` except for the target input, copy static methods (now, parse, UTC) and prototype, then restore in `finally` block.
   - Remaining uncovered branch (99.07%) is V8 optional chaining operator `?.` on line 190 — not a meaningful logic gap.
 ---
+
+## 2026-02-16T01:04 - US-034
+Session: 4f55f419-dfb5-4d3d-8a89-90662cbe3305
+- Closed coverage gaps in src/components/StudentSearch.tsx — added 4 tests (12 total), fixed 3 pre-existing lint errors
+- Files changed: `src/components/StudentSearch.test.tsx` (modified, +150/-3 lines)
+- Tests added: fetch error (catch branch with console.error spy), non-ok response (results not shown), re-show results on focus when query >= 2 chars (onFocus branch), 'Unknown' name for null first+last name + no grade/ID/phone
+- Lint fixes: replaced `any` types with `unknown` and typed interface for next/link mock
+- File now at 100% line coverage, 100% function coverage, 91.3% branch coverage
+- Remaining uncovered branches: line 77 (`loading &&` short-circuit false branch), line 95 (unreachable ternary — dropdown hidden when query < 2)
+- All 998 tests pass across 62 files
+- **Learnings for future iterations:**
+  - StudentSearch uses `useEffect` with debounce timer (300ms) — same fake timer pattern as AddUserModal debounce testing
+  - The `onFocus` handler `query.length >= 2 && setShowResults(true)` re-shows results without refetching — test by closing dropdown via backdrop, then focusing input
+  - Line 95 ternary (`query.length < 2 ? "Type at least 2 characters" : "No students found"`) has an unreachable branch: the `true` path requires `showResults=true` while `query.length < 2`, but the `useEffect` sets `showResults=false` when query < 2 chars — so only "No students found" path is testable
+  - Pre-existing lint `any` errors in test files should be fixed proactively: use typed interfaces for mock component props and `unknown` + `as unknown as typeof X` for mock function returns
+---
