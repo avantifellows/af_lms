@@ -158,8 +158,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "5 tests added. Props are { sessions } (array of TeachingSession). Covers: empty state (no sessions message with Log Session hint), single session rendering (date via toLocaleDateString, duration via formatDuration mock, topics grouped by chapter), multiple sessions, topics grouped by chapter within a session (two chapters from one session), multiple chapters in same session with bullet-pointed topic lists."
     },
     {
       "id": "US-010",

@@ -116,3 +116,14 @@ Session: f4039aed-b6c1-4aa0-a45d-24da0bac0662
   - The ▶ arrow character can be queried with `screen.getAllByText("▶")` and class checked for rotation
   - When a component uses optional chaining (`chapterProgress?.completedTopicIds.length || 0`), test both the undefined case and the populated case
 ---
+
+## 2026-02-15T23:39 - US-009
+Session: 05ce34ee-4fa6-448b-ac3a-242e1c501f5b
+- Implemented 5 unit tests for SessionHistory.tsx
+- Files changed: `src/components/curriculum/SessionHistory.test.tsx` (new, ~111 lines)
+- Test coverage areas: empty state (no sessions message), single session rendering (date, duration via formatDuration mock, topics), grouping topics by chapter within a session, multiple sessions rendering, multiple chapters in same session
+- **Learnings for future iterations:**
+  - SessionHistory is a simple presentational component — no state, no effects, just maps sessions to JSX with topic grouping
+  - The `formatSessionDate` helper inside the component uses `toLocaleDateString("en-IN")` — test with partial text match (e.g., `/Jan/`) since exact locale output varies by environment
+  - Only `formatDuration` from curriculum-helpers needs mocking; `formatSessionDate` is internal to the component
+---
