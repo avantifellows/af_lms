@@ -291,3 +291,17 @@ Session: ff6bc6fa-7bbe-4667-9098-c82529524f8b
   - The page checks ownership via `visit.pm_email !== session.user.email && !isAdmin` — need separate admin auth setup helper to test the admin bypass path
   - EndVisitButton mock should expose props as data attributes for assertion (data-visit-id, data-already-ended)
 ---
+
+## 2026-02-16T00:23 - US-023
+Session: 067209a7-2345-4a27-9ce8-d90fc6ce2451
+- Implemented 42 unit tests for dashboard/page.tsx (server component — most complex page)
+- Files changed: `src/app/dashboard/page.test.tsx` (new, 892 lines)
+- Test coverage areas: auth redirects (no session, no email, passcode user redirect to school), no permission message, no program message, single-school redirect (with/without search bypass), permission level subtitles (admin/all-schools/region/school-count for levels 1-4), admin link gating (level 4 only), PM nav links (Schools/Visits), PM stats cards (My Schools, Total Visits, Open Issues with values), search components (StudentSearch, SchoolSearch with defaultValue passthrough), school cards (correct props: href, showStudentCount, showGradeBreakdown, showRegion), Start Visit action for PM only, grade counts integration (merge into school data), recent visits table (completed+in-progress status badges, school_name fallback to school_code, View/Continue links with correct hrefs, View all link, empty visits hidden, non-PM hidden), empty state (generic/search-specific), pagination (correct props, page clamping, empty searchParams), My Schools heading for PM, multiple school cards, header (h1, email, sign out), query verification (ILIKE search pattern, ANY code filter, combined code+search, grade counts school IDs, empty schools skip), empty school codes early return
+- All 923 tests pass across 60 files (881 previous + 42 new)
+- **Learnings for future iterations:**
+  - Dashboard has "My Schools" appearing as BOTH a stats card label AND a section h2 heading for PM users — use `getAllByText()` to handle duplicates
+  - Query call order depends on whether schools are returned (getSchoolGradeCounts returns early with empty Map when schoolIds is empty, so it doesn't call query). This shifts subsequent query indices — need conditional mock setup based on whether schools are present
+  - "Schools" h1 heading conflicts with nav link "Schools" for PM users — use `getByRole("heading", { level: 1, name: "Schools" })` to target specifically
+  - For PM users (hasPMAccess=true), Promise.all runs [getSchoolGradeCounts, getRecentVisits, getOpenIssuesCount] — when no schools, getSchoolGradeCounts returns early so only 4 total queries (schools + count + visits + issues) instead of 5
+  - The `codes.length === 0` early return in `getSchools` means zero DB queries are made when user has no accessible codes
+---

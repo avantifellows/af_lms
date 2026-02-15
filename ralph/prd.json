@@ -402,8 +402,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": "Most complex page. Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "42 tests added. Covers: auth redirects (no session, no email, passcode user), no permission message, no program message, single-school redirect (with/without search), permission level subtitles (admin/level 3/level 2 regions/level 1 school count), admin link (level 4 only), PM nav links (Visits), PM stats cards (Total Visits, Open Issues), search components (StudentSearch, SchoolSearch with defaultValue), school cards (correct props, Start Visit for PM, showRegion toggle), grade counts integration, recent visits table (completed+in-progress, school_name fallback, View/Continue links, empty visits, non-PM), empty state (no search/search-specific), pagination (correct props, empty search, page clamping), My Schools heading for PM, multiple school cards, header elements (h1 Schools, email, sign out), query verification (search ILIKE, code ANY filter, grade counts params, empty schools skip), code+search combined filter, empty school codes early return."
     },
     {
       "id": "US-024",
