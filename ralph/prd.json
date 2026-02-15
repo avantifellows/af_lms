@@ -141,8 +141,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "17 tests added. Props are { chapters, progress, expandedChapterIds, onToggleChapter }. Covers: empty state (no chapters), chapter rendering (names with index numbers, progress indicator/color from helpers, completed/total topic counts, 0/N when no progress), date/time display (formatDate with lastTaughtDate or null, formatDuration when totalTimeMinutes > 0, hidden when 0 or missing), expand/collapse (arrow rotate-90 class, topics visible when expanded, hidden when collapsed, independent per chapter), topic rendering (TopicRow stub with isCompleted based on completedTopicIds, false when no progress entry), empty topics ('No topics defined'), onToggleChapter callback with chapter ID."
     },
     {
       "id": "US-009",

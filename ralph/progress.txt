@@ -104,3 +104,15 @@ Session: 5fd0976a-24a5-428b-9741-a244e5fcf133
   - Chapter completion checkboxes can be targeted via `screen.getAllByRole("checkbox")` when chapter is not expanded (only chapter-level checkboxes visible), but after expanding use `within(row)` scoping to find the right one
   - The `checked={isMarkedComplete || isAlreadyComplete}` pattern means checking isAlreadyComplete requires the checkbox to be both checked AND disabled
 ---
+
+## 2026-02-15T23:36 - US-008
+Session: f4039aed-b6c1-4aa0-a45d-24da0bac0662
+- Implemented 17 unit tests for ChapterAccordion.tsx
+- Files changed: `src/components/curriculum/ChapterAccordion.test.tsx` (new, ~280 lines)
+- Test coverage areas: empty state, chapter rendering with index numbers, progress indicator/color from helpers, completed/total topic counts (with and without progress entry), date display (formatDate with lastTaughtDate or null), time display (formatDuration when > 0, hidden when 0 or missing), expand/collapse (arrow rotation, topics visible/hidden, independent per chapter), TopicRow stub integration (isCompleted based on completedTopicIds, false when no progress), empty topics message, onToggleChapter callback
+- **Learnings for future iterations:**
+  - ChapterAccordion props are `{ chapters, progress, expandedChapterIds, onToggleChapter }` — expand state is controlled by parent
+  - Simple presentational components with controlled state are straightforward to test — mock helpers, stub children, check rendering
+  - The ▶ arrow character can be queried with `screen.getAllByText("▶")` and class checked for rotation
+  - When a component uses optional chaining (`chapterProgress?.completedTopicIds.length || 0`), test both the undefined case and the populated case
+---
