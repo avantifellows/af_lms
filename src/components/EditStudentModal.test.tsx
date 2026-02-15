@@ -793,6 +793,31 @@ describe("EditStudentModal", () => {
       expect(dateInput.value).toBe("");
     });
 
+    it("handles Date constructor throwing (catch branch in formatDateForInput)", () => {
+      const OriginalDate = globalThis.Date;
+      // Temporarily replace Date so it throws for the student's date_of_birth
+      const MockDate = vi.fn(function (...args: unknown[]) {
+        if (args.length === 1 && args[0] === "2008-05-15T00:00:00.000Z") {
+          throw new Error("Date parse failure");
+        }
+        // @ts-expect-error — calling original constructor
+        return new OriginalDate(...args);
+      }) as unknown as DateConstructor;
+      MockDate.now = OriginalDate.now;
+      MockDate.parse = OriginalDate.parse;
+      MockDate.UTC = OriginalDate.UTC;
+      MockDate.prototype = OriginalDate.prototype;
+      globalThis.Date = MockDate;
+
+      try {
+        renderModal();
+        const dateInput = document.querySelector("input[type='date']") as HTMLInputElement;
+        expect(dateInput.value).toBe("");
+      } finally {
+        globalThis.Date = OriginalDate;
+      }
+    });
+
     it("renders without batches prop", () => {
       renderModal({ batches: undefined });
       expect(screen.getByText("Edit Student")).toBeInTheDocument();
