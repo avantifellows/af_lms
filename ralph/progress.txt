@@ -486,3 +486,15 @@ Session: f4039aed-b6c1-4aa0-a45d-24da0bac0662
   - `isSecureOrigin()` line 25 checks `typeof window === "undefined"` for SSR — this branch is unreachable in jsdom since `window` is always defined. Similarly, cleanup guard false branches (timeoutId/watchId already null) are V8 internal branch tracking.
   - Branch coverage ceilings exist due to V8 counting short-circuit and null-check false branches — 94.87% is the practical maximum for this file.
 ---
+
+## 2026-02-16T01:12 - US-037
+Session: 8f87e01f-3171-4348-8160-13f0b058ae1e
+- Closed coverage gap in src/app/api/batches/[id]/route.ts — added 1 test (9 total)
+- Files changed: `src/app/api/batches/[id]/route.test.ts` (modified, +13 lines)
+- Tests added: empty batch ID param → 400 with 'Batch ID is required' (lines 31-36)
+- File now at 100% line, function, and statement coverage
+- All 1005 tests pass across 62 files
+- **Learnings for future iterations:**
+  - The uncovered line was the empty `id` guard (lines 31-36) — `routeParams({ id: "" })` triggers this path
+  - Gap-closing stories for single-line coverage gaps are the fastest — identify the line, write one test, verify
+---
