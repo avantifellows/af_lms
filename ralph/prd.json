@@ -598,8 +598,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 35,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "3 tests added (11 total), 4 pre-existing lint errors fixed. Covers: moderate accuracy warning (yellow banner with ~250m text, Ending visit... button during submitting state), API error without .error field → 'Failed to end visit' fallback, non-Error thrown by fetch → 'An error occurred'. Lint fixes: replaced `any` types with `unknown` and `unknown as typeof fetch`. File now at 100% line, branch, function, and statement coverage."
     },
     {
       "id": "US-036",

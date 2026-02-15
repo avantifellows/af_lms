@@ -459,3 +459,17 @@ Session: 4f55f419-dfb5-4d3d-8a89-90662cbe3305
   - Line 95 ternary (`query.length < 2 ? "Type at least 2 characters" : "No students found"`) has an unreachable branch: the `true` path requires `showResults=true` while `query.length < 2`, but the `useEffect` sets `showResults=false` when query < 2 chars — so only "No students found" path is testable
   - Pre-existing lint `any` errors in test files should be fixed proactively: use typed interfaces for mock component props and `unknown` + `as unknown as typeof X` for mock function returns
 ---
+
+## 2026-02-16T01:07 - US-035
+Session: aa8aec90-19b1-46d2-bac6-c4fd225d26f1
+- Closed coverage gaps in src/components/visits/EndVisitButton.tsx — added 3 tests (11 total), fixed 4 pre-existing lint errors
+- Files changed: `src/components/visits/EndVisitButton.test.tsx` (modified, +91/-4 lines)
+- Tests added: moderate accuracy warning (yellow banner, Ending visit... button, pending fetch for intermediate state), API error without .error field → 'Failed to end visit', non-Error thrown by fetch → 'An error occurred'
+- Lint fixes: replaced `any` types with `unknown` and `unknown as typeof fetch` on 4 lines
+- File now at 100% line, branch, function, and statement coverage
+- All 1001 tests pass across 62 files
+- **Learnings for future iterations:**
+  - When a component transitions to `done` state and returns `null` (removing from DOM), hold the fetch promise open with `new Promise(resolve => { resolveFetch = resolve })` to observe intermediate states (warning, submitting button text) before the component unmounts
+  - The moderate accuracy branch (line 53-57) renders a yellow warning AND changes button text to "Ending visit..." — both are visible only during the submitting state before fetch resolves
+  - Pre-existing lint `any` errors should always be fixed when touching a test file — use `unknown` type + `as unknown as typeof X` pattern for mock functions
+---
