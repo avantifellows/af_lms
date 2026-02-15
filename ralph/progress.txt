@@ -17,6 +17,7 @@ Started: Sun Feb 15 23:07:30 IST 2026
 - **Window dialogs**: `vi.stubGlobal("alert", vi.fn())` + `vi.stubGlobal("confirm", vi.fn(() => true))` in `beforeEach` for components using `alert()`/`confirm()`
 - **Date inputs without htmlFor**: `type="date"` inputs may lack `htmlFor`/`id` association; query with `document.querySelector('input[type="date"]')` instead of `getByLabelText("Date")`
 - **Duplicate count badges**: When selecting topics changes a count badge and another chapter has the same count text, use `getAllByText()` and check `className` to distinguish blue (selected) vs gray (total) badges
+- **React 19 use(params) in client components**: Wrap component in `<Suspense>` and use `await act(async () => { render(...) })` to let the Promise resolve before assertions
 
 ---
 
@@ -175,4 +176,16 @@ Session: 4b9d3b69-7075-4f18-97c2-01c73c76bce4
   - The passcode input has proper `htmlFor`/`id` association (`htmlFor="passcode"` + `id="passcode"`), so `getByLabelText` works fine here (unlike some other inputs in the codebase)
   - To test loading state with a pending promise, use `mockImplementation(() => new Promise(resolve => { resolveRef = resolve }))` to hold the promise open, then resolve it after assertion
   - The redirect path uses `passcode.substring(0, 5)` — first 5 digits of the 8-digit passcode become the school code
+---
+
+## 2026-02-15T23:55 - US-014
+Session: d476a0e6-5608-4c79-90af-77dd7ac98dd7
+- Implemented 23 unit tests for Principal Meeting page (src/app/visits/[id]/principal/page.tsx)
+- Files changed: `src/app/visits/[id]/principal/page.test.tsx` (new, 653 lines)
+- Test coverage areas: loading skeleton, data loading (pre-filled form with 6 textareas and 5 checkboxes, empty form, school_code fallback when school_name absent), fetch errors (non-ok response, network error, non-Error thrown), form interactions (textarea change → 'Unsaved changes', process confirmation checkbox toggle, resource access checkbox toggle), save via PATCH (success resets to 'All changes saved', server error message, fallback error 'Failed to save', network error, non-Error thrown, disabled button when saved), Save & Return (navigates on success, Saving... button text + yellow status, stale closure: navigates even on failure), navigation links (back + cancel to /visits/{id}), form field labels (8 sections) and checkbox labels (5 items)
+- All 820 tests pass across 52 files (797 previous + 23 new)
+- **Learnings for future iterations:**
+  - Components using React 19 `use(params)` with Promise props need `<Suspense>` wrapping and `await act(async () => render(...))` to let the Promise resolve — without this, tests see the Suspense fallback forever
+  - The `handleSaveAndContinue` function has a stale closure bug: `if (!error)` checks the closure's captured `error` (which is null from initial render), not the freshly set error state after `handleSave()` fails — so `router.push` is called even when save fails. The test documents this actual behavior rather than the intended behavior.
+  - Props use `params: Promise<{ id: string }>` matching Next.js 16 pattern — pass `Promise.resolve({ id: "42" })` in tests
 ---
