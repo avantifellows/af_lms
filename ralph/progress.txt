@@ -418,3 +418,15 @@ Session: 5252a427-542a-4ab1-bcad-00faa6e7968d
   - `getAccuracyStatus` returns "good" or "moderate" — mock to return "moderate" to cover the yellow-styled alternative branch (lines 143-168)
   - Line 55 (`if (gpsState.status !== "acquired") return;`) is unreachable from UI because the Start Visit button is `disabled={gpsState.status !== "acquired"}` — defensive guard that can't be triggered
 ---
+
+## 2026-02-16T00:57 - US-032
+Session: d4513987-61c9-4548-9e49-26f075c0fc6a
+- Closed coverage gaps in src/app/api/curriculum/chapters/route.ts — added 2 tests (10 total)
+- Files changed: `src/app/api/curriculum/chapters/route.test.ts` (modified, +30 lines)
+- Tests added: non-array JSONB data (object/number) → 'Unknown chapter'/'Unknown subject' (line 48), invalid JSON string → catch block 'Unknown' fallback (line 50)
+- File now at 100% line/function/statement coverage, 91.66% branches
+- All 993 tests pass across 62 files
+- **Learnings for future iterations:**
+  - `extractEnglishName` has 3 fallback paths: (1) non-array parsed data → line 48, (2) JSON.parse failure → line 50, (3) array without matching lang_code or missing field → line 46. The first test already covered path (3) via the normal success path; paths (1) and (2) needed explicit non-array and invalid-JSON inputs
+  - For V8 branch coverage, the remaining uncovered branches (91.66%) are likely the `typeof jsonbData === "string"` short-circuit and `english?.[field] ||` operator — hard to push higher without redundant tests
+---

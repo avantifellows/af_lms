@@ -550,8 +550,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 32,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "2 tests added (10 total). Covers: non-array JSONB data (object/number) → 'Unknown chapter'/'Unknown subject' fallback (line 48), invalid JSON string → catch block 'Unknown' fallback (line 50). File now at 100% line coverage, 100% function coverage, 100% statement coverage, 91.66% branches."
     },
     {
       "id": "US-033",
