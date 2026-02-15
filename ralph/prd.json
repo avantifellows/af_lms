@@ -191,8 +191,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "3 tests added. Props are { topic, isCompleted } matching PRD. Covers: topic name and code rendering, uncompleted style (gray border, white bg, no SVG, darker text-gray-700), completed style (green bg, green border, white text, SVG checkmark rendered, muted text-gray-500). All 6 branches covered via isCompleted true/false."
     },
     {
       "id": "US-012",

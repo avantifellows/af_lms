@@ -138,3 +138,15 @@ Session: 2d0487e0-5f72-446a-b7f7-f69e81d926bd
   - Mock both `calculateStats` and `formatDuration` from curriculum-helpers, then just assert rendered text
   - Props match PRD exactly: `{ chapters, progress }`
 ---
+
+## 2026-02-15T23:43 - US-011
+Session: 8f3f5fa6-cedc-44eb-8495-49ca4be488a6
+- Implemented 3 unit tests for TopicRow.tsx
+- Files changed: `src/components/curriculum/TopicRow.test.tsx` (new, 59 lines)
+- Test coverage areas: topic name and code rendering, uncompleted style (gray border, white bg, no SVG checkmark, text-gray-700), completed style (green bg/border, white text, SVG checkmark rendered, text-gray-500)
+- All 6 branches covered via isCompleted true/false toggle
+- **Learnings for future iterations:**
+  - TopicRow is the simplest curriculum component — pure presentational, no state, no effects, no mocked dependencies
+  - All 6 branches are driven by a single boolean prop `isCompleted` — just need two render scenarios
+  - Use `container.querySelector("span.bg-green-500")` to target Tailwind-styled elements without accessible roles
+---
