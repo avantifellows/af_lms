@@ -347,3 +347,16 @@ Session: 0b0088f7-4691-42fe-80fa-df0360192c2b
   - 90% threshold was crossed during Phase 4 as predicted — actual coverage (97.55%) significantly exceeds the 90% target
   - Only `src/proxy.ts` (0% lines) and `src/lib/constants.ts` (0% lines) remain at 0% coverage — these are Phase 5/6 targets
 ---
+
+## 2026-02-16T00:39 - US-027
+Session: d5bb87e3-2698-41a0-aeec-16e2ab669aee
+- Closed coverage gaps in src/app/api/student/[id]/route.ts — added 3 tests (11 total)
+- Files changed: `src/app/api/student/[id]/route.test.ts` (modified, +44 lines)
+- Tests added: empty ID param → 400, student update HTTP failure (404) → 400 with error text, batch update failure → 200 with warnings
+- File now at 100% coverage (lines, branches, functions, statements)
+- All 974 tests pass across 62 files
+- **Learnings for future iterations:**
+  - Uncovered lines 37, 65-67, 130-132 were: empty ID guard, student PATCH failure error extraction, batch PATCH failure error extraction
+  - The existing "mixed success/failure" test only covered grade failure (lines 97-99), not student or batch failure paths — each error path in sequential fetch chains needs its own test
+  - When only errors exist (no results), the route returns 400; when mixed results+errors, it returns 200 with warnings — two different response shapes to test
+---
