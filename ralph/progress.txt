@@ -390,3 +390,16 @@ Session: 8e532859-02f3-4635-b180-b22de85e3295
   - Some code paths are unreachable from the component's public API (e.g., `isOpen=false` when parent only renders component when truthy, empty dropout tab when tabs only show when non-empty). These are defensive guards that can't be tested without bypassing the parent's render logic
   - For non-Error thrown in catch blocks, use `vi.fn().mockImplementation(() => { throw "string" })` (synchronous throw) rather than `mockRejectedValueOnce("string")` — the latter creates a rejected promise which may cause timing issues with `vi.waitFor`
 ---
+
+## 2026-02-16T00:51 - US-030
+Session: e4c9b16c-053c-4a4e-acd3-ed9b736a116b
+- Closed coverage gaps in src/lib/permissions.ts — added 5 tests (61 total)
+- Files changed: `src/lib/permissions.test.ts` (modified, +36 lines)
+- Tests added: level 1 null school_codes → false, level 2 null regions in canAccessSchool → false, unexpected level (default switch) → false, level 2 null regions in getAccessibleSchoolCodes → [], level 2 empty regions → []
+- File now at 100% line/function/statement coverage, 96.42% branches
+- All 986 tests pass across 62 files
+- **Learnings for future iterations:**
+  - Uncovered lines 216 and 241 were the `default` switch case and final `return []` — edge cases for unexpected levels and missing regions
+  - Remaining uncovered branches (96.42%) are nullish coalescing and optional chaining operators (`?.` and `??`) on lines 74, 210, 225 — these are V8's branch counting for short-circuit operators, not meaningful logic gaps
+  - Gap-closing stories for well-tested files are quick — identify uncovered lines via coverage, write targeted tests, verify
+---
