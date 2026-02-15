@@ -20,6 +20,7 @@ Started: Sun Feb 15 23:07:30 IST 2026
 - **React 19 use(params) in client components**: Wrap component in `<Suspense>` and use `await act(async () => { render(...) })` to let the Promise resolve before assertions
 - **Server component test pattern**: Use `vi.hoisted()` for mock variables referenced in `vi.mock()` factories. Redirect sentinel: `mockRedirect = vi.fn((url) => { throw new Error('REDIRECT:' + url); })`. Test redirects: `await expect(Page()).rejects.toThrow("REDIRECT:/")`. Test rendering: `const jsx = await Page(); render(jsx);`. Mock `next/link` as `<a>` stub. Mock `next-auth`, `@/lib/auth`, `next/navigation`, and permission functions.
 - **Top-level env vars**: Pages that use `const X = process.env.X` at module top-level capture env vars at import time. Since `vi.mock()` is hoisted above `process.env` assignments, use pattern-matching (`expect(url).toContain(...)`) for fetch URL assertions instead of exact URL matching.
+- **resetAllMocks for server pages**: Use `vi.resetAllMocks()` (not `clearAllMocks`) in `beforeEach` for server component tests with `mockResolvedValueOnce()` — `clearAllMocks` does NOT clear pending once-queues, causing mock leakage. After `resetAllMocks`, re-establish sentinel implementations for redirect/notFound.
 
 ---
 
@@ -304,4 +305,18 @@ Session: 067209a7-2345-4a27-9ce8-d90fc6ce2451
   - "Schools" h1 heading conflicts with nav link "Schools" for PM users — use `getByRole("heading", { level: 1, name: "Schools" })` to target specifically
   - For PM users (hasPMAccess=true), Promise.all runs [getSchoolGradeCounts, getRecentVisits, getOpenIssuesCount] — when no schools, getSchoolGradeCounts returns early so only 4 total queries (schools + count + visits + issues) instead of 5
   - The `codes.length === 0` early return in `getSchools` means zero DB queries are made when user has no accessible codes
+---
+
+## 2026-02-16T00:30 - US-024
+Session: 4a3af1fa-7222-456f-8d0a-dc647d57a7df
+- Implemented 45 unit tests for school/[udise]/page.tsx (server component — second most complex page)
+- Files changed: `src/app/school/[udise]/page.test.tsx` (new, 1150 lines)
+- Test coverage areas: auth redirect (no session), notFound (no school), passcode user access (own school ok, wrong school denied with "Return to login"), Google user permission matrix (no permission denied, level 1 matching/non-matching school_codes, level 2 matching/non-matching region incl null region, level 3 all-schools, level 4 admin), no program access message, PageHeader props (title, subtitle with/without UDISE code, backHref for multi/single school, Google email vs passcode "School {code}"), tab visibility (all tabs for full access, enrollment-only for restricted), child component props (CurriculumTab schoolCode/schoolName/canEdit, PerformanceTab udise_code fallback to code, VisitsTab schoolCode), NVS student stats (grade breakdown, excludes dropouts, excludes non-NVS, null grade handling), StudentTable props (active/dropout split, canEdit, isAdmin, isPasscodeUser, userProgramIds, grades, batches, nvsStreams), data issues banner (multiple issues, single issue singular text, no issues hidden), NVS streams extraction (sorted, deduplicated, null metadata handling), hasMultipleSchools logic (level >=2, school_codes length), query verification (school by udise, students by school id, batches by program_id=64), mentorship tab coming soon, passcode user skips program context check
+- All 968 tests pass across 61 files (923 previous + 45 new)
+- **Learnings for future iterations:**
+  - **CRITICAL**: Use `vi.resetAllMocks()` instead of `vi.clearAllMocks()` for server component tests with `mockResolvedValueOnce()` — `clearAllMocks` does NOT clear pending `mockResolvedValueOnce` queue, causing mock leakage between tests. After `resetAllMocks`, re-establish sentinel implementations for redirect/notFound in `beforeEach`.
+  - school/[udise]/page.tsx has 71 branches — most come from the permission matrix (levels 1-4 with school_codes/regions), passcode vs Google user paths, program context check gated by `!isPasscodeUser`, feature access determining tab visibility, and NVS student data processing (grade counts, dropout filtering)
+  - The `hasMultipleSchools` calculation uses `permission.level >= 2 || (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1)` — must ensure test users pass the access check first (level 1 with null school_codes fails the access check before reaching hasMultipleSchools)
+  - `getDistinctNVSStreams` filters out batches with null/undefined stream metadata and returns sorted unique streams — test with mixed metadata (some null, some with stream)
+  - For query verification, use `.find()` on `mockQuery.mock.calls` with SQL string matching (e.g., `call[0].includes("FROM batch b")`) since Promise.all makes call order non-deterministic
 ---

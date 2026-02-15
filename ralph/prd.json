@@ -421,8 +421,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": "Second most complex page. Uses server component pattern validated in US-016."
+      "passes": true,
+      "notes": "45 tests added. Covers: auth redirect (no session), notFound (no school), passcode user access (own school ok, wrong school denied with Return to login link), Google user permissions (no permission denied, level 1 matching/non-matching school_codes, level 2 matching/non-matching region incl null region, level 3 all-schools, level 4 admin), no program access message, PageHeader props (title, subtitle with/without UDISE, backHref for multi/single school, Google email vs passcode School label), tab visibility (all tabs for full access, enrollment-only for restricted), CurriculumTab props (schoolCode, schoolName, canEdit), PerformanceTab props (udise_code fallback to code), VisitsTab props (schoolCode), NVS student stats (grade breakdown, excludes dropouts, excludes non-NVS, null grade handling), StudentTable props (active/dropout split, canEdit, isAdmin, isPasscodeUser, userProgramIds, grades, batches, nvsStreams), data issues banner (multiple issues, single issue singular text, no issues hidden), NVS streams extraction (sorted, deduplicated, null metadata handling), hasMultipleSchools logic (level >=2, school_codes length), query verification (school by udise, students by school id, batches by program_id=64), mentorship tab coming soon. Uses vi.resetAllMocks() with sentinel re-establishment pattern."
     },
     {
       "id": "US-025",
