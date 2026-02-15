@@ -121,7 +121,7 @@ export async function seedTestVisit(
         "No school found in AHMEDABAD region — check db-dump.sql"
       );
     }
-    schoolCode = schoolResult.rows[0].code;
+    schoolCode = schoolResult.rows[0].code as string;
   }
 
   const initialData = {
