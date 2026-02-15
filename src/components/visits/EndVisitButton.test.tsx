@@ -6,8 +6,8 @@ const mockGetAccurateLocation = vi.fn();
 const mockGetAccuracyStatus = vi.fn(() => "good" as const);
 
 vi.mock("@/lib/geolocation", () => ({
-  getAccurateLocation: (...args: any[]) => mockGetAccurateLocation(...args),
-  getAccuracyStatus: (...args: any[]) => mockGetAccuracyStatus(...args),
+  getAccurateLocation: (...args: unknown[]) => mockGetAccurateLocation(...args),
+  getAccuracyStatus: (...args: unknown[]) => mockGetAccuracyStatus(...args),
 }));
 
 describe("EndVisitButton", () => {
@@ -90,7 +90,7 @@ describe("EndVisitButton", () => {
         ok: true,
         json: () => Promise.resolve({ success: true }),
       })
-    ) as any;
+    ) as unknown as typeof fetch;
     vi.stubGlobal("fetch", mockFetch);
 
     render(<EndVisitButton visitId={42} alreadyEnded={false} />);
@@ -185,7 +185,7 @@ describe("EndVisitButton", () => {
           ok: false,
           json: () => Promise.resolve({ error: "Visit already ended" }),
         })
-      ) as any
+      ) as unknown as typeof fetch
     );
 
     render(<EndVisitButton visitId={1} alreadyEnded={false} />);
@@ -194,6 +194,93 @@ describe("EndVisitButton", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Visit already ended")).toBeInTheDocument();
+    });
+  });
+
+  it("shows moderate accuracy warning when GPS is imprecise", async () => {
+    const user = userEvent.setup();
+    const location = { lat: 28.7, lng: 77.1, accuracy: 250 };
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve(location),
+      cancel: vi.fn(),
+    });
+    mockGetAccuracyStatus.mockReturnValue("moderate");
+
+    // Hold fetch open so we can observe the warning during submitting state
+    let resolveFetch!: (value: unknown) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () => new Promise((resolve) => { resolveFetch = resolve; })
+      ) as unknown as typeof fetch
+    );
+
+    render(<EndVisitButton visitId={1} alreadyEnded={false} />);
+
+    await user.click(screen.getByRole("button", { name: "End Visit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/GPS accuracy is moderate.*250m.*Reading accepted/)
+      ).toBeInTheDocument();
+    });
+
+    // Also verify "Ending visit..." button text in submitting state
+    expect(
+      screen.getByRole("button", { name: "Ending visit..." })
+    ).toBeDisabled();
+
+    // Resolve fetch to complete the flow
+    await act(async () => {
+      resolveFetch({ ok: true, json: () => Promise.resolve({ success: true }) });
+    });
+  });
+
+  it("shows fallback error when API response has no error field", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 28.7, lng: 77.1, accuracy: 15 }),
+      cancel: vi.fn(),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({}),
+        })
+      ) as unknown as typeof fetch
+    );
+
+    render(<EndVisitButton visitId={1} alreadyEnded={false} />);
+
+    await user.click(screen.getByRole("button", { name: "End Visit" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to end visit")).toBeInTheDocument();
+    });
+  });
+
+  it("shows generic error when fetch throws a non-Error", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 28.7, lng: 77.1, accuracy: 15 }),
+      cancel: vi.fn(),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject("network down")) as unknown as typeof fetch
+    );
+
+    render(<EndVisitButton visitId={1} alreadyEnded={false} />);
+
+    await user.click(screen.getByRole("button", { name: "End Visit" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("An error occurred")).toBeInTheDocument();
     });
   });
 });
