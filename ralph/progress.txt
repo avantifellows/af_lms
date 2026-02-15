@@ -163,3 +163,16 @@ Session: 8abc77e4-1854-4ad0-a4dc-47b3ac09ec11
   - Verification stories are quick — just run coverage, check threshold, lint test files, commit summary
   - Coverage jumped from 0% to ~97-100% on all 6 curriculum components (ChapterAccordion, CurriculumTab, LogSessionModal, ProgressSummary, SessionHistory, TopicRow)
 ---
+
+## 2026-02-15T23:48 - US-013
+Session: 4b9d3b69-7075-4f18-97c2-01c73c76bce4
+- Implemented 16 unit tests for Login page (src/app/page.tsx)
+- Files changed: `src/app/page.test.tsx` (new, 210 lines)
+- Test coverage areas: initial state (Google button, passcode toggle, heading, subtitle), Google OAuth (signIn('google') with callbackUrl), passcode form toggle (show/hide, hides Google button), passcode input validation (strips non-numeric, limits to 8 digits, disable/enable Continue), passcode submission (signIn('passcode') call, 'Verifying...' loading state, disabled button), success redirect (router.push('/school/{first5digits}')), error display ('Invalid passcode'), error clearing on re-submit, no-op result path (neither ok nor error), back button (clears state, returns to login options)
+- All 797 tests pass across 51 files (781 previous + 16 new)
+- **Learnings for future iterations:**
+  - Login page is a straightforward client component — standard RTL + userEvent testing, no complex mocking needed beyond signIn and useRouter
+  - The passcode input has proper `htmlFor`/`id` association (`htmlFor="passcode"` + `id="passcode"`), so `getByLabelText` works fine here (unlike some other inputs in the codebase)
+  - To test loading state with a pending promise, use `mockImplementation(() => new Promise(resolve => { resolveRef = resolve }))` to hold the promise open, then resolve it after assertion
+  - The redirect path uses `passcode.substring(0, 5)` — first 5 digits of the 8-digit passcode become the school code
+---

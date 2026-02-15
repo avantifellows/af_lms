@@ -224,8 +224,8 @@
         "Build passes (npm run build)"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "16 tests added. Covers: initial state (Google button, passcode toggle, heading, subtitle), Google OAuth (signIn('google') call), passcode form toggle (show/hide, hides Google button), passcode input validation (strips non-numeric chars, limits to 8 digits, disable/enable Continue button), passcode submission (signIn('passcode') call, 'Verifying...' loading state, disabled button during loading), success redirect (router.push to /school/{first5digits}), error display ('Invalid passcode'), error clearing on re-submit, no-op when result has neither ok nor error, back button (clears passcode + error, returns to login options)."
     },
     {
       "id": "US-014",
