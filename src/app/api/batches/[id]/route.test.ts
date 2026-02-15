@@ -125,4 +125,17 @@ describe("PATCH /api/batches/[id]", () => {
     const res = await PATCH(req as never, params);
     expect(res.status).toBe(500);
   });
+
+  it("returns 400 when batch ID is empty", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    const req = jsonRequest("http://localhost/api/batches/", {
+      method: "PATCH",
+      body: { metadata: { stream: "engineering" } },
+    });
+    const res = await PATCH(req as never, routeParams({ id: "" }));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("Batch ID is required");
+  });
 });
