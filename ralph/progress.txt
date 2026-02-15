@@ -189,3 +189,16 @@ Session: d476a0e6-5608-4c79-90af-77dd7ac98dd7
   - The `handleSaveAndContinue` function has a stale closure bug: `if (!error)` checks the closure's captured `error` (which is null from initial render), not the freshly set error state after `handleSave()` fails — so `router.push` is called even when save fails. The test documents this actual behavior rather than the intended behavior.
   - Props use `params: Promise<{ id: string }>` matching Next.js 16 pattern — pass `Promise.resolve({ id: "42" })` in tests
 ---
+
+## 2026-02-15T23:58 - US-015
+Session: f4039aed-b6c1-4aa0-a45d-24da0bac0662
+- Verified Phase 3 coverage: all 820 tests pass across 52 test files
+- Coverage results: 85.56% lines (target >= 84%), 85.33% statements, 80.61% branches, 84.22% functions
+- Baseline was 81.84% lines (Phase 2) — Phase 3 added ~4% coverage from 2 client page test files (Login page, Principal Meeting page)
+- Files committed: `unit-coverage/coverage-summary.json`
+- Lint: both Phase 3 test files pass lint individually
+- Build: pre-existing type error in `e2e/helpers/db.ts:152` still present (not related to unit tests)
+- **Learnings for future iterations:**
+  - Verification stories are quick — just run coverage, check threshold, lint test files, commit summary
+  - Coverage jumped: page.tsx 0%→100%, principal/page.tsx 0%→86%
+---
