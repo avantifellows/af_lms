@@ -62,5 +62,5 @@ next-env.d.ts
 .env*.local
 
 .planning
-ralph/
+ralph/*
 .claude/commands
