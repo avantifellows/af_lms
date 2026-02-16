@@ -29,7 +29,7 @@ Separating scope, capabilities, and ownership keeps each concern simple. A singl
 |--------|------|---------|
 | `email` | varchar(255) | User identifier |
 | `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, or `admin` |
-| `level` | integer | 1=specific schools, 2=region, 3=all schools, 4=admin |
+| `level` | integer | 1=specific schools, 2=region, 3=all schools |
 | `school_codes` | text[] | Specific school codes (level 1) |
 | `regions` | text[] | Region names (level 2) |
 | `program_ids` | integer[] | Which programs the user is assigned to |
@@ -43,7 +43,6 @@ The `level` + `school_codes`/`regions` columns determine which schools appear in
 
 | Level | Scope | Example |
 |-------|-------|---------|
-| 4 | Admin — all schools | Tech admin |
 | 3 | All schools | CoE program admin who needs to see all CoE schools |
 | 2 | Region | SPM assigned to Pune region |
 | 1 | Specific schools | Teacher at JNV Bhavnagar |
