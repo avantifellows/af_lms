@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserPermission, getFeatureAccess, canAccessSchoolSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { validateGpsReading } from "@/lib/geo-validation";
 
 // GET /api/pm/visits - List visits for current PM
 export async function GET(request: NextRequest) {
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   let queryText = `
     SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-           v.data, v.inserted_at, v.updated_at,
+           v.data, v.inserted_at, v.updated_at, v.ended_at,
            s.name as school_name
     FROM lms_pm_school_visits v
     LEFT JOIN school s ON s.code = v.school_code
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ visits });
 }
 
-// POST /api/pm/visits - Create a new visit
+// POST /api/pm/visits - Create a new visit with GPS
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
 
@@ -67,13 +68,19 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { school_code, visit_date } = body;
+  const { school_code } = body;
 
-  if (!school_code || !visit_date) {
+  if (!school_code) {
     return NextResponse.json(
-      { error: "school_code and visit_date are required" },
+      { error: "school_code is required" },
       { status: 400 }
     );
+  }
+
+  // Validate GPS reading
+  const gps = validateGpsReading(body, "start");
+  if (!gps.valid) {
+    return NextResponse.json({ error: gps.error }, { status: 400 });
   }
 
   // Verify PM has access to this school using already-fetched permission
@@ -118,12 +125,35 @@ export async function POST(request: NextRequest) {
     issueLog: [],
   };
 
-  const result = await query<{ id: number }>(
-    `INSERT INTO lms_pm_school_visits (school_code, pm_email, visit_date, status, data)
-     VALUES ($1, $2, $3, 'in_progress', $4)
-     RETURNING id`,
-    [school_code, session.user.email, visit_date, JSON.stringify(initialData)]
+  // visit_date derived server-side as IST date; start GPS stored in dedicated columns
+  const result = await query<{ id: number; visit_date: string }>(
+    `INSERT INTO lms_pm_school_visits
+       (school_code, pm_email, visit_date, status, data,
+        start_lat, start_lng, start_accuracy)
+     VALUES (
+       $1, $2,
+       (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
+       'in_progress', $3,
+       $4, $5, $6
+     )
+     RETURNING id, visit_date`,
+    [
+      school_code,
+      session.user.email,
+      JSON.stringify(initialData),
+      gps.reading!.lat,
+      gps.reading!.lng,
+      gps.reading!.accuracy,
+    ]
   );
 
-  return NextResponse.json({ id: result[0].id }, { status: 201 });
+  const response: { id: number; visit_date: string; warning?: string } = {
+    id: result[0].id,
+    visit_date: result[0].visit_date,
+  };
+  if (gps.warning) {
+    response.warning = gps.warning;
+  }
+
+  return NextResponse.json(response, { status: 201 });
 }
