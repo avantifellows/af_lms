@@ -181,29 +181,34 @@ export function getSchoolByPasscode(passcode: string): string | null {
   return entry?.schoolCode || null;
 }
 
+export function canAccessSchoolSync(
+  permission: UserPermission | null,
+  schoolCode: string,
+  schoolRegion?: string
+): boolean {
+  if (!permission) return false;
+  switch (permission.level) {
+    case 3: return true;
+    case 2: return permission.regions?.includes(schoolRegion || "") || false;
+    case 1: return permission.school_codes?.includes(schoolCode) || false;
+    default: return false;
+  }
+}
+
 export async function canAccessSchool(
   email: string | null,
   schoolCode: string,
   schoolRegion?: string
 ): Promise<boolean> {
   if (!email) return false;
-
   const permission = await getUserPermission(email);
-  if (!permission) return false;
+  return canAccessSchoolSync(permission, schoolCode, schoolRegion);
+}
 
-  switch (permission.level) {
-    case 3:
-      // All schools access
-      return true;
-    case 2:
-      // Region access
-      return permission.regions?.includes(schoolRegion || "") || false;
-    case 1:
-      // Single school access
-      return permission.school_codes?.includes(schoolCode) || false;
-    default:
-      return false;
-  }
+export function hasMultipleSchools(permission: UserPermission | null): boolean {
+  if (!permission) return false;
+  return permission.level >= 2 ||
+    (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1);
 }
 
 export async function getAccessibleSchoolCodes(

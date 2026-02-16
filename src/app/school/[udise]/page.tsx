@@ -7,6 +7,8 @@ import {
   getUserPermission,
   getProgramContextSync,
   getFeatureAccess,
+  canAccessSchoolSync,
+  hasMultipleSchools,
 } from "@/lib/permissions";
 import StudentTable, { Grade } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
@@ -219,21 +221,7 @@ export default async function SchoolPage({ params }: PageProps) {
       );
     }
 
-    // Check school access using permission object directly
-    let hasAccess = false;
-    switch (permission.level) {
-      case 3:
-        hasAccess = true;
-        break;
-      case 2:
-        hasAccess = permission.regions?.includes(school.region || "") || false;
-        break;
-      case 1:
-        hasAccess = permission.school_codes?.includes(school.code) || false;
-        break;
-    }
-
-    if (!hasAccess) {
+    if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
@@ -325,16 +313,12 @@ export default async function SchoolPage({ params }: PageProps) {
     .sort((a, b) => a.grade - b.grade);
 
   // Check if user has access to multiple schools (to show/hide back arrow)
-  let hasMultipleSchools = false;
-  if (!isPasscodeUser && permission) {
-    hasMultipleSchools = permission.level >= 2 ||
-      (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1);
-  }
+  const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
 
   const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
 
   // Determine back link based on role
-  const backHref = hasMultipleSchools ? "/dashboard" : undefined;
+  const backHref = multipleSchools ? "/dashboard" : undefined;
 
   // Build tabs
   const enrollmentContent = (
