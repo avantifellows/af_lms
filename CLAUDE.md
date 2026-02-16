@@ -9,12 +9,16 @@ Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that al
 ## Development Commands
 
 ```bash
-npm run dev          # Start development server at localhost:3000
-npm run build        # Production build
-npm run lint         # Run ESLint
-npm run start        # Start production server
-npm run test:e2e     # Run Playwright e2e tests (port 3001) + V8 coverage
-npm run test:e2e:ui  # Playwright UI mode for debugging (no coverage)
+npm run dev              # Start development server at localhost:3000
+npm run build            # Production build
+npm run lint             # Run ESLint
+npm run start            # Start production server
+npm run test             # Run unit tests (Vitest)
+npm run test:unit        # Run unit tests (alias)
+npm run test:unit:watch  # Run unit tests in watch mode
+npm run test:unit:coverage # Run unit tests + V8 coverage
+npm run test:e2e         # Run Playwright e2e tests (port 3001) + V8 coverage
+npm run test:e2e:ui      # Playwright UI mode for debugging (no coverage)
 ```
 
 ## Architecture
@@ -24,6 +28,7 @@ npm run test:e2e:ui  # Playwright UI mode for debugging (no coverage)
 - **Auth**: NextAuth.js v4 with Google OAuth + custom passcode provider
 - **Database**: PostgreSQL via `pg` pool
 - **Styling**: Tailwind CSS v4
+- **Unit Tests**: Vitest + V8 coverage
 - **E2E Tests**: Playwright (Chromium) + V8 coverage via monocart-reporter
 
 ### Directory Structure
@@ -38,7 +43,8 @@ src/
 └── lib/
     ├── auth.ts             # NextAuth configuration
     ├── db.ts               # PostgreSQL connection pool
-    └── permissions.ts      # Access control (hardcoded)
+    ├── permissions.ts      # Access control (hardcoded)
+    └── *.test.ts           # Colocated unit tests (Vitest)
 
 e2e/                        # Playwright E2E tests
 ├── fixtures/
@@ -88,6 +94,68 @@ DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 NEXTAUTH_SECRET, NEXTAUTH_URL
 ```
+
+## Unit Tests
+
+Unit tests use Vitest with V8 coverage. Test files live alongside source files as `*.test.ts`.
+
+```bash
+npm run test               # Run all unit tests
+npm run test:unit:coverage # Run with V8 coverage report
+```
+
+### Key conventions
+- Test files: `src/**/*.test.ts` (colocated with source)
+- Config: `vitest.config.ts` (path alias `@/*` configured)
+- Coverage output:
+  - `unit-coverage/coverage-summary.json` — **committed** to repo; read by GitHub Actions
+  - `unit-coverage/index.html` — local coverage viewer (gitignored)
+- GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
+- Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
+
+### Test files (22 files, 301 tests)
+
+**Library tests** (8 files, 157 tests):
+- `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
+- `src/lib/curriculum-helpers.test.ts` — pure helpers + localStorage functions
+- `src/lib/geo-validation.test.ts` — GPS reading validation
+- `src/lib/geolocation.test.ts` — browser geolocation API (watchPosition/clearWatch mocks, fake timers)
+- `src/lib/school-student-list-data-issues.test.ts` — student deduplication and multi-school detection
+- `src/lib/auth.test.ts` — NextAuth callbacks (authorize, jwt, session)
+- `src/lib/bigquery.test.ts` — BigQuery client init + query functions (singleton reset via vi.resetModules)
+- `src/lib/db.test.ts` — pg Pool query wrapper
+
+**API route tests** (13 files, 144 tests):
+- `src/app/api/admin/schools/route.test.ts` — GET list/search schools
+- `src/app/api/admin/schools/[code]/route.test.ts` — PATCH update school program_ids
+- `src/app/api/admin/users/route.test.ts` — GET list users, POST create user
+- `src/app/api/admin/users/[id]/route.test.ts` — DELETE/PATCH user management
+- `src/app/api/curriculum/chapters/route.test.ts` — GET chapters with topics (uses NextRequest)
+- `src/app/api/students/search/route.test.ts` — GET student search with school access control
+- `src/app/api/pm/visits/route.test.ts` — GET/POST visits with GPS validation
+- `src/app/api/pm/visits/[id]/route.test.ts` — GET/PATCH/PUT visit details + completion
+- `src/app/api/pm/visits/[id]/end/route.test.ts` — POST end visit with GPS (idempotent)
+- `src/app/api/batches/route.test.ts` — GET batches (DB service proxy)
+- `src/app/api/batches/[id]/route.test.ts` — PATCH batch metadata (DB service proxy)
+- `src/app/api/student/route.test.ts` — POST student update (DB service proxy)
+- `src/app/api/student/[id]/route.test.ts` — PATCH student + grade + batch (multi-fetch)
+- `src/app/api/student/dropout/route.test.ts` — POST mark dropout (DB service proxy)
+- `src/app/api/quiz-analytics/[udise]/route.test.ts` — POST quiz analytics (BigQuery)
+- `src/app/api/quiz-analytics/[udise]/sessions/route.test.ts` — GET quiz sessions (BigQuery)
+
+**Shared test utilities:**
+- `src/app/api/__test-utils__/api-test-helpers.ts` — `jsonRequest()`, `routeParams()`, session constants
+
+### Mocking patterns
+- **DB queries**: `vi.mock("./db")` + `vi.mocked(query)` for return value control per test
+- **Constructors** (pg.Pool, BigQuery): `vi.hoisted()` + `vi.fn(function() { return {...} })` (arrow functions can't be `new`-ed)
+- **Browser APIs**: `vi.stubGlobal("navigator", {...})`, `vi.stubGlobal("localStorage", {...})`
+- **Timers**: `vi.useFakeTimers()` / `vi.advanceTimersByTime()` for timeout-based tests
+- **Singletons**: `vi.resetModules()` + dynamic `import()` in each test to get fresh module instances
+- **NextAuth provider**: access user's authorize via `provider.options.authorize` (not `provider.authorize` which is the default `() => null`)
+- **API route auth**: `vi.mock("next-auth")` + `vi.mock("@/lib/auth", () => ({ authOptions: {} }))` — mock `getServerSession` directly
+- **External fetch**: `vi.stubGlobal("fetch", mockFetch)` for DB service proxy routes — chain with `mockResolvedValueOnce()`
+- **NextRequest**: Use `new NextRequest(new URL(url, "http://localhost"))` for routes that read `request.nextUrl.searchParams`
 
 ## E2E Tests
 
