@@ -1,11 +1,10 @@
 import { query } from "./db";
 
-// Permission levels
-export type AccessLevel = 1 | 2 | 3 | 4;
+// Permission levels (school scope only)
+export type AccessLevel = 1 | 2 | 3;
 // 1 = Single school access
 // 2 = Region access (all schools in a region)
 // 3 = All schools access
-// 4 = Admin (all schools + user management)
 
 // User roles
 export type UserRole = "teacher" | "program_manager" | "program_admin" | "admin";
@@ -182,30 +181,34 @@ export function getSchoolByPasscode(passcode: string): string | null {
   return entry?.schoolCode || null;
 }
 
+export function canAccessSchoolSync(
+  permission: UserPermission | null,
+  schoolCode: string,
+  schoolRegion?: string
+): boolean {
+  if (!permission) return false;
+  switch (permission.level) {
+    case 3: return true;
+    case 2: return permission.regions?.includes(schoolRegion || "") || false;
+    case 1: return permission.school_codes?.includes(schoolCode) || false;
+    default: return false;
+  }
+}
+
 export async function canAccessSchool(
   email: string | null,
   schoolCode: string,
   schoolRegion?: string
 ): Promise<boolean> {
   if (!email) return false;
-
   const permission = await getUserPermission(email);
-  if (!permission) return false;
+  return canAccessSchoolSync(permission, schoolCode, schoolRegion);
+}
 
-  switch (permission.level) {
-    case 4:
-    case 3:
-      // Admin and All schools access
-      return true;
-    case 2:
-      // Region access
-      return permission.regions?.includes(schoolRegion || "") || false;
-    case 1:
-      // Single school access
-      return permission.school_codes?.includes(schoolCode) || false;
-    default:
-      return false;
-  }
+export function hasMultipleSchools(permission: UserPermission | null): boolean {
+  if (!permission) return false;
+  return permission.level >= 2 ||
+    (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1);
 }
 
 export async function getAccessibleSchoolCodes(
@@ -215,7 +218,7 @@ export async function getAccessibleSchoolCodes(
   const permission = existingPermission !== undefined ? existingPermission : await getUserPermission(email);
   if (!permission) return [];
 
-  if (permission.level === 4 || permission.level === 3) return "all";
+  if (permission.level === 3) return "all";
   if (permission.level === 1) return permission.school_codes || [];
 
   // Level 2: fetch all school codes in the user's assigned regions
@@ -234,7 +237,7 @@ export async function getAccessibleSchoolCodes(
 
 export async function isAdmin(email: string): Promise<boolean> {
   const permission = await getUserPermission(email);
-  return permission?.level === 4;
+  return permission?.role === "admin";
 }
 
 // Synchronous helper to get program context from a permission object

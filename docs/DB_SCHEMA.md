@@ -107,7 +107,7 @@ Stores user access permissions for this CRUD UI. See [permissions.md](permission
 | id | serial | Primary key |
 | email | varchar(255) | User email (unique) |
 | role | varchar(50) | `teacher`, `program_manager`, `program_admin`, or `admin` (default: `teacher`) |
-| level | integer | 1=School, 2=Region, 3=All Schools, 4=Admin |
+| level | integer | 1=School, 2=Region, 3=All Schools |
 | school_codes | text[] | Array of school codes (for level 1) |
 | regions | text[] | Array of region names (for level 2) |
 | program_ids | integer[] | Array of program IDs the user is assigned to (1=CoE, 2=Nodal, 64=NVS) |
