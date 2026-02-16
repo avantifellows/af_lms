@@ -149,5 +149,5 @@ export async function seedTestVisit(
     [schoolCode, "e2e-pm@test.local", JSON.stringify(initialData)]
   );
 
-  return { visitId: result.rows[0].id, schoolCode };
+  return { visitId: result.rows[0].id, schoolCode: schoolCode as string };
 }

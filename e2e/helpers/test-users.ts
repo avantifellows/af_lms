@@ -13,7 +13,7 @@ export interface TestUser {
 export const TEST_USERS = {
   admin: {
     email: "e2e-admin@test.local",
-    level: 4,
+    level: 3,
     role: "admin",
     program_ids: [1, 2, 64],
     school_codes: null,
