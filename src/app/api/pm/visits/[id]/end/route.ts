@@ -47,7 +47,7 @@ export async function POST(
   const visit = visits[0];
 
   // Permission: PM can end own visit, admin can end any visit
-  const userIsAdmin = permission?.level === 4;
+  const userIsAdmin = permission?.role === "admin";
   if (visit.pm_email !== session.user.email && !userIsAdmin) {
     return NextResponse.json(
       { error: "You can only end your own visits" },

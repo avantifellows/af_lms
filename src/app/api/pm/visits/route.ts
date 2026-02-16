@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
+import { getUserPermission, getFeatureAccess, canAccessSchoolSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
 
@@ -88,30 +88,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No permission record" }, { status: 403 });
   }
 
-  // Inline school access check using permission object
-  let hasSchoolAccess = false;
-  switch (permission.level) {
-    case 4:
-    case 3:
-      hasSchoolAccess = true;
-      break;
-    case 2: {
-      const schoolResult = await query<{ region: string }>(
-        `SELECT region FROM school WHERE code = $1`,
-        [school_code]
-      );
-      if (schoolResult.length === 0) {
-        return NextResponse.json({ error: "School not found" }, { status: 404 });
-      }
-      hasSchoolAccess = permission.regions?.includes(schoolResult[0].region) || false;
-      break;
+  // Fetch region only when needed for level 2 access check
+  let schoolRegion: string | undefined;
+  if (permission.level === 2) {
+    const schoolResult = await query<{ region: string }>(
+      `SELECT region FROM school WHERE code = $1`,
+      [school_code]
+    );
+    if (schoolResult.length === 0) {
+      return NextResponse.json({ error: "School not found" }, { status: 404 });
     }
-    case 1:
-      hasSchoolAccess = permission.school_codes?.includes(school_code) || false;
-      break;
+    schoolRegion = schoolResult[0].region;
   }
 
-  if (!hasSchoolAccess) {
+  if (!canAccessSchoolSync(permission, school_code, schoolRegion)) {
     return NextResponse.json(
       { error: "You do not have access to this school" },
       { status: 403 }

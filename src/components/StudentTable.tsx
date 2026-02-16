@@ -46,11 +46,9 @@ interface StudentTableProps {
 
 function formatDate(dateString: string | null): string {
   if (!dateString) return "—";
-  return new Date(dateString).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  const d = new Date(dateString);
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${String(d.getDate()).padStart(2, "0")} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function getCategoryColor(category: string | null): string {

@@ -60,7 +60,7 @@ export async function GET(
 
   // Only allow PM who created the visit or admins to view
   const isOwner = visit.pm_email === session.user.email;
-  const userIsAdmin = permission?.level === 4;
+  const userIsAdmin = permission?.role === "admin";
 
   if (!isOwner && !userIsAdmin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });

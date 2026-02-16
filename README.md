@@ -8,11 +8,11 @@ Admin interface for managing JNV (Jawahar Navodaya Vidyalaya) student enrollment
 - **School Dashboard**: Browse schools with search and filtering
 - **Student Search**: Search students across accessible schools by name, ID, or phone
 - **Grade Filtering**: Filter students by grade within a school
-- **User Permissions**: Role-based access control with 4 levels:
-  - Level 4 (Admin): Full access + user management
+- **User Permissions**: Role-based access control with 3 school scope levels:
   - Level 3 (All Schools): Access to all JNV schools
   - Level 2 (Region): Access to schools in specific regions
   - Level 1 (School): Access to specific schools only
+  - Admin status is determined by role, not level
 - **Read-only Mode**: Optional view-only access for any permission level
 
 ## Tech Stack
@@ -199,7 +199,7 @@ This is intentional technical debt for rapid development. The DB Service is Avan
 
 Permissions are stored in `user_permission` table:
 - `email`: User's email (unique)
-- `level`: Access level (1-4)
+- `level`: School scope level (1-3)
 - `school_codes`: Array of school codes (for level 1)
 - `regions`: Array of region names (for level 2)
 - `read_only`: Boolean for view-only access

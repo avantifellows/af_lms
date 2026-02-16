@@ -136,7 +136,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
   }
 
   // Only allow PM who created the visit or admins to view
-  const isAdmin = permission?.level === 4;
+  const isAdmin = permission?.role === "admin";
 
   if (visit.pm_email !== session.user.email && !isAdmin) {
     return (
