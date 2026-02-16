@@ -202,6 +202,14 @@ export async function canAccessSchool(
 ): Promise<boolean> {
   if (!email) return false;
   const permission = await getUserPermission(email);
+  // For level-2 (region) users, look up the school's region if not provided
+  if (permission?.level === 2 && !schoolRegion) {
+    const result = await query<{ region: string }>(
+      `SELECT region FROM school WHERE code = $1`,
+      [schoolCode]
+    );
+    schoolRegion = result[0]?.region;
+  }
   return canAccessSchoolSync(permission, schoolCode, schoolRegion);
 }
 
