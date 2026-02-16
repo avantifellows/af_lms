@@ -3,10 +3,14 @@ import { NextRequest } from "next/server";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({
-  getUserPermission: vi.fn(),
-  getFeatureAccess: vi.fn(),
-}));
+vi.mock("@/lib/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/permissions")>();
+  return {
+    ...actual,
+    getUserPermission: vi.fn(),
+    getFeatureAccess: vi.fn(),
+  };
+});
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/geo-validation", () => ({ validateGpsReading: vi.fn() }));
 

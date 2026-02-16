@@ -21,14 +21,12 @@ interface UserListProps {
 }
 
 const LEVEL_LABELS: Record<number, string> = {
-  4: "Admin",
   3: "All Schools",
   2: "Region",
   1: "School",
 };
 
 const LEVEL_COLORS: Record<number, string> = {
-  4: "bg-purple-100 text-purple-800",
   3: "bg-blue-100 text-blue-800",
   2: "bg-green-100 text-green-800",
   1: "bg-gray-100 text-gray-800",

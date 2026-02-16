@@ -312,7 +312,7 @@ describe("getUserPermission", () => {
     mockQuery.mockResolvedValueOnce([
       {
         email: "admin@avantifellows.org",
-        level: 4,
+        level: 3,
         role: "admin",
         school_codes: null,
         regions: null,
@@ -322,7 +322,7 @@ describe("getUserPermission", () => {
     ]);
 
     const result = await getUserPermission("admin@avantifellows.org");
-    expect(result!.level).toBe(4);
+    expect(result!.level).toBe(3);
   });
 });
 
@@ -346,9 +346,9 @@ describe("canAccessSchool", () => {
     expect(result).toBe(false);
   });
 
-  it("returns true for level 4 (admin)", async () => {
+  it("returns true for level 3 admin", async () => {
     mockQuery.mockResolvedValueOnce([
-      { email: "admin@af.org", level: 4, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
+      { email: "admin@af.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
     ]);
     const result = await canAccessSchool("admin@af.org", "70705");
     expect(result).toBe(true);
@@ -440,8 +440,8 @@ describe("getAccessibleSchoolCodes", () => {
     getAccessibleSchoolCodes = mod.getAccessibleSchoolCodes;
   });
 
-  it("returns 'all' for level 4", async () => {
-    const perm = makePermission({ level: 4, role: "admin" });
+  it("returns 'all' for level 3 admin", async () => {
+    const perm = makePermission({ level: 3, role: "admin" });
     const result = await getAccessibleSchoolCodes("admin@af.org", perm);
     expect(result).toBe("all");
   });
@@ -490,7 +490,7 @@ describe("getAccessibleSchoolCodes", () => {
 
   it("fetches permission from DB when not provided", async () => {
     mockQuery.mockResolvedValueOnce([
-      { email: "admin@af.org", level: 4, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
+      { email: "admin@af.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
     ]);
     const result = await getAccessibleSchoolCodes("admin@af.org");
     expect(result).toBe("all");
@@ -505,14 +505,14 @@ describe("isAdmin", () => {
     isAdmin = mod.isAdmin;
   });
 
-  it("returns true for level 4", async () => {
+  it("returns true for admin role", async () => {
     mockQuery.mockResolvedValueOnce([
-      { email: "admin@af.org", level: 4, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
+      { email: "admin@af.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
     ]);
     expect(await isAdmin("admin@af.org")).toBe(true);
   });
 
-  it("returns false for non-level-4", async () => {
+  it("returns false for non-admin role", async () => {
     mockQuery.mockResolvedValueOnce([
       { email: "pm@af.org", level: 3, role: "program_manager", school_codes: null, regions: null, program_ids: null, read_only: false },
     ]);

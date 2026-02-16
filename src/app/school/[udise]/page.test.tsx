@@ -33,11 +33,15 @@ vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
 }));
-vi.mock("@/lib/permissions", () => ({
-  getUserPermission: mockGetUserPermission,
-  getProgramContextSync: mockGetProgramContextSync,
-  getFeatureAccess: mockGetFeatureAccess,
-}));
+vi.mock("@/lib/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/permissions")>();
+  return {
+    ...actual,
+    getUserPermission: mockGetUserPermission,
+    getProgramContextSync: mockGetProgramContextSync,
+    getFeatureAccess: mockGetFeatureAccess,
+  };
+});
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
@@ -213,7 +217,7 @@ const makeStudent = (overrides = {}) => ({
 
 const makePermission = (overrides = {}) => ({
   email: "user@avantifellows.org",
-  level: 4 as const,
+  level: 3 as const,
   role: "admin" as const,
   school_codes: null,
   regions: null,

@@ -35,7 +35,7 @@ const users = [
   {
     id: 1,
     email: "me@avantifellows.org",
-    level: 4,
+    level: 3,
     role: "admin",
     school_codes: null,
     regions: null,
@@ -145,8 +145,7 @@ describe("UserList", () => {
     it("renders level badges", () => {
       renderList();
       // Level labels from LEVEL_LABELS
-      expect(screen.getAllByText("Admin").length).toBeGreaterThanOrEqual(1); // level 4 = "Admin"
-      expect(screen.getByText("All Schools")).toBeInTheDocument(); // level 3
+      expect(screen.getAllByText("All Schools").length).toBe(2); // level 3 (users 1 + 4)
       expect(screen.getByText("Region")).toBeInTheDocument(); // level 2
       expect(screen.getByText("School")).toBeInTheDocument(); // level 1
     });
@@ -170,9 +169,9 @@ describe("UserList", () => {
       expect(screen.getAllByText("Read/Write").length).toBe(3);
     });
 
-    it("shows 'All JNV schools' for level 4 and 3 users", () => {
+    it("shows 'All JNV schools' for level 3 users", () => {
       renderList();
-      expect(screen.getAllByText("All JNV schools").length).toBe(2); // users 1 (level 4) + 4 (level 3)
+      expect(screen.getAllByText("All JNV schools").length).toBe(2); // users 1 (level 3 admin) + 4 (level 3 admin)
     });
 
     it("shows regions for level 2 users", () => {

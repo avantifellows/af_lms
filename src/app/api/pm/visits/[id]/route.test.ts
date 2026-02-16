@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({
-  getUserPermission: vi.fn(),
-  getFeatureAccess: vi.fn(),
-}));
+vi.mock("@/lib/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/permissions")>();
+  return {
+    ...actual,
+    getUserPermission: vi.fn(),
+    getFeatureAccess: vi.fn(),
+  };
+});
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
@@ -114,9 +118,9 @@ describe("GET /api/pm/visits/[id]", () => {
     expect(json.visit.id).toBe(10);
   });
 
-  it("allows admin (level 4) to view any visit", async () => {
+  it("allows admin to view any visit", async () => {
     mockSession.mockResolvedValue(PM_SESSION);
-    mockGetPermission.mockResolvedValue({ ...PM_PERM, level: 4 } as never);
+    mockGetPermission.mockResolvedValue({ ...PM_PERM, role: "admin" } as never);
     mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
     mockQuery.mockResolvedValue([{ ...VISIT, pm_email: "other@avantifellows.org" }]);
 
