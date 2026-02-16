@@ -34,11 +34,11 @@ interface SeedUser {
 
 // Seed data - add/modify users here
 const SEED_USERS: SeedUser[] = [
-  // Level 4: Admin (can manage users + all school access)
-  { email: "pritam@avantifellows.org", level: 4, role: "admin" },
-  { email: "aman.bahuguna@avantifellows.org", level: 4, role: "admin" },
-  { email: "dhyaneshwaran@avantifellows.org", level: 4, role: "admin" },
-  { email: "vishal@avantifellows.org", level: 4, role: "admin" },
+  // Admins: role="admin" grants full access; level=3 gives all-schools scope
+  { email: "pritam@avantifellows.org", level: 3, role: "admin" },
+  { email: "aman.bahuguna@avantifellows.org", level: 3, role: "admin" },
+  { email: "dhyaneshwaran@avantifellows.org", level: 3, role: "admin" },
+  { email: "vishal@avantifellows.org", level: 3, role: "admin" },
 
   // Level 3: All schools access
   // (add level 3 users here)
@@ -59,7 +59,7 @@ async function setup() {
       CREATE TABLE IF NOT EXISTS user_permission (
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
-        level INTEGER NOT NULL CHECK (level IN (1, 2, 3, 4)),
+        level INTEGER NOT NULL CHECK (level IN (1, 2, 3)),
         role VARCHAR(50) DEFAULT 'teacher',
         school_codes TEXT[],
         regions TEXT[],
