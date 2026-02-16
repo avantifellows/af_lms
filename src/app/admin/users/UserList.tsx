@@ -179,7 +179,7 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                   )}
                 </td>
                 <td className="px-3 py-4 text-sm text-gray-500">
-                  {user.level === 4 || user.level === 3 ? (
+                  {user.level === 3 ? (
                     <span className="text-gray-400">All JNV schools</span>
                   ) : user.level === 2 ? (
                     <span>{user.regions?.join(", ") || "No regions assigned"}</span>

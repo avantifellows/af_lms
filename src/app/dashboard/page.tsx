@@ -288,7 +288,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Schools</h1>
               <p className="mt-1 text-sm text-gray-500">
-                {permission.level === 4
+                {permission.role === "admin"
                   ? "Admin access"
                   : permission.level === 3
                     ? "All schools access"
@@ -315,7 +315,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             )}
           </div>
           <div className="flex items-center gap-4">
-            {permission.level === 4 && (
+            {permission.role === "admin" && (
               <Link
                 href="/admin"
                 className="text-sm text-blue-600 hover:text-blue-800"

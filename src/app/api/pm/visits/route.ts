@@ -84,7 +84,6 @@ export async function POST(request: NextRequest) {
   // Inline school access check using permission object
   let hasSchoolAccess = false;
   switch (permission.level) {
-    case 4:
     case 3:
       hasSchoolAccess = true;
       break;

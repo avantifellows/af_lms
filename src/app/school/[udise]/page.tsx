@@ -222,7 +222,6 @@ export default async function SchoolPage({ params }: PageProps) {
     // Check school access using permission object directly
     let hasAccess = false;
     switch (permission.level) {
-      case 4:
       case 3:
         hasAccess = true;
         break;
