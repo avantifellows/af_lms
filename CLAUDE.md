@@ -63,9 +63,10 @@ e2e/                        # Playwright E2E tests
 
 ### Permission Levels
 Defined in `src/lib/permissions.ts`:
-- **Level 3**: All schools access (admin)
+- **Level 3**: All schools access
 - **Level 2**: Region-based access (not fully implemented)
 - **Level 1**: Specific school codes only
+- Admin status is determined by `role = "admin"`, not by level
 
 ### Database Schema (External PostgreSQL)
 Tables queried:

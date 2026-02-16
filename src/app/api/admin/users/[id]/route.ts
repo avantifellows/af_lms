@@ -58,9 +58,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const body = await request.json();
     const { level, role, school_codes, regions, program_ids, read_only } = body;
 
-    if (level && (level < 1 || level > 4)) {
+    if (level && (level < 1 || level > 3)) {
       return NextResponse.json(
-        { error: "Level must be between 1 and 4" },
+        { error: "Level must be between 1 and 3" },
         { status: 400 }
       );
     }

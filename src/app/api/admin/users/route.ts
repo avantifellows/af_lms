@@ -64,9 +64,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (level < 1 || level > 4) {
+    if (level < 1 || level > 3) {
       return NextResponse.json(
-        { error: "Level must be between 1 and 4" },
+        { error: "Level must be between 1 and 3" },
         { status: 400 }
       );
     }
