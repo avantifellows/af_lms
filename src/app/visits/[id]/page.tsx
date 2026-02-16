@@ -1,9 +1,10 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { canAccessPMFeatures } from "@/lib/permissions";
+import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
+import EndVisitButton from "@/components/visits/EndVisitButton";
 
 interface Visit {
   id: number;
@@ -28,13 +29,14 @@ interface Visit {
   };
   inserted_at: string;
   updated_at: string;
+  ended_at: string | null;
   school_name?: string;
 }
 
 async function getVisit(id: string): Promise<Visit | null> {
   const visits = await query<Visit>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-            v.data, v.inserted_at, v.updated_at,
+            v.data, v.inserted_at, v.updated_at, v.ended_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
@@ -116,8 +118,8 @@ export default async function VisitDetailPage({ params }: PageProps) {
     redirect("/");
   }
 
-  const canAccess = await canAccessPMFeatures(session.user.email);
-  if (!canAccess) {
+  const permission = await getUserPermission(session.user.email);
+  if (!getFeatureAccess(permission, "visits").canView) {
     redirect("/dashboard");
   }
 
@@ -134,11 +136,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
   }
 
   // Only allow PM who created the visit or admins to view
-  const permission = await query<{ role: string }>(
-    `SELECT role FROM user_permission WHERE LOWER(email) = LOWER($1)`,
-    [session.user.email]
-  );
-  const isAdmin = permission.length > 0 && permission[0].role === "admin";
+  const isAdmin = permission?.role === "admin";
 
   if (visit.pm_email !== session.user.email && !isAdmin) {
     return (
@@ -152,7 +150,6 @@ export default async function VisitDetailPage({ params }: PageProps) {
 
   const sections = getSectionStatus(visit);
   const completedCount = sections.filter((s) => s.isComplete).length;
-  const allComplete = completedCount === sections.length;
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
@@ -178,15 +175,31 @@ export default async function VisitDetailPage({ params }: PageProps) {
                 timeZone: "Asia/Kolkata",
               })}
             </p>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+              <span>
+                Started: {new Date(visit.inserted_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+              </span>
+              {visit.ended_at && (
+                <span>
+                  Ended: {new Date(visit.ended_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                </span>
+              )}
+            </div>
           </div>
           <span
             className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${
               visit.status === "completed"
                 ? "bg-green-100 text-green-800"
-                : "bg-yellow-100 text-yellow-800"
+                : visit.ended_at
+                  ? "bg-blue-100 text-blue-800"
+                  : "bg-yellow-100 text-yellow-800"
             }`}
           >
-            {visit.status === "completed" ? "Completed" : "In Progress"}
+            {visit.status === "completed"
+              ? "Completed"
+              : visit.ended_at
+                ? "Ended"
+                : "In Progress"}
           </span>
         </div>
 
@@ -266,32 +279,26 @@ export default async function VisitDetailPage({ params }: PageProps) {
         </div>
       </div>
 
-      {/* Complete Button */}
-      {visit.status !== "completed" && (
+      {/* End Visit */}
+      {visit.status !== "completed" && !visit.ended_at && (
         <div className="bg-white shadow rounded-lg p-6">
-          {allComplete ? (
-            <div>
-              <p className="text-sm text-gray-600 mb-4">
-                All sections are complete. You can now finalize this visit.
-              </p>
-              <form action={`/api/pm/visits/${visit.id}`} method="POST">
-                <input type="hidden" name="action" value="complete" />
-                <button
-                  type="submit"
-                  className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                >
-                  Complete Visit
-                </button>
-              </form>
-            </div>
-          ) : (
-            <div className="text-center text-gray-500">
-              <p>Complete all sections to finalize this visit.</p>
-              <p className="text-sm mt-1">
-                {sections.length - completedCount} section(s) remaining
-              </p>
-            </div>
-          )}
+          <p className="text-sm text-gray-600 mb-4">
+            When you&apos;re done at the school, end the visit to record your departure time and location.
+          </p>
+          <EndVisitButton visitId={visit.id} alreadyEnded={!!visit.ended_at} />
+        </div>
+      )}
+
+      {/* Ended confirmation */}
+      {visit.ended_at && visit.status !== "completed" && (
+        <div className="bg-white shadow rounded-lg p-6 text-center">
+          <p className="text-sm text-gray-500">
+            Visit ended on{" "}
+            {new Date(visit.ended_at).toLocaleString("en-IN", {
+              timeZone: "Asia/Kolkata",
+            })}
+            . You can still update sections above.
+          </p>
         </div>
       )}
     </main>

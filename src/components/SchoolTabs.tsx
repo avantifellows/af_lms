@@ -48,6 +48,8 @@ interface VisitHistoryProps {
     id: number;
     visit_date: string;
     status: string;
+    inserted_at?: string | null;
+    ended_at?: string | null;
   }[];
   schoolCode: string;
 }
@@ -85,29 +87,49 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
             className="flex justify-between items-center p-3 bg-gray-50 rounded-lg"
           >
             <div>
-              <span className="font-medium">
-                {new Date(visit.visit_date).toLocaleDateString("en-IN", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                  timeZone: "Asia/Kolkata",
-                })}
-              </span>
-              <span
-                className={`ml-3 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                  visit.status === "completed"
-                    ? "bg-green-100 text-green-800"
-                    : "bg-yellow-100 text-yellow-800"
-                }`}
-              >
-                {visit.status === "completed" ? "Completed" : "In Progress"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium">
+                  {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    timeZone: "Asia/Kolkata",
+                  })}
+                </span>
+                <span
+                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                    visit.status === "completed"
+                      ? "bg-green-100 text-green-800"
+                      : visit.ended_at
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-yellow-100 text-yellow-800"
+                  }`}
+                >
+                  {visit.status === "completed"
+                    ? "Completed"
+                    : visit.ended_at
+                      ? "Ended"
+                      : "In Progress"}
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                {visit.inserted_at && (
+                  <span>
+                    Started: {new Date(visit.inserted_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
+                  </span>
+                )}
+                {visit.ended_at && (
+                  <span className="ml-3">
+                    Ended: {new Date(visit.ended_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
+                  </span>
+                )}
+              </div>
             </div>
             <Link
               href={`/visits/${visit.id}`}
               className="text-sm text-blue-600 hover:text-blue-800"
             >
-              {visit.status === "completed" ? "View" : "Continue"}
+              {visit.status === "completed" || visit.ended_at ? "View" : "Continue"}
             </Link>
           </div>
         ))}

@@ -1,14 +1,13 @@
 import { query } from "./db";
 
-// Permission levels
-export type AccessLevel = 1 | 2 | 3 | 4;
+// Permission levels (school scope only)
+export type AccessLevel = 1 | 2 | 3;
 // 1 = Single school access
 // 2 = Region access (all schools in a region)
 // 3 = All schools access
-// 4 = Admin (all schools + user management)
 
 // User roles
-export type UserRole = "teacher" | "program_manager" | "admin";
+export type UserRole = "teacher" | "program_manager" | "program_admin" | "admin";
 
 // Program IDs
 export const PROGRAM_IDS = {
@@ -18,7 +17,101 @@ export const PROGRAM_IDS = {
 } as const;
 
 // Feature types for permission checking
-export type Feature = "students" | "visits" | "curriculum" | "mentorship" | "analytics";
+export type Feature = "students" | "visits" | "curriculum" | "mentorship" | "performance" | "summary_stats" | "pm_dashboard";
+
+// Feature access levels
+export type FeatureAccess = "none" | "view" | "edit";
+
+// Feature permission matrix: feature → role → access level
+const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
+  students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
+  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
+  curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
+  mentorship:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
+  performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
+};
+
+// Features gated to CoE/Nodal programs only (NVS-only users get "none")
+const NVS_GATED_FEATURES: Set<Feature> = new Set([
+  "visits", "curriculum", "mentorship", "pm_dashboard", "summary_stats",
+]);
+
+export interface FeatureAccessResult {
+  access: FeatureAccess;
+  canView: boolean;
+  canEdit: boolean;
+}
+
+interface FeatureAccessOptions {
+  isPasscodeUser?: boolean;
+}
+
+/**
+ * Get the feature access level for a user.
+ * Handles passcode users, NVS-only gating, and read_only downgrade.
+ */
+export function getFeatureAccess(
+  permission: UserPermission | null,
+  feature: Feature,
+  opts?: FeatureAccessOptions,
+): FeatureAccessResult {
+  const none: FeatureAccessResult = { access: "none", canView: false, canEdit: false };
+
+  // Passcode users: students → edit, everything else → none
+  if (opts?.isPasscodeUser) {
+    if (feature === "students") {
+      return { access: "edit", canView: true, canEdit: true };
+    }
+    return none;
+  }
+
+  if (!permission) return none;
+
+  // Look up base access from matrix
+  let access = FEATURE_PERMISSIONS[feature]?.[permission.role] ?? "none";
+
+  // NVS-only gating: force "none" for gated features if user lacks CoE/Nodal
+  if (access !== "none" && NVS_GATED_FEATURES.has(feature)) {
+    const context = getProgramContextSync(permission);
+    if (!context.hasCoEOrNodal) {
+      access = "none";
+    }
+  }
+
+  // read_only downgrade: "edit" → "view"
+  if (access === "edit" && permission.read_only) {
+    access = "view";
+  }
+
+  return {
+    access,
+    canView: access !== "none",
+    canEdit: access === "edit",
+  };
+}
+
+/**
+ * Check if a user owns a record (for per-row edit gating).
+ * Returns true if the user's program_ids include the record's program_id.
+ */
+export function ownsRecord(
+  permission: UserPermission | null,
+  programId: number | null,
+  opts?: { isPasscodeUser?: boolean },
+): boolean {
+  // Passcode users own all records at their school
+  if (opts?.isPasscodeUser) return true;
+  if (!permission) return false;
+  // Admins own everything
+  if (permission.role === "admin") return true;
+  // Unassigned records are editable by anyone with feature-level edit
+  if (programId === null) return true;
+  // Check program_ids
+  if (!permission.program_ids || permission.program_ids.length === 0) return false;
+  return permission.program_ids.includes(programId);
+}
 
 export interface UserPermission {
   email: string;
@@ -88,39 +181,52 @@ export function getSchoolByPasscode(passcode: string): string | null {
   return entry?.schoolCode || null;
 }
 
+export function canAccessSchoolSync(
+  permission: UserPermission | null,
+  schoolCode: string,
+  schoolRegion?: string
+): boolean {
+  if (!permission) return false;
+  switch (permission.level) {
+    case 3: return true;
+    case 2: return permission.regions?.includes(schoolRegion || "") || false;
+    case 1: return permission.school_codes?.includes(schoolCode) || false;
+    default: return false;
+  }
+}
+
 export async function canAccessSchool(
   email: string | null,
   schoolCode: string,
   schoolRegion?: string
 ): Promise<boolean> {
   if (!email) return false;
-
   const permission = await getUserPermission(email);
-  if (!permission) return false;
-
-  switch (permission.level) {
-    case 4:
-    case 3:
-      // Admin and All schools access
-      return true;
-    case 2:
-      // Region access
-      return permission.regions?.includes(schoolRegion || "") || false;
-    case 1:
-      // Single school access
-      return permission.school_codes?.includes(schoolCode) || false;
-    default:
-      return false;
+  // For level-2 (region) users, look up the school's region if not provided
+  if (permission?.level === 2 && !schoolRegion) {
+    const result = await query<{ region: string }>(
+      `SELECT region FROM school WHERE code = $1`,
+      [schoolCode]
+    );
+    schoolRegion = result[0]?.region;
   }
+  return canAccessSchoolSync(permission, schoolCode, schoolRegion);
+}
+
+export function hasMultipleSchools(permission: UserPermission | null): boolean {
+  if (!permission) return false;
+  return permission.level >= 2 ||
+    (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1);
 }
 
 export async function getAccessibleSchoolCodes(
-  email: string
+  email: string,
+  existingPermission?: UserPermission | null
 ): Promise<string[] | "all"> {
-  const permission = await getUserPermission(email);
+  const permission = existingPermission !== undefined ? existingPermission : await getUserPermission(email);
   if (!permission) return [];
 
-  if (permission.level === 4 || permission.level === 3) return "all";
+  if (permission.level === 3) return "all";
   if (permission.level === 1) return permission.school_codes || [];
 
   // Level 2: fetch all school codes in the user's assigned regions
@@ -139,53 +245,7 @@ export async function getAccessibleSchoolCodes(
 
 export async function isAdmin(email: string): Promise<boolean> {
   const permission = await getUserPermission(email);
-  return permission?.level === 4;
-}
-
-export async function canEditStudents(email: string): Promise<boolean> {
-  const permission = await getUserPermission(email);
-  return permission !== null && !permission.read_only;
-}
-
-export async function isProgramManager(email: string): Promise<boolean> {
-  const permission = await getUserPermission(email);
-  return permission?.role === "program_manager" || permission?.role === "admin";
-}
-
-export async function getUserRole(email: string): Promise<UserRole | null> {
-  const permission = await getUserPermission(email);
-  return permission?.role || null;
-}
-
-export async function canAccessPMFeatures(email: string): Promise<boolean> {
-  const permission = await getUserPermission(email);
-  if (!permission) return false;
-
-  // Must have PM or Admin role
-  const hasRole = permission.role === "program_manager" || permission.role === "admin";
-  if (!hasRole) return false;
-
-  // Must have CoE or Nodal program (NVS-only PMs don't get visit features)
-  const context = getProgramContextSync(permission);
-  return context.hasCoEOrNodal;
-}
-
-// Check if user can edit curriculum (teachers and admins can, PMs cannot)
-// Also requires CoE/Nodal program access
-export async function canEditCurriculum(email: string): Promise<boolean> {
-  const permission = await getUserPermission(email);
-  if (!permission) return false;
-
-  // Must have CoE/Nodal program access
-  const context = getProgramContextSync(permission);
-  if (!context.hasCoEOrNodal) return false;
-
-  // Admins can always edit
-  if (permission.role === "admin") return true;
-  // Teachers can edit (not read_only)
-  if (permission.role === "teacher" && !permission.read_only) return true;
-  // PMs are view-only for curriculum
-  return false;
+  return permission?.role === "admin";
 }
 
 // Synchronous helper to get program context from a permission object
@@ -244,61 +304,3 @@ export async function getProgramContext(
   return getProgramContextSync(permission);
 }
 
-// Check if user can access a specific feature based on their programs
-export async function canAccessFeature(
-  email: string,
-  feature: Feature
-): Promise<boolean> {
-  const permission = await getUserPermission(email);
-  if (!permission) return false;
-
-  // Admins can access everything
-  if (permission.role === "admin") {
-    return true;
-  }
-
-  const context = getProgramContextSync(permission);
-  if (!context.hasAccess) return false;
-
-  // Feature-specific checks
-  switch (feature) {
-    case "students":
-    case "analytics":
-      // All programs can access students and analytics
-      return true;
-
-    case "visits":
-    case "curriculum":
-    case "mentorship":
-      // NVS-only users cannot access these features
-      return context.hasCoEOrNodal;
-
-    default:
-      return false;
-  }
-}
-
-// Get program filter for students
-// Returns null if user can see all students, or array of program IDs to filter by
-export async function getStudentProgramFilter(
-  email: string
-): Promise<number[] | null> {
-  const permission = await getUserPermission(email);
-  if (!permission) return []; // No access - empty array means no students
-
-  // Admins see all students
-  if (permission.role === "admin") {
-    return null; // null = no filter (see all)
-  }
-
-  const context = getProgramContextSync(permission);
-  if (!context.hasAccess) return [];
-
-  // CoE/Nodal users see all students for context
-  if (context.hasCoEOrNodal) {
-    return null; // null = no filter (see all)
-  }
-
-  // NVS-only users see only NVS students
-  return context.programIds;
-}

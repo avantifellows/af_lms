@@ -86,23 +86,28 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
     setLoading(true);
 
     try {
-      // Validate program selection
-      if (selectedPrograms.length === 0) {
+      const isAdminRole = role === "admin";
+
+      // Validate program selection (not needed for admins)
+      if (!isAdminRole && selectedPrograms.length === 0) {
         throw new Error("At least one program must be selected");
       }
 
       const body: Record<string, unknown> = {
-        level,
+        level: isAdminRole ? 3 : level,
         role,
-        read_only: readOnly,
-        program_ids: selectedPrograms,
+        read_only: isAdminRole ? false : readOnly,
+        program_ids: isAdminRole ? PROGRAMS.map((p) => p.id) : selectedPrograms,
       };
 
       if (!isEditing) {
         body.email = email;
       }
 
-      if (level === 2) {
+      if (isAdminRole) {
+        body.school_codes = null;
+        body.regions = null;
+      } else if (level === 2) {
         body.regions = selectedRegions;
         body.school_codes = null;
       } else if (level === 1) {
@@ -200,18 +205,23 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
               <p className="mt-1 text-xs text-gray-500">
                 {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools"}
                 {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
-                {role === "admin" && "Admins have full access to all features including user management"}
+                {role === "admin" && "Admins have full access to all features, all schools, and all programs"}
               </p>
             </div>
 
+            {role === "admin" ? (
+              <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+                Admins automatically get access to all schools, all programs, and full edit permissions.
+              </div>
+            ) : (
+            <>
             <div>
-              <label className={labelClassName}>Permission Level</label>
+              <label className={labelClassName}>School Access</label>
               <select
                 value={level}
                 onChange={(e) => setLevel(Number(e.target.value))}
                 className={inputClassName}
               >
-                <option value={4}>Admin - Full access + user management</option>
                 <option value={3}>All Schools - Access to all JNV schools</option>
                 <option value={2}>Region - Access to schools in specific regions</option>
                 <option value={1}>School - Access to specific schools</option>
@@ -339,6 +349,10 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                 )}
               </div>
             )}
+            </>
+            )}
+
+
 
             <div className="mt-6 flex justify-end gap-3">
               <button

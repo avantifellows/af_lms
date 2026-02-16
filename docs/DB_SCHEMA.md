@@ -100,17 +100,19 @@ Junction table linking users to groups.
 ## Custom Tables (Created by this app)
 
 ### `user_permission`
-Stores user access permissions for this CRUD UI.
+Stores user access permissions for this CRUD UI. See [permissions.md](permissions.md) for how these columns drive the three-layer permission model.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | serial | Primary key |
 | email | varchar(255) | User email (unique) |
-| level | integer | 1=School, 2=Region, 3=All Schools, 4=Admin |
+| role | varchar(50) | `teacher`, `program_manager`, `program_admin`, or `admin` (default: `teacher`) |
+| level | integer | 1=School, 2=Region, 3=All Schools |
 | school_codes | text[] | Array of school codes (for level 1) |
 | regions | text[] | Array of region names (for level 2) |
-| read_only | boolean | If true, user can only view, not edit |
-| created_at | timestamp | |
+| program_ids | integer[] | Array of program IDs the user is assigned to (1=CoE, 2=Nodal, 64=NVS) |
+| read_only | boolean | If true, downgrades edit access to view |
+| inserted_at | timestamp | |
 | updated_at | timestamp | |
 
 ## Common Queries

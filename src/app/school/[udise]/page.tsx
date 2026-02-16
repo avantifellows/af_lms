@@ -4,25 +4,22 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
-  canAccessSchool,
-  canEditStudents,
-  canEditCurriculum,
-  getAccessibleSchoolCodes,
   getUserPermission,
-  getProgramContext,
-  getStudentProgramFilter,
-  isAdmin,
-  ProgramPermissionContext,
+  getProgramContextSync,
+  getFeatureAccess,
+  canAccessSchoolSync,
+  hasMultipleSchools,
 } from "@/lib/permissions";
 import StudentTable, { Grade } from "@/components/StudentTable";
+import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
-import QuizAnalyticsSection from "@/components/QuizAnalyticsSection";
-import SchoolTabs, { VisitHistorySection } from "@/components/SchoolTabs";
+import SchoolTabs from "@/components/SchoolTabs";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
+import PerformanceTab from "@/components/PerformanceTab";
+import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
-import { getSchoolQuizSessions } from "@/lib/bigquery";
 
 interface Student {
   group_user_id: string;
@@ -54,23 +51,6 @@ interface School {
   district: string;
   state: string;
   region: string | null;
-}
-
-interface Visit {
-  id: number;
-  visit_date: string;
-  status: string;
-}
-
-async function getSchoolVisits(schoolCode: string, pmEmail: string): Promise<Visit[]> {
-  return query<Visit>(
-    `SELECT id, visit_date, status
-     FROM lms_pm_school_visits
-     WHERE school_code = $1 AND pm_email = $2
-     ORDER BY visit_date DESC
-     LIMIT 10`,
-    [schoolCode, pmEmail]
-  );
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -211,15 +191,37 @@ export default async function SchoolPage({ params }: PageProps) {
         </div>
       );
     }
-  } else {
-    // For Google users, check permissions
-    const hasAccess = await canAccessSchool(
-      session.user?.email || null,
-      school.code,
-      school.region || undefined,
-    );
+  }
 
-    if (!hasAccess) {
+  // Single DB call for permission — reuse everywhere
+  const permission = !isPasscodeUser && session.user?.email
+    ? await getUserPermission(session.user.email)
+    : null;
+
+  // For Google users, check school access
+  if (!isPasscodeUser) {
+    if (!permission) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+            <h1 className="text-xl font-bold text-red-600 mb-2">
+              Access Denied
+            </h1>
+            <p className="text-gray-600 mb-4">
+              You don&apos;t have permission to view this school.
+            </p>
+            <Link
+              href="/dashboard"
+              className="text-blue-600 hover:text-blue-800"
+            >
+              Return to dashboard
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
@@ -241,86 +243,51 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
-  // Get program context for Google users
-  let programContext: ProgramPermissionContext = {
-    hasAccess: true,
-    programIds: [],
-    isNVSOnly: false,
-    hasCoEOrNodal: true,
-  };
-  let studentProgramFilter: number[] | null = null;
+  // Derive everything from the single permission object — no extra DB calls
+  const programContext = getProgramContextSync(permission);
 
-  if (!isPasscodeUser && session.user?.email) {
-    programContext = await getProgramContext(session.user.email);
-
-    // Check if user has any program access
-    if (!programContext.hasAccess) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">
-              No Program Access
-            </h1>
-            <p className="text-gray-600 mb-4">
-              You are not assigned to any programs. Please contact an administrator.
-            </p>
-            <Link
-              href="/dashboard"
-              className="text-blue-600 hover:text-blue-800"
-            >
-              Return to dashboard
-            </Link>
-          </div>
+  if (!isPasscodeUser && !programContext.hasAccess) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+          <h1 className="text-xl font-bold text-red-600 mb-2">
+            No Program Access
+          </h1>
+          <p className="text-gray-600 mb-4">
+            You are not assigned to any programs. Please contact an administrator.
+          </p>
+          <Link
+            href="/dashboard"
+            className="text-blue-600 hover:text-blue-800"
+          >
+            Return to dashboard
+          </Link>
         </div>
-      );
-    }
-
-    // Get student program filter
-    studentProgramFilter = await getStudentProgramFilter(session.user.email);
+      </div>
+    );
   }
 
-  // Check if user is a PM (for Google users only)
-  let isPM = false;
-  let visits: Visit[] = [];
-  if (!isPasscodeUser && session.user?.email) {
-    const permission = await getUserPermission(session.user.email);
-    isPM = permission?.role === "program_manager" || permission?.role === "admin";
-  }
+  // Derive feature access from the permission matrix
+  const opts = { isPasscodeUser };
+  const studentsAccess = getFeatureAccess(permission, "students", opts);
+  const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
+  const performanceAccess = getFeatureAccess(permission, "performance", opts);
+  const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
+  const visitsAccess = getFeatureAccess(permission, "visits", opts);
 
-  // Check if user is admin - only admins can see tabs other than Enrollment
-  const userIsAdmin = !isPasscodeUser && session.user?.email ? await isAdmin(session.user.email) : false;
-
-  // Fetch data in parallel
-  const dataPromises: [
-    Promise<Student[]>,
-    Promise<Grade[]>,
-    Promise<Batch[]>,
-    Promise<{ session_id: string; test_name: string; start_date: string; student_count: number }[]>,
-    Promise<Visit[]>
-  ] = [
+  // Fetch enrollment data in parallel (other tabs lazy-load their own data)
+  const [allStudents, grades, batches] = await Promise.all([
     getStudents(school.id),
     getGrades(),
     getBatchesWithMetadata(),
-    getSchoolQuizSessions(school.udise_code || school.code),
-    isPM && session.user?.email ? getSchoolVisits(school.code, session.user.email) : Promise.resolve([]),
-  ];
+  ]);
 
-  const [allStudents, grades, batches, quizSessions, visitResults] = await Promise.all(dataPromises);
-  visits = visitResults;
+  // Deduplicate students and detect all data issues
+  const { students: dedupedStudents, issues: dataIssues } = await processStudents(allStudents);
 
-  // Separate active and dropout students
-  let activeStudents = allStudents.filter((s) => s.status !== "dropout");
-  let dropoutStudents = allStudents.filter((s) => s.status === "dropout");
-
-  // Filter students by program if needed (NVS-only users see only NVS students)
-  if (studentProgramFilter !== null && studentProgramFilter.length > 0) {
-    activeStudents = activeStudents.filter(
-      (s) => s.program_id && studentProgramFilter.includes(Number(s.program_id))
-    );
-    dropoutStudents = dropoutStudents.filter(
-      (s) => s.program_id && studentProgramFilter.includes(Number(s.program_id))
-    );
-  }
+  // Separate active and dropout students (all students visible; editability is per-row)
+  const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
+  const dropoutStudents = dedupedStudents.filter((s) => s.status === "dropout");
 
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
@@ -345,34 +312,40 @@ export default async function SchoolPage({ params }: PageProps) {
     .map(([grade, count]) => ({ grade: parseInt(grade), count }))
     .sort((a, b) => a.grade - b.grade);
 
-  // Check if user can edit students (not read-only)
-  const canEdit = isPasscodeUser
-    ? true // Passcode users can edit by default
-    : await canEditStudents(session.user?.email || "");
-
-  // Check if user can edit curriculum (teachers and admins can, PMs view-only)
-  const canEditCurriculumFlag = isPasscodeUser
-    ? true // Passcode users (teachers) can edit
-    : await canEditCurriculum(session.user?.email || "");
-
   // Check if user has access to multiple schools (to show/hide back arrow)
-  let hasMultipleSchools = false;
-  if (!isPasscodeUser) {
-    const accessibleSchools = await getAccessibleSchoolCodes(
-      session.user?.email || "",
-    );
-    hasMultipleSchools =
-      accessibleSchools === "all" || accessibleSchools.length > 1;
-  }
+  const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
 
   const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
 
   // Determine back link based on role
-  const backHref = hasMultipleSchools ? "/dashboard" : undefined;
+  const backHref = multipleSchools ? "/dashboard" : undefined;
 
   // Build tabs
   const enrollmentContent = (
     <div>
+      {/* Data Issues Banner */}
+      {dataIssues.length > 0 && (
+        <div className="max-w-3xl mx-auto mb-4">
+          <details className="bg-amber-50 border border-amber-200 rounded-lg">
+            <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
+              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
+            </summary>
+            <div className="px-4 pb-3 space-y-2">
+              {dataIssues.map((issue) => (
+                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
+                  <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </span>
+                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
+
       {/* NVS Student Stats */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
@@ -387,7 +360,10 @@ export default async function SchoolPage({ params }: PageProps) {
       <StudentTable
         students={activeStudents}
         dropoutStudents={dropoutStudents}
-        canEdit={canEdit}
+        canEdit={studentsAccess.canEdit}
+        userProgramIds={permission?.program_ids ?? null}
+        isPasscodeUser={isPasscodeUser}
+        isAdmin={permission?.role === "admin"}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
@@ -396,18 +372,7 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const performanceContent = (
-    <div>
-      {quizSessions.length > 0 ? (
-        <QuizAnalyticsSection
-          sessions={quizSessions}
-          schoolUdise={school.udise_code || school.code}
-        />
-      ) : (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-          <p className="text-gray-500">No quiz data available for this school yet.</p>
-        </div>
-      )}
-    </div>
+    <PerformanceTab schoolUdise={school.udise_code || school.code} />
   );
 
   const mentorshipContent = (
@@ -417,24 +382,24 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const visitsContent = (
-    <VisitHistorySection visits={visits} schoolCode={school.code} />
+    <VisitsTab schoolCode={school.code} />
   );
 
   const curriculumContent = (
     <CurriculumTab
       schoolCode={school.code}
       schoolName={school.name}
-      canEdit={canEditCurriculumFlag}
+      canEdit={curriculumAccess.canEdit}
     />
   );
 
-  // Only admins can see tabs other than Enrollment (rolling out slowly)
+  // Tab visibility driven by feature permission matrix
   const tabs = [
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-    ...(userIsAdmin ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
-    ...(userIsAdmin ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
-    ...(userIsAdmin ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
-    ...(userIsAdmin && isPM ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
+    ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
+    ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
+    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
+    ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 
   return (
