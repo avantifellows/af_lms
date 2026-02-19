@@ -200,10 +200,12 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
               >
                 <option value="teacher">Teacher - Student management view</option>
                 <option value="program_manager">Program Manager - School visits + student management</option>
+                <option value="program_admin">Program Admin - Scoped oversight with read-only visits</option>
                 <option value="admin">Admin - Full access + user management</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
                 {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools"}
+                {role === "program_admin" && "Program Admins can oversee scoped schools; visit workflows are read-only"}
                 {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
                 {role === "admin" && "Admins have full access to all features, all schools, and all programs"}
               </p>

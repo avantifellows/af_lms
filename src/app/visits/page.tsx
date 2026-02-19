@@ -3,42 +3,148 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import {
+  buildVisitScopePredicate,
+  buildVisitsActor,
+  isScopedVisitsRole,
+} from "@/lib/visits-policy";
 import Link from "next/link";
 
 interface Visit {
   id: number;
   school_code: string;
+  pm_email: string;
   school_name?: string;
   visit_date: string;
   status: string;
   inserted_at: string;
+  completed_at: string | null;
 }
 
-async function getVisits(pmEmail: string): Promise<Visit[]> {
+interface VisitFilters {
+  schoolCode?: string;
+  status?: "in_progress" | "completed";
+  pmEmail?: string;
+}
+
+interface PageProps {
+  searchParams: Promise<{
+    school_code?: string;
+    status?: string;
+    pm_email?: string;
+  }>;
+}
+
+function normalizeVisitFilters(raw: {
+  school_code?: string;
+  status?: string;
+  pm_email?: string;
+}): VisitFilters {
+  const schoolCode = raw.school_code?.trim() || "";
+  const pmEmail = raw.pm_email?.trim() || "";
+  const status = raw.status === "completed" || raw.status === "in_progress"
+    ? raw.status
+    : undefined;
+
+  return {
+    schoolCode: schoolCode || undefined,
+    pmEmail: pmEmail || undefined,
+    status,
+  };
+}
+
+async function getVisits(
+  actorEmail: string,
+  permission: NonNullable<Awaited<ReturnType<typeof getUserPermission>>>,
+  filters: VisitFilters
+): Promise<Visit[]> {
+  const actor = buildVisitsActor(actorEmail, permission);
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIndex = 1;
+
+  if (actor.role === "program_manager") {
+    whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
+    params.push(actor.email);
+    paramIndex += 1;
+  } else if (filters.pmEmail) {
+    whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
+    params.push(filters.pmEmail);
+    paramIndex += 1;
+  }
+
+  if (filters.schoolCode) {
+    whereClauses.push(`v.school_code = $${paramIndex}`);
+    params.push(filters.schoolCode);
+    paramIndex += 1;
+  }
+
+  if (filters.status) {
+    whereClauses.push(`v.status = $${paramIndex}`);
+    params.push(filters.status);
+    paramIndex += 1;
+  }
+
+  if (isScopedVisitsRole(actor)) {
+    const scope = buildVisitScopePredicate(actor, {
+      startIndex: paramIndex,
+      schoolCodeColumn: "v.school_code",
+      schoolRegionColumn: "s.region",
+    });
+    if (scope.clause) {
+      whereClauses.push(scope.clause);
+      params.push(...scope.params);
+    }
+  }
+
   return query<Visit>(
-    `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
+    `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
+            v.inserted_at, v.completed_at,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.pm_email = $1
+     ${whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : ""}
      ORDER BY v.visit_date DESC, v.inserted_at DESC`,
-    [pmEmail]
+    params
   );
 }
 
-export default async function VisitsListPage() {
+export default async function VisitsListPage({ searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
+  const rawSearchParams = await searchParams;
 
-  if (!session?.user?.email) {
+  if (!session) {
+    redirect("/");
+  }
+
+  if (session.isPasscodeUser) {
+    if (session.schoolCode) {
+      redirect(`/school/${session.schoolCode}`);
+    }
+    redirect("/dashboard");
+  }
+
+  if (!session.user?.email) {
     redirect("/");
   }
 
   const permission = await getUserPermission(session.user.email);
+  if (!permission) {
+    redirect("/dashboard");
+  }
   if (!getFeatureAccess(permission, "visits").canView) {
     redirect("/dashboard");
   }
 
-  const visits = await getVisits(session.user.email);
+  const filters = normalizeVisitFilters(rawSearchParams);
+  const isScopedRole = permission.role === "admin" || permission.role === "program_admin";
+  const scopedFilters: VisitFilters = {
+    schoolCode: filters.schoolCode,
+    status: filters.status,
+    pmEmail: isScopedRole ? filters.pmEmail : undefined,
+  };
+
+  const visits = await getVisits(session.user.email, permission, scopedFilters);
 
   const inProgress = visits.filter((v) => v.status === "in_progress");
   const completed = visits.filter((v) => v.status === "completed");
@@ -51,6 +157,67 @@ export default async function VisitsListPage() {
           {visits.length} total ({inProgress.length} in progress)
         </div>
       </div>
+
+      {isScopedRole && (
+        <form method="get" className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <label htmlFor="school_code" className="block text-xs font-medium text-gray-600 mb-1">
+                School Code
+              </label>
+              <input
+                id="school_code"
+                name="school_code"
+                defaultValue={scopedFilters.schoolCode || ""}
+                placeholder="e.g. 70705"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="status" className="block text-xs font-medium text-gray-600 mb-1">
+                Status
+              </label>
+              <select
+                id="status"
+                name="status"
+                defaultValue={scopedFilters.status || ""}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white"
+              >
+                <option value="">All</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="pm_email" className="block text-xs font-medium text-gray-600 mb-1">
+                PM Email
+              </label>
+              <input
+                id="pm_email"
+                name="pm_email"
+                type="email"
+                defaultValue={scopedFilters.pmEmail || ""}
+                placeholder="pm@avantifellows.org"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <button
+                type="submit"
+                className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              >
+                Apply Filters
+              </button>
+              <Link
+                href="/visits"
+                className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200"
+              >
+                Reset
+              </Link>
+            </div>
+          </div>
+        </form>
+      )}
 
       {/* In Progress Section */}
       {inProgress.length > 0 && (
@@ -161,7 +328,7 @@ export default async function VisitsListPage() {
                       })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.inserted_at).toLocaleDateString("en-IN", {
+                      {new Date(visit.completed_at || visit.inserted_at).toLocaleDateString("en-IN", {
                         year: "numeric",
                         month: "short",
                         day: "numeric",

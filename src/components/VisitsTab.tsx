@@ -8,7 +8,7 @@ interface Visit {
   visit_date: string;
   status: string;
   inserted_at: string;
-  ended_at: string | null;
+  completed_at: string | null;
 }
 
 interface Props {

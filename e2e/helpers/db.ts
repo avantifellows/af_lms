@@ -6,6 +6,7 @@ import { insertTestUsers } from "./test-users";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
+const MIGRATIONS_DIR = path.resolve(__dirname, "../fixtures/migrations");
 
 function getDbUser(): string {
   return process.env.TEST_DB_USER || "postgres";
@@ -35,6 +36,45 @@ export function getTestPool(): Pool {
     database: TEST_DB,
     ssl: false,
   });
+}
+
+function getMigrationFiles(): string[] {
+  if (!fs.existsSync(MIGRATIONS_DIR)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+}
+
+async function applyE2eMigrations(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS e2e_schema_migrations (
+      version VARCHAR(255) PRIMARY KEY,
+      applied_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+    )
+  `);
+
+  const applied = await pool.query<{ version: string }>(
+    `SELECT version FROM e2e_schema_migrations`
+  );
+  const appliedVersions = new Set(applied.rows.map((row) => row.version));
+
+  for (const fileName of getMigrationFiles()) {
+    const version = fileName.replace(/\.sql$/, "");
+    if (appliedVersions.has(version)) {
+      continue;
+    }
+
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, fileName), "utf8");
+    await pool.query(sql);
+    await pool.query(
+      `INSERT INTO e2e_schema_migrations (version) VALUES ($1)`,
+      [version]
+    );
+  }
 }
 
 /**
@@ -80,6 +120,7 @@ export async function resetDatabase(): Promise<void> {
   // Insert deterministic test users
   const testPool = getTestPool();
   try {
+    await applyE2eMigrations(testPool);
     await insertTestUsers(testPool);
   } finally {
     await testPool.end();
@@ -124,30 +165,88 @@ export async function seedTestVisit(
     schoolCode = schoolResult.rows[0].code as string;
   }
 
-  const initialData = {
-    principalMeeting: null,
-    leadershipMeetings: null,
-    classroomObservations: [],
-    studentDiscussions: {
-      groupDiscussions: [],
-      individualDiscussions: [],
-    },
-    staffMeetings: {
-      individualMeetings: [],
-      teamMeeting: null,
-    },
-    teacherFeedback: [],
-    issueLog: [],
-  };
-
   const result = await pool.query(
     `INSERT INTO lms_pm_school_visits
-       (school_code, pm_email, visit_date, status, data,
+       (school_code, pm_email, visit_date, status,
         start_lat, start_lng, start_accuracy)
-     VALUES ($1, $2, CURRENT_DATE, 'in_progress', $3, 23.0225, 72.5714, 50)
+     VALUES ($1, $2, CURRENT_DATE, 'in_progress', 23.0225, 72.5714, 50)
      RETURNING id`,
-    [schoolCode, "e2e-pm@test.local", JSON.stringify(initialData)]
+    [schoolCode, "e2e-pm@test.local"]
   );
 
   return { visitId: result.rows[0].id, schoolCode: schoolCode as string };
+}
+
+export type SeedActionStatus = "pending" | "in_progress" | "completed";
+
+interface SeedVisitActionParams {
+  actionType: string;
+  status?: SeedActionStatus;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Seed a visit action with deterministic status timestamps for E2E scenarios.
+ */
+export async function seedVisitAction(
+  pool: Pool,
+  visitId: number,
+  { actionType, status = "pending", data = {} }: SeedVisitActionParams
+): Promise<{ actionId: number }> {
+  const now = new Date();
+  const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  const nowIso = now.toISOString();
+
+  const startedAt =
+    status === "pending" ? null : tenMinutesAgo;
+  const endedAt =
+    status === "completed" ? nowIso : null;
+
+  const startLat = startedAt ? 23.0225 : null;
+  const startLng = startedAt ? 72.5714 : null;
+  const startAccuracy = startedAt ? 50 : null;
+  const endLat = endedAt ? 23.0228 : null;
+  const endLng = endedAt ? 72.5717 : null;
+  const endAccuracy = endedAt ? 45 : null;
+
+  const result = await pool.query(
+    `INSERT INTO lms_pm_visit_actions (
+       visit_id,
+       action_type,
+       status,
+       started_at,
+       ended_at,
+       start_lat,
+       start_lng,
+       start_accuracy,
+       end_lat,
+       end_lng,
+       end_accuracy,
+       data,
+       inserted_at,
+       updated_at
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+       (NOW() AT TIME ZONE 'UTC'),
+       (NOW() AT TIME ZONE 'UTC')
+     )
+     RETURNING id`,
+    [
+      visitId,
+      actionType,
+      status,
+      startedAt,
+      endedAt,
+      startLat,
+      startLng,
+      startAccuracy,
+      endLat,
+      endLng,
+      endAccuracy,
+      JSON.stringify(data),
+    ]
+  );
+
+  return { actionId: result.rows[0].id };
 }

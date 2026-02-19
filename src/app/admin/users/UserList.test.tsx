@@ -142,6 +142,15 @@ describe("UserList", () => {
       expect(screen.getAllByText("Teacher").length).toBeGreaterThanOrEqual(1);
     });
 
+    it("renders Program Admin role label", () => {
+      renderList({
+        initialUsers: [
+          { ...users[1], id: 99, email: "pa@avantifellows.org", role: "program_admin" },
+        ],
+      });
+      expect(screen.getByText("Program Admin")).toBeInTheDocument();
+    });
+
     it("renders level badges", () => {
       renderList();
       // Level labels from LEVEL_LABELS

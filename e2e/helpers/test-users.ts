@@ -29,6 +29,15 @@ export const TEST_USERS = {
     regions: ["AHMEDABAD"], // Must match a region in your dump
     read_only: false,
   },
+  programAdmin: {
+    email: "e2e-program-admin@test.local",
+    level: 2,
+    role: "program_admin",
+    program_ids: [1, 2],
+    school_codes: null,
+    regions: ["AHMEDABAD"],
+    read_only: false,
+  },
   teacher: {
     email: "e2e-teacher@test.local",
     level: 1,

@@ -1,208 +1,389 @@
 import { test, expect } from "../fixtures/auth";
-import { getTestPool, seedTestVisit } from "../helpers/db";
+import { getTestPool, seedTestVisit, seedVisitAction } from "../helpers/db";
+import type { Page } from "@playwright/test";
 import type { Pool } from "pg";
 
 let pool: Pool;
 let schoolCode: string;
-let visitId: number;
+
+async function setGoodGps(page: Page) {
+  await page.context().grantPermissions(["geolocation"]);
+  await page.context().setGeolocation({
+    latitude: 23.0225,
+    longitude: 72.5714,
+    accuracy: 50,
+  });
+}
 
 test.beforeAll(async () => {
   pool = getTestPool();
 
-  // Ensure an AHMEDABAD school exists (PM test user's region)
-  const { rows } = await pool.query(
+  const schoolResult = await pool.query(
     `SELECT code FROM school WHERE region = 'AHMEDABAD' LIMIT 1`
   );
-  if (rows.length > 0) {
-    schoolCode = rows[0].code;
-  } else {
-    // Seed a test school in the PM's region
-    schoolCode = "E2EAHM001";
-    await pool.query(
-      `INSERT INTO school (code, name, region, inserted_at, updated_at)
-       VALUES ($1, 'E2E Test School Ahmedabad', 'AHMEDABAD', NOW(), NOW())`,
-      [schoolCode]
-    );
+  if (schoolResult.rows.length > 0) {
+    schoolCode = schoolResult.rows[0].code as string;
+    return;
   }
+
+  schoolCode = "E2EAHM001";
+  await pool.query(
+    `INSERT INTO school (code, name, region, inserted_at, updated_at)
+     SELECT $1::varchar, 'E2E Test School Ahmedabad', 'AHMEDABAD', NOW(), NOW()
+     WHERE NOT EXISTS (SELECT 1 FROM school WHERE code = $1::varchar)`,
+    [schoolCode]
+  );
 });
 
 test.afterAll(async () => {
-  if (pool) await pool.end();
+  if (pool) {
+    await pool.end();
+  }
 });
 
-/* ─── Group 1: Visits list page (no visits seeded yet) ───────────── */
+test.describe("Visits — Phase 6.3 E2E scenarios", () => {
+  test("visits-list-shows-two-states", async ({ pmPage }) => {
+    const inProgressVisit = await seedTestVisit(pool, schoolCode);
+    const completedVisit = await seedTestVisit(pool, schoolCode);
 
-test.describe("Visits — List page", () => {
-  test("PM sees All Visits heading and empty state", async ({ pmPage }) => {
+    await pool.query(
+      `UPDATE lms_pm_school_visits
+       SET status = 'completed',
+           completed_at = (NOW() AT TIME ZONE 'UTC'),
+           updated_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE id = $1`,
+      [completedVisit.visitId]
+    );
+
     await pmPage.goto("/visits");
 
-    await expect(
-      pmPage.getByRole("heading", { name: "All Visits" })
-    ).toBeVisible();
-    await expect(pmPage.getByText("No visits recorded yet.")).toBeVisible();
+    await expect(pmPage.getByRole("heading", { name: "In Progress" })).toBeVisible();
+    await expect(pmPage.getByRole("heading", { name: "Completed" })).toBeVisible();
+    await expect(pmPage.getByRole("columnheader", { name: "Ended" })).toHaveCount(0);
+    await expect(pmPage.getByText("Ended:")).toHaveCount(0);
+    await expect(pmPage.getByRole("link", { name: "Continue" }).first()).toBeVisible();
+    await expect(pmPage.getByRole("link", { name: "View" }).first()).toBeVisible();
+
+    expect(inProgressVisit.visitId).not.toBe(completedVisit.visitId);
   });
 
-  test("teacher is redirected away from /visits", async ({ teacherPage }) => {
-    await teacherPage.goto("/visits");
+  test("pm-can-add-and-delete-pending-action", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
 
-    await expect(
-      teacherPage.getByRole("heading", { name: "All Visits" })
-    ).not.toBeVisible();
-  });
-});
-
-/* ─── Group 2: Create visit flow ─────────────────────────────────── */
-
-test.describe("Visits — Create flow", () => {
-  test("PM sees new visit form with school code", async ({ pmPage }) => {
-    await pmPage.context().grantPermissions(["geolocation"]);
-    await pmPage.context().setGeolocation({
-      latitude: 23.0225,
-      longitude: 72.5714,
-      accuracy: 50,
-    });
-
-    await pmPage.goto(`/school/${schoolCode}/visit/new`);
-
-    await expect(
-      pmPage.getByRole("heading", { name: "Start New School Visit" })
-    ).toBeVisible();
-    await expect(pmPage.locator(`input[value="${schoolCode}"]`)).toBeVisible();
-  });
-
-  test("PM creates visit with GPS and is redirected to detail", async ({
-    pmPage,
-  }) => {
-    await pmPage.context().grantPermissions(["geolocation"]);
-    await pmPage.context().setGeolocation({
-      latitude: 23.0225,
-      longitude: 72.5714,
-      accuracy: 50,
-    });
-
-    await pmPage.goto(`/school/${schoolCode}/visit/new`);
-
-    // Wait for GPS to be acquired
-    await expect(pmPage.getByText("Location acquired")).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // Submit the form
-    await pmPage.getByRole("button", { name: "Start Visit" }).click();
-
-    // Should redirect to visit detail page
-    await pmPage.waitForURL(/\/visits\/\d+/, { timeout: 15_000 });
-    await expect(pmPage.getByText("In Progress")).toBeVisible();
-  });
-});
-
-/* ─── Group 3: Visit detail page (seeded visit) ──────────────────── */
-
-test.describe("Visits — Detail page", () => {
-  test.beforeAll(async () => {
-    const result = await seedTestVisit(pool, schoolCode);
-    visitId = result.visitId;
-  });
-
-  test("PM sees visit in In Progress table on list page", async ({
-    pmPage,
-  }) => {
-    await pmPage.goto("/visits");
-
-    await expect(
-      pmPage.getByRole("heading", { name: "In Progress" })
-    ).toBeVisible();
-    await expect(
-      pmPage.getByRole("link", { name: "Continue" }).first()
-    ).toBeVisible();
-  });
-
-  test("PM sees visit detail with status and progress", async ({ pmPage }) => {
+    await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
 
-    await expect(pmPage.getByText("In Progress")).toBeVisible();
-    await expect(pmPage.getByText("0 of 6 sections")).toBeVisible();
+    await pmPage.getByRole("button", { name: "Add Action Point" }).click();
+    const dialog = pmPage.getByRole("dialog");
+    await dialog.getByLabel("Teacher Feedback").click();
+    await dialog.getByRole("button", { name: "Add" }).click();
+
+    const pendingCard = pmPage.locator('[data-action-type="teacher_feedback"]').first();
+    await expect(pendingCard).toBeVisible();
+    await expect(pendingCard.getByRole("button", { name: "Start" })).toBeVisible();
+    await expect(pendingCard.getByRole("button", { name: "Delete" })).toBeVisible();
+
+    await pendingCard.getByRole("button", { name: "Delete" }).click();
+    await expect(pmPage.locator('[data-action-type="teacher_feedback"]')).toHaveCount(0);
   });
 
-  test("all 6 section links are rendered", async ({ pmPage }) => {
-    await pmPage.goto(`/visits/${visitId}`);
-
-    for (const name of [
-      "Principal Meeting",
-      "Leadership Meetings",
-      "Classroom Observations",
-      "Student Discussions",
-      "Staff Meetings",
-      "Feedback & Issues",
-    ]) {
-      await expect(pmPage.getByText(name).first()).toBeVisible();
-    }
-  });
-
-  test("End Visit button is visible", async ({ pmPage }) => {
-    await pmPage.goto(`/visits/${visitId}`);
-
-    await expect(
-      pmPage.getByRole("button", { name: "End Visit" })
-    ).toBeVisible();
-  });
-});
-
-/* ─── Group 4: Principal meeting form ─────────────────────────────── */
-
-test.describe("Visits — Principal meeting", () => {
-  test("PM fills and saves principal meeting form", async ({ pmPage }) => {
-    await pmPage.goto(`/visits/${visitId}/principal`);
-
-    // Wait for loading to complete
-    await expect(
-      pmPage.getByRole("heading", { name: "Principal Meeting" })
-    ).toBeVisible();
-
-    // Initially shows "All changes saved"
-    await expect(pmPage.getByText("All changes saved")).toBeVisible();
-
-    // Fill in Syllabus Status textarea
-    await pmPage
-      .getByPlaceholder(/Physics G11/)
-      .fill("All subjects on track for completion by March");
-
-    // Should show unsaved changes
-    await expect(pmPage.getByText("Unsaved changes")).toBeVisible();
-
-    // Click the Save button (not "Save & Return to Overview")
-    await pmPage.getByRole("button", { name: "Save", exact: true }).click();
-
-    // Wait for save to complete
-    await expect(pmPage.getByText("All changes saved")).toBeVisible({
-      timeout: 5_000,
+  test("pm-can-start-and-end-classroom-observation", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "pending",
     });
-  });
-});
 
-/* ─── Group 5: Access control ─────────────────────────────────────── */
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
 
-test.describe("Visits — Access control", () => {
-  test("teacher cannot access /visits", async ({ teacherPage }) => {
-    await teacherPage.goto("/visits");
+    const actionCard = pmPage.getByTestId(`action-card-${actionId}`);
+    await actionCard.getByRole("button", { name: "Start" }).click();
+    await expect(actionCard.getByRole("link", { name: "Open" })).toBeVisible();
+    await actionCard.getByRole("link", { name: "Open" }).click();
 
-    // Teacher should be redirected to /dashboard
-    await teacherPage.waitForURL(/\/dashboard/);
-  });
+    await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
+    await pmPage.getByLabel("Class Details").fill("Grade 9 science");
+    await pmPage.getByLabel("Observations").fill("Students were engaged and participating.");
+    await pmPage.getByLabel("Support Needed").fill("Need additional lab planning support.");
+    await pmPage.getByRole("button", { name: "Save" }).click();
+    await pmPage.getByRole("button", { name: "End Action" }).click();
 
-  test("teacher cannot access new visit page", async ({ teacherPage }) => {
-    await teacherPage.goto(`/school/${schoolCode}/visit/new`);
-
-    // Should be redirected (no visit edit permission)
     await expect(
-      teacherPage.getByRole("heading", { name: "Start New School Visit" })
-    ).not.toBeVisible();
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
+    const refreshedCard = pmPage.getByTestId(`action-card-${actionId}`);
+    await expect(refreshedCard.getByRole("link", { name: "View Details" })).toBeVisible();
   });
 
-  test("admin can view PM-created visit", async ({ adminPage }) => {
+  test("complete-blocked-without-completed-classroom-observation", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "principal_meeting",
+      status: "completed",
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(
+      pmPage.getByText("At least one completed classroom observation is required to complete visit")
+    ).toBeVisible();
+  });
+
+  test("complete-blocked-when-any-action-in-progress", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "principal_meeting",
+      status: "in_progress",
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(
+      pmPage.getByText("All in-progress action points must be ended before completing visit")
+    ).toBeVisible();
+  });
+
+  test("complete-visit-success", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "teacher_feedback",
+      status: "pending",
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(pmPage.getByText("This visit is completed and read-only.")).toBeVisible();
+    await expect(pmPage.getByRole("button", { name: "Complete Visit" })).toHaveCount(0);
+    await expect(pmPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+  });
+
+  test("moderate-gps-warning-visible", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "pending",
+    });
+
+    const startResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${actionId}/start`,
+      {
+        data: {
+          start_lat: 23.0225,
+          start_lng: 72.5714,
+          start_accuracy: 250,
+        },
+      }
+    );
+    expect(startResponse.ok()).toBeTruthy();
+    const startPayload = await startResponse.json();
+    expect(startPayload.warning).toContain("moderate");
+    expect(startPayload.warning).toContain("250m");
+
+    const endResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${actionId}/end`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 250,
+        },
+      }
+    );
+    expect(endResponse.ok()).toBeTruthy();
+    const endPayload = await endResponse.json();
+    expect(endPayload.warning).toContain("moderate");
+    expect(endPayload.warning).toContain("250m");
+
+    const completeResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/complete`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 250,
+        },
+      }
+    );
+    expect(completeResponse.ok()).toBeTruthy();
+    const completePayload = await completeResponse.json();
+    expect(completePayload.warning).toContain("moderate");
+    expect(completePayload.warning).toContain("250m");
+  });
+
+  test("poor-gps-blocks-write", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "pending",
+    });
+
+    const startResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${actionId}/start`,
+      {
+        data: {
+          start_lat: 23.0225,
+          start_lng: 72.5714,
+          start_accuracy: 701,
+        },
+      }
+    );
+    expect(startResponse.status()).toBe(422);
+    const startPayload = await startResponse.json();
+    expect(startPayload.error).toContain("GPS accuracy too low");
+
+    const endResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${actionId}/end`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 701,
+        },
+      }
+    );
+    expect(endResponse.status()).toBe(422);
+    const endPayload = await endResponse.json();
+    expect(endPayload.error).toContain("GPS accuracy too low");
+
+    const completeResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/complete`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 701,
+        },
+      }
+    );
+    expect(completeResponse.status()).toBe(422);
+    const completePayload = await completeResponse.json();
+    expect(completePayload.error).toContain("GPS accuracy too low");
+  });
+
+  test("admin-can-complete-other-pm-visit-with-same-rules", async ({ adminPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "principal_meeting",
+      status: "completed",
+    });
+
+    await setGoodGps(adminPage);
     await adminPage.goto(`/visits/${visitId}`);
+    await adminPage.getByRole("button", { name: "Complete Visit" }).click();
 
-    await expect(adminPage.getByText("In Progress")).toBeVisible();
-    await expect(adminPage.getByText(/\d+ of 6 sections/)).toBeVisible();
+    await expect(
+      adminPage.getByText("At least one completed classroom observation is required to complete visit")
+    ).toBeVisible();
+
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+    });
+
+    await adminPage.getByRole("button", { name: "Complete Visit" }).click();
+    await expect(adminPage.getByText("This visit is completed and read-only.")).toBeVisible();
+  });
+
+  test("program-admin-read-only", async ({ programAdminPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "principal_meeting",
+      status: "pending",
+    });
+
+    await programAdminPage.goto("/visits");
+    await expect(
+      programAdminPage.getByRole("heading", { name: "All Visits" })
+    ).toBeVisible();
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(
+      programAdminPage.getByText("This visit is read-only for your role.")
+    ).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+    await expect(programAdminPage.getByRole("button", { name: "Complete Visit" })).toHaveCount(0);
+    await expect(programAdminPage.getByRole("button", { name: "Start" })).toHaveCount(0);
+
+    const createResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions`,
+      {
+        data: { action_type: "classroom_observation" },
+      }
+    );
+    expect(createResponse.status()).toBe(403);
+
+    const startResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${actionId}/start`,
+      {
+        data: {
+          start_lat: 23.0225,
+          start_lng: 72.5714,
+          start_accuracy: 10,
+        },
+      }
+    );
+    expect(startResponse.status()).toBe(403);
+
+    const endResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${actionId}/end`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 10,
+        },
+      }
+    );
+    expect(endResponse.status()).toBe(403);
+
+    const completeResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/complete`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 10,
+        },
+      }
+    );
+    expect(completeResponse.status()).toBe(403);
+  });
+
+  test("legacy-routes-are-gone", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await pmPage.goto(`/visits/${visitId}`);
+    await expect(pmPage.locator('a[href*="/principal"]')).toHaveCount(0);
+    await expect(pmPage.getByRole("button", { name: "End Visit" })).toHaveCount(0);
+
+    const legacyEndResponse = await pmPage.request.post(
+      `/api/pm/visits/${visitId}/end`,
+      {
+        data: {
+          end_lat: 23.0225,
+          end_lng: 72.5714,
+          end_accuracy: 10,
+        },
+      }
+    );
+    expect(legacyEndResponse.status()).toBe(404);
   });
 });

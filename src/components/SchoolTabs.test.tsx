@@ -74,14 +74,14 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: "2026-01-15T09:00:00Z",
-        ended_at: "2026-01-15T15:00:00Z",
+        completed_at: "2026-01-15T15:00:00Z",
       },
       {
         id: 2,
         visit_date: "2026-01-20",
         status: "in_progress",
         inserted_at: "2026-01-20T10:00:00Z",
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
@@ -90,18 +90,34 @@ describe("VisitHistorySection", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
-  it("shows 'Ended' badge for non-completed visits with ended_at", () => {
+  it("does not render an 'Ended' status badge", () => {
     const visits = [
       {
         id: 3,
         visit_date: "2026-02-01",
         status: "in_progress",
         inserted_at: "2026-02-01T09:00:00Z",
-        ended_at: "2026-02-01T14:00:00Z",
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
-    expect(screen.getByText("Ended")).toBeInTheDocument();
+    expect(screen.queryByText("Ended")).not.toBeInTheDocument();
+  });
+
+  it("uses completed_at for completed timestamp rendering", () => {
+    const visits = [
+      {
+        id: 4,
+        visit_date: "2026-02-10",
+        status: "completed",
+        inserted_at: "2026-02-10T09:00:00Z",
+        completed_at: "2026-02-10T10:30:00Z",
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
+
+    expect(screen.getByText(/^Started:/)).toBeInTheDocument();
+    expect(screen.getByText(/^Completed:/)).toBeInTheDocument();
   });
 
   it("shows 'View' link for completed visits", () => {
@@ -111,7 +127,7 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: null,
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
@@ -119,28 +135,28 @@ describe("VisitHistorySection", () => {
     expect(link).toHaveAttribute("href", "/visits/1");
   });
 
-  it("shows 'View' link for ended visits", () => {
+  it("shows 'Continue' link for in-progress visits", () => {
     const visits = [
       {
         id: 2,
         visit_date: "2026-01-20",
-        status: "active",
+        status: "in_progress",
         inserted_at: null,
-        ended_at: "2026-01-20T15:00:00Z",
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
-    expect(screen.getByRole("link", { name: "View" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue" })).toBeInTheDocument();
   });
 
-  it("shows 'Continue' link for in-progress visits without ended_at", () => {
+  it("shows 'Continue' link for in-progress visits without completed_at", () => {
     const visits = [
       {
         id: 3,
         visit_date: "2026-01-25",
         status: "in_progress",
         inserted_at: "2026-01-25T09:00:00Z",
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
@@ -155,7 +171,7 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: null,
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="XYZ" />);
@@ -170,7 +186,7 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: null,
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);

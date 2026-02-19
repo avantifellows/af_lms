@@ -135,7 +135,7 @@ describe("PATCH /api/admin/users/[id]", () => {
     mockQuery.mockResolvedValue([]);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
-      body: { level: 3, role: "admin", program_ids: [1, 2] },
+      body: { level: 2, role: "program_admin", program_ids: [1, 2] },
     });
     const res = await PATCH(req as never, params);
     expect(res.status).toBe(200);
