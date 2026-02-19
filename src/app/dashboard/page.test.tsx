@@ -208,8 +208,8 @@ const noProgramContext = {
 };
 
 // setupAdmin: admin (level 4) has hasPMAccess=true via getFeatureAccess
-// Query order when schools present: schools, count, gradeCounts, visits, openIssues
-// Query order when no schools (empty IDs → getSchoolGradeCounts returns early): schools, count, visits, openIssues
+// Query order when schools present: schools, count, gradeCounts, visits
+// Query order when no schools (empty IDs → getSchoolGradeCounts returns early): schools, count, visits
 function setupAdmin(schools: unknown[] = [], totalCount = 0) {
   mockGetServerSession.mockResolvedValue(adminSession);
   mockGetUserPermission.mockResolvedValue(adminPermission);
@@ -223,16 +223,14 @@ function setupAdmin(schools: unknown[] = [], totalCount = 0) {
   if (hasSchools) {
     mockQuery.mockResolvedValueOnce([]); // getSchoolGradeCounts
   }
-  // Promise.all: [gradeCounts(returns early if empty), getRecentVisits, getOpenIssuesCount]
+  // Promise.all: [gradeCounts(returns early if empty), getRecentVisits]
   mockQuery.mockResolvedValueOnce([]); // getRecentVisits
-  mockQuery.mockResolvedValueOnce([{ count: "0" }]); // getOpenIssuesCount
 }
 
 function setupPM(
   schools: unknown[] = [],
   totalCount = 0,
   visits: unknown[] = [],
-  openIssues = 0,
 ) {
   mockGetServerSession.mockResolvedValue(pmSession);
   mockGetUserPermission.mockResolvedValue(pmPermission);
@@ -247,7 +245,6 @@ function setupPM(
     mockQuery.mockResolvedValueOnce([]); // getSchoolGradeCounts
   }
   mockQuery.mockResolvedValueOnce(visits); // getRecentVisits
-  mockQuery.mockResolvedValueOnce([{ count: String(openIssues) }]); // getOpenIssuesCount
 }
 
 function setupTeacher(
@@ -276,7 +273,7 @@ const defaultSearchParams = Promise.resolve({});
 
 describe("DashboardPage (server component)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   // --- Auth redirects ---
@@ -469,20 +466,19 @@ describe("DashboardPage (server component)", () => {
 
   // --- PM stats cards ---
 
-  it("renders PM stats cards (Total Visits, Open Issues)", async () => {
+  it("renders PM stats cards", async () => {
     const visits = [
       { id: 1, school_code: "SC001", visit_date: "2026-02-10", status: "completed", inserted_at: "2026-02-10T10:00:00Z" },
       { id: 2, school_code: "SC002", visit_date: "2026-02-08", status: "in_progress", inserted_at: "2026-02-08T09:00:00Z" },
       { id: 3, school_code: "SC003", visit_date: "2026-02-06", status: "completed", inserted_at: "2026-02-06T08:00:00Z" },
     ];
-    setupPM([], 5, visits, 7);
+    setupPM([], 5, visits);
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
     expect(screen.getByText("Total Visits")).toBeInTheDocument();
-    expect(screen.getByText("Open Issues")).toBeInTheDocument();
-    expect(screen.getByText("7")).toBeInTheDocument(); // openIssues
+    expect(screen.getByText("3")).toBeInTheDocument();
   });
 
   it("does not render PM stats for non-PM users", async () => {
@@ -492,7 +488,6 @@ describe("DashboardPage (server component)", () => {
     render(jsx);
 
     expect(screen.queryByText("Total Visits")).not.toBeInTheDocument();
-    expect(screen.queryByText("Open Issues")).not.toBeInTheDocument();
   });
 
   // --- Search components ---
@@ -602,8 +597,7 @@ describe("DashboardPage (server component)", () => {
         { school_id: "s1", grade: 9, count: "10" },
         { school_id: "s1", grade: 10, count: "15" },
       ]) // grade counts
-      .mockResolvedValueOnce([]) // visits
-      .mockResolvedValueOnce([{ count: "0" }]); // open issues
+      .mockResolvedValueOnce([]); // visits
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);

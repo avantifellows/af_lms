@@ -1,26 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import {
+  apiError,
+  enforceVisitReadAccess,
+  requireVisitsAccess,
+} from "@/lib/visits-policy";
 
-interface Visit {
+interface VisitDetailRow {
   id: number;
   school_code: string;
   pm_email: string;
   visit_date: string;
   status: string;
-  data: Record<string, unknown>;
+  completed_at: string | null;
   inserted_at: string;
   updated_at: string;
+  school_name: string | null;
+  school_region: string | null;
+}
+
+interface VisitActionRow {
+  id: number;
+  visit_id: number;
+  action_type: string;
+  status: string;
+  data: Record<string, unknown>;
+  started_at: string | null;
   ended_at: string | null;
-  start_lat: string | null;
-  start_lng: string | null;
   start_accuracy: string | null;
-  end_lat: string | null;
-  end_lng: string | null;
   end_accuracy: string | null;
-  school_name?: string;
+  inserted_at: string;
+  updated_at: string;
 }
 
 // GET /api/pm/visits/[id] - Get visit details
@@ -28,24 +40,19 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  void request;
   const { id } = await params;
   const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireVisitsAccess(session, "view");
+  if (!access.ok) {
+    return access.response;
   }
+  const { actor } = access;
 
-  const permission = await getUserPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canView) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  const visits = await query<Visit>(
+  const visits = await query<VisitDetailRow>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-            v.data, v.inserted_at, v.updated_at, v.ended_at,
-            v.start_lat, v.start_lng, v.start_accuracy,
-            v.end_lat, v.end_lng, v.end_accuracy,
-            s.name as school_name
+            v.completed_at, v.inserted_at, v.updated_at,
+            s.name as school_name, s.region as school_region
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      WHERE v.id = $1`,
@@ -53,198 +60,40 @@ export async function GET(
   );
 
   if (visits.length === 0) {
-    return NextResponse.json({ error: "Visit not found" }, { status: 404 });
+    return apiError(404, "Visit not found");
   }
 
   const visit = visits[0];
-
-  // Only allow PM who created the visit or admins to view
-  const isOwner = visit.pm_email === session.user.email;
-  const userIsAdmin = permission?.role === "admin";
-
-  if (!isOwner && !userIsAdmin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const readError = enforceVisitReadAccess(actor, {
+    pmEmail: visit.pm_email,
+    schoolCode: visit.school_code,
+    schoolRegion: visit.school_region,
+  });
+  if (readError) {
+    return readError;
   }
 
-  return NextResponse.json({ visit });
-}
-
-// PATCH /api/pm/visits/[id] - Update a section of the visit
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const permission = await getUserPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canEdit) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  // Get the visit first
-  const visits = await query<Visit>(
-    `SELECT id, pm_email, status, data FROM lms_pm_school_visits WHERE id = $1`,
+  const actions = await query<VisitActionRow>(
+    `SELECT id, visit_id, action_type, status, data,
+            started_at, ended_at, start_accuracy, end_accuracy,
+            inserted_at, updated_at
+     FROM lms_pm_visit_actions
+     WHERE visit_id = $1
+       AND deleted_at IS NULL
+     ORDER BY inserted_at ASC, id ASC`,
     [id]
   );
 
-  if (visits.length === 0) {
-    return NextResponse.json({ error: "Visit not found" }, { status: 404 });
-  }
-
-  const visit = visits[0];
-
-  // Only the PM who created the visit can update it
-  if (visit.pm_email !== session.user.email) {
-    return NextResponse.json(
-      { error: "Only the visit creator can update it" },
-      { status: 403 }
-    );
-  }
-
-  // Cannot update completed visits
-  if (visit.status === "completed") {
-    return NextResponse.json(
-      { error: "Cannot update a completed visit" },
-      { status: 400 }
-    );
-  }
-
-  const body = await request.json();
-  const { section, data: sectionData } = body;
-
-  if (!section || sectionData === undefined) {
-    return NextResponse.json(
-      { error: "section and data are required" },
-      { status: 400 }
-    );
-  }
-
-  // Valid sections
-  const validSections = [
-    "principalMeeting",
-    "leadershipMeetings",
-    "classroomObservations",
-    "studentDiscussions",
-    "staffMeetings",
-    "teacherFeedback",
-    "issueLog",
-  ];
-
-  if (!validSections.includes(section)) {
-    return NextResponse.json(
-      { error: `Invalid section. Must be one of: ${validSections.join(", ")}` },
-      { status: 400 }
-    );
-  }
-
-  // Update the specific section in the JSONB data
-  await query(
-    `UPDATE lms_pm_school_visits
-     SET data = jsonb_set(data, $1, $2::jsonb),
-         updated_at = NOW()
-     WHERE id = $3`,
-    [`{${section}}`, JSON.stringify(sectionData), id]
-  );
-
-  // Fetch updated visit
-  const updatedVisits = await query<Visit>(
-    `SELECT id, school_code, pm_email, visit_date, status, data, updated_at
-     FROM lms_pm_school_visits WHERE id = $1`,
-    [id]
-  );
-
-  return NextResponse.json({ visit: updatedVisits[0] });
-}
-
-// POST /api/pm/visits/[id]/complete - Mark visit as complete
-// (Alternative: could be a separate route file)
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const body = await request.json();
-  const { action } = body;
-
-  if (action !== "complete") {
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
-  }
-
-  // Get the visit
-  const visits = await query<Visit>(
-    `SELECT id, pm_email, status, data FROM lms_pm_school_visits WHERE id = $1`,
-    [id]
-  );
-
-  if (visits.length === 0) {
-    return NextResponse.json({ error: "Visit not found" }, { status: 404 });
-  }
-
-  const visit = visits[0];
-
-  if (visit.pm_email !== session.user.email) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (visit.status === "completed") {
-    return NextResponse.json({ error: "Visit already completed" }, { status: 400 });
-  }
-
-  // Validate all required sections are filled
-  const data = visit.data as {
-    principalMeeting: unknown;
-    leadershipMeetings: unknown;
-    classroomObservations: unknown[];
-    studentDiscussions: { groupDiscussions: unknown[]; individualDiscussions: unknown[] };
-    staffMeetings: { individualMeetings: unknown[]; teamMeeting: unknown };
-    teacherFeedback: unknown[];
-    issueLog: unknown[];
+  const publicVisit = {
+    id: visit.id,
+    school_code: visit.school_code,
+    pm_email: visit.pm_email,
+    visit_date: visit.visit_date,
+    status: visit.status,
+    completed_at: visit.completed_at,
+    inserted_at: visit.inserted_at,
+    updated_at: visit.updated_at,
+    school_name: visit.school_name,
   };
-
-  const errors: string[] = [];
-
-  if (!data.principalMeeting) {
-    errors.push("Principal meeting is required");
-  }
-  if (!data.leadershipMeetings) {
-    errors.push("Leadership meetings are required");
-  }
-  if (!data.classroomObservations || data.classroomObservations.length === 0) {
-    errors.push("At least one classroom observation is required");
-  }
-  if (
-    !data.studentDiscussions?.groupDiscussions?.length &&
-    !data.studentDiscussions?.individualDiscussions?.length
-  ) {
-    errors.push("At least one student discussion is required");
-  }
-  if (!data.staffMeetings?.teamMeeting) {
-    errors.push("Team meeting is required");
-  }
-
-  if (errors.length > 0) {
-    return NextResponse.json(
-      { error: "Visit incomplete", details: errors },
-      { status: 400 }
-    );
-  }
-
-  // Mark as complete
-  await query(
-    `UPDATE lms_pm_school_visits SET status = 'completed', updated_at = NOW() WHERE id = $1`,
-    [id]
-  );
-
-  return NextResponse.json({ success: true, status: "completed" });
+  return NextResponse.json({ visit: publicVisit, actions });
 }

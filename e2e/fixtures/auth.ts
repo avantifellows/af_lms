@@ -72,6 +72,7 @@ export const test = base.extend<{
   autoTestFixture: void;
   adminPage: Page;
   pmPage: Page;
+  programAdminPage: Page;
   teacherPage: Page;
   passcodePage: Page;
 }>({
@@ -93,6 +94,15 @@ export const test = base.extend<{
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, googleUserPayload("pm"));
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
+  programAdminPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("programAdmin"));
     await startCoverage(page, testInfo);
     await use(page);
     await stopCoverage(page, testInfo);

@@ -161,18 +161,6 @@ async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visi
   );
 }
 
-async function getOpenIssuesCount(pmEmail: string): Promise<number> {
-  const result = await query<{ count: string }>(
-    `SELECT COUNT(*) as count
-     FROM lms_pm_school_visits v,
-          jsonb_array_elements(v.data->'issueLog') as issue
-     WHERE v.pm_email = $1
-       AND issue->>'status' = 'open'`,
-    [pmEmail]
-  );
-  return parseInt(result[0]?.count || "0", 10);
-}
-
 interface PageProps {
   searchParams: Promise<{ q?: string; page?: string }>;
 }
@@ -191,10 +179,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect(`/school/${session.schoolCode}`);
   }
 
-  // Single DB call for permission — reuse everywhere
-  const t0 = performance.now();
   const permission = await getUserPermission(session.user.email);
-  console.log(`[dashboard] getUserPermission: ${(performance.now() - t0).toFixed(0)}ms`);
 
   if (!permission) {
     return (
@@ -242,32 +227,22 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const hasPMAccess = getFeatureAccess(permission, "pm_dashboard").canView;
 
-  const t1 = performance.now();
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
-  console.log(`[dashboard] getAccessibleSchoolCodes: ${(performance.now() - t1).toFixed(0)}ms`);
 
   // If user has access to only one school and no search, redirect directly (skip heavy queries)
   if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery) {
     redirect(`/school/${schoolCodes[0]}`);
   }
 
-  // Fetch schools, then grade counts + PM data in parallel
-  const t2 = performance.now();
   const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
-  console.log(`[dashboard] getSchools: ${(performance.now() - t2).toFixed(0)}ms`);
   const totalPages = Math.ceil(totalCount / SCHOOLS_PER_PAGE);
 
   const schoolIds = schools.map((s) => s.id);
 
-  // Run grade counts and PM-specific queries in parallel
-  const t3 = performance.now();
-  const [gradeCounts, recentVisits, openIssues] = await Promise.all([
+  const [gradeCounts, recentVisits] = await Promise.all([
     getSchoolGradeCounts(schoolIds),
     hasPMAccess ? getRecentVisits(session.user.email) : Promise.resolve([] as Visit[]),
-    hasPMAccess ? getOpenIssuesCount(session.user.email) : Promise.resolve(0),
   ]);
-  console.log(`[dashboard] parallel (gradeCounts + visits): ${(performance.now() - t3).toFixed(0)}ms`);
-  console.log(`[dashboard] total: ${(performance.now() - t0).toFixed(0)}ms`);
 
   // Merge grade counts into schools and derive total from grade counts
   const schoolsWithGrades = schools.map((school) => {
@@ -337,7 +312,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Stats - only show for PM users */}
         {hasPMAccess && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-8">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
             <div className="bg-white rounded-lg shadow p-6">
               <div className="text-sm font-medium text-gray-500">My Schools</div>
               <div className="mt-1 text-3xl font-semibold text-gray-900">
@@ -348,12 +323,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               <div className="text-sm font-medium text-gray-500">Total Visits</div>
               <div className="mt-1 text-3xl font-semibold text-gray-900">
                 {recentVisits.length}
-              </div>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-sm font-medium text-gray-500">Open Issues</div>
-              <div className="mt-1 text-3xl font-semibold text-gray-900">
-                {openIssues}
               </div>
             </div>
           </div>

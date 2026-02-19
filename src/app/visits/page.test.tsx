@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-// ---- mocks (hoisted) ----
-
 const {
   mockGetServerSession,
   mockGetUserPermission,
@@ -40,48 +38,70 @@ vi.mock("next/link", () => ({
 
 import VisitsListPage from "./page";
 
-// ---- helpers ----
-
+const defaultSearchParams = Promise.resolve({});
 const pmSession = {
   user: { email: "pm@avantifellows.org" },
 };
+const passcodeSession = {
+  user: {},
+  isPasscodeUser: true,
+  schoolCode: "70705",
+};
 
-const pmPermission = { level: 3, role: "pm" };
+const programManagerPermission = {
+  email: "pm@avantifellows.org",
+  level: 3,
+  role: "program_manager",
+  read_only: false,
+};
 
-function setupAuth() {
+function setupAuth(permission = programManagerPermission) {
   mockGetServerSession.mockResolvedValue(pmSession);
-  mockGetUserPermission.mockResolvedValue(pmPermission);
+  mockGetUserPermission.mockResolvedValue(permission);
   mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
 }
 
 const inProgressVisit = {
   id: 1,
   school_code: "SC001",
+  pm_email: "pm@avantifellows.org",
   school_name: "Test School A",
   visit_date: "2026-02-10",
   status: "in_progress",
   inserted_at: "2026-02-10T10:00:00Z",
+  completed_at: null,
 };
 
 const completedVisit = {
   id: 2,
   school_code: "SC002",
+  pm_email: "pm@avantifellows.org",
   school_name: "Test School B",
   visit_date: "2026-02-08",
   status: "completed",
-  inserted_at: "2026-02-08T09:00:00Z",
+  inserted_at: "2026-01-01T09:00:00Z",
+  completed_at: "2026-02-09T11:00:00Z",
 };
 
 const visitNoName = {
   id: 3,
   school_code: "SC003",
+  pm_email: "pm@avantifellows.org",
   school_name: null,
   visit_date: "2026-02-05",
   status: "in_progress",
   inserted_at: "2026-02-05T08:00:00Z",
+  completed_at: null,
 };
 
-// ---- tests ----
+function formatISTDate(value: string) {
+  return new Date(value).toLocaleDateString("en-IN", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
+}
 
 describe("VisitsListPage (server component)", () => {
   beforeEach(() => {
@@ -91,7 +111,7 @@ describe("VisitsListPage (server component)", () => {
   it("redirects to / when there is no session", async () => {
     mockGetServerSession.mockResolvedValue(null);
 
-    await expect(VisitsListPage()).rejects.toThrow("REDIRECT:/");
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
     expect(mockGetUserPermission).not.toHaveBeenCalled();
   });
@@ -99,18 +119,36 @@ describe("VisitsListPage (server component)", () => {
   it("redirects to / when session has no email", async () => {
     mockGetServerSession.mockResolvedValue({ user: {} });
 
-    await expect(VisitsListPage()).rejects.toThrow("REDIRECT:/");
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
+  });
+
+  it("redirects passcode users to their school page", async () => {
+    mockGetServerSession.mockResolvedValue(passcodeSession);
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/school/70705");
+    expect(mockRedirect).toHaveBeenCalledWith("/school/70705");
+    expect(mockGetUserPermission).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("redirects to /dashboard when permission is missing", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(null);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
   });
 
   it("redirects to /dashboard when user cannot view visits", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
-    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetUserPermission.mockResolvedValue(programManagerPermission);
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
 
-    await expect(VisitsListPage()).rejects.toThrow("REDIRECT:/dashboard");
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockGetFeatureAccess).toHaveBeenCalledWith(pmPermission, "visits");
+    expect(mockGetFeatureAccess).toHaveBeenCalledWith(programManagerPermission, "visits");
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
@@ -118,12 +156,12 @@ describe("VisitsListPage (server component)", () => {
     setupAuth();
     mockQuery.mockResolvedValue([inProgressVisit]);
 
-    const jsx = await VisitsListPage();
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
     render(jsx);
 
     expect(screen.getByText("All Visits")).toBeInTheDocument();
     expect(screen.getByText("1 total (1 in progress)")).toBeInTheDocument();
-    expect(screen.getByText("In Progress")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
     expect(screen.getByText("Test School A")).toBeInTheDocument();
     expect(screen.getByText("Code: SC001")).toBeInTheDocument();
 
@@ -131,47 +169,45 @@ describe("VisitsListPage (server component)", () => {
     expect(continueLink.closest("a")).toHaveAttribute("href", "/visits/1");
   });
 
-  it("renders completed visits with View links", async () => {
+  it("renders completed visits with View links and uses completed_at timestamp", async () => {
     setupAuth();
     mockQuery.mockResolvedValue([completedVisit]);
 
-    const jsx = await VisitsListPage();
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
     render(jsx);
 
     expect(screen.getByText("1 total (0 in progress)")).toBeInTheDocument();
-    // "Completed" appears as both section heading and table column header
     expect(screen.getByRole("heading", { name: "Completed" })).toBeInTheDocument();
     expect(screen.getByText("Test School B")).toBeInTheDocument();
     expect(screen.getByText("Code: SC002")).toBeInTheDocument();
 
+    const completedDate = formatISTDate(completedVisit.completed_at);
+    const insertedDate = formatISTDate(completedVisit.inserted_at);
+    expect(screen.getByText(completedDate)).toBeInTheDocument();
+    expect(screen.queryByText(insertedDate)).not.toBeInTheDocument();
+
     const viewLink = screen.getByText("View");
     expect(viewLink.closest("a")).toHaveAttribute("href", "/visits/2");
-
-    // In Progress section should not render
-    expect(screen.queryByText("In Progress")).not.toBeInTheDocument();
   });
 
-  it("renders both in-progress and completed sections", async () => {
+  it("keeps visits list as a two-state UI with no ended state", async () => {
     setupAuth();
     mockQuery.mockResolvedValue([inProgressVisit, completedVisit]);
 
-    const jsx = await VisitsListPage();
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(screen.getByText("2 total (1 in progress)")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Completed" })).toBeInTheDocument();
-    expect(screen.getByText("Test School A")).toBeInTheDocument();
-    expect(screen.getByText("Test School B")).toBeInTheDocument();
-    expect(screen.getByText("Continue")).toBeInTheDocument();
-    expect(screen.getByText("View")).toBeInTheDocument();
+    expect(screen.queryByText("Ended")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Ended" })).not.toBeInTheDocument();
   });
 
   it("renders empty state when no visits exist", async () => {
     setupAuth();
     mockQuery.mockResolvedValue([]);
 
-    const jsx = await VisitsListPage();
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
     render(jsx);
 
     expect(screen.getByText("0 total (0 in progress)")).toBeInTheDocument();
@@ -180,7 +216,6 @@ describe("VisitsListPage (server component)", () => {
     const dashboardLink = screen.getByText("Go to dashboard to start a visit");
     expect(dashboardLink.closest("a")).toHaveAttribute("href", "/dashboard");
 
-    // Sections should not render
     expect(screen.queryByText("In Progress")).not.toBeInTheDocument();
     expect(screen.queryByText("Completed")).not.toBeInTheDocument();
   });
@@ -189,26 +224,81 @@ describe("VisitsListPage (server component)", () => {
     setupAuth();
     mockQuery.mockResolvedValue([visitNoName]);
 
-    const jsx = await VisitsListPage();
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    // school_name is null, so should show school_code as the main display
-    const cells = screen.getAllByText("SC003");
-    // One in the main display (fallback), one in "Code: SC003"
-    expect(cells.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("SC003").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Code: SC003")).toBeInTheDocument();
   });
 
-  it("queries visits for the logged-in user's email", async () => {
+  it("queries PM visits with role-safe pm filter", async () => {
     setupAuth();
     mockQuery.mockResolvedValue([]);
 
-    await VisitsListPage();
+    await VisitsListPage({ searchParams: defaultSearchParams });
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("lms_pm_school_visits");
-    expect(sql).toContain("pm_email = $1");
+    expect(sql).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(params).toEqual(["pm@avantifellows.org"]);
+  });
+
+  it("shows scoped-role filters and maps admin filter query params", async () => {
+    setupAuth({
+      email: "admin@avantifellows.org",
+      level: 3,
+      role: "admin",
+      read_only: false,
+    });
+    mockQuery.mockResolvedValue([completedVisit]);
+
+    const jsx = await VisitsListPage({
+      searchParams: Promise.resolve({
+        school_code: "70705",
+        status: "completed",
+        pm_email: "pm2@avantifellows.org",
+      }),
+    });
+    render(jsx);
+
+    expect(screen.getByLabelText("School Code")).toHaveValue("70705");
+    expect(screen.getByLabelText("Status")).toHaveValue("completed");
+    expect(screen.getByLabelText("PM Email")).toHaveValue("pm2@avantifellows.org");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("LOWER(v.pm_email) = LOWER($1)");
+    expect(sql).toContain("v.school_code = $2");
+    expect(sql).toContain("v.status = $3");
+    expect(params).toEqual(["pm2@avantifellows.org", "70705", "completed"]);
+  });
+
+  it("shows scoped filters for program_admin and applies mandatory filter params with scope", async () => {
+    setupAuth({
+      email: "program-admin@avantifellows.org",
+      level: 2,
+      role: "program_admin",
+      regions: ["AHMEDABAD"],
+      read_only: false,
+    });
+    mockQuery.mockResolvedValue([completedVisit]);
+
+    const jsx = await VisitsListPage({
+      searchParams: Promise.resolve({
+        school_code: "70705",
+        status: "completed",
+        pm_email: "pm2@avantifellows.org",
+      }),
+    });
+    render(jsx);
+
+    expect(screen.getByLabelText("School Code")).toHaveValue("70705");
+    expect(screen.getByLabelText("Status")).toHaveValue("completed");
+    expect(screen.getByLabelText("PM Email")).toHaveValue("pm2@avantifellows.org");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("v.school_code = $2");
+    expect(sql).toContain("v.status = $3");
+    expect(sql).toContain("COALESCE(s.region, '') = ANY($4)");
+    expect(params).toEqual(["pm2@avantifellows.org", "70705", "completed", ["AHMEDABAD"]]);
   });
 });

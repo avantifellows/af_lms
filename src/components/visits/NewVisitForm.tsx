@@ -237,16 +237,15 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="font-medium text-blue-900 mb-2">Visit Workflow</h3>
         <p className="text-sm text-blue-800 mb-2">
-          Once you start the visit, you&apos;ll be guided through the following
-          sections:
+          Once you start the visit, create action points as needed and move each
+          action through its lifecycle:
         </p>
         <ol className="text-sm text-blue-800 list-decimal list-inside space-y-1">
-          <li>Principal Meeting & Core Operations Review</li>
-          <li>Leadership Meetings (VP & CBSE Teachers)</li>
-          <li>Classroom Observations</li>
-          <li>Student Discussions (Group & Individual)</li>
-          <li>Staff Meetings (Individual & Team)</li>
-          <li>Feedback & Issue Log</li>
+          <li>Add an action point (for example, Classroom Observation or Principal Meeting).</li>
+          <li>Start an action to capture start GPS and timestamp.</li>
+          <li>Open in-progress actions to fill details and save updates.</li>
+          <li>End each action to capture end GPS and mark it completed.</li>
+          <li>Complete the visit after at least one Classroom Observation is completed and no action is in progress.</li>
         </ol>
       </div>
     </main>

@@ -451,6 +451,16 @@ describe("AddUserModal — role descriptions", () => {
 
     expect(screen.getByText(/Admins have full access to all features/)).toBeInTheDocument();
   });
+
+  it("shows program admin description when role is program_admin", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    const roleSelect = screen.getAllByRole("combobox")[0];
+    await user.selectOptions(roleSelect, "program_admin");
+
+    expect(screen.getByText(/Program Admins can oversee scoped schools/)).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

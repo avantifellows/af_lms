@@ -64,3 +64,4 @@ next-env.d.ts
 .planning
 ralph/*
 .claude/commands
+.env.dont.touch
