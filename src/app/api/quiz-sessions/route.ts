@@ -124,19 +124,25 @@ export async function GET(request: NextRequest) {
   const hasMore = sessions.length > perPage;
   const items = hasMore ? sessions.slice(0, perPage) : sessions;
 
-  const parsed = items.map((s) => ({
-    ...s,
-    start_time: s.start_time ? istToUTCDate(s.start_time) : null,
-    end_time: s.end_time ? istToUTCDate(s.end_time) : null,
-    meta_data: s.meta_data
-      ? {
-          ...s.meta_data,
-          date_created: s.meta_data?.date_created
-            ? istToUTCDate(s.meta_data.date_created)
-            : undefined,
-        }
-      : s.meta_data,
-  }));
+  const parsed = items.map((s) => {
+    const meta = s.meta_data;
+    const dateCreated =
+      meta && typeof (meta as Record<string, unknown>).date_created === "string"
+        ? ((meta as Record<string, unknown>).date_created as string)
+        : undefined;
+
+    return {
+      ...s,
+      start_time: s.start_time ? istToUTCDate(s.start_time) : null,
+      end_time: s.end_time ? istToUTCDate(s.end_time) : null,
+      meta_data: meta
+        ? {
+            ...meta,
+            date_created: dateCreated ? istToUTCDate(dateCreated) : undefined,
+          }
+        : meta,
+    };
+  });
 
   return NextResponse.json({ sessions: parsed, hasMore });
 }
