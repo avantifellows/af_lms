@@ -61,6 +61,24 @@ function getStatusClasses(status?: string) {
   return "bg-gray-100 text-gray-700";
 }
 
+function getMetaString(
+  meta: Record<string, unknown> | null | undefined,
+  key: string
+): string | undefined {
+  const value = meta?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getMetaDisplay(
+  meta: Record<string, unknown> | null | undefined,
+  key: string
+): string | undefined {
+  const value = meta?.[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return undefined;
+}
+
 export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [sessions, setSessions] = useState<QuizSession[]>([]);
@@ -289,8 +307,8 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
               </tr>
             ) : (
               sessions.map((session) => {
-                const status = session.meta_data?.status as string | undefined;
-                const classBatchIds = (session.meta_data?.batch_id as string | undefined)
+                const status = getMetaString(session.meta_data, "status");
+                const classBatchIds = getMetaString(session.meta_data, "batch_id")
                   ?.split(",")
                   .filter(Boolean);
                 const classBatchNames = classBatchIds?.map(
@@ -316,13 +334,17 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                     </td>
                     <td className="px-3 py-4 text-sm text-gray-500">
                       <LinkIcon
-                        href={session.meta_data?.shortened_link || session.portal_link || ""}
+                        href={
+                          getMetaString(session.meta_data, "shortened_link") ??
+                          session.portal_link ??
+                          ""
+                        }
                         label="Portal link"
                       />
                     </td>
                     <td className="px-3 py-4 text-sm text-gray-500">
                       <LinkIcon
-                        href={session.meta_data?.admin_testing_link || ""}
+                        href={getMetaString(session.meta_data, "admin_testing_link") ?? ""}
                         label="Admin testing link"
                       />
                     </td>
@@ -417,9 +439,10 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
               setMenuState(null);
             }}
             disabled={
-              (sessions.find((s) => s.id === menuState.id)?.meta_data?.status as
-                | string
-                | undefined) === "pending"
+              getMetaString(
+                sessions.find((s) => s.id === menuState.id)?.meta_data,
+                "status"
+              ) === "pending"
             }
             className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-300"
           >
@@ -1073,17 +1096,23 @@ function QuizSessionDetailsModal({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [onClose]);
 
-  const parentId = session.meta_data?.parent_id as string | undefined;
-  const classBatchIds = (session.meta_data?.batch_id as string | undefined)
+  const parentId = getMetaString(session.meta_data, "parent_id");
+  const classBatchIds = getMetaString(session.meta_data, "batch_id")
     ?.split(",")
     .filter(Boolean);
   const classBatchNames = classBatchIds?.map(
     (id) => batchNameMap.get(id) || id
   );
-  const portalLink = session.meta_data?.shortened_link || session.portal_link || "";
-  const reportLink = session.meta_data?.report_link || "";
-  const adminLink = session.meta_data?.admin_testing_link || "";
-  const omrLink = session.meta_data?.shortened_omr_link || "";
+  const portalLink =
+    getMetaString(session.meta_data, "shortened_link") ??
+    session.portal_link ??
+    "";
+  const reportLink = getMetaString(session.meta_data, "report_link") ?? "";
+  const adminLink = getMetaString(session.meta_data, "admin_testing_link") ?? "";
+  const omrLink = getMetaString(session.meta_data, "shortened_omr_link") ?? "";
+  const gradeLabel = getMetaDisplay(session.meta_data, "grade") ?? "-";
+  const cmsUrl = getMetaString(session.meta_data, "cms_test_id") ?? "-";
+  const status = getMetaString(session.meta_data, "status");
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -1108,7 +1137,7 @@ function QuizSessionDetailsModal({
             </div>
             <div>
               <span className="font-medium text-gray-900">Grade:</span>{" "}
-              {session.meta_data?.grade ?? "-"}
+              {gradeLabel}
             </div>
             <div>
               <span className="font-medium text-gray-900">Parent Batch:</span>{" "}
@@ -1120,7 +1149,7 @@ function QuizSessionDetailsModal({
             </div>
             <div>
               <span className="font-medium text-gray-900">CMS URL:</span>{" "}
-              {session.meta_data?.cms_test_id || "-"}
+              {cmsUrl}
             </div>
             <LinkRow label="Portal Link" href={portalLink} />
             <LinkRow label="Admin Testing Link" href={adminLink} />
@@ -1136,7 +1165,7 @@ function QuizSessionDetailsModal({
             </div>
             <div>
               <span className="font-medium text-gray-900">Status:</span>{" "}
-              {getStatusLabel(session.meta_data?.status as string | undefined)}
+              {getStatusLabel(status)}
             </div>
           </div>
           <div className="px-4 py-3 border-t border-gray-200 flex justify-end">
