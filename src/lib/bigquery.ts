@@ -230,7 +230,8 @@ export async function getBatchOverviewData(
       COUNT(DISTINCT fk_student_id) AS student_count,
       ROUND(AVG(percentage), 1) AS avg_percentage,
       ROUND(AVG(CASE WHEN LOWER(student_gender) = 'male' THEN percentage END), 1) AS male_avg_percentage,
-      ROUND(AVG(CASE WHEN LOWER(student_gender) = 'female' THEN percentage END), 1) AS female_avg_percentage
+      ROUND(AVG(CASE WHEN LOWER(student_gender) = 'female' THEN percentage END), 1) AS female_avg_percentage,
+      MAX(test_format) AS test_format
     FROM ${FACT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
@@ -258,7 +259,8 @@ export async function getBatchOverviewData(
       f.session_id,
       rt.test_name,
       f.section AS subject,
-      ROUND(AVG(f.percentage), 1) AS avg_percentage
+      ROUND(AVG(f.percentage), 1) AS avg_percentage,
+      MAX(f.test_format) AS test_format
     FROM ${FACT_TABLE} f
     JOIN recent_tests rt ON f.session_id = rt.session_id
     WHERE f.student_school_udise_code = @udise

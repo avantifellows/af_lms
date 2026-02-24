@@ -2,11 +2,19 @@
 
 import { useState, useEffect } from "react";
 import StatCard from "../StatCard";
-import type { BatchOverviewData, TestTrendPoint, SubjectTrendPoint } from "@/types/quiz";
+import type { BatchOverviewData, BatchSummary, TestTrendPoint, SubjectTrendPoint } from "@/types/quiz";
+import type { TestCategory } from "../PerformanceTab";
+
+const CHAPTER_FORMATS = ["chapter_test", "combined_chapter_test", "homework"];
+
+function isChapterTest(format: string | null): boolean {
+  return format != null && CHAPTER_FORMATS.includes(format.toLowerCase());
+}
 
 interface Props {
   schoolUdise: string;
   grade: number;
+  testCategory: TestCategory;
   onTestClick: (sessionId: string, testName: string) => void;
 }
 
@@ -102,7 +110,59 @@ function TestCard({
   );
 }
 
-export default function BatchOverview({ schoolUdise, grade, onTestClick }: Props) {
+function computeSummary(
+  tests: TestTrendPoint[],
+  subjectTrend: SubjectTrendPoint[]
+): BatchSummary {
+  const testsCount = tests.length;
+  const avgParticipation =
+    testsCount > 0
+      ? Math.round(tests.reduce((s, t) => s + t.student_count, 0) / testsCount)
+      : 0;
+  const overallAvg =
+    testsCount > 0
+      ? Math.round(
+          (tests.reduce((s, t) => s + t.avg_percentage, 0) / testsCount) * 10
+        ) / 10
+      : 0;
+
+  let trendDirection: BatchSummary["trend_direction"] = "flat";
+  if (testsCount >= 2) {
+    const last = tests[testsCount - 1].avg_percentage;
+    const prev = tests[testsCount - 2].avg_percentage;
+    if (last - prev > 1) trendDirection = "up";
+    else if (prev - last > 1) trendDirection = "down";
+  }
+
+  let weakestSubject: string | null = null;
+  if (subjectTrend.length > 0) {
+    const subjectAvgs = new Map<string, { total: number; count: number }>();
+    for (const pt of subjectTrend) {
+      const entry = subjectAvgs.get(pt.subject) || { total: 0, count: 0 };
+      entry.total += pt.avg_percentage;
+      entry.count += 1;
+      subjectAvgs.set(pt.subject, entry);
+    }
+    let minAvg = Infinity;
+    for (const [subject, { total, count }] of subjectAvgs) {
+      const avg = total / count;
+      if (avg < minAvg) {
+        minAvg = avg;
+        weakestSubject = subject;
+      }
+    }
+  }
+
+  return {
+    tests_conducted: testsCount,
+    avg_participation: avgParticipation,
+    overall_avg: overallAvg,
+    trend_direction: trendDirection,
+    weakest_subject: weakestSubject,
+  };
+}
+
+export default function BatchOverview({ schoolUdise, grade, testCategory, onTestClick }: Props) {
   const [data, setData] = useState<BatchOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +207,26 @@ export default function BatchOverview({ schoolUdise, grade, onTestClick }: Props
     );
   }
 
-  const { summary, tests, subjectTrend, totalEnrolled } = data;
+  const { totalEnrolled } = data;
+
+  // Filter tests by category
+  const filterFn = (format: string | null) =>
+    testCategory === "chapter" ? isChapterTest(format) : !isChapterTest(format);
+
+  const tests = data.tests.filter((t) => filterFn(t.test_format));
+  const subjectTrend = data.subjectTrend.filter((s) => filterFn(s.test_format));
+
+  if (tests.length === 0) {
+    return (
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+        <p className="text-gray-500">
+          No {testCategory === "chapter" ? "chapter" : "full"} tests available for this grade yet.
+        </p>
+      </div>
+    );
+  }
+
+  const summary = computeSummary(tests, subjectTrend);
 
   // Build subject lookup by session_id
   const subjectsByTest = new Map<string, SubjectTrendPoint[]>();

@@ -48,6 +48,7 @@ export interface TestTrendPoint {
   avg_percentage: number;
   male_avg_percentage: number | null;
   female_avg_percentage: number | null;
+  test_format: string | null;
 }
 
 export interface SubjectTrendPoint {
@@ -55,6 +56,7 @@ export interface SubjectTrendPoint {
   test_name: string;
   subject: string;
   avg_percentage: number;
+  test_format: string | null;
 }
 
 export interface BatchSummary {

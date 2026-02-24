@@ -12,10 +12,13 @@ type ActiveView =
   | { type: "batch" }
   | { type: "deepDive"; sessionId: string; testName: string };
 
+export type TestCategory = "chapter" | "full";
+
 export default function PerformanceTab({ schoolUdise }: Props) {
   const [grades, setGrades] = useState<number[] | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>({ type: "batch" });
+  const [testCategory, setTestCategory] = useState<TestCategory>("chapter");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,6 +96,24 @@ export default function PerformanceTab({ schoolUdise }: Props) {
         </select>
       </div>
 
+      {selectedGrade != null && activeView.type === "batch" && (
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+          {(["chapter", "full"] as const).map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setTestCategory(cat)}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                testCategory === cat
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {cat === "chapter" ? "Chapter Tests" : "Full Tests"}
+            </button>
+          ))}
+        </div>
+      )}
+
       {selectedGrade == null ? (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
           <p className="text-gray-500">Select a grade to view performance data.</p>
@@ -101,6 +122,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
         <BatchOverview
           schoolUdise={schoolUdise}
           grade={selectedGrade}
+          testCategory={testCategory}
           onTestClick={handleTestClick}
         />
       ) : (
