@@ -12,6 +12,7 @@
     "deploy:production": "./scripts/deploy.sh production"
   },
   "dependencies": {
+    "@aws-sdk/client-sns": "^3.996.0",
     "@google-cloud/bigquery": "^8.1.1",
     "@types/pg": "^8.15.6",
     "next": "16.0.7",
