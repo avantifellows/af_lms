@@ -1,36 +1,42 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import QuizAnalyticsSection from "./QuizAnalyticsSection";
-
-interface QuizSession {
-  session_id: string;
-  test_name: string;
-  start_date: string;
-  student_count: number;
-}
+import BatchOverview from "./performance/BatchOverview";
+import TestDeepDive from "./performance/TestDeepDive";
 
 interface Props {
   schoolUdise: string;
 }
 
+type ActiveView =
+  | { type: "batch" }
+  | { type: "deepDive"; sessionId: string; testName: string };
+
+export type TestCategory = "chapter" | "full";
+
 export default function PerformanceTab({ schoolUdise }: Props) {
-  const [sessions, setSessions] = useState<QuizSession[] | null>(null);
+  const [grades, setGrades] = useState<number[] | null>(null);
+  const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>({ type: "batch" });
+  const [testCategory, setTestCategory] = useState<TestCategory>("chapter");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchSessions() {
-      try {
-        const res = await fetch(`/api/quiz-analytics/${schoolUdise}/sessions`);
-        if (!res.ok) throw new Error("Failed to fetch quiz sessions");
-        const data = await res.json();
-        setSessions(data.sessions);
-      } catch (err) {
-        console.error("Failed to fetch quiz sessions:", err);
+    fetch(`/api/quiz-analytics/${schoolUdise}/grades`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch grades");
+        return res.json();
+      })
+      .then((data: { grades: number[] }) => {
+        setGrades(data.grades);
+        if (data.grades.length === 1) {
+          setSelectedGrade(data.grades[0]);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch grades:", err);
         setError("Failed to load quiz data");
-      }
-    }
-    fetchSessions();
+      });
   }, [schoolUdise]);
 
   if (error) {
@@ -41,7 +47,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     );
   }
 
-  if (sessions === null) {
+  if (grades === null) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -50,7 +56,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     );
   }
 
-  if (sessions.length === 0) {
+  if (grades.length === 0) {
     return (
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
         <p className="text-gray-500">No quiz data available for this school yet.</p>
@@ -58,7 +64,76 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     );
   }
 
+  const handleTestClick = (sessionId: string, testName: string) => {
+    setActiveView({ type: "deepDive", sessionId, testName });
+  };
+
+  const handleBack = () => {
+    setActiveView({ type: "batch" });
+  };
+
+  const handleGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setSelectedGrade(val ? parseInt(val, 10) : null);
+    setActiveView({ type: "batch" });
+  };
+
   return (
-    <QuizAnalyticsSection sessions={sessions} schoolUdise={schoolUdise} />
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <label className="text-sm font-medium text-gray-700">Grade</label>
+        <select
+          className="rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          value={selectedGrade ?? ""}
+          onChange={handleGradeChange}
+        >
+          {grades.length > 1 && <option value="">Select grade...</option>}
+          {grades.map((g) => (
+            <option key={g} value={g}>
+              Grade {g}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedGrade != null && activeView.type === "batch" && (
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+          {(["chapter", "full"] as const).map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setTestCategory(cat)}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                testCategory === cat
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {cat === "chapter" ? "Chapter Tests" : "Full Tests"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selectedGrade == null ? (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+          <p className="text-gray-500">Select a grade to view performance data.</p>
+        </div>
+      ) : activeView.type === "batch" ? (
+        <BatchOverview
+          schoolUdise={schoolUdise}
+          grade={selectedGrade}
+          testCategory={testCategory}
+          onTestClick={handleTestClick}
+        />
+      ) : (
+        <TestDeepDive
+          schoolUdise={schoolUdise}
+          grade={selectedGrade}
+          sessionId={activeView.sessionId}
+          testName={activeView.testName}
+          onBack={handleBack}
+        />
+      )}
+    </div>
   );
 }
