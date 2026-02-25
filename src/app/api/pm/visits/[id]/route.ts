@@ -13,6 +13,13 @@ interface Visit {
   data: Record<string, unknown>;
   inserted_at: string;
   updated_at: string;
+  ended_at: string | null;
+  start_lat: string | null;
+  start_lng: string | null;
+  start_accuracy: string | null;
+  end_lat: string | null;
+  end_lng: string | null;
+  end_accuracy: string | null;
   school_name?: string;
 }
 
@@ -35,7 +42,9 @@ export async function GET(
 
   const visits = await query<Visit>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-            v.data, v.inserted_at, v.updated_at,
+            v.data, v.inserted_at, v.updated_at, v.ended_at,
+            v.start_lat, v.start_lng, v.start_accuracy,
+            v.end_lat, v.end_lng, v.end_accuracy,
             s.name as school_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
@@ -50,7 +59,10 @@ export async function GET(
   const visit = visits[0];
 
   // Only allow PM who created the visit or admins to view
-  if (visit.pm_email !== session.user.email && permission?.role !== "admin") {
+  const isOwner = visit.pm_email === session.user.email;
+  const userIsAdmin = permission?.role === "admin";
+
+  if (!isOwner && !userIsAdmin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
