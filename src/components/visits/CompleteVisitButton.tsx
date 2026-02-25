@@ -12,9 +12,36 @@ interface CompleteVisitButtonProps {
   disabled?: boolean;
 }
 
-function extractErrorMessage(error: unknown, fallback: string): string {
+interface StructuredError {
+  message: string;
+  details: string[];
+}
+
+function readErrorDetails(details: unknown): string[] {
+  if (!Array.isArray(details)) {
+    return [];
+  }
+
+  return details.filter((detail): detail is string => typeof detail === "string" && detail.length > 0);
+}
+
+function parseApiError(payload: unknown): StructuredError {
+  if (!payload || typeof payload !== "object") {
+    return { message: "Failed to complete visit", details: [] };
+  }
+
+  const maybeError = "error" in payload ? payload.error : null;
+  const maybeDetails = "details" in payload ? payload.details : null;
+
+  return {
+    message: typeof maybeError === "string" ? maybeError : "Failed to complete visit",
+    details: readErrorDetails(maybeDetails),
+  };
+}
+
+function extractErrorState(error: unknown, fallback: string): StructuredError {
   if (error instanceof Error && error.message) {
-    return error.message;
+    return { message: error.message, details: [] };
   }
 
   if (
@@ -24,33 +51,26 @@ function extractErrorMessage(error: unknown, fallback: string): string {
     typeof error.message === "string" &&
     error.message.trim().length > 0
   ) {
-    return error.message;
+    const details = "details" in error ? readErrorDetails(error.details) : [];
+    return { message: error.message, details };
   }
 
-  return fallback;
+  return { message: fallback, details: [] };
 }
 
-function parseApiError(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "Failed to complete visit";
+async function readJsonSafely(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
-
-  const maybeError = "error" in payload ? payload.error : null;
-  const maybeDetails = "details" in payload ? payload.details : null;
-
-  const error = typeof maybeError === "string" ? maybeError : "Failed to complete visit";
-  if (Array.isArray(maybeDetails) && maybeDetails.length > 0) {
-    return `${error}: ${maybeDetails.join("; ")}`;
-  }
-
-  return error;
 }
 
 export default function CompleteVisitButton({ visitId, disabled = false }: CompleteVisitButtonProps) {
   const router = useRouter();
   const cancelRef = useRef<(() => void) | null>(null);
   const [state, setState] = useState<CompleteState>("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<StructuredError | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
 
   const isBusy = state !== "idle";
@@ -81,9 +101,11 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
         }),
       });
 
-      const payload: unknown = await response.json();
+      const payload = await readJsonSafely(response);
       if (!response.ok) {
-        throw new Error(parseApiError(payload));
+        setError(parseApiError(payload));
+        setState("idle");
+        return;
       }
 
       if (
@@ -99,7 +121,7 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
       router.refresh();
     } catch (err) {
       setState("idle");
-      setError(extractErrorMessage(err, "Failed to complete visit"));
+      setError(extractErrorState(err, "Failed to complete visit"));
     }
   }
 
@@ -112,9 +134,16 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
       )}
 
       {error && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-          {error}
-        </p>
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          <p>{error.message}</p>
+          {error.details.length > 0 && (
+            <ul className="mt-1 list-disc pl-5" data-testid="complete-visit-error-details">
+              {error.details.map((detail, index) => (
+                <li key={`${detail}-${index}`}>{detail}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {state === "acquiring" && (

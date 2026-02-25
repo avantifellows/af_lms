@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
+import { validateClassroomObservationComplete } from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
 import {
@@ -20,13 +21,12 @@ interface VisitAccessRow {
   school_region: string | null;
 }
 
-interface CompletionAttemptRow {
+interface CompletedClassroomActionRow {
   id: number;
-  status: string;
-  completed_at: string | null;
-  updated_at: string;
-  applied: boolean;
-  has_completed_classroom_observation: boolean;
+  data: unknown;
+}
+
+interface InProgressActionStateRow {
   has_in_progress_actions: boolean;
 }
 
@@ -109,84 +109,124 @@ export async function POST(
     );
   }
 
-  const completionAttempt = await query<CompletionAttemptRow>(
-    `WITH action_stats AS (
-       SELECT
-         EXISTS (
-           SELECT 1
-           FROM lms_pm_visit_actions a
-           WHERE a.visit_id = $1
-             AND a.deleted_at IS NULL
-             AND a.action_type = 'classroom_observation'
-             AND a.status = 'completed'
-         ) AS has_completed_classroom_observation,
-         EXISTS (
-           SELECT 1
-           FROM lms_pm_visit_actions a
-           WHERE a.visit_id = $1
-             AND a.deleted_at IS NULL
-             AND a.status = 'in_progress'
-         ) AS has_in_progress_actions
-     ),
-     updated_visit AS (
-       UPDATE lms_pm_school_visits v
-       SET status = 'completed',
-           completed_at = (NOW() AT TIME ZONE 'UTC'),
-           end_lat = $2,
-           end_lng = $3,
-           end_accuracy = $4,
-           updated_at = (NOW() AT TIME ZONE 'UTC')
-       FROM action_stats stats
-       WHERE v.id = $1
-         AND v.status = 'in_progress'
-         AND stats.has_completed_classroom_observation
-         AND NOT stats.has_in_progress_actions
-       RETURNING v.id, v.status, v.completed_at, v.updated_at
-     )
-     SELECT uv.id, uv.status, uv.completed_at, uv.updated_at,
-            TRUE AS applied,
-            stats.has_completed_classroom_observation,
-            stats.has_in_progress_actions
-     FROM updated_visit uv
-     CROSS JOIN action_stats stats
-     UNION ALL
-     SELECT v.id, v.status, v.completed_at, v.updated_at,
-            FALSE AS applied,
-            stats.has_completed_classroom_observation,
-            stats.has_in_progress_actions
-     FROM lms_pm_school_visits v
-     CROSS JOIN action_stats stats
+  const actionState = await query<InProgressActionStateRow>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM lms_pm_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.status = 'in_progress'
+     ) AS has_in_progress_actions`,
+    [id]
+  );
+  const hasInProgressActions = actionState[0]?.has_in_progress_actions === true;
+  if (hasInProgressActions) {
+    return apiError(422, "All in-progress action points must be ended before completing visit");
+  }
+
+  const completedClassroomActions = await query<CompletedClassroomActionRow>(
+    `SELECT a.id, a.data
+     FROM lms_pm_visit_actions a
+     WHERE a.visit_id = $1
+       AND a.deleted_at IS NULL
+       AND a.action_type = 'classroom_observation'
+       AND a.status = 'completed'
+     ORDER BY a.id ASC`,
+    [id]
+  );
+
+  if (completedClassroomActions.length === 0) {
+    return apiError(
+      422,
+      "At least one completed classroom observation is required to complete visit",
+      ["No completed classroom observation action found for this visit"]
+    );
+  }
+
+  let hasValidCompletedClassroomObservation = false;
+  let firstInvalidDetails: string[] = [];
+
+  for (const action of completedClassroomActions) {
+    const validation = validateClassroomObservationComplete(action.data);
+    if (validation.valid) {
+      hasValidCompletedClassroomObservation = true;
+      break;
+    }
+
+    if (firstInvalidDetails.length === 0) {
+      firstInvalidDetails = validation.errors.map((error) => `Action ${action.id}: ${error}`);
+    }
+  }
+
+  if (!hasValidCompletedClassroomObservation) {
+    return apiError(
+      422,
+      "At least one completed classroom observation is required to complete visit",
+      firstInvalidDetails
+    );
+  }
+
+  const updatedVisit = await query<Pick<VisitAccessRow, "id" | "status" | "completed_at">>(
+    `UPDATE lms_pm_school_visits v
+     SET status = 'completed',
+         completed_at = (NOW() AT TIME ZONE 'UTC'),
+         end_lat = $2,
+         end_lng = $3,
+         end_accuracy = $4,
+         updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE v.id = $1
-       AND NOT EXISTS (SELECT 1 FROM updated_visit)
-     LIMIT 1`,
+       AND v.status = 'in_progress'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM lms_pm_visit_actions a
+         WHERE a.visit_id = $1
+           AND a.deleted_at IS NULL
+           AND a.status = 'in_progress'
+       )
+     RETURNING v.id, v.status, v.completed_at`,
     [id, gps.reading!.lat, gps.reading!.lng, gps.reading!.accuracy]
   );
 
-  if (completionAttempt.length === 0) {
-    return apiError(404, "Visit not found");
-  }
-
-  const outcome = completionAttempt[0];
-  if (outcome.applied || outcome.status === "completed") {
+  if (updatedVisit.length > 0) {
     return completeResponse(
       {
-        id: outcome.id,
-        status: outcome.status,
-        completed_at: outcome.completed_at,
+        id: updatedVisit[0].id,
+        status: updatedVisit[0].status,
+        completed_at: updatedVisit[0].completed_at,
       },
       gps.warning
     );
   }
 
-  if (outcome.has_in_progress_actions) {
-    return apiError(422, "All in-progress action points must be ended before completing visit");
+  const currentVisit = await loadVisitAccessTarget(id);
+  if (!currentVisit) {
+    return apiError(404, "Visit not found");
   }
 
-  if (!outcome.has_completed_classroom_observation) {
-    return apiError(
-      422,
-      "At least one completed classroom observation is required to complete visit"
+  if (currentVisit.status === "completed") {
+    return completeResponse(
+      {
+        id: currentVisit.id,
+        status: currentVisit.status,
+        completed_at: currentVisit.completed_at,
+      },
+      gps.warning
     );
+  }
+
+  const latestActionState = await query<InProgressActionStateRow>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM lms_pm_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.status = 'in_progress'
+     ) AS has_in_progress_actions`,
+    [id]
+  );
+  const stillHasInProgressActions = latestActionState[0]?.has_in_progress_actions === true;
+  if (stillHasInProgressActions) {
+    return apiError(422, "All in-progress action points must be ended before completing visit");
   }
 
   return apiError(409, "Visit cannot be completed from current state");

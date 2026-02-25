@@ -14,6 +14,10 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import {
+  CLASSROOM_OBSERVATION_RUBRIC,
+  CURRENT_RUBRIC_VERSION,
+} from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
@@ -70,7 +74,7 @@ const VISIT_ROW = {
 const BASE_ACTION_ROW = {
   id: 101,
   visit_id: 10,
-  action_type: "classroom_observation",
+  action_type: "principal_meeting",
   status: "in_progress",
   data: { notes: "current" },
   started_at: "2026-02-18T10:05:00.000Z",
@@ -80,6 +84,20 @@ const BASE_ACTION_ROW = {
   inserted_at: "2026-02-18T10:00:00.000Z",
   updated_at: "2026-02-18T10:05:00.000Z",
 };
+
+function buildValidClassroomData() {
+  const params = Object.fromEntries(
+    CLASSROOM_OBSERVATION_RUBRIC.parameters.map((parameter) => [
+      parameter.key,
+      { score: parameter.options[0]!.score },
+    ])
+  );
+
+  return {
+    rubric_version: CURRENT_RUBRIC_VERSION,
+    params,
+  };
+}
 
 function setupPmView() {
   mockSession.mockResolvedValue(PM_SESSION);
@@ -314,6 +332,120 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ error: "data must be an object" });
   });
 
+  it("returns 422 for invalid in-progress classroom observation payload", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "classroom_observation" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: {
+          rubric_version: CURRENT_RUBRIC_VERSION,
+          params: {},
+          legacy_notes: "should fail",
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid classroom observation data",
+      details: ["Unknown top-level field: legacy_notes"],
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 422 for unknown classroom rubric version", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "classroom_observation" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: {
+          rubric_version: "99.0",
+          params: { teacher_on_time: { score: 1 } },
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid classroom observation data",
+      details: ["Unsupported classroom observation rubric_version: 99.0"],
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 422 for invalid classroom params shape", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "classroom_observation" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: {
+          rubric_version: CURRENT_RUBRIC_VERSION,
+          params: {
+            teacher_on_time: {
+              score: 1,
+              remarks: 123,
+            },
+          },
+          observer_summary_strengths: 999,
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid classroom observation data",
+      details: [
+        "observer_summary_strengths must be a string",
+        "remarks for Teacher started the class on time must be a string",
+      ],
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts partial classroom observation payload while action is in progress", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "classroom_observation" };
+    const payload = {
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: {
+        teacher_on_time: { score: 1 },
+      },
+    };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
   it("returns 409 when PM tries to patch completed action", async () => {
     setupPmView();
     mockQuery
@@ -353,6 +485,78 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "PATCH",
       body: JSON.stringify({ data: { notes: "admin edit" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for incomplete completed classroom payload (strict mode)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "classroom_observation", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: {
+          rubric_version: CURRENT_RUBRIC_VERSION,
+          params: {
+            teacher_on_time: { score: 1 },
+          },
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid classroom observation data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([
+        "Missing score for Teacher Grooming",
+        "Missing score for Gender Sensitivity Parameters",
+      ])
+    );
+  });
+
+  it("allows admin to patch completed classroom action when rubric is complete", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const action = { ...BASE_ACTION_ROW, action_type: "classroom_observation", status: "completed" };
+    const payload = buildValidClassroomData();
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await PATCH(req as never, params);

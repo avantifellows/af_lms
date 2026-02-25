@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
+import {
+  validateClassroomObservationComplete,
+  validateClassroomObservationSave,
+} from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import {
   apiError,
@@ -166,6 +170,17 @@ export async function PATCH(
   const { data } = bodyResult.body;
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return apiError(400, "data must be an object");
+  }
+
+  if (action.action_type === "classroom_observation") {
+    const validation =
+      action.status === "completed"
+        ? validateClassroomObservationComplete(data)
+        : validateClassroomObservationSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid classroom observation data", validation.errors);
+    }
   }
 
   const updated = await query<VisitActionRow>(

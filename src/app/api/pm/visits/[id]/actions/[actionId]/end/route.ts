@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
+import { validateClassroomObservationComplete } from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
 import {
@@ -25,7 +26,7 @@ interface VisitActionRow {
   visit_id: number;
   action_type: string;
   status: string;
-  data: Record<string, unknown>;
+  data: unknown;
   started_at: string | null;
   ended_at: string | null;
   start_accuracy: string | null;
@@ -33,6 +34,8 @@ interface VisitActionRow {
   inserted_at: string;
   updated_at: string;
 }
+
+const CLASSROOM_ACTION_TYPE = "classroom_observation";
 
 async function loadVisitAccessTarget(visitId: string): Promise<VisitAccessRow | null> {
   const visits = await query<VisitAccessRow>(
@@ -68,6 +71,19 @@ function endResponse(action: VisitActionRow, warning?: string) {
     response.warning = warning;
   }
   return NextResponse.json(response);
+}
+
+function classroomValidationError(action: VisitActionRow) {
+  if (action.action_type !== CLASSROOM_ACTION_TYPE) {
+    return null;
+  }
+
+  const validation = validateClassroomObservationComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid classroom observation data", validation.errors);
 }
 
 // POST /api/pm/visits/[id]/actions/[actionId]/end - end action with end GPS
@@ -126,6 +142,11 @@ export async function POST(
     return apiError(422, "Action must be started before ending");
   }
 
+  const invalidClassroomData = classroomValidationError(existingAction);
+  if (invalidClassroomData) {
+    return invalidClassroomData;
+  }
+
   const ended = await query<VisitActionRow>(
     `UPDATE lms_pm_visit_actions
      SET status = 'completed',
@@ -160,6 +181,11 @@ export async function POST(
   }
   if (!current.started_at) {
     return apiError(422, "Action must be started before ending");
+  }
+
+  const invalidCurrentClassroomData = classroomValidationError(current);
+  if (invalidCurrentClassroomData) {
+    return invalidCurrentClassroomData;
   }
 
   return apiError(409, "Action cannot be ended from current state");

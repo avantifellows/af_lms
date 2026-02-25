@@ -2,6 +2,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CURRENT_RUBRIC_VERSION } from "@/lib/classroom-observation-rubric";
+
 const {
   mockGetServerSession,
   mockGetUserPermission,
@@ -142,9 +144,10 @@ describe("VisitActionDetailPage", () => {
         makeAction({
           action_type: "classroom_observation",
           data: {
-            class_details: "Grade 9 Maths",
-            observations: "Students engaged",
-            support_needed: "Need worksheet alignment",
+            rubric_version: CURRENT_RUBRIC_VERSION,
+            params: {
+              teacher_on_time: { score: 1 },
+            },
           },
         }),
       ]);
@@ -154,22 +157,37 @@ describe("VisitActionDetailPage", () => {
 
     expect(screen.getByText("Classroom Observation Details")).toBeInTheDocument();
     expect(screen.getByTestId("action-renderer-classroom_observation")).toBeInTheDocument();
+    expect(screen.getByTestId("classroom-observation-form")).toBeInTheDocument();
   });
 
-  it("loads the principal meeting renderer for principal_meeting actions", async () => {
+  it("shows unsupported classroom rubric warning and hides save/end actions", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
-      .mockResolvedValueOnce([makeAction({ action_type: "principal_meeting" })]);
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "classroom_observation",
+          data: {
+            rubric_version: "2.0",
+            params: {
+              teacher_on_time: { score: 1 },
+            },
+          },
+        }),
+      ]);
 
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    expect(screen.getByText("Principal Meeting Details")).toBeInTheDocument();
-    expect(screen.getByTestId("action-renderer-principal_meeting")).toBeInTheDocument();
+    expect(screen.getByTestId("classroom-unsupported-version-warning")).toHaveTextContent(
+      "Unsupported classroom observation rubric version: 2.0"
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("rubric-param-teacher_on_time")).toBeInTheDocument();
   });
 
-  it("completes a classroom observation by saving details and ending with GPS", async () => {
+  it("bootstraps missing rubric_version and strips legacy classroom keys in PATCH payload", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
@@ -178,9 +196,74 @@ describe("VisitActionDetailPage", () => {
           action_type: "classroom_observation",
           data: {
             class_details: "Grade 9 Maths",
-            observations: "Initial",
-            support_needed: "",
+            observations: "Legacy text",
+            support_needed: "Legacy support",
             preserved_key: "keep-me",
+            params: {
+              teacher_on_time: { score: 1, remarks: "Observed" },
+            },
+            observer_summary_strengths: "Strong opening",
+          },
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "classroom_observation",
+              data: {
+                rubric_version: CURRENT_RUBRIC_VERSION,
+                params: {
+                  teacher_on_time: { score: 1, remarks: "Observed" },
+                },
+                observer_summary_strengths: "Strong opening",
+              },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data.rubric_version).toBe(CURRENT_RUBRIC_VERSION);
+    expect(body.data.params).toEqual({
+      teacher_on_time: { score: 1, remarks: "Observed" },
+    });
+    expect(body.data.observer_summary_strengths).toBe("Strong opening");
+    expect(body.data).not.toHaveProperty("class_details");
+    expect(body.data).not.toHaveProperty("observations");
+    expect(body.data).not.toHaveProperty("support_needed");
+    expect(body.data).not.toHaveProperty("preserved_key");
+  });
+
+  it("auto-saves classroom observation before calling /end", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "classroom_observation",
+          data: {
+            params: {
+              teacher_on_time: { score: 1 },
+            },
           },
         }),
       ]);
@@ -200,10 +283,10 @@ describe("VisitActionDetailPage", () => {
               action: makeAction({
                 action_type: "classroom_observation",
                 data: {
-                  class_details: "Grade 9 Maths",
-                  observations: "Updated classroom note",
-                  support_needed: "",
-                  preserved_key: "keep-me",
+                  rubric_version: CURRENT_RUBRIC_VERSION,
+                  params: {
+                    teacher_on_time: { score: 1 },
+                  },
                 },
               }),
             }),
@@ -219,10 +302,10 @@ describe("VisitActionDetailPage", () => {
                 status: "completed",
                 ended_at: "2026-02-19T10:00:00.000Z",
                 data: {
-                  class_details: "Grade 9 Maths",
-                  observations: "Updated classroom note",
-                  support_needed: "",
-                  preserved_key: "keep-me",
+                  rubric_version: CURRENT_RUBRIC_VERSION,
+                  params: {
+                    teacher_on_time: { score: 1 },
+                  },
                 },
               }),
             }),
@@ -234,28 +317,19 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    const observations = screen.getByLabelText("Observations");
-    await user.clear(observations);
-    await user.type(observations, "Updated classroom note");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "End Action" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
     });
 
     const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
     expect(saveInit.method).toBe("PATCH");
-    const saveBody = JSON.parse(String(saveInit.body)) as { data: Record<string, string> };
-    expect(saveBody.data.observations).toBe("Updated classroom note");
-    expect(saveBody.data.preserved_key).toBe("keep-me");
 
-    await user.click(screen.getByRole("button", { name: "End Action" }));
-
-    await waitFor(() => {
-      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
+    const saveBody = JSON.parse(String(saveInit.body)) as { data: Record<string, unknown> };
+    expect(saveBody.data.rubric_version).toBe(CURRENT_RUBRIC_VERSION);
 
     const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
@@ -263,11 +337,140 @@ describe("VisitActionDetailPage", () => {
     expect(endInit.body).toBe(
       JSON.stringify({ end_lat: 23.02, end_lng: 72.57, end_accuracy: 45 })
     );
+  });
+
+  it("shows classroom save failure details and does not call /end", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "classroom_observation",
+          data: {
+            rubric_version: CURRENT_RUBRIC_VERSION,
+            params: {
+              teacher_on_time: { score: 1 },
+            },
+          },
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 422,
+        json: () =>
+          Promise.resolve({
+            error: "Validation failed",
+            details: ["Missing score for Teacher Grooming", "Missing score for Gender Sensitivity Parameters"],
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Completed")).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
+      expect(screen.getByText("Could not save observation. Fix errors and try End again.")).toBeInTheDocument();
     });
+
+    expect(screen.getByText("Missing score for Teacher Grooming")).toBeInTheDocument();
+    expect(screen.getByText("Missing score for Gender Sensitivity Parameters")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockGetAccurateLocation).not.toHaveBeenCalled();
+  });
+
+  it("shows classroom /end 422 guidance with details", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "classroom_observation",
+          data: {
+            rubric_version: CURRENT_RUBRIC_VERSION,
+            params: {
+              teacher_on_time: { score: 1 },
+            },
+          },
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "classroom_observation",
+                data: {
+                  rubric_version: CURRENT_RUBRIC_VERSION,
+                  params: {
+                    teacher_on_time: { score: 1 },
+                  },
+                },
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Incomplete rubric",
+              details: ["Missing score for Teacher Grooming"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Please complete all required rubric scores before ending this observation.")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Missing score for Teacher Grooming")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
+  });
+
+  it("loads the principal meeting renderer for principal_meeting actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([makeAction({ action_type: "principal_meeting" })]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Principal Meeting Details")).toBeInTheDocument();
+    expect(screen.getByTestId("action-renderer-principal_meeting")).toBeInTheDocument();
   });
 
   it("saves via PATCH and preserves unrelated fields in action data", async () => {

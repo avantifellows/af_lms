@@ -3,6 +3,10 @@ import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import { insertTestUsers } from "./test-users";
+import {
+  CLASSROOM_OBSERVATION_RUBRIC,
+  CURRENT_RUBRIC_VERSION,
+} from "../../src/lib/classroom-observation-rubric";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -183,6 +187,25 @@ interface SeedVisitActionParams {
   actionType: string;
   status?: SeedActionStatus;
   data?: Record<string, unknown>;
+}
+
+/**
+ * Canonical strict-valid classroom observation payload for completed action fixtures.
+ */
+export function buildCompleteClassroomObservationData(): Record<string, unknown> {
+  const params = Object.fromEntries(
+    CLASSROOM_OBSERVATION_RUBRIC.parameters.map((parameter) => [
+      parameter.key,
+      { score: parameter.options[0]!.score },
+    ])
+  );
+
+  return {
+    rubric_version: CURRENT_RUBRIC_VERSION,
+    params,
+    observer_summary_strengths: "Strong student engagement and concept clarity.",
+    observer_summary_improvements: "Improve recap pacing near class closure.",
+  };
 }
 
 /**

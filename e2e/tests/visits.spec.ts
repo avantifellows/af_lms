@@ -1,5 +1,10 @@
 import { test, expect } from "../fixtures/auth";
-import { getTestPool, seedTestVisit, seedVisitAction } from "../helpers/db";
+import {
+  buildCompleteClassroomObservationData,
+  getTestPool,
+  seedTestVisit,
+  seedVisitAction,
+} from "../helpers/db";
 import type { Page } from "@playwright/test";
 import type { Pool } from "pg";
 
@@ -13,6 +18,18 @@ async function setGoodGps(page: Page) {
     longitude: 72.5714,
     accuracy: 50,
   });
+}
+
+async function fillClassroomRubricScores(page: Page) {
+  const rubricCards = page.locator('[data-testid^="rubric-param-"]');
+  await expect(rubricCards).toHaveCount(19);
+
+  const count = await rubricCards.count();
+  for (let index = 0; index < count; index += 1) {
+    await rubricCards.nth(index).locator('input[type="radio"]').first().check();
+  }
+
+  await expect(page.getByTestId("rubric-answered-summary")).toHaveText("Answered: 19/19");
 }
 
 test.beforeAll(async () => {
@@ -103,15 +120,40 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await actionCard.getByRole("link", { name: "Open" }).click();
 
     await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
-    await pmPage.getByLabel("Class Details").fill("Grade 9 science");
-    await pmPage.getByLabel("Observations").fill("Students were engaged and participating.");
-    await pmPage.getByLabel("Support Needed").fill("Need additional lab planning support.");
-    await pmPage.getByRole("button", { name: "Save" }).click();
+    await fillClassroomRubricScores(pmPage);
+
+    const requestOrder: string[] = [];
+    pmPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        request.method() === "PATCH" &&
+        url.pathname === `/api/pm/visits/${visitId}/actions/${actionId}`
+      ) {
+        requestOrder.push("patch");
+      }
+      if (
+        request.method() === "POST" &&
+        url.pathname === `/api/pm/visits/${visitId}/actions/${actionId}/end`
+      ) {
+        requestOrder.push("end");
+      }
+    });
+
     await pmPage.getByRole("button", { name: "End Action" }).click();
 
     await expect(
       pmPage.getByText("Completed actions are read-only for your role.")
     ).toBeVisible();
+    expect(requestOrder).toEqual(["patch", "end"]);
+
+    const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
+      `SELECT status, data FROM lms_pm_visit_actions WHERE id = $1`,
+      [actionId]
+    );
+    const actionRow = actionRows.rows[0];
+    expect(actionRow?.status).toBe("completed");
+    expect(typeof actionRow?.data?.rubric_version).toBe("string");
+    expect(Object.keys((actionRow?.data?.params as Record<string, unknown>) ?? {})).toHaveLength(19);
 
     await pmPage.getByRole("link", { name: "Back to Visit" }).click();
     await pmPage.waitForURL(`/visits/${visitId}`);
@@ -119,8 +161,45 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(refreshedCard.getByRole("link", { name: "View Details" })).toBeVisible();
   });
 
-  test("complete-blocked-without-completed-classroom-observation", async ({ pmPage }) => {
+  test("classroom-end-validation-422-is-retryable", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "pending",
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+
+    const actionCard = pmPage.getByTestId(`action-card-${actionId}`);
+    await actionCard.getByRole("button", { name: "Start" }).click();
+    await actionCard.getByRole("link", { name: "Open" }).click();
+
+    await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+
+    await expect(
+      pmPage.getByText("Please complete all required rubric scores before ending this observation.")
+    ).toBeVisible();
+    await expect(pmPage).toHaveURL(`/visits/${visitId}/actions/${actionId}`);
+
+    await fillClassroomRubricScores(pmPage);
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+  });
+
+  test("complete-blocked-without-rubric-valid-completed-classroom-observation", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+      data: {
+        class_details: "Legacy classroom notes",
+      },
+    });
     await seedVisitAction(pool, visitId, {
       actionType: "principal_meeting",
       status: "completed",
@@ -140,6 +219,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
       status: "completed",
+      data: buildCompleteClassroomObservationData(),
     });
     await seedVisitAction(pool, visitId, {
       actionType: "principal_meeting",
@@ -149,6 +229,9 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
     await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+    await expect(pmPage.getByRole("button", { name: "Completing..." })).toHaveCount(0, {
+      timeout: 15_000,
+    });
 
     await expect(
       pmPage.getByText("All in-progress action points must be ended before completing visit")
@@ -160,6 +243,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
       status: "completed",
+      data: buildCompleteClassroomObservationData(),
     });
     await seedVisitAction(pool, visitId, {
       actionType: "teacher_feedback",
@@ -178,8 +262,13 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
   test("moderate-gps-warning-visible", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
-      actionType: "classroom_observation",
+      actionType: "principal_meeting",
       status: "pending",
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+      data: buildCompleteClassroomObservationData(),
     });
 
     const startResponse = await pmPage.request.post(
@@ -296,6 +385,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
       status: "completed",
+      data: buildCompleteClassroomObservationData(),
     });
 
     await adminPage.getByRole("button", { name: "Complete Visit" }).click();

@@ -2,6 +2,11 @@
 
 import { useMemo, useRef, useState } from "react";
 
+import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
+import {
+  CURRENT_RUBRIC_VERSION,
+  getRubricConfig,
+} from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
 import { getActionTypeLabel, isActionType, type ActionType } from "@/lib/visit-actions";
 
@@ -39,6 +44,18 @@ interface ActionFormConfig {
   description: string;
   fields: FieldConfig[];
 }
+
+interface ApiErrorPayload {
+  error?: unknown;
+  details?: unknown;
+}
+
+interface StructuredError {
+  message: string;
+  details: string[];
+}
+
+const CLASSROOM_ACTION_TYPE = "classroom_observation";
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   principal_meeting: {
@@ -80,22 +97,8 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   },
   classroom_observation: {
     title: "Classroom Observation Details",
-    description: "Record observations, strengths, and support needs.",
-    fields: [
-      { key: "class_details", label: "Class Details", placeholder: "Grade/subject/teacher context" },
-      {
-        key: "observations",
-        label: "Observations",
-        placeholder: "What did you observe in class?",
-        multiline: true,
-      },
-      {
-        key: "support_needed",
-        label: "Support Needed",
-        placeholder: "What support is required?",
-        multiline: true,
-      },
-    ],
+    description: "Complete the classroom observation rubric and summaries.",
+    fields: [],
   },
   group_student_discussion: {
     title: "Group Student Discussion Details",
@@ -211,16 +214,19 @@ const FALLBACK_FORM_CONFIG: ActionFormConfig = {
   ],
 };
 
-interface ApiErrorPayload {
-  error?: unknown;
-  details?: unknown;
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
+function readErrorDetails(details: unknown): string[] {
+  if (!Array.isArray(details)) {
+    return [];
   }
 
+  return details.filter((detail): detail is string => typeof detail === "string" && detail.length > 0);
+}
+
+function extractErrorState(error: unknown, fallback: string): StructuredError {
   if (
     typeof error === "object" &&
     error !== null &&
@@ -228,29 +234,25 @@ function extractErrorMessage(error: unknown, fallback: string): string {
     typeof error.message === "string" &&
     error.message.trim().length > 0
   ) {
-    return error.message;
+    const details = "details" in error ? readErrorDetails(error.details) : [];
+    return { message: error.message, details };
   }
 
-  return fallback;
+  return { message: fallback, details: [] };
 }
 
-function parseApiError(payload: unknown, fallback: string): string {
+function parseApiError(payload: unknown, fallback: string): StructuredError {
   if (!payload || typeof payload !== "object") {
-    return fallback;
+    return { message: fallback, details: [] };
   }
 
   const { error, details } = payload as ApiErrorPayload;
-  const errorMessage = typeof error === "string" ? error : fallback;
-  if (Array.isArray(details) && details.length > 0) {
-    const detailText = details
-      .filter((detail): detail is string => typeof detail === "string")
-      .join("; ");
-    if (detailText) {
-      return `${errorMessage}: ${detailText}`;
-    }
-  }
+  const message = typeof error === "string" && error.trim().length > 0 ? error : fallback;
 
-  return errorMessage;
+  return {
+    message,
+    details: readErrorDetails(details),
+  };
 }
 
 function isLocationCancelled(error: unknown): boolean {
@@ -260,6 +262,99 @@ function isLocationCancelled(error: unknown): boolean {
     "message" in error &&
     error.message === "Location request was cancelled."
   );
+}
+
+function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return {};
+  }
+
+  const sanitized: Record<string, unknown> = {};
+
+  if (typeof data.rubric_version === "string") {
+    sanitized.rubric_version = data.rubric_version;
+  }
+
+  if (isPlainObject(data.params)) {
+    const params: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(data.params)) {
+      if (!isPlainObject(value)) {
+        continue;
+      }
+
+      const nextValue: Record<string, unknown> = {};
+
+      if (typeof value.score === "number" && Number.isFinite(value.score)) {
+        nextValue.score = value.score;
+      }
+
+      if (typeof value.remarks === "string") {
+        nextValue.remarks = value.remarks;
+      }
+
+      if (Object.keys(nextValue).length > 0) {
+        params[key] = nextValue;
+      }
+    }
+
+    sanitized.params = params;
+  }
+
+  if (typeof data.observer_summary_strengths === "string") {
+    sanitized.observer_summary_strengths = data.observer_summary_strengths;
+  }
+
+  if (typeof data.observer_summary_improvements === "string") {
+    sanitized.observer_summary_improvements = data.observer_summary_improvements;
+  }
+
+  return sanitized;
+}
+
+function bootstrapClassroomPayload(data: unknown): Record<string, unknown> {
+  const sanitized = sanitizeClassroomPayload(data);
+
+  if (typeof sanitized.rubric_version !== "string") {
+    sanitized.rubric_version = CURRENT_RUBRIC_VERSION;
+  }
+
+  return sanitized;
+}
+
+function normalizeFormDataForAction(actionType: string, data: unknown): Record<string, unknown> {
+  if (actionType === CLASSROOM_ACTION_TYPE) {
+    return bootstrapClassroomPayload(data);
+  }
+
+  if (!isPlainObject(data)) {
+    return {};
+  }
+
+  return { ...data };
+}
+
+function sanitizePatchData(actionType: string, data: Record<string, unknown>): Record<string, unknown> {
+  if (actionType === CLASSROOM_ACTION_TYPE) {
+    return bootstrapClassroomPayload(data);
+  }
+
+  return data;
+}
+
+function normalizeActionForState(action: ActionRecord): ActionRecord {
+  return {
+    ...action,
+    data: normalizeFormDataForAction(action.action_type, action.data),
+  };
+}
+
+async function readJsonSafely(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
 }
 
 function toActionTypeLabel(actionType: string): string {
@@ -339,9 +434,10 @@ function readActionFromPayload(payload: unknown): ActionRecord | null {
     visit_id: visitId ?? 0,
     action_type: typeof action.action_type === "string" ? action.action_type : "unknown",
     status: typeof action.status === "string" ? action.status : "pending",
-    data: action.data && typeof action.data === "object" && !Array.isArray(action.data)
-      ? action.data as Record<string, unknown>
-      : {},
+    data:
+      action.data && typeof action.data === "object" && !Array.isArray(action.data)
+        ? (action.data as Record<string, unknown>)
+        : {},
     started_at: typeof action.started_at === "string" ? action.started_at : null,
     ended_at: typeof action.ended_at === "string" ? action.ended_at : null,
     inserted_at: typeof action.inserted_at === "string" ? action.inserted_at : "",
@@ -356,10 +452,12 @@ export default function ActionDetailForm({
   canWrite,
   isAdmin,
 }: ActionDetailFormProps) {
-  const [action, setAction] = useState<ActionRecord>(initialAction);
-  const [formData, setFormData] = useState<Record<string, unknown>>(initialAction.data ?? {});
+  const [action, setAction] = useState<ActionRecord>(() => normalizeActionForState(initialAction));
+  const [formData, setFormData] = useState<Record<string, unknown>>(() =>
+    normalizeFormDataForAction(initialAction.action_type, initialAction.data)
+  );
   const [state, setState] = useState<FormState>("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<StructuredError | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const cancelEndRef = useRef<(() => void) | null>(null);
 
@@ -370,10 +468,55 @@ export default function ActionDetailForm({
     return FALLBACK_FORM_CONFIG;
   }, [action.action_type]);
 
+  const isClassroomObservation = action.action_type === CLASSROOM_ACTION_TYPE;
+  const rubricVersion = typeof formData.rubric_version === "string" ? formData.rubric_version : null;
+  const hasUnsupportedRubricVersion =
+    isClassroomObservation && rubricVersion !== null && getRubricConfig(rubricVersion) === null;
+
   const isVisitCompleted = visitStatus === "completed";
-  const canSave = !isVisitCompleted && canWrite && (action.status !== "completed" || isAdmin);
-  const canEnd = !isVisitCompleted && canWrite && action.status === "in_progress";
+  const canSave =
+    !isVisitCompleted &&
+    canWrite &&
+    !hasUnsupportedRubricVersion &&
+    (action.status !== "completed" || isAdmin);
+  const canEnd =
+    !isVisitCompleted &&
+    canWrite &&
+    !hasUnsupportedRubricVersion &&
+    action.status === "in_progress";
   const isBusy = state !== "idle";
+
+  async function persistActionData(dataToPersist: Record<string, unknown>) {
+    const response = await fetch(`/api/pm/visits/${visitId}/actions/${action.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: dataToPersist }),
+    });
+
+    const payload = await readJsonSafely(response);
+
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        status: response.status,
+        error: parseApiError(payload, "Failed to save action details"),
+      };
+    }
+
+    const updatedAction = readActionFromPayload(payload);
+    if (!updatedAction) {
+      return {
+        ok: false as const,
+        status: response.status,
+        error: { message: "Failed to save action details", details: [] },
+      };
+    }
+
+    return {
+      ok: true as const,
+      action: normalizeActionForState(updatedAction),
+    };
+  }
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -387,25 +530,17 @@ export default function ActionDetailForm({
     setState("saving");
 
     try {
-      const response = await fetch(`/api/pm/visits/${visitId}/actions/${action.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: formData }),
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(parseApiError(payload, "Failed to save action details"));
+      const result = await persistActionData(sanitizePatchData(action.action_type, formData));
+
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
 
-      const updatedAction = readActionFromPayload(payload);
-      if (!updatedAction) {
-        throw new Error("Failed to save action details");
-      }
-
-      setAction(updatedAction);
-      setFormData(updatedAction.data ?? {});
+      setAction(result.action);
+      setFormData(result.action.data ?? {});
     } catch (err) {
-      setError(extractErrorMessage(err, "Failed to save action details"));
+      setError(extractErrorState(err, "Failed to save action details"));
     } finally {
       setState("idle");
     }
@@ -418,6 +553,32 @@ export default function ActionDetailForm({
 
     setError(null);
     setWarning(null);
+
+    if (isClassroomObservation) {
+      setState("saving");
+
+      try {
+        const saveResult = await persistActionData(sanitizePatchData(action.action_type, formData));
+
+        if (!saveResult.ok) {
+          setError({
+            message: "Could not save observation. Fix errors and try End again.",
+            details: saveResult.error.details,
+          });
+          return;
+        }
+
+        setAction(saveResult.action);
+        setFormData(saveResult.action.data ?? {});
+      } catch {
+        setError({
+          message: "Could not save observation. Fix errors and try End again.",
+          details: [],
+        });
+        return;
+      }
+    }
+
     setState("acquiring");
 
     try {
@@ -435,9 +596,20 @@ export default function ActionDetailForm({
           end_accuracy: location.accuracy,
         }),
       });
-      const payload: unknown = await response.json();
+      const payload = await readJsonSafely(response);
       if (!response.ok) {
-        throw new Error(parseApiError(payload, "Failed to end action"));
+        const parsedError = parseApiError(payload, "Failed to end action");
+
+        if (isClassroomObservation && response.status === 422) {
+          setError({
+            message: "Please complete all required rubric scores before ending this observation.",
+            details: parsedError.details,
+          });
+          return;
+        }
+
+        setError(parsedError);
+        return;
       }
 
       if (
@@ -451,20 +623,26 @@ export default function ActionDetailForm({
 
       const endedAction = readActionFromPayload(payload);
       if (!endedAction) {
-        throw new Error("Failed to end action");
+        setError({ message: "Failed to end action", details: [] });
+        return;
       }
 
-      setAction(endedAction);
-      setFormData(endedAction.data ?? {});
+      const normalizedEndedAction = normalizeActionForState(endedAction);
+      setAction(normalizedEndedAction);
+      setFormData(normalizedEndedAction.data ?? {});
     } catch (err) {
       if (!isLocationCancelled(err)) {
-        setError(extractErrorMessage(err, "Failed to end action"));
+        setError(extractErrorState(err, "Failed to end action"));
       }
     } finally {
       cancelEndRef.current = null;
       setState("idle");
     }
   }
+
+  const unsupportedVersionMessage = hasUnsupportedRubricVersion && rubricVersion
+    ? `Unsupported classroom observation rubric version: ${rubricVersion}. This observation is read-only until migrated.`
+    : null;
 
   return (
     <div className="space-y-4">
@@ -488,16 +666,33 @@ export default function ActionDetailForm({
         </div>
       </div>
 
-      {warning && (
+      {unsupportedVersionMessage ? (
+        <p
+          className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2"
+          data-testid="classroom-unsupported-version-warning"
+        >
+          {unsupportedVersionMessage}
+        </p>
+      ) : warning && (
         <p className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2">
           {warning}
         </p>
       )}
 
       {error && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-          {error}
-        </p>
+        <div
+          className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"
+          data-testid="action-error"
+        >
+          <p>{error.message}</p>
+          {error.details.length > 0 && (
+            <ul className="mt-1 list-disc pl-5" data-testid="action-error-details">
+              {error.details.map((detail, index) => (
+                <li key={`${detail}-${index}`}>{detail}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {state === "acquiring" && (
@@ -515,7 +710,7 @@ export default function ActionDetailForm({
         </div>
       )}
 
-      {!canSave && !canEnd && (
+      {!unsupportedVersionMessage && !canSave && !canEnd && (
         <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
           {isVisitCompleted
             ? "This visit is completed and read-only."
@@ -534,35 +729,43 @@ export default function ActionDetailForm({
       >
         <h2 className="text-lg font-semibold text-gray-900">{config.title}</h2>
 
-        {config.fields.map((field) => (
-          <label key={field.key} className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-700">{field.label}</span>
-            {field.multiline ? (
-              <textarea
-                value={readStringValue(formData[field.key])}
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  setFormData((current) => ({ ...current, [field.key]: nextValue }));
-                }}
-                disabled={!canSave || isBusy}
-                placeholder={field.placeholder}
-                rows={4}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
-              />
-            ) : (
-              <input
-                value={readStringValue(formData[field.key])}
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  setFormData((current) => ({ ...current, [field.key]: nextValue }));
-                }}
-                disabled={!canSave || isBusy}
-                placeholder={field.placeholder}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
-              />
-            )}
-          </label>
-        ))}
+        {isClassroomObservation ? (
+          <ClassroomObservationForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
+          />
+        ) : (
+          config.fields.map((field) => (
+            <label key={field.key} className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-700">{field.label}</span>
+              {field.multiline ? (
+                <textarea
+                  value={readStringValue(formData[field.key])}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setFormData((current) => ({ ...current, [field.key]: nextValue }));
+                  }}
+                  disabled={!canSave || isBusy}
+                  placeholder={field.placeholder}
+                  rows={4}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
+                />
+              ) : (
+                <input
+                  value={readStringValue(formData[field.key])}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setFormData((current) => ({ ...current, [field.key]: nextValue }));
+                  }}
+                  disabled={!canSave || isBusy}
+                  placeholder={field.placeholder}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
+                />
+              )}
+            </label>
+          ))
+        )}
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
           {canSave && (

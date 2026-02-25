@@ -14,6 +14,10 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import {
+  CLASSROOM_OBSERVATION_RUBRIC,
+  CURRENT_RUBRIC_VERSION,
+} from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
@@ -67,7 +71,7 @@ const VISIT_ROW = {
 const PENDING_ACTION = {
   id: 101,
   visit_id: 10,
-  action_type: "classroom_observation",
+  action_type: "principal_meeting",
   status: "pending",
   data: {},
   started_at: null,
@@ -93,6 +97,20 @@ const COMPLETED_ACTION = {
   end_accuracy: "15.00",
   updated_at: "2026-02-19T10:25:00.000Z",
 };
+
+function buildValidClassroomData() {
+  const params = Object.fromEntries(
+    CLASSROOM_OBSERVATION_RUBRIC.parameters.map((parameter) => [
+      parameter.key,
+      { score: parameter.options[0]!.score },
+    ])
+  );
+
+  return {
+    rubric_version: CURRENT_RUBRIC_VERSION,
+    params,
+  };
+}
 
 function setupPmEdit() {
   mockSession.mockResolvedValue(PM_SESSION);
@@ -221,6 +239,125 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     const [queryText, queryParams] = mockQuery.mock.calls[1] as [string, unknown[]];
     expect(queryText).toContain("deleted_at IS NULL");
     expect(queryParams).toEqual(["10", "101"]);
+  });
+
+  it("returns 422 when classroom observation rubric data is incomplete", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "classroom_observation",
+        data: {
+          rubric_version: CURRENT_RUBRIC_VERSION,
+          params: {
+            teacher_on_time: { score: 1 },
+          },
+        },
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid classroom observation data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([
+        "Missing score for Teacher Grooming",
+        "Missing score for Gender Sensitivity Parameters",
+      ])
+    );
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 422 when classroom observation stored data is malformed JSON", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "classroom_observation",
+        data: null,
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid classroom observation data",
+      details: ["Classroom observation data must be an object"],
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 422 when classroom observation rubric version is unsupported", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "classroom_observation",
+        data: {
+          rubric_version: "99.0",
+          params: {},
+        },
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid classroom observation data",
+      details: ["Unsupported classroom observation rubric_version: 99.0"],
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends classroom observation when strict rubric data is valid", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "classroom_observation",
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          ...COMPLETED_ACTION,
+          action_type: "classroom_observation",
+          data: buildValidClassroomData(),
+        },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.status).toBe("completed");
+    expect(json.action.action_type).toBe("classroom_observation");
   });
 
   it("ends in-progress action, sets completed timestamps, and does not expose lat/lng", async () => {

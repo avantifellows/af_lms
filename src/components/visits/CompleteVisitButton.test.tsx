@@ -46,6 +46,55 @@ describe("CompleteVisitButton", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
+  it("renders /complete details as a list and supports retry after failure", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockImplementation(() => ({
+      promise: Promise.resolve({ lat: 28.6, lng: 77.2, accuracy: 40 }),
+      cancel: vi.fn(),
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () =>
+          Promise.resolve({
+            error: "At least one completed classroom observation is required to complete visit",
+            details: [
+              "Action 101: rubric_version is required",
+              "Action 101: Missing score for Teacher Grooming",
+            ],
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            visit: { id: 10, status: "completed", completed_at: "2026-02-19T12:00:00.000Z" },
+          }),
+      }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CompleteVisitButton visitId={10} />);
+
+    await user.click(screen.getByRole("button", { name: "Complete Visit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("At least one completed classroom observation is required to complete visit")
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("complete-visit-error-details")).toBeInTheDocument();
+    expect(screen.getByText("Action 101: rubric_version is required")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Complete Visit" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Complete Visit" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("renders geolocation error message when location promise rejects with a plain object", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn() as unknown as typeof fetch;

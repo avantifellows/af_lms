@@ -14,6 +14,10 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import {
+  CLASSROOM_OBSERVATION_RUBRIC,
+  CURRENT_RUBRIC_VERSION,
+} from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
@@ -82,6 +86,20 @@ const COMPLETED_VISIT_ROW = {
   completed_at: "2026-02-19T12:00:00.000Z",
 };
 
+function buildValidClassroomData() {
+  const params = Object.fromEntries(
+    CLASSROOM_OBSERVATION_RUBRIC.parameters.map((parameter) => [
+      parameter.key,
+      { score: parameter.options[0]!.score },
+    ])
+  );
+
+  return {
+    rubric_version: CURRENT_RUBRIC_VERSION,
+    params,
+  };
+}
+
 function completionRequest(accuracy = 10) {
   return new Request("http://localhost/api/pm/visits/10/complete", {
     method: "POST",
@@ -137,15 +155,60 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     setupPmEdit();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed classroom observation is required to complete visit",
+      details: ["No completed classroom observation action found for this visit"],
+    });
+  });
+
+  it("returns 422 when completed classroom observations are rubric-invalid", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
       .mockResolvedValueOnce([
         {
-          id: 10,
-          status: "in_progress",
-          completed_at: null,
-          updated_at: "2026-02-19T12:05:00.000Z",
-          applied: false,
-          has_completed_classroom_observation: false,
-          has_in_progress_actions: false,
+          id: 201,
+          data: {
+            rubric_version: CURRENT_RUBRIC_VERSION,
+            params: {
+              teacher_on_time: { score: 1 },
+            },
+          },
+        },
+      ]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("At least one completed classroom observation is required to complete visit");
+    expect(json.details).toEqual(
+      expect.arrayContaining([
+        "Action 201: Missing score for Teacher Grooming",
+        "Action 201: Missing score for Gender Sensitivity Parameters",
+      ])
+    );
+  });
+
+  it("returns 422 when completed classroom observation uses unsupported rubric version", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 301,
+          data: {
+            rubric_version: "99.0",
+            params: {},
+          },
         },
       ]);
 
@@ -154,24 +217,13 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
       error: "At least one completed classroom observation is required to complete visit",
+      details: ["Action 301: Unsupported classroom observation rubric_version: 99.0"],
     });
   });
 
   it("returns 422 when any action is in progress", async () => {
     setupPmEdit();
-    mockQuery
-      .mockResolvedValueOnce([VISIT_ROW])
-      .mockResolvedValueOnce([
-        {
-          id: 10,
-          status: "in_progress",
-          completed_at: null,
-          updated_at: "2026-02-19T12:05:00.000Z",
-          applied: false,
-          has_completed_classroom_observation: true,
-          has_in_progress_actions: true,
-        },
-      ]);
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([{ has_in_progress_actions: true }]);
 
     const res = await POST(completionRequest() as never, params);
 
@@ -198,15 +250,18 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     setupPmEdit();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
       .mockResolvedValueOnce([
         {
           id: 10,
           status: "completed",
           completed_at: "2026-02-19T12:15:00.000Z",
-          updated_at: "2026-02-19T12:15:00.000Z",
-          applied: true,
-          has_completed_classroom_observation: true,
-          has_in_progress_actions: false,
         },
       ]);
 
@@ -225,7 +280,7 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(json.visit.end_lng).toBeUndefined();
     expect(json.visit.end_accuracy).toBeUndefined();
 
-    const [completionQueryText, completionParams] = mockQuery.mock.calls[1] as [string, unknown[]];
+    const [completionQueryText, completionParams] = mockQuery.mock.calls[3] as [string, unknown[]];
     expect(completionQueryText).toContain("UPDATE lms_pm_school_visits v");
     expect(completionQueryText).toContain("status = 'completed'");
     expect(completionQueryText).toContain("completed_at = (NOW() AT TIME ZONE 'UTC')");
@@ -233,8 +288,6 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(completionQueryText).toContain("end_lng = $3");
     expect(completionQueryText).toContain("end_accuracy = $4");
     expect(completionQueryText).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
-    expect(completionQueryText).toContain("a.action_type = 'classroom_observation'");
-    expect(completionQueryText).toContain("a.status = 'completed'");
     expect(completionQueryText).toContain("a.status = 'in_progress'");
     expect(completionQueryText).toContain("a.deleted_at IS NULL");
     expect(completionQueryText).toContain("v.status = 'in_progress'");
@@ -264,15 +317,18 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
     mockQuery
       .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" }])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 202,
+          data: buildValidClassroomData(),
+        },
+      ])
       .mockResolvedValueOnce([
         {
           id: 10,
           status: "completed",
           completed_at: "2026-02-19T12:20:00.000Z",
-          updated_at: "2026-02-19T12:20:00.000Z",
-          applied: true,
-          has_completed_classroom_observation: true,
-          has_in_progress_actions: false,
         },
       ]);
 
