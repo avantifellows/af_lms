@@ -320,3 +320,20 @@ Session: 2c122857-1707-4f4e-95b6-5135b7a98299
   - VisitsTab is very small (55 lines) — only a loading spinner, error state, and a render of VisitHistorySection
   - Empty state text gets `uppercase tracking-wide` treatment matching other empty states in the Ledger UI
 ---
+
+## 2026-02-26 - US-014
+Session: caf5814d-2a84-4d29-85b3-a2268fd53067
+- Updated `src/components/SchoolTabs.test.tsx`: added `uppercase` and `font-bold` assertions for active tab styling (border-accent/text-accent assertions already updated in US-013)
+- Verified `border-transparent` assertion on inactive tabs still passes
+- Added 4 new tests to `src/lib/visit-actions.test.ts` for `statusBadgeClass()`:
+  - `completed` → `bg-success-bg text-accent-hover rounded-full text-xs font-medium`
+  - `in_progress` → `bg-warning-bg text-warning-text rounded-full`
+  - `pending` → `bg-bg-card-alt text-text-secondary rounded-full`
+  - `unknown_value` → `bg-bg-card-alt text-text-muted rounded-full` (default fallback)
+- Files changed: src/components/SchoolTabs.test.tsx, src/lib/visit-actions.test.ts
+- npm run build passes, npm run test passes (1104/1104 — 4 new tests added)
+- **Learnings for future iterations:**
+  - SchoolTabs.test.tsx border/text assertions were already updated to theme tokens in US-013 — US-014 only needed the `uppercase`/`font-bold` additions
+  - `statusBadgeClass()` tests verify the CSS class contract — if token names change, these tests will catch it
+  - The test count grew from 1100 to 1104 with the 4 new statusBadgeClass tests
+---
