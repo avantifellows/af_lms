@@ -13,9 +13,10 @@ interface Visit {
 
 interface Props {
   schoolCode: string;
+  canEdit?: boolean;
 }
 
-export default function VisitsTab({ schoolCode }: Props) {
+export default function VisitsTab({ schoolCode, canEdit = false }: Props) {
   const [visits, setVisits] = useState<Visit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,5 +52,5 @@ export default function VisitsTab({ schoolCode }: Props) {
     );
   }
 
-  return <VisitHistorySection visits={visits} schoolCode={schoolCode} />;
+  return <VisitHistorySection visits={visits} schoolCode={schoolCode} canEdit={canEdit} />;
 }

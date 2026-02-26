@@ -141,7 +141,7 @@ export default function ClassroomObservationForm({
                         };
                       });
                     }}
-                    className="mt-0.5 h-4 w-4 accent-accent"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
                   />
                   <span>
                     {option.label}
