@@ -337,3 +337,21 @@ Session: caf5814d-2a84-4d29-85b3-a2268fd53067
   - `statusBadgeClass()` tests verify the CSS class contract — if token names change, these tests will catch it
   - The test count grew from 1100 to 1104 with the 4 new statusBadgeClass tests
 ---
+
+## 2026-02-26 - US-015
+Session: 42ce4387-81c2-43ed-ae93-05732300aea3
+- Final review of all 17 modified files across the Ledger UI revamp (US-001 through US-014)
+- Verified class cleanup via grep:
+  - Zero `rounded-md`/`rounded-lg` on data elements (only `rounded-full` on badges)
+  - Zero `shadow` on cards (only `shadow-xl` on modal, intentional per style guide)
+  - Zero `bg-blue-600`/`bg-green-600`, zero `focus:ring-*`
+  - Zero hardcoded `gray-*`/`blue-*`/`green-*`/`red-*`/`yellow-*` in visit source files
+- Remaining `rounded-lg`/`shadow` in dashboard/page.tsx are in non-visit sections (correctly out of scope)
+- npm run build passes, npm run test passes (1104/1104)
+- Created `ralph/visit-ui-ledger-revamp-review.txt` with findings (48 lines)
+- Files changed: ralph/visit-ui-ledger-revamp-review.txt (new)
+- **Learnings for future iterations:**
+  - The Ledger UI revamp is complete across all 12 visit source files + 2 test files + 3 infra files
+  - Dashboard non-visit elements (header, stat cards, permission errors) were intentionally left unchanged
+  - All 14 story implementations + 1 review story = 15 total iterations for the feature
+---
