@@ -144,3 +144,29 @@ Session: bcd75233-206d-4c8e-a4a5-1d790ebd009e
   - The notFoundState helper is parameterized (title, description) and used twice with different messages — update both usages via the shared helper, not inline.
   - No test assertions broke because the page test file uses only semantic queries (getByText, getByRole) — no class name assertions exist.
 ---
+
+## 2026-02-26 - US-007
+Session: 0575c70d-cae9-45c7-9ca9-2da756c12383
+- Restyled `src/components/visits/ActionPointList.tsx` to Ledger UI design system
+- Outer container: `bg-bg-card border border-border` (replaced `bg-white shadow rounded-lg`)
+- Section header: `border-b-2 border-border-accent` (replaced `border-b border-gray-200`), title `uppercase tracking-wide font-bold text-text-primary`
+- Subtitle: `text-text-muted` (replaced `text-gray-500`)
+- Add Action Point button: `bg-accent` sharp uppercase bold (replaced `bg-blue-600 rounded-md`)
+- Warning alert: sharp, `bg-warning-bg border-warning-border text-warning-text`, added `role="alert"`
+- Error alert: sharp, `bg-danger-bg border-danger/20 text-danger`, added `role="alert"`
+- GPS acquiring alert: sharp, `bg-bg-card-alt border-border text-text-primary`, cancel button `text-accent`
+- Empty state: `text-text-muted uppercase tracking-wide`
+- Action cards: per-card `border-b border-border` (replaced `divide-y divide-gray-200`)
+- Action type name: `text-text-primary`. Timestamps: `font-mono text-text-muted`
+- Start button: `bg-accent` sharp uppercase bold (replaced `bg-yellow-500 rounded-md`)
+- Delete button: sharp `border-danger/20 bg-danger-bg text-danger` (replaced `rounded-md border-red-200 bg-red-50`)
+- Open link: sharp accent `bg-success-bg border-border-accent text-accent` uppercase bold
+- View Details link: sharp secondary `border-border bg-bg-card text-text-secondary`
+- Removed ALL `rounded-md`, `shadow`, hardcoded `gray-*`/`blue-*`/`yellow-*`/`red-*` classes
+- Files changed: src/components/visits/ActionPointList.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - ActionPointList tests use only semantic queries — no class name assertions, so CSS-only changes never break tests
+  - Warning/error alerts should get `role="alert"` for accessibility even though not explicitly in test assertions
+  - The `divide-y divide-gray-200` → per-card `border-b border-border` pattern is consistent with how visits list page and dashboard tables were done
+---

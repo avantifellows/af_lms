@@ -134,7 +134,7 @@
         "Verify in browser using agent-browser: navigate to a visit with actions, check action card styling, button styles, status badges"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
