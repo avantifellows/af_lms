@@ -349,39 +349,39 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {hasPMAccess && recentVisits.length > 0 && (
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Recent Visits</h2>
+              <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Recent Visits</h2>
               <Link
                 href="/visits"
-                className="text-sm text-blue-600 hover:text-blue-800"
+                className="text-sm text-accent hover:text-accent-hover font-bold uppercase"
               >
                 View all
               </Link>
             </div>
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+            <div className="bg-bg-card border border-border overflow-hidden">
+              <table className="min-w-full">
+                <thead className="bg-bg-card-alt border-b-2 border-border-accent">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
                       School
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
                       Date
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-right text-xs font-bold text-text-muted uppercase tracking-wider">
                       Action
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-bg-card">
                   {recentVisits.map((visit) => (
-                    <tr key={visit.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <tr key={visit.id} className="border-b border-border/40 hover:bg-hover-bg">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text-primary">
                         {visit.school_name || visit.school_code}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-text-secondary">
                         {new Date(visit.visit_date).toLocaleDateString("en-IN", {
                           year: "numeric",
                           month: "short",
@@ -399,7 +399,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                         <Link
                           href={`/visits/${visit.id}`}
-                          className="text-blue-600 hover:text-blue-800"
+                          className="text-accent hover:text-accent-hover font-bold"
                         >
                           {visit.status === "completed" ? "View" : "Continue"}
                         </Link>
@@ -432,7 +432,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   hasPMAccess ? (
                     <Link
                       href={`/school/${school.code}/visit/new`}
-                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-bold text-text-on-accent bg-accent hover:bg-accent-hover uppercase"
                     >
                       Start Visit
                     </Link>
