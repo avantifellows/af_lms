@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { statusBadgeClass } from "@/lib/visit-actions";
 
 interface Tab {
   id: string;
@@ -97,11 +98,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
                   })}
                 </span>
                 <span
-                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                    visit.status === "completed"
-                      ? "bg-green-100 text-green-800"
-                      : "bg-yellow-100 text-yellow-800"
-                  }`}
+                  className={`inline-flex ${statusBadgeClass(visit.status)}`}
                 >
                   {visit.status === "completed"
                     ? "Completed"

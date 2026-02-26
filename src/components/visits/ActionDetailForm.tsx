@@ -8,7 +8,7 @@ import {
   getRubricConfig,
 } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
-import { getActionTypeLabel, isActionType, type ActionType } from "@/lib/visit-actions";
+import { getActionTypeLabel, isActionType, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
 
 interface ActionRecord {
   id: number;
@@ -377,16 +377,6 @@ function toActionStatusLabel(status: string): string {
     .join(" ");
 }
 
-function actionStatusClass(status: string): string {
-  if (status === "completed") {
-    return "bg-green-100 text-green-800";
-  }
-  if (status === "in_progress") {
-    return "bg-yellow-100 text-yellow-800";
-  }
-  return "bg-gray-100 text-gray-700";
-}
-
 function formatTimestamp(value: string | null): string {
   if (!value) {
     return "-";
@@ -655,7 +645,7 @@ export default function ActionDetailForm({
             <p className="mt-1 text-sm text-gray-500">{config.description}</p>
           </div>
           <span
-            className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${actionStatusClass(action.status)}`}
+            className={`inline-flex px-3 py-1 text-sm font-semibold ${statusBadgeClass(action.status)}`}
           >
             {toActionStatusLabel(action.status)}
           </span>

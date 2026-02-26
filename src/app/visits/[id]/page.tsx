@@ -7,6 +7,7 @@ import Link from "next/link";
 import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
 import ActionPointList from "@/components/visits/ActionPointList";
 import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
+import { statusBadgeClass } from "@/lib/visit-actions";
 
 interface Visit {
   id: number;
@@ -63,13 +64,6 @@ async function getVisitDetail(id: string): Promise<VisitDetail> {
   );
 
   return { visit: visits[0], actions };
-}
-
-function visitStatusClass(status: string): string {
-  if (status === "completed") {
-    return "bg-green-100 text-green-800";
-  }
-  return "bg-yellow-100 text-yellow-800";
 }
 
 function formatVisitStatus(status: string): string {
@@ -194,7 +188,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
             </div>
           </div>
           <span
-            className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${visitStatusClass(visit.status)}`}
+            className={`inline-flex px-3 py-1 text-sm font-semibold ${statusBadgeClass(visit.status)}`}
           >
             {formatVisitStatus(visit.status)}
           </span>

@@ -13,6 +13,7 @@ import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
 import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
 import Pagination from "@/components/Pagination";
+import { statusBadgeClass } from "@/lib/visit-actions";
 
 
 const SCHOOLS_PER_PAGE = 20;
@@ -390,11 +391,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            visit.status === "completed"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-yellow-100 text-yellow-800"
-                          }`}
+                          className={`inline-flex ${statusBadgeClass(visit.status)}`}
                         >
                           {visit.status === "completed" ? "Completed" : "In Progress"}
                         </span>

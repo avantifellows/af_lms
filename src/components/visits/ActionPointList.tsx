@@ -8,6 +8,7 @@ import {
   ACTION_STATUS_VALUES,
   getActionTypeLabel,
   isActionType,
+  statusBadgeClass,
   type ActionStatus,
 } from "@/lib/visit-actions";
 import ActionTypePickerModal from "./ActionTypePickerModal";
@@ -103,16 +104,6 @@ function formatActionStatus(status: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function actionStatusClass(status: string): string {
-  if (status === "completed") {
-    return "bg-green-100 text-green-800";
-  }
-  if (status === "in_progress") {
-    return "bg-yellow-100 text-yellow-800";
-  }
-  return "bg-gray-100 text-gray-700";
 }
 
 function formatTimestamp(value: string | null): string {
@@ -341,7 +332,7 @@ export default function ActionPointList({
                   </div>
                 </div>
                 <span
-                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${actionStatusClass(action.status)}`}
+                  className={`inline-flex ${statusBadgeClass(action.status)}`}
                 >
                   {formatActionStatus(action.status)}
                 </span>

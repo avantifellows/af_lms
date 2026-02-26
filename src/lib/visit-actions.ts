@@ -23,3 +23,17 @@ export function isActionType(value: string): value is ActionType {
 export function getActionTypeLabel(actionType: ActionType): string {
   return ACTION_TYPES[actionType];
 }
+
+export function statusBadgeClass(status: string): string {
+  const base = "rounded-full px-2.5 py-0.5 text-xs font-medium";
+  if (status === "completed") {
+    return `${base} bg-success-bg text-accent-hover`;
+  }
+  if (status === "in_progress") {
+    return `${base} bg-warning-bg text-warning-text`;
+  }
+  if (status === "pending") {
+    return `${base} bg-bg-card-alt text-text-secondary`;
+  }
+  return `${base} bg-bg-card-alt text-text-muted`;
+}
