@@ -81,7 +81,7 @@ export async function GET(
     `SELECT id, visit_id, action_type, status, data,
             started_at, ended_at, start_accuracy, end_accuracy,
             inserted_at, updated_at
-     FROM lms_pm_visit_actions
+     FROM lms_pm_school_visit_actions
      WHERE visit_id = $1
        AND deleted_at IS NULL
      ORDER BY inserted_at ASC, id ASC`,
@@ -140,7 +140,7 @@ export async function POST(
   }
 
   const created = await query<VisitActionRow>(
-    `INSERT INTO lms_pm_visit_actions
+    `INSERT INTO lms_pm_school_visit_actions
        (visit_id, action_type, status, data)
      VALUES ($1, $2, 'pending', '{}'::jsonb)
      RETURNING id, visit_id, action_type, status, data,

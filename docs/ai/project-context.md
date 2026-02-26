@@ -206,7 +206,7 @@ Admin sections:
 
 #### DB schema
 - `lms_pm_school_visits`: visit-level data with `start_lat/lng/accuracy`, `completed_at`, `end_lat/lng/accuracy`, `status` (`in_progress`/`completed`)
-- `lms_pm_visit_actions`: per-action rows with `action_type`, `status`, `started_at`, `start_lat/lng/accuracy`, `ended_at`, `end_lat/lng/accuracy`, `data` (JSONB form payload), `deleted_at` (soft delete)
+- `lms_pm_school_visit_actions`: per-action rows with `action_type`, `status`, `started_at`, `start_lat/lng/accuracy`, `ended_at`, `end_lat/lng/accuracy`, `data` (JSONB form payload), `deleted_at` (soft delete)
 - **Dropped columns** (hard cutover): `lms_pm_school_visits.data` (JSONB blob) and `lms_pm_school_visits.ended_at`
 - DB migration lives in db-service repo: `priv/repo/migrations/20260217120000_add_visit_actions_and_update_school_visits.exs`
 
@@ -216,7 +216,7 @@ Planning docs: `docs/ai/school-visit-action-points/`
 - Implementation phases 1-5 are complete for the rubric rollout documented in `docs/ai/classroom-observation/2026-02-21-classroom-observation-implementation-and-testing-plan.md`
 - Manual frontend QA runbook is complete with `10/10` test cases passing (`docs/ai/classroom-observation/phase-5-manual-frontend-test-cases.md`)
 - Agent-browser exploratory testing was also run for role/session/geolocation flows (`docs/ai/agent-browser-testing.md`)
-- In-repo consumer impact audit is complete for classroom observation payload usage; BigQuery quiz analytics and curriculum flows do not consume `lms_pm_visit_actions.data`
+- In-repo consumer impact audit is complete for classroom observation payload usage; BigQuery quiz analytics and curriculum flows do not consume `lms_pm_school_visit_actions.data`
 
 ### 3.6 Curriculum tracking (POC)
 

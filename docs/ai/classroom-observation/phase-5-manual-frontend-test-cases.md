@@ -92,7 +92,7 @@ Findings:
 ## Test 8: Unsupported rubric version — PASS 2026-02-25
 1. Open a classroom action with explicit unsupported `rubric_version` (example: `2.0`).
 Expected: unsupported/read-only UI state; save/end blocked; safe messaging shown.
-Setup: SQL `UPDATE lms_pm_visit_actions SET data = jsonb_set(data, '{rubric_version}', '"2.0"') WHERE id = 5` on action 5 (completed CO, visit 6). Restored to `"1.0"` after test.
+Setup: SQL `UPDATE lms_pm_school_visit_actions SET data = jsonb_set(data, '{rubric_version}', '"2.0"') WHERE id = 5` on action 5 (completed CO, visit 6). Restored to `"1.0"` after test.
 Findings:
 - Yellow warning banner: "Unsupported classroom observation rubric version: 2.0. This observation is read-only until migrated."
 - All 19 rubric radio buttons and remarks links rendered as `[disabled]`.

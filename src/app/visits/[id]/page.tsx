@@ -55,7 +55,7 @@ async function getVisitDetail(id: string): Promise<VisitDetail> {
   const actions = await query<VisitAction>(
     `SELECT id, visit_id, action_type, status,
             started_at, ended_at, inserted_at, updated_at
-     FROM lms_pm_visit_actions
+     FROM lms_pm_school_visit_actions
      WHERE visit_id = $1
        AND deleted_at IS NULL
      ORDER BY inserted_at ASC, id ASC`,

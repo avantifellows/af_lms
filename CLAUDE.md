@@ -94,7 +94,7 @@ Core tables:
 
 Visit tables:
 - `lms_pm_school_visits`: id, school_code, pm_email, visit_date, status (`in_progress`/`completed`), start GPS fields, end GPS fields, completed_at, inserted_at, updated_at
-- `lms_pm_visit_actions`: id, visit_id (FK), action_type, status (`pending`/`in_progress`/`completed`), start/end GPS + timestamps, data (JSONB form payload), deleted_at (soft delete), inserted_at, updated_at
+- `lms_pm_school_visit_actions`: id, visit_id (FK), action_type, status (`pending`/`in_progress`/`completed`), start/end GPS + timestamps, data (JSONB form payload), deleted_at (soft delete), inserted_at, updated_at
 
 ### PM Visits: Classroom Observation Rubric (v1)
 - Payload contract is rubric-only: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`

@@ -112,7 +112,7 @@ export async function POST(
   const actionState = await query<InProgressActionStateRow>(
     `SELECT EXISTS (
        SELECT 1
-       FROM lms_pm_visit_actions a
+       FROM lms_pm_school_visit_actions a
        WHERE a.visit_id = $1
          AND a.deleted_at IS NULL
          AND a.status = 'in_progress'
@@ -126,7 +126,7 @@ export async function POST(
 
   const completedClassroomActions = await query<CompletedClassroomActionRow>(
     `SELECT a.id, a.data
-     FROM lms_pm_visit_actions a
+     FROM lms_pm_school_visit_actions a
      WHERE a.visit_id = $1
        AND a.deleted_at IS NULL
        AND a.action_type = 'classroom_observation'
@@ -178,7 +178,7 @@ export async function POST(
        AND v.status = 'in_progress'
        AND NOT EXISTS (
          SELECT 1
-         FROM lms_pm_visit_actions a
+         FROM lms_pm_school_visit_actions a
          WHERE a.visit_id = $1
            AND a.deleted_at IS NULL
            AND a.status = 'in_progress'
@@ -217,7 +217,7 @@ export async function POST(
   const latestActionState = await query<InProgressActionStateRow>(
     `SELECT EXISTS (
        SELECT 1
-       FROM lms_pm_visit_actions a
+       FROM lms_pm_school_visit_actions a
        WHERE a.visit_id = $1
          AND a.deleted_at IS NULL
          AND a.status = 'in_progress'
