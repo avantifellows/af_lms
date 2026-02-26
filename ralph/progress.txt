@@ -25,6 +25,7 @@ Started: Sun Feb 15 23:07:30 IST 2026
 
 - **Tailwind v4 @theme inline**: Register CSS custom properties in `@theme inline { }` block to generate utility classes (e.g., `--color-accent: var(--color-accent)` → enables `bg-accent`, `text-accent`, `border-accent`). Without registration, must use verbose `bg-[var(--color-accent)]` syntax.
 - **Focus ring suppression**: Global CSS handles `outline: none` and `--tw-ring-shadow` reset for all interactive elements. Still need to remove `focus:ring-*` classes from JSX to avoid generating unused CSS.
+- **Status badges**: Use `statusBadgeClass(status)` from `@/lib/visit-actions` — includes `rounded-full px-2.5 py-0.5 text-xs font-medium` + theme colors. Callers just need `inline-flex ${statusBadgeClass(status)}`.
 
 ---
 
@@ -40,4 +41,21 @@ Session: fa216564-1fc8-4ecf-a907-c2529187b695
   - Tailwind v4 requires tokens registered in `@theme inline` to generate utility classes — without this, only `bg-[var(--color-X)]` works
   - Dark mode query was deleted; this is intentional for an internal light-mode-only tool
   - theme.ts is scoped to inline styles only — never use for color refs in JSX className
+---
+
+## 2026-02-26 - US-002
+Session: f73cd00e-94f0-47a5-83d7-84a5ee8b1b60
+- Created shared `statusBadgeClass(status)` in `src/lib/visit-actions.ts` with 4 branches: completed, in_progress, pending, unknown fallback
+- Returns base classes `rounded-full px-2.5 py-0.5 text-xs font-medium` + status-specific bg/text using Ledger theme tokens
+- Removed `visitStatusClass()` from `src/app/visits/[id]/page.tsx` — replaced with shared import
+- Removed `actionStatusClass()` from `src/components/visits/ActionPointList.tsx` — replaced with shared import
+- Removed `actionStatusClass()` from `src/components/visits/ActionDetailForm.tsx` — replaced with shared import
+- Replaced inline status ternary in `src/app/dashboard/page.tsx` with `statusBadgeClass()` import
+- Replaced inline status ternary in `src/components/SchoolTabs.tsx` with `statusBadgeClass()` import
+- Files changed: src/lib/visit-actions.ts, src/app/visits/[id]/page.tsx, src/components/visits/ActionPointList.tsx, src/components/visits/ActionDetailForm.tsx, src/app/dashboard/page.tsx, src/components/SchoolTabs.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - `statusBadgeClass()` includes `rounded-full` in its base — callers should NOT also add `rounded-full`
+  - Badge callers that previously had `px-2 py-1 text-xs font-semibold rounded-full` now use `inline-flex ${statusBadgeClass(status)}` — the shared helper owns the badge sizing/rounding
+  - All 5 duplicated status badge class helpers are now consolidated into one location
 ---
