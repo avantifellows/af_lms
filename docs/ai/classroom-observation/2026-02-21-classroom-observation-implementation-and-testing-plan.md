@@ -520,8 +520,8 @@ Consumer inventory (2026-02-23):
 - [x] `not needed` — BigQuery quiz analytics queries (`src/lib/bigquery.ts`) and `/api/quiz-analytics` routes (`src/app/api/quiz-analytics/[udise]/route.ts`, `src/app/api/quiz-analytics/[udise]/sessions/route.ts`) do not read visit action JSONB.
 - [x] `not needed` — Curriculum tracking summaries (`src/lib/curriculum-helpers.ts`, `src/components/curriculum/ProgressSummary.tsx`) are localStorage/chapter based and do not read classroom observation JSONB.
 - [x] `not needed` — PM visit list/dashboard surfaces (`src/app/visits/page.tsx`, `src/app/dashboard/page.tsx`, `src/app/api/pm/visits/route.ts`) read visit-level fields only, not classroom observation payload internals.
-- [x] `not needed` — In-repo PM visit exports/reports: no CSV/XLS/export endpoint that consumes `lms_pm_visit_actions.data` was found in this repo.
-- [ ] `needs follow-up` — Downstream external dashboards/exports (outside this repo) that may directly query `lms_pm_visit_actions.data` need owner confirmation before release gate sign-off.
+- [x] `not needed` — In-repo PM visit exports/reports: no CSV/XLS/export endpoint that consumes `lms_pm_school_visit_actions.data` was found in this repo.
+- [ ] `needs follow-up` — Downstream external dashboards/exports (outside this repo) that may directly query `lms_pm_school_visit_actions.data` need owner confirmation before release gate sign-off.
 
 Update docs to reflect:
 

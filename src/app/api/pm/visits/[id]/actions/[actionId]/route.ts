@@ -59,7 +59,7 @@ async function loadAction(visitId: string, actionId: string): Promise<VisitActio
     `SELECT id, visit_id, action_type, status, data,
             started_at, ended_at, start_accuracy, end_accuracy,
             inserted_at, updated_at
-     FROM lms_pm_visit_actions
+     FROM lms_pm_school_visit_actions
      WHERE visit_id = $1
        AND id = $2
        AND deleted_at IS NULL`,
@@ -184,7 +184,7 @@ export async function PATCH(
   }
 
   const updated = await query<VisitActionRow>(
-    `UPDATE lms_pm_visit_actions
+    `UPDATE lms_pm_school_visit_actions
      SET data = $3::jsonb,
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE visit_id = $1
@@ -247,7 +247,7 @@ export async function DELETE(
   }
 
   const deleted = await query<{ id: number }>(
-    `UPDATE lms_pm_visit_actions
+    `UPDATE lms_pm_school_visit_actions
      SET deleted_at = (NOW() AT TIME ZONE 'UTC'),
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE visit_id = $1

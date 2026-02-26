@@ -9,7 +9,7 @@
 
 ## 0) Scope (Hard Cutover / MVP)
 
-**Goal:** replace section-based visit JSON (`lms_pm_school_visits.data`) with **per-action tracking** in `lms_pm_visit_actions`, including:
+**Goal:** replace section-based visit JSON (`lms_pm_school_visits.data`) with **per-action tracking** in `lms_pm_school_visit_actions`, including:
 
 - Action lifecycle: `pending → in_progress → completed`
 - Action-level GPS + timestamps on start/end
@@ -32,8 +32,8 @@
 
 ### 0.1 Create actions table
 
-- [x] Add `lms_pm_visit_actions` table (DDL below; omit DB-level action type enum enforcement)
-- [x] Add index on `lms_pm_visit_actions(visit_id)`
+- [x] Add `lms_pm_school_visit_actions` table (DDL below; omit DB-level action type enum enforcement)
+- [x] Add index on `lms_pm_school_visit_actions(visit_id)`
 - [x] Ensure defaults/timestamps use UTC: `NOW() AT TIME ZONE 'UTC'`
   - [x] **Decision:** do **not** enforce action types in DB via `CHECK (action_type IN (...))`. Treat `action_type` as free-form `VARCHAR(50)` and validate against `ACTION_TYPES` in app code (single source of truth).
 - [x] Implemented in db-service migration: `priv/repo/migrations/20260217120000_add_visit_actions_and_update_school_visits.exs`
@@ -41,7 +41,7 @@
 DDL (reference):
 
 ```sql
-CREATE TABLE lms_pm_visit_actions (
+CREATE TABLE lms_pm_school_visit_actions (
   id SERIAL PRIMARY KEY,
   visit_id INTEGER NOT NULL REFERENCES lms_pm_school_visits(id) ON DELETE CASCADE,
 
@@ -66,15 +66,15 @@ CREATE TABLE lms_pm_visit_actions (
   -- Status
   status VARCHAR(20) DEFAULT 'pending'
     CHECK (status IN ('pending', 'in_progress', 'completed')),
-  CONSTRAINT lms_pm_visit_actions_deleted_pending_check
+  CONSTRAINT lms_pm_school_visit_actions_deleted_pending_check
     CHECK (deleted_at IS NULL OR status = 'pending'),
-  CONSTRAINT lms_pm_visit_actions_status_timestamps_check
+  CONSTRAINT lms_pm_school_visit_actions_status_timestamps_check
     CHECK (
       (status = 'pending'     AND started_at IS NULL AND ended_at IS NULL) OR
       (status = 'in_progress' AND started_at IS NOT NULL AND ended_at IS NULL) OR
       (status = 'completed'   AND started_at IS NOT NULL AND ended_at IS NOT NULL)
     ),
-  CONSTRAINT lms_pm_visit_actions_time_order_check
+  CONSTRAINT lms_pm_school_visit_actions_time_order_check
     CHECK (ended_at IS NULL OR ended_at >= started_at),
 
   -- Action-specific form data
@@ -85,7 +85,7 @@ CREATE TABLE lms_pm_visit_actions (
   updated_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
 );
 
-CREATE INDEX idx_visit_actions_visit_id ON lms_pm_visit_actions(visit_id);
+CREATE INDEX idx_visit_actions_visit_id ON lms_pm_school_visit_actions(visit_id);
 ```
 
 ### 0.2 Visit table schema changes
@@ -99,7 +99,7 @@ CREATE INDEX idx_visit_actions_visit_id ON lms_pm_visit_actions(visit_id);
 ### 0.3 Verification checklist (local)
 
 - [x] Migration runs cleanly on local dev (db-service)
-- [x] `lms_pm_visit_actions` exists with constraints + `visit_id` index
+- [x] `lms_pm_school_visit_actions` exists with constraints + `visit_id` index
 - [x] `lms_pm_school_visits` has `completed_at`
 - [x] `lms_pm_school_visits` no longer has `data`, `ended_at`
 - [x] No GPS lat/lng fields are accidentally logged by DB triggers (should be none)
@@ -246,7 +246,7 @@ Implementation notes (2026-02-18):
 - Updated `src/app/api/pm/visits/[id]/route.ts` `GET` handler to:
   - return visit metadata plus action list in one payload (`{ visit, actions }`)
   - enforce scoped non-owner reads via `school.region`-backed `canAccessSchoolSync` policy path
-  - fetch action rows from `lms_pm_visit_actions` with `deleted_at IS NULL` and stable ordering (`inserted_at ASC, id ASC`)
+  - fetch action rows from `lms_pm_school_visit_actions` with `deleted_at IS NULL` and stable ordering (`inserted_at ASC, id ASC`)
   - avoid selecting raw GPS coordinates in both visit and action queries
 - Extended `src/app/api/pm/visits/[id]/route.test.ts` GET coverage for:
   - payload shape (`{ visit, actions }`)
@@ -257,7 +257,7 @@ Validation run (2026-02-18):
 - `npm run test:unit -- 'src/app/api/pm/visits/[id]/route.test.ts'`
 - `npm run lint -- 'src/app/api/pm/visits/[id]/route.ts' 'src/app/api/pm/visits/[id]/route.test.ts'`
 - `npm run test:e2e -- e2e/tests/visits.spec.ts`
-- E2E infra update: `e2e/helpers/db.ts` now runs versioned SQL migrations from `e2e/fixtures/migrations/*.sql` (tracked via `e2e_schema_migrations`) after loading `db-dump.sql`; current migration adds visit-schema compatibility (`completed_at` + `lms_pm_visit_actions` + index) so local E2E resets run against required schema without API workarounds.
+- E2E infra update: `e2e/helpers/db.ts` now runs versioned SQL migrations from `e2e/fixtures/migrations/*.sql` (tracked via `e2e_schema_migrations`) after loading `db-dump.sql`; current migration adds visit-schema compatibility (`completed_at` + `lms_pm_school_visit_actions` + index) so local E2E resets run against required schema without API workarounds.
 
 ### 1.5 Remove old section update routes
 
@@ -282,7 +282,7 @@ Implementation notes (2026-02-18):
   - deleted `src/app/api/pm/visits/[id]/end/route.test.ts`
   - rewrote `src/app/api/pm/visits/[id]/route.test.ts` to GET coverage only
 - Removed stale UI paths tied to section JSON updates:
-  - `src/app/visits/[id]/page.tsx` now renders action-point timeline from `lms_pm_visit_actions` (no `visit.data`)
+  - `src/app/visits/[id]/page.tsx` now renders action-point timeline from `lms_pm_school_visit_actions` (no `visit.data`)
   - `src/app/visits/[id]/principal/page.tsx` now redirects back to `/visits/[id]`
   - removed legacy `EndVisitButton` component/test that still targeted `/end`
 - Eliminated remaining `visit.data` runtime dependency by removing dashboard open-issues JSONB query (`src/app/dashboard/page.tsx`) and aligning dashboard tests.
