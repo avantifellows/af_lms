@@ -56,7 +56,7 @@
         "Verify in browser using agent-browser: navigate to /visits, check header border, table styling, filter form, hover states, font-mono on dates"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
