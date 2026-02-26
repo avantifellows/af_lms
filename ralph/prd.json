@@ -1,0 +1,292 @@
+{
+  "project": "af_lms",
+  "branchName": "ralph/visit-ui-ledger-revamp",
+  "description": "Visit UI Ledger Revamp — Restyle all school visit pages and components to follow the Ledger UI design system (emerald green corporate brutalist: sharp corners, thick accent borders, uppercase headers, monospace numbers, minimal shadows). IMPORTANT: Before starting any story, read these context files: (1) docs/UI-Style-Guide.md — the complete design system spec with color tokens, typography, and component patterns, (2) docs/ai/visit-ui-revamp/brainstorming.md — the 15-step implementation plan with exact class changes per file, (3) docs/ai/project-context.md — project architecture and conventions.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add Ledger UI CSS variables and Tailwind tokens to globals.css",
+      "description": "As a developer, I need Ledger UI design tokens registered as CSS custom properties and Tailwind v4 utility classes so all subsequent restyling uses consistent tokens instead of hardcoded colors.",
+      "acceptanceCriteria": [
+        "Add 19 CSS custom properties to :root in src/app/globals.css — exact values in docs/ai/visit-ui-revamp/brainstorming.md Step 1 (accent #059669, bg #F0F7F4, text-primary #2A2A2A, border #D1E7DD, danger #ef4444, etc.)",
+        "Delete the dark mode media query block (lines 18-23 in globals.css: @media (prefers-color-scheme: dark) { ... })",
+        "Register all 19 tokens in the existing @theme inline block so Tailwind v4 generates utility classes (e.g., bg-accent, text-text-primary, border-border, bg-danger-bg, etc.)",
+        "Add global focus ring suppression CSS for input, select, textarea, button, a — both :focus and :focus-visible selectors with outline: none and --tw-ring-shadow: 0 0 #000 !important",
+        "Create src/lib/theme.ts — export a theme const object mirroring CSS variables, ~20 lines. This is ONLY for dynamic inline styles where CSS vars cannot work (e.g., style={{ width: `${percent}%` }}). Do NOT use theme.ts for color references in JSX.",
+        "npm run build passes without errors",
+        "npm run test passes (no tests should break — this adds new tokens, does not change existing code)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create shared statusBadgeClass helper and deduplicate status helpers",
+      "description": "As a developer, I need a single statusBadgeClass() function replacing the 5 duplicated visit/action status class helpers so status badge colors are defined once.",
+      "acceptanceCriteria": [
+        "Add statusBadgeClass(status: string) to src/lib/visit-actions.ts that returns Tailwind classes for status badges: completed (bg-success-bg text-accent-hover), in_progress (bg-warning-bg text-warning-text), pending (bg-bg-card-alt text-text-secondary), unknown fallback (bg-bg-card-alt text-text-muted). All badges include rounded-full px-2.5 py-0.5 text-xs font-medium.",
+        "Remove visitStatusClass() from src/app/visits/[id]/page.tsx — replace with import of statusBadgeClass from @/lib/visit-actions",
+        "Remove actionStatusClass() from src/components/visits/ActionPointList.tsx — replace with import of statusBadgeClass",
+        "Remove actionStatusClass() from src/components/visits/ActionDetailForm.tsx — replace with import of statusBadgeClass",
+        "Replace inline status badge logic in src/app/dashboard/page.tsx (lines ~393-397, bg-green-100/bg-yellow-100 ternary) with statusBadgeClass() import",
+        "Replace inline status badge logic in src/components/SchoolTabs.tsx (lines ~100-104) with statusBadgeClass() import",
+        "npm run build passes",
+        "npm run test passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Restyle visits list page to Ledger UI",
+      "description": "As a PM viewing my visit list, I want the page to follow Ledger UI with emerald accent borders, sharp corners, uppercase headers, and monospace numbers.",
+      "acceptanceCriteria": [
+        "File: src/app/visits/page.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 3 for full spec.",
+        "Page layout: replace max-w-7xl mx-auto with full-bleed min-h-screen bg-bg + progressive padding wrapper (px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8)",
+        "Page header: add 4px emerald bottom border (border-b-4 border-border-accent), title uppercase tracking-tight font-bold text-text-primary",
+        "Section headers (In Progress / Completed): uppercase tracking-wide font-bold, 2px accent bottom border, text-text-primary",
+        "Filter form: sharp corners (remove rounded-lg), bg-bg-card border-border, no shadow. Labels: text-xs font-bold uppercase tracking-wide text-text-muted. Inputs: sharp (remove rounded-md), border-2 border-border, accent focus. Apply button: bg-accent sharp uppercase.",
+        "Tables: sharp corners (remove rounded-lg), bg-bg-card border-border, no shadow. Headers: bg-bg-card-alt + 2px accent bottom border, font-bold text-text-muted uppercase. Body rows: per-row border-b border-border/40 (replace divide-y divide-gray-200). Row hover: hover:bg-hover-bg.",
+        "Date cells and count badges: add font-mono. Continue button: bg-accent sharp uppercase bold. View link: text-accent font-bold uppercase. Empty state: centered uppercase muted text.",
+        "Remove ALL rounded-md, rounded-lg, shadow classes from data elements (keep rounded-full on status badges only). Remove ALL hardcoded gray-*/blue-* color classes — use theme tokens.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: navigate to /visits, check header border, table styling, filter form, hover states, font-mono on dates"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Restyle dashboard visit elements to Ledger UI",
+      "description": "As a PM on the dashboard, I want the Recent Visits table and Start Visit buttons to match the visits list page so the experience is consistent.",
+      "acceptanceCriteria": [
+        "File: src/app/dashboard/page.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 3.5 for full spec.",
+        "SCOPE: Only restyle visit-related elements. Do NOT change school card grid, pagination, search bar, or other non-visit elements.",
+        "Recent Visits section header: uppercase tracking-wide font-bold text-text-primary. View all link: text-accent hover:text-accent-hover font-bold uppercase text-sm.",
+        "Recent Visits table wrapper: sharp corners, no shadow, border border-border. Table headers: bg-bg-card-alt + 2px accent bottom border, font-bold text-text-muted.",
+        "Visit date cells: font-mono text-text-secondary. Status badges: already using shared statusBadgeClass() from US-002. View/Continue links: text-accent font-bold.",
+        "Start Visit button on school cards: bg-accent sharp uppercase (replace bg-green-600 rounded-md).",
+        "Add row hover to Recent Visits table: hover:bg-hover-bg on tr elements (currently has NO hover effect).",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: navigate to /dashboard, check Recent Visits table matches /visits styling, check Start Visit button on school cards"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Restyle visit detail page to Ledger UI",
+      "description": "As a PM viewing a specific visit, I want the detail page to follow Ledger UI with sharp card, emerald progress bar, and accessible error states.",
+      "acceptanceCriteria": [
+        "File: src/app/visits/[id]/page.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 4 for full spec.",
+        "Page layout: replace max-w-4xl mx-auto with full-bleed + progressive padding. Back link: text-accent font-semibold with hover to text-accent-hover.",
+        "Visit info card: sharp corners, no shadow, border border-border. Title: uppercase tracking-tight font-bold text-text-primary. Visit date: text-text-secondary. Timestamps: text-text-muted, time values get font-mono.",
+        "Status badge: uses shared statusBadgeClass(). Keeps rounded-full.",
+        "Progress bar track: bg-border sharp (remove rounded-full on track). Fill: bg-accent sharp. Add role=progressbar, aria-valuenow, aria-valuemin={0}, aria-valuemax={100}. Progress numbers: font-mono.",
+        "Read-only notice: sharp corners, theme colors (replace rounded-md bg-gray-50 border-gray-200).",
+        "Not-found error state: sharp corners, theme danger colors, role=alert added. Forbidden state: sharp corners, theme warning colors, role=alert added.",
+        "Old visitStatusClass() helper already removed in US-002.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: navigate to a visit detail page, check card styling, progress bar, back link, status badge"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Restyle action detail page shell to Ledger UI",
+      "description": "As a PM viewing a specific action, I want the page shell (layout, back link, error/forbidden states) to follow Ledger UI.",
+      "acceptanceCriteria": [
+        "File: src/app/visits/[id]/actions/[actionId]/page.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 5 for full spec.",
+        "Page layout: full-bleed + progressive padding. Back link: text-accent font-semibold uppercase.",
+        "notFoundState() helper (used twice — visit not found, action not found): sharp corners, theme danger colors (bg-danger-bg, text-danger), role=alert added. Remove rounded-lg.",
+        "forbiddenState() helper: sharp corners, theme warning colors (bg-warning-bg, border-warning-border, text-warning-text), role=alert added. Remove rounded-lg.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: navigate to an action detail page, verify page shell styling"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Restyle ActionPointList component to Ledger UI",
+      "description": "As a PM managing action points on a visit, I want the action card list to follow Ledger UI with sharp cards, emerald buttons, and themed status badges.",
+      "acceptanceCriteria": [
+        "File: src/components/visits/ActionPointList.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 7 for full spec.",
+        "Outer container: sharp corners, no shadow, border border-border (replace rounded-lg shadow). Section header: 2px accent bottom border, uppercase tracking-wide font-bold text-text-primary. Subtitle: text-text-muted.",
+        "Add Action button: bg-accent sharp uppercase bold (replace bg-blue-600 rounded-md). Action cards: border-b border-border (replace divide-y divide-gray-200).",
+        "Action type name: text-text-primary. Timestamps: font-mono. Status badges: shared statusBadgeClass(), keep rounded-full.",
+        "Start button: bg-accent sharp (replace bg-yellow-500 rounded-md). Delete button: sharp, theme danger style. Open/View links: accent/secondary styles.",
+        "Warning/error/GPS alerts: sharp corners, theme colors. Empty state: uppercase muted text.",
+        "Old actionStatusClass() already removed in US-002.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: navigate to a visit with actions, check action card styling, button styles, status badges"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Restyle ActionTypePickerModal to Ledger UI",
+      "description": "As a PM adding a new action to a visit, I want the action type picker modal to follow Ledger UI with sharp corners, emerald accent, and themed radio options.",
+      "acceptanceCriteria": [
+        "File: src/components/visits/ActionTypePickerModal.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 8 for full spec.",
+        "Backdrop: bg-black/50 (was bg-black/40). Modal container: sharp corners (remove rounded-lg), shadow-xl stays per style guide.",
+        "Header: 4px accent bottom border (border-b-4 border-border-accent), title uppercase tracking-tight. Subtitle: text-text-muted.",
+        "Radio options: sharp corners (remove rounded-md), border border-border, hover:bg-hover-bg. Radio accent: accent-accent or accent-[var(--color-accent)].",
+        "Footer: border-t border-border. Cancel button: sharp secondary style. Add button: bg-accent sharp uppercase (replace bg-blue-600 rounded-md).",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: open action type picker on a visit, check modal styling, radio options, buttons"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Restyle ActionDetailForm component to Ledger UI",
+      "description": "As a PM filling out an action's form, I want Ledger UI labels, sharp inputs with accent focus states, and themed buttons.",
+      "acceptanceCriteria": [
+        "File: src/components/visits/ActionDetailForm.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 9 for full spec.",
+        "Header card: sharp corners, no shadow, border border-border. Action type title: uppercase tracking-tight text-text-primary. Description: text-text-secondary. Timestamps: font-mono.",
+        "Status badge: shared statusBadgeClass(), keep rounded-full.",
+        "Form card: sharp corners, no shadow. Form title: uppercase tracking-wide.",
+        "Field labels (dynamic FieldConfig[] renderer — applies to ALL generated fields): text-xs font-bold uppercase tracking-wide text-text-muted (replace text-sm font-medium text-gray-700).",
+        "Inputs/textareas: sharp corners, border-2 border-border, accent focus border. REMOVE: rounded-md, shadow-sm, focus:border-blue-500, focus:ring-1, focus:ring-blue-500.",
+        "Save button: bg-accent sharp uppercase (replace bg-blue-600 rounded-md). End button: bg-accent sharp uppercase (replace bg-green-600 rounded-md).",
+        "Warning/error/read-only alerts: sharp corners, theme colors.",
+        "Old actionStatusClass() already removed in US-002.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: open an action detail form, check form field styling, button styles, alert styling"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Restyle ClassroomObservationForm to Ledger UI",
+      "description": "As a PM filling out a classroom observation rubric, I want Ledger UI styling on the sticky score bar, parameter sections, radio inputs, and summary textareas.",
+      "acceptanceCriteria": [
+        "File: src/components/visits/ClassroomObservationForm.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 10 for full spec.",
+        "Sticky score bar: sharp corners, bg-bg-card-alt border-2 border-border-accent. PRESERVE sticky top-2 z-10 positioning. Score text: font-mono font-bold text-accent. Answered count: font-mono.",
+        "Parameter sections: sharp corners (remove rounded-md), border border-border. Parameter title: text-text-primary uppercase. Description: text-text-secondary.",
+        "Radio inputs: accent-accent. REMOVE: border-gray-300, text-blue-600, focus:ring-blue-500. Score numbers in options: font-mono text-text-muted.",
+        "Add remarks toggle button: text-accent (replace text-blue-700). Preserve toggle logic. Remarks textarea: sharp, border-2 border-border, accent focus.",
+        "Session summary section: sharp corners, border border-border, title uppercase. Session summary textareas: same input style.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: open a classroom observation action, check rubric form styling, sticky bar, parameter sections, radio buttons"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Restyle CompleteVisitButton to Ledger UI",
+      "description": "As a PM completing a visit, I want the GPS capture alerts and complete button to follow Ledger UI with accessible alert roles.",
+      "acceptanceCriteria": [
+        "File: src/components/visits/CompleteVisitButton.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 11 for full spec.",
+        "Warning alert: sharp corners, bg-warning-bg border-warning-border text-warning-text. Add role=alert.",
+        "Error alert: sharp corners, theme danger colors. Add role=alert. Error detail list (ul): list marker + text in theme danger.",
+        "GPS alert: sharp corners, bg-bg-card-alt border-border. Cancel link: text-accent (replace text-blue-700).",
+        "Complete button: bg-accent sharp uppercase bold, larger padding (replace rounded-md bg-green-600). Preserve 3-state machine text changes (idle/acquiring/submitting).",
+        "Remove all rounded-md from alerts and buttons. Remove focus:ring-* classes.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: check CompleteVisitButton on an in-progress visit"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Restyle NewVisitForm to Ledger UI",
+      "description": "As a PM starting a new visit, I want the form, GPS states, and buttons to follow Ledger UI.",
+      "acceptanceCriteria": [
+        "File: src/components/visits/NewVisitForm.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Step 12 for full spec.",
+        "Page layout: replace max-w-2xl mx-auto with full-bleed + progressive padding. Card: sharp corners, no shadow, border border-border. Title: uppercase tracking-tight text-text-primary.",
+        "Field labels: text-xs font-bold uppercase tracking-wide text-text-muted. School code input: sharp, border-2 border-border, bg-bg-card-alt for disabled.",
+        "GPS states (4 distinct states from GpsState union): Acquiring = sharp bg-bg-card-alt border-border + spinner border-accent. Good accuracy = sharp bg-success-bg border-border-accent. Moderate accuracy = sharp bg-warning-bg border-warning-border. Error = sharp theme danger. Idle = sharp border-dashed border-border. GPS accuracy value: font-mono.",
+        "API error alert: sharp, theme danger, role=alert. Start Visit button: bg-accent sharp uppercase — REMOVE rounded-md, shadow-sm, focus:ring-* classes.",
+        "Cancel/back button (LoadingLink): sharp secondary — REMOVE rounded-md, shadow-sm, focus:ring-*. Do NOT modify LoadingLink.tsx itself. Info box: sharp, theme accent-tinted bg.",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: check NewVisitForm at /school/[udise]/visit/new, verify GPS states, buttons"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Restyle SchoolTabs and VisitsTab to Ledger UI",
+      "description": "As a user viewing a school's visit history tab, I want the tab navigation and visit rows to follow Ledger UI.",
+      "acceptanceCriteria": [
+        "Files: src/components/SchoolTabs.tsx and src/components/VisitsTab.tsx. Read docs/ai/visit-ui-revamp/brainstorming.md Steps 13-14 for full spec.",
+        "SchoolTabs — Tab nav: border-b-2 border-border. Active tab: border-accent text-accent. Inactive tab: text-text-secondary. Tab text: uppercase font-bold.",
+        "SchoolTabs — VisitHistorySection: empty state sharp + theme colors. Start Visit button: bg-accent sharp uppercase. Visit rows: sharp bg-bg-card-alt. Status badges: shared statusBadgeClass(). View/Continue links: text-accent font-bold uppercase.",
+        "SchoolTabs — inline status logic (lines ~100-104) already replaced with statusBadgeClass() import in US-002.",
+        "VisitsTab — Loading spinner: border-accent. Loading text: text-text-secondary. Error state: sharp corners, theme danger colors (remove rounded-lg bg-red-50 border-red-200).",
+        "npm run build passes",
+        "npm run test passes",
+        "Verify in browser using agent-browser: navigate to a school page, click Visits tab, check tab styling, visit row styling, status badges"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Update unit tests for Ledger UI styling changes",
+      "description": "As a developer, I need to update the 3 broken test assertions in SchoolTabs.test.tsx and add tests for the new statusBadgeClass() helper.",
+      "acceptanceCriteria": [
+        "File: src/components/SchoolTabs.test.tsx — Update active tab border assertion from toContain('border-blue-500') to match new theme class (border-accent or border-[var(--color-accent)])",
+        "File: src/components/SchoolTabs.test.tsx — Update active tab text assertion from toContain('text-blue-600') to match new theme class",
+        "File: src/components/SchoolTabs.test.tsx — Verify inactive tab border assertion (border-transparent) still passes",
+        "File: src/components/SchoolTabs.test.tsx — Add new assertions: active tab has 'uppercase' and 'font-bold' classes",
+        "File: src/lib/visit-actions.test.ts — Add test: statusBadgeClass('completed') returns classes with success bg + accent-hover text",
+        "File: src/lib/visit-actions.test.ts — Add test: statusBadgeClass('in_progress') returns classes with warning bg + warning text",
+        "File: src/lib/visit-actions.test.ts — Add test: statusBadgeClass('pending') returns classes with card-alt bg + secondary text",
+        "File: src/lib/visit-actions.test.ts — Add test: statusBadgeClass('unknown_value') returns default muted fallback classes",
+        "npm run test passes — ALL 1100+ tests green, zero regressions"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Final review and documentation of Ledger UI revamp",
+      "description": "As a developer, I want to review all changes, verify visual consistency, and document findings to ensure the revamp is complete and correct.",
+      "acceptanceCriteria": [
+        "Use explore agents to review the current state of all 17 modified files",
+        "Review git diff to see all changes made in this branch",
+        "Class cleanup verified via grep: no remaining rounded-md/rounded-lg on data elements in visit files (only rounded-full on badges), no remaining shadow on cards, no remaining bg-blue-600/bg-green-600, no remaining focus:ring-*",
+        "Theme token usage verified via grep: no hardcoded gray-* or blue-* color classes remain in the 17 modified visit files",
+        "npm run build passes",
+        "npm run test passes — all 1100+ tests green",
+        "Create ralph/visit-ui-ledger-revamp-review.txt with concise findings (under 50 lines): what was done, files changed, any concerns or recommendations"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

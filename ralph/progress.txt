@@ -1,0 +1,43 @@
+# Ralph Progress Log
+Started: Sun Feb 15 23:07:30 IST 2026
+
+## Codebase Patterns
+- **Client component tests**: Use `@testing-library/react` + `userEvent.setup()` for interactions
+- **Email inputs**: `type="email"` inputs have no label-input `htmlFor`/`id` association; query with `document.querySelector('input[type="email"]')` instead of `getByRole("textbox", { name: /email/i })`
+- **Debounce testing**: Use `vi.useFakeTimers({ shouldAdvanceTime: true })` + `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })`, then `vi.advanceTimersByTime(delay)` wrapped in `act()`
+- **Fetch mocking**: `vi.stubGlobal("fetch", mockFetch)` with `mockFetch = vi.fn()` in `beforeEach`
+- **Pre-existing build failure**: `e2e/helpers/db.ts:152` has type error (`string | undefined` not assignable to `string`) — not caused by unit tests
+- **Pre-existing lint errors**: 818 errors exist in codebase; new test files should lint clean individually with `npx eslint <file>`
+- **AddUserModal props**: `{ user, regions, onClose, onSave }` — NOT `{ isOpen, onClose, onSave, editUser, currentUserEmail }` as PRD stated
+- **Multiple selects**: Use `screen.getAllByRole("combobox")` and index to target specific `<select>` elements
+- **PRD props often wrong**: Always read actual source component to get real props interface before writing tests
+- **Duplicate text in table+modal**: When a component shows the same text in a table row AND a modal, use `getAllByText()` or scope queries with `within()` to avoid `getByText` failing on multiple matches
+- **Stats card counts**: Use `within(card)` scoping to check stat values, since count numbers like "1" or "2" may appear multiple times on page
+- **Mock child components**: Use `vi.mock("./ChildComponent", ...)` with stub that exposes `data-testid` + callback buttons to test parent integration cleanly
+- **Window dialogs**: `vi.stubGlobal("alert", vi.fn())` + `vi.stubGlobal("confirm", vi.fn(() => true))` in `beforeEach` for components using `alert()`/`confirm()`
+- **Date inputs without htmlFor**: `type="date"` inputs may lack `htmlFor`/`id` association; query with `document.querySelector('input[type="date"]')` instead of `getByLabelText("Date")`
+- **Duplicate count badges**: When selecting topics changes a count badge and another chapter has the same count text, use `getAllByText()` and check `className` to distinguish blue (selected) vs gray (total) badges
+- **React 19 use(params) in client components**: Wrap component in `<Suspense>` and use `await act(async () => { render(...) })` to let the Promise resolve before assertions
+- **Server component test pattern**: Use `vi.hoisted()` for mock variables referenced in `vi.mock()` factories. Redirect sentinel: `mockRedirect = vi.fn((url) => { throw new Error('REDIRECT:' + url); })`. Test redirects: `await expect(Page()).rejects.toThrow("REDIRECT:/")`. Test rendering: `const jsx = await Page(); render(jsx);`. Mock `next/link` as `<a>` stub. Mock `next-auth`, `@/lib/auth`, `next/navigation`, and permission functions.
+- **Top-level env vars**: Pages that use `const X = process.env.X` at module top-level capture env vars at import time. Since `vi.mock()` is hoisted above `process.env` assignments, use pattern-matching (`expect(url).toContain(...)`) for fetch URL assertions instead of exact URL matching.
+- **resetAllMocks for server pages**: Use `vi.resetAllMocks()` (not `clearAllMocks`) in `beforeEach` for server component tests with `mockResolvedValueOnce()` — `clearAllMocks` does NOT clear pending once-queues, causing mock leakage. After `resetAllMocks`, re-establish sentinel implementations for redirect/notFound.
+- **Recharts mock coverage**: Mock `Bar`/`Pie` to render `{children}` (not `() => null`) so `.map()` Cell callbacks execute. Mock `Tooltip`/`Pie` to invoke callback props (`formatter`, `label`) so those arrow functions get V8 coverage. Use typed interfaces (`type P = { children?: React.ReactNode }`) to avoid lint `any` errors.
+
+- **Tailwind v4 @theme inline**: Register CSS custom properties in `@theme inline { }` block to generate utility classes (e.g., `--color-accent: var(--color-accent)` → enables `bg-accent`, `text-accent`, `border-accent`). Without registration, must use verbose `bg-[var(--color-accent)]` syntax.
+- **Focus ring suppression**: Global CSS handles `outline: none` and `--tw-ring-shadow` reset for all interactive elements. Still need to remove `focus:ring-*` classes from JSX to avoid generating unused CSS.
+
+---
+
+## 2026-02-26 - US-001
+Session: fa216564-1fc8-4ecf-a907-c2529187b695
+- Implemented Ledger UI design tokens as CSS custom properties in globals.css
+- Registered all 19 tokens in @theme inline block for Tailwind v4 utility class generation
+- Deleted dark mode media query (light-mode-only internal tool)
+- Added global focus ring suppression CSS for all interactive elements
+- Created src/lib/theme.ts for dynamic inline styles where CSS vars can't work
+- Files changed: src/app/globals.css, src/lib/theme.ts (new)
+- **Learnings for future iterations:**
+  - Tailwind v4 requires tokens registered in `@theme inline` to generate utility classes — without this, only `bg-[var(--color-X)]` works
+  - Dark mode query was deleted; this is intentional for an internal light-mode-only tool
+  - theme.ts is scoped to inline styles only — never use for color refs in JSX className
+---
