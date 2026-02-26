@@ -1,14 +1,15 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import Toast from "@/components/Toast";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
 import {
   CURRENT_RUBRIC_VERSION,
   getRubricConfig,
 } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
-import { getActionTypeLabel, isActionType, type ActionType } from "@/lib/visit-actions";
+import { getActionTypeLabel, isActionType, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
 
 interface ActionRecord {
   id: number;
@@ -377,16 +378,6 @@ function toActionStatusLabel(status: string): string {
     .join(" ");
 }
 
-function actionStatusClass(status: string): string {
-  if (status === "completed") {
-    return "bg-green-100 text-green-800";
-  }
-  if (status === "in_progress") {
-    return "bg-yellow-100 text-yellow-800";
-  }
-  return "bg-gray-100 text-gray-700";
-}
-
 function formatTimestamp(value: string | null): string {
   if (!value) {
     return "-";
@@ -460,6 +451,9 @@ export default function ActionDetailForm({
   const [error, setError] = useState<StructuredError | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const cancelEndRef = useRef<(() => void) | null>(null);
+
+  const dismissError = useCallback(() => setError(null), []);
+  const dismissWarning = useCallback(() => setWarning(null), []);
 
   const config = useMemo(() => {
     if (isActionType(action.action_type)) {
@@ -646,64 +640,53 @@ export default function ActionDetailForm({
 
   return (
     <div className="space-y-4">
-      <div className="bg-white shadow rounded-lg p-6">
+      <div className="bg-bg-card border border-border p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-2xl font-bold text-text-primary uppercase tracking-tight">
               {toActionTypeLabel(action.action_type)}
             </h1>
-            <p className="mt-1 text-sm text-gray-500">{config.description}</p>
+            <p className="mt-1 text-sm text-text-secondary">{config.description}</p>
           </div>
           <span
-            className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${actionStatusClass(action.status)}`}
+            className={`inline-flex ${statusBadgeClass(action.status)}`}
           >
             {toActionStatusLabel(action.status)}
           </span>
         </div>
-        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono">
           <span>Started: {formatTimestamp(action.started_at)}</span>
           <span>Ended: {formatTimestamp(action.ended_at)}</span>
         </div>
       </div>
 
-      {unsupportedVersionMessage ? (
+      {unsupportedVersionMessage && (
         <p
-          className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2"
+          className="text-sm text-warning-text bg-warning-bg border border-warning-border px-3 py-2"
           data-testid="classroom-unsupported-version-warning"
+          role="alert"
         >
           {unsupportedVersionMessage}
         </p>
-      ) : warning && (
-        <p className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2">
-          {warning}
-        </p>
+      )}
+
+      {!unsupportedVersionMessage && warning && (
+        <Toast variant="warning" message={warning} onDismiss={dismissWarning} />
       )}
 
       {error && (
-        <div
-          className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"
-          data-testid="action-error"
-        >
-          <p>{error.message}</p>
-          {error.details.length > 0 && (
-            <ul className="mt-1 list-disc pl-5" data-testid="action-error-details">
-              {error.details.map((detail, index) => (
-                <li key={`${detail}-${index}`}>{detail}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <Toast variant="error" message={error.message} details={error.details} onDismiss={dismissError} />
       )}
 
       {state === "acquiring" && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-          <span className="text-sm text-blue-800">Getting location to end action...</span>
+        <div className="flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-2">
+          <span className="text-sm text-text-primary">Getting location to end action...</span>
           <button
             type="button"
             onClick={() => {
               cancelEndRef.current?.();
             }}
-            className="text-xs font-medium text-blue-700 underline hover:text-blue-900"
+            className="text-xs font-medium text-accent underline hover:text-accent-hover"
           >
             Cancel
           </button>
@@ -711,7 +694,7 @@ export default function ActionDetailForm({
       )}
 
       {!unsupportedVersionMessage && !canSave && !canEnd && (
-        <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
+        <p className="text-sm text-text-secondary bg-bg-card-alt border border-border px-3 py-2">
           {isVisitCompleted
             ? "This visit is completed and read-only."
             : action.status === "completed" && !isAdmin
@@ -724,10 +707,10 @@ export default function ActionDetailForm({
         onSubmit={(event) => {
           void handleSave(event);
         }}
-        className="bg-white shadow rounded-lg p-6 space-y-4"
+        className="bg-bg-card border border-border p-6 space-y-4"
         data-testid={`action-renderer-${action.action_type}`}
       >
-        <h2 className="text-lg font-semibold text-gray-900">{config.title}</h2>
+        <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">{config.title}</h2>
 
         {isClassroomObservation ? (
           <ClassroomObservationForm
@@ -738,7 +721,7 @@ export default function ActionDetailForm({
         ) : (
           config.fields.map((field) => (
             <label key={field.key} className="block">
-              <span className="mb-1 block text-sm font-medium text-gray-700">{field.label}</span>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">{field.label}</span>
               {field.multiline ? (
                 <textarea
                   value={readStringValue(formData[field.key])}
@@ -749,7 +732,7 @@ export default function ActionDetailForm({
                   disabled={!canSave || isBusy}
                   placeholder={field.placeholder}
                   rows={4}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
+                  className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
                 />
               ) : (
                 <input
@@ -760,7 +743,7 @@ export default function ActionDetailForm({
                   }}
                   disabled={!canSave || isBusy}
                   placeholder={field.placeholder}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
+                  className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
                 />
               )}
             </label>
@@ -772,7 +755,7 @@ export default function ActionDetailForm({
             <button
               type="submit"
               disabled={isBusy}
-              className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {state === "saving" ? "Saving..." : "Save"}
             </button>
@@ -784,7 +767,7 @@ export default function ActionDetailForm({
                 void handleEndAction();
               }}
               disabled={isBusy}
-              className="inline-flex items-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {state === "acquiring"
                 ? "Getting location..."

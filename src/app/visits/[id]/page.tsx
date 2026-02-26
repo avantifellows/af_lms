@@ -7,6 +7,7 @@ import Link from "next/link";
 import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
 import ActionPointList from "@/components/visits/ActionPointList";
 import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
+import { statusBadgeClass } from "@/lib/visit-actions";
 
 interface Visit {
   id: number;
@@ -65,13 +66,6 @@ async function getVisitDetail(id: string): Promise<VisitDetail> {
   return { visit: visits[0], actions };
 }
 
-function visitStatusClass(status: string): string {
-  if (status === "completed") {
-    return "bg-green-100 text-green-800";
-  }
-  return "bg-yellow-100 text-yellow-800";
-}
-
 function formatVisitStatus(status: string): string {
   if (status === "completed") {
     return "Completed";
@@ -125,9 +119,9 @@ export default async function VisitDetailPage({ params }: PageProps) {
 
   if (!visit) {
     return (
-      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">Visit not found.</p>
+      <main className="min-h-screen bg-bg px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+        <div className="bg-danger-bg border border-danger/20 p-4" role="alert">
+          <p className="text-danger font-semibold">Visit not found.</p>
         </div>
       </main>
     );
@@ -141,9 +135,9 @@ export default async function VisitDetailPage({ params }: PageProps) {
   });
   if (!canView) {
     return (
-      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-yellow-800">You do not have access to this visit.</p>
+      <main className="min-h-screen bg-bg px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+        <div className="bg-warning-bg border border-warning-border p-4" role="alert">
+          <p className="text-warning-text font-semibold">You do not have access to this visit.</p>
         </div>
       </main>
     );
@@ -161,20 +155,20 @@ export default async function VisitDetailPage({ params }: PageProps) {
   const isReadOnlyVisit = visit.status === "completed" || !canEdit;
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-bg px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
       <div className="mb-4">
-        <Link href="/dashboard" className="text-sm text-gray-500 hover:text-gray-700">
+        <Link href="/dashboard" className="text-accent hover:text-accent-hover font-semibold uppercase text-sm">
           &larr; Back to Dashboard
         </Link>
       </div>
 
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <div className="flex justify-between items-start">
+      <div className="bg-bg-card border border-border p-4 sm:p-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">
               {visit.school_name || visit.school_code}
             </h1>
-            <p className="mt-1 text-gray-500">
+            <p className="mt-1 text-text-secondary text-sm sm:text-base">
               Visit on {new Date(visit.visit_date).toLocaleDateString("en-IN", {
                 year: "numeric",
                 month: "short",
@@ -182,7 +176,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
                 timeZone: "Asia/Kolkata",
               })}
             </p>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono">
               <span>
                 Started: {formatTimestamp(visit.inserted_at)}
               </span>
@@ -194,22 +188,28 @@ export default async function VisitDetailPage({ params }: PageProps) {
             </div>
           </div>
           <span
-            className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${visitStatusClass(visit.status)}`}
+            className={`inline-flex shrink-0 ${statusBadgeClass(visit.status)}`}
           >
             {formatVisitStatus(visit.status)}
           </span>
         </div>
 
         <div className="mt-6">
-          <div className="flex justify-between text-sm text-gray-600 mb-2">
+          <div className="flex justify-between text-sm text-text-secondary mb-2">
             <span>Action Progress</span>
-            <span>
+            <span className="font-mono">
               {completedCount} of {actions.length} action points completed
             </span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
+          <div
+            className="w-full bg-border h-2"
+            role="progressbar"
+            aria-valuenow={progressPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
-              className="bg-green-600 h-2 rounded-full transition-all"
+              className="bg-accent h-2 transition-all"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
@@ -218,13 +218,13 @@ export default async function VisitDetailPage({ params }: PageProps) {
 
       <div className="mb-6">
         {visit.status === "completed" ? (
-          <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-4 py-3">
+          <p className="text-sm text-text-secondary bg-bg-card-alt border border-border px-4 py-3">
             This visit is completed and read-only.
           </p>
         ) : canEdit ? (
           <CompleteVisitButton visitId={visit.id} />
         ) : (
-          <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-4 py-3">
+          <p className="text-sm text-text-secondary bg-bg-card-alt border border-border px-4 py-3">
             This visit is read-only for your role.
           </p>
         )}

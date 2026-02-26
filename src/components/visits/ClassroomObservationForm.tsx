@@ -78,12 +78,12 @@ export default function ClassroomObservationForm({
 
   return (
     <div className="space-y-4" data-testid="classroom-observation-form">
-      <div className="sticky top-2 z-10 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-blue-900">
-          <span className="font-semibold" data-testid="rubric-score-summary">
+      <div className="sticky top-2 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
+          <span className="font-mono font-bold text-accent" data-testid="rubric-score-summary">
             Score: {totalScore}/{CLASSROOM_OBSERVATION_RUBRIC.maxScore}
           </span>
-          <span data-testid="rubric-answered-summary">
+          <span className="font-mono" data-testid="rubric-answered-summary">
             Answered: {answeredCount}/{CLASSROOM_OBSERVATION_RUBRIC.parameters.length}
           </span>
         </div>
@@ -98,13 +98,13 @@ export default function ClassroomObservationForm({
         return (
           <section
             key={parameter.key}
-            className="rounded-md border border-gray-200 p-4"
+            className="border border-border p-4"
             data-testid={`rubric-param-${parameter.key}`}
           >
             <div className="mb-3">
-              <h3 className="text-sm font-semibold text-gray-900">{parameter.label}</h3>
+              <h3 className="text-sm font-semibold text-text-primary uppercase">{parameter.label}</h3>
               {parameter.description && (
-                <p className="mt-1 text-xs text-gray-600">{parameter.description}</p>
+                <p className="mt-1 text-xs text-text-secondary">{parameter.description}</p>
               )}
             </div>
 
@@ -113,7 +113,7 @@ export default function ClassroomObservationForm({
               {parameter.options.map((option) => (
                 <label
                   key={`${parameter.key}-${option.score}`}
-                  className="flex cursor-pointer items-start gap-2 text-sm text-gray-700"
+                  className="flex cursor-pointer items-start gap-2 text-sm text-text-primary"
                 >
                   <input
                     type="radio"
@@ -141,11 +141,11 @@ export default function ClassroomObservationForm({
                         };
                       });
                     }}
-                    className="mt-0.5 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
                   />
                   <span>
                     {option.label}
-                    <span className="ml-1 text-gray-500">({option.score})</span>
+                    <span className="ml-1 font-mono text-text-muted">({option.score})</span>
                   </span>
                 </label>
               ))}
@@ -158,7 +158,7 @@ export default function ClassroomObservationForm({
                 onClick={() => {
                   setRevealedRemarks((current) => new Set(current).add(parameter.key));
                 }}
-                className="mt-3 text-xs font-medium text-blue-700 underline hover:text-blue-900 disabled:cursor-not-allowed disabled:text-gray-400"
+                className="mt-3 text-xs font-medium text-accent underline hover:text-accent-hover disabled:cursor-not-allowed disabled:text-text-muted"
               >
                 Add remarks
               </button>
@@ -166,7 +166,7 @@ export default function ClassroomObservationForm({
 
             {remarksVisible && (
               <label className="mt-3 block">
-                <span className="mb-1 block text-xs font-medium text-gray-700">Remarks</span>
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">Remarks</span>
                 <textarea
                   rows={3}
                   value={remarks}
@@ -193,7 +193,7 @@ export default function ClassroomObservationForm({
                     });
                   }}
                   placeholder="Optional remarks"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
+                  className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
                 />
               </label>
             )}
@@ -201,11 +201,11 @@ export default function ClassroomObservationForm({
         );
       })}
 
-      <section className="rounded-md border border-gray-200 p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900">Session Summary (Optional)</h3>
+      <section className="border border-border p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-text-primary uppercase">Session Summary (Optional)</h3>
         {CLASSROOM_OBSERVATION_RUBRIC.sessionFields.map((field) => (
           <label key={field.key} className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-700">{field.label}</span>
+            <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">{field.label}</span>
             <textarea
               rows={4}
               value={readString(data[field.key])}
@@ -215,7 +215,7 @@ export default function ClassroomObservationForm({
                 const nextValue = event.target.value;
                 setData((current) => ({ ...current, [field.key]: nextValue }));
               }}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100"
+              className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
             />
           </label>
         ))}

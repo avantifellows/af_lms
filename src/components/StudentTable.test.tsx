@@ -242,7 +242,7 @@ describe("StudentTable - tabs", () => {
         grades={defaultGrades}
       />,
     );
-    expect(screen.queryByText(/Active Students/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Active/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Dropout/)).not.toBeInTheDocument();
   });
 
@@ -250,7 +250,7 @@ describe("StudentTable - tabs", () => {
     render(
       <StudentTable students={[makeStudent()]} grades={defaultGrades} />,
     );
-    expect(screen.queryByText(/Active Students/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Active/)).not.toBeInTheDocument();
   });
 
   it("shows tabs when dropoutStudents is non-empty", () => {
@@ -266,7 +266,7 @@ describe("StudentTable - tabs", () => {
         grades={defaultGrades}
       />,
     );
-    expect(screen.getByText("Active Students (1)")).toBeInTheDocument();
+    expect(screen.getByText("Active (1)")).toBeInTheDocument();
     expect(screen.getByText("Dropout (1)")).toBeInTheDocument();
   });
 });
@@ -325,7 +325,7 @@ describe("StudentTable - tab switching", () => {
     );
 
     await user.click(screen.getByText("Dropout (1)"));
-    await user.click(screen.getByText("Active Students (1)"));
+    await user.click(screen.getByText("Active (1)"));
 
     expect(screen.getByText("ActiveKid Sharma")).toBeInTheDocument();
     expect(screen.queryByText("DroppedKid Sharma")).not.toBeInTheDocument();

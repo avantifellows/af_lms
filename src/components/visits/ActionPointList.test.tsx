@@ -3,6 +3,11 @@ import userEvent from "@testing-library/user-event";
 
 import ActionPointList, { type VisitActionListItem } from "./ActionPointList";
 
+const mockPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -40,6 +45,7 @@ function makeAction(overrides: Partial<VisitActionListItem>): VisitActionListIte
 describe("ActionPointList", () => {
   beforeEach(() => {
     mockGetAccurateLocation.mockReset();
+    mockPush.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -168,7 +174,7 @@ describe("ActionPointList", () => {
     });
   });
 
-  it("creates a principal meeting action card from picker", async () => {
+  it("creates a second classroom observation action card from picker", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(() =>
       Promise.resolve({
@@ -177,7 +183,7 @@ describe("ActionPointList", () => {
           Promise.resolve({
             action: makeAction({
               id: 201,
-              action_type: "principal_meeting",
+              action_type: "classroom_observation",
               status: "pending",
             }),
           }),
@@ -188,19 +194,19 @@ describe("ActionPointList", () => {
     render(<ActionPointList visitId={10} actions={[]} />);
 
     await user.click(screen.getByRole("button", { name: "Add Action Point" }));
-    await user.click(screen.getByLabelText("Principal Meeting"));
+    await user.click(screen.getByLabelText("Classroom Observation"));
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action_type: "principal_meeting" }),
+        body: JSON.stringify({ action_type: "classroom_observation" }),
       });
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Principal Meeting")).toBeInTheDocument();
+      expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     });
   });
@@ -286,6 +292,7 @@ describe("ActionPointList", () => {
       expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
       expect(screen.getByText("In Progress")).toBeInTheDocument();
+      expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/101");
     });
   });
 });

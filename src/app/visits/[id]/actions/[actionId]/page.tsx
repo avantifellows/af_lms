@@ -72,15 +72,17 @@ async function getActionDetail(visitId: string, actionId: string): Promise<Actio
 
 function notFoundState(title: string, description: string) {
   return (
-    <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-4">
-        <Link href="/visits" className="text-sm text-gray-500 hover:text-gray-700">
-          &larr; Back to Visits
-        </Link>
-      </div>
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-        <h1 className="text-base font-semibold text-red-800">{title}</h1>
-        <p className="mt-1 text-sm text-red-700">{description}</p>
+    <main className="min-h-screen bg-bg">
+      <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+        <div className="mb-4">
+          <Link href="/visits" className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
+            &larr; Back to Visits
+          </Link>
+        </div>
+        <div className="border border-danger/20 bg-danger-bg p-4" role="alert">
+          <h1 className="text-base font-semibold text-danger">{title}</h1>
+          <p className="mt-1 text-sm text-danger">{description}</p>
+        </div>
       </div>
     </main>
   );
@@ -88,14 +90,16 @@ function notFoundState(title: string, description: string) {
 
 function forbiddenState() {
   return (
-    <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-4">
-        <Link href="/visits" className="text-sm text-gray-500 hover:text-gray-700">
-          &larr; Back to Visits
-        </Link>
-      </div>
-      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
-        <p className="text-yellow-800">You do not have access to this action.</p>
+    <main className="min-h-screen bg-bg">
+      <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+        <div className="mb-4">
+          <Link href="/visits" className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
+            &larr; Back to Visits
+          </Link>
+        </div>
+        <div className="border border-warning-border bg-warning-bg p-4" role="alert">
+          <p className="text-warning-text">You do not have access to this action.</p>
+        </div>
       </div>
     </main>
   );
@@ -156,20 +160,22 @@ export default async function VisitActionDetailPage({ params }: PageProps) {
   });
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-4">
-        <Link href={`/visits/${detail.visit.id}`} className="text-sm text-gray-500 hover:text-gray-700">
-          &larr; Back to Visit
-        </Link>
-      </div>
+    <main className="min-h-screen bg-bg">
+      <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+        <div className="mb-4">
+          <Link href={`/visits/${detail.visit.id}`} className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
+            &larr; Back to Visit
+          </Link>
+        </div>
 
-      <ActionDetailForm
-        visitId={detail.visit.id}
-        visitStatus={detail.visit.status}
-        initialAction={detail.action}
-        canWrite={canWrite}
-        isAdmin={permission.role === "admin"}
-      />
+        <ActionDetailForm
+          visitId={detail.visit.id}
+          visitStatus={detail.visit.status}
+          initialAction={detail.action}
+          canWrite={canWrite}
+          isAdmin={permission.role === "admin"}
+        />
+      </div>
     </main>
   );
 }
