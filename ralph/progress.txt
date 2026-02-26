@@ -86,3 +86,22 @@ Session: 7365b7f4-0955-44d3-ace6-d9f987441566
   - Section header pattern: `text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2`
   - Table header pattern: `bg-bg-card-alt border-b-2 border-border-accent` with `text-xs font-bold text-text-muted uppercase tracking-wider`
 ---
+
+## 2026-02-26 - US-004
+Session: 45aeb0c4-094a-4561-8201-cb185492a155
+- Restyled visit-related elements in `src/app/dashboard/page.tsx` to Ledger UI
+- Recent Visits section header: uppercase tracking-wide font-bold text-text-primary
+- "View all" link: text-accent hover:text-accent-hover font-bold uppercase
+- Table wrapper: sharp corners (`bg-bg-card border border-border`), removed shadow and rounded-lg
+- Table headers: `bg-bg-card-alt border-b-2 border-border-accent`, font-bold text-text-muted
+- Table body: removed `divide-y divide-gray-200`, added per-row `border-b border-border/40 hover:bg-hover-bg`
+- Visit date cells: added `font-mono`, text-text-secondary
+- View/Continue links: text-accent hover:text-accent-hover font-bold
+- Start Visit button on school cards: bg-accent sharp uppercase (replaced bg-green-600 rounded-md)
+- Status badges already using shared `statusBadgeClass()` from US-002
+- Files changed: src/app/dashboard/page.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - Dashboard visit restyling is scoped — only Recent Visits table + Start Visit button. Do NOT restyle school cards, pagination, search, stats, or nav elements.
+  - The `statusBadgeClass()` integration was already done in US-002, so this step only needed visual class changes.
+---

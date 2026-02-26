@@ -76,7 +76,7 @@
         "Verify in browser using agent-browser: navigate to /dashboard, check Recent Visits table matches /visits styling, check Start Visit button on school cards"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
