@@ -53,6 +53,8 @@ describe("SchoolTabs", () => {
     const visitsBtn = screen.getByText("Visits");
     expect(visitsBtn.className).toContain("border-accent");
     expect(visitsBtn.className).toContain("text-accent");
+    expect(visitsBtn.className).toContain("uppercase");
+    expect(visitsBtn.className).toContain("font-bold");
 
     const studentsBtn = screen.getByText("Students");
     expect(studentsBtn.className).toContain("border-transparent");
