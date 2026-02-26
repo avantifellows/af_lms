@@ -51,8 +51,8 @@ describe("SchoolTabs", () => {
   it("applies active styling to the selected tab button", () => {
     render(<SchoolTabs tabs={tabs} defaultTab="visits" />);
     const visitsBtn = screen.getByText("Visits");
-    expect(visitsBtn.className).toContain("border-blue-500");
-    expect(visitsBtn.className).toContain("text-blue-600");
+    expect(visitsBtn.className).toContain("border-accent");
+    expect(visitsBtn.className).toContain("text-accent");
 
     const studentsBtn = screen.getByText("Students");
     expect(studentsBtn.className).toContain("border-transparent");
