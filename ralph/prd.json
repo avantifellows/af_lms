@@ -193,7 +193,7 @@
         "Verify in browser using agent-browser: open a classroom observation action, check rubric form styling, sticky bar, parameter sections, radio buttons"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

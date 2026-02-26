@@ -219,3 +219,29 @@ Session: 781f6339-1a65-4240-ac5e-4bf08bb978d5
   - All alert states (warning, error, GPS, read-only) should get `role="alert"` for accessibility
   - `statusBadgeClass()` already includes `rounded-full px-2.5 py-0.5 text-xs font-medium` — callers only need `inline-flex ${statusBadgeClass(status)}`
 ---
+
+## 2026-02-26 - US-010
+Session: cc654c81-2fc3-455b-8df8-2789619979ea
+- Restyled `src/components/visits/ClassroomObservationForm.tsx` to Ledger UI design system
+- Sticky score bar: `rounded-md border border-blue-200 bg-blue-50` → `border-2 border-border-accent bg-bg-card-alt` (sharp, preserved `sticky top-2 z-10`)
+- Score text: `font-semibold text-blue-900` → `font-mono font-bold text-accent`
+- Answered count: added `font-mono`
+- Parameter sections: `rounded-md border border-gray-200` → `border border-border` (sharp)
+- Parameter title: `text-sm font-semibold text-gray-900` → added `text-text-primary uppercase`
+- Parameter description: `text-xs text-gray-600` → `text-xs text-text-secondary`
+- Radio inputs: `border-gray-300 text-blue-600 focus:ring-blue-500` → `accent-accent` (removed border/focus classes)
+- Score numbers in options: `text-gray-500` → `font-mono text-text-muted`
+- Add remarks toggle: `text-blue-700 hover:text-blue-900` → `text-accent hover:text-accent-hover`
+- Remarks label: `text-xs font-medium text-gray-700` → `text-xs font-bold uppercase tracking-wide text-text-muted`
+- Remarks/session textareas: `rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100` → `border-2 border-border focus:border-accent disabled:bg-bg-card-alt` (sharp, no shadow/ring)
+- Session summary section: `rounded-md border border-gray-200` → `border border-border` (sharp), title `uppercase`
+- Session field labels: `text-sm font-medium text-gray-700` → `text-xs font-bold uppercase tracking-wide text-text-muted`
+- Removed ALL `rounded-md`, `shadow-sm`, hardcoded `gray-*`/`blue-*` classes
+- Files changed: src/components/visits/ClassroomObservationForm.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - ClassroomObservationForm tests use semantic queries + testid — CSS-only changes never break tests
+  - Radio accent: use `accent-accent` (Tailwind v4 utility from @theme token) — same pattern as ActionTypePickerModal
+  - Textarea input pattern: `border-2 border-border focus:border-accent focus:outline-none disabled:bg-bg-card-alt` — consistent across all visit forms
+  - Label pattern: `text-xs font-bold uppercase tracking-wide text-text-muted` — consistent across ActionDetailForm and ClassroomObservationForm
+---
