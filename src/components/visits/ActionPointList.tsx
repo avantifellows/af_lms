@@ -257,11 +257,11 @@ export default function ActionPointList({
   }
 
   return (
-    <div className="bg-white shadow rounded-lg overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+    <div className="bg-bg-card border border-border overflow-hidden">
+      <div className="px-6 py-4 border-b-2 border-border-accent flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Action Points</h2>
-          <span className="text-xs text-gray-500">
+          <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Action Points</h2>
+          <span className="text-xs text-text-muted">
             {readOnly ? "Read-only" : "Creation-order timeline"}
           </span>
         </div>
@@ -274,7 +274,7 @@ export default function ActionPointList({
               setIsAddModalOpen(true);
             }}
             disabled={isBusy}
-            className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center bg-accent px-3 py-2 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             Add Action Point
           </button>
@@ -282,26 +282,26 @@ export default function ActionPointList({
       </div>
 
       {warning && (
-        <div className="mx-6 mt-4 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+        <div className="mx-6 mt-4 border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-text" role="alert">
           {warning}
         </div>
       )}
 
       {error && (
-        <div className="mx-6 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div className="mx-6 mt-4 border border-danger/20 bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
           {error}
         </div>
       )}
 
       {startState === "acquiring" && startingActionId !== null && (
-        <div className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-          <span className="text-sm text-blue-800">Getting location to start action...</span>
+        <div className="mx-6 mt-4 flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-2">
+          <span className="text-sm text-text-primary">Getting location to start action...</span>
           <button
             type="button"
             onClick={() => {
               cancelStartRef.current?.();
             }}
-            className="text-xs font-medium text-blue-700 underline hover:text-blue-900"
+            className="text-xs font-medium text-accent underline hover:text-accent-hover"
           >
             Cancel
           </button>
@@ -309,25 +309,25 @@ export default function ActionPointList({
       )}
 
       {items.length === 0 ? (
-        <div className="px-6 py-8 text-sm text-gray-500">
+        <div className="px-6 py-8 text-sm text-text-muted uppercase tracking-wide">
           No action points added yet.
         </div>
       ) : (
-        <div className="divide-y divide-gray-200">
+        <div>
           {items.map((action) => (
             <div
               key={action.id}
               data-testid={`action-card-${action.id}`}
               data-action-type={action.action_type}
               data-action-status={action.status}
-              className="px-6 py-4"
+              className="px-6 py-4 border-b border-border"
             >
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-sm font-medium text-gray-900">
+                  <div className="text-sm font-medium text-text-primary">
                     {formatActionType(action.action_type)}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-text-muted mt-1 font-mono">
                     Added: {formatTimestamp(action.inserted_at)}
                   </div>
                 </div>
@@ -337,7 +337,7 @@ export default function ActionPointList({
                   {formatActionStatus(action.status)}
                 </span>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono">
                 <span>Started: {formatTimestamp(action.started_at)}</span>
                 <span>Ended: {formatTimestamp(action.ended_at)}</span>
               </div>
@@ -350,7 +350,7 @@ export default function ActionPointList({
                         void handleStartAction(action.id);
                       }}
                       disabled={isBusy}
-                      className="inline-flex items-center rounded-md bg-yellow-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center bg-accent px-3 py-1.5 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {startingActionId === action.id
                         ? startState === "acquiring"
@@ -364,7 +364,7 @@ export default function ActionPointList({
                         void handleDeleteAction(action.id);
                       }}
                       disabled={isBusy}
-                      className="inline-flex items-center rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center border border-danger/20 bg-danger-bg px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger-bg/80 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {deletingActionId === action.id ? "Deleting..." : "Delete"}
                     </button>
@@ -373,7 +373,7 @@ export default function ActionPointList({
                 {action.status === "in_progress" && (
                   <Link
                     href={`/visits/${visitId}/actions/${action.id}`}
-                    className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    className="inline-flex items-center border border-border-accent bg-success-bg px-3 py-1.5 text-xs font-bold text-accent uppercase tracking-wide hover:bg-hover-bg"
                   >
                     Open
                   </Link>
@@ -381,7 +381,7 @@ export default function ActionPointList({
                 {action.status === "completed" && (
                   <Link
                     href={`/visits/${visitId}/actions/${action.id}`}
-                    className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    className="inline-flex items-center border border-border bg-bg-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-hover-bg"
                   >
                     View Details
                   </Link>
