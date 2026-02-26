@@ -114,7 +114,7 @@
         "Verify in browser using agent-browser: navigate to an action detail page, verify page shell styling"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -129,3 +129,18 @@ Session: 770207b2-8c63-4071-9a80-e149ac084a05
   - Progress bar accessibility: add `role="progressbar"` + `aria-valuenow`/`aria-valuemin={0}`/`aria-valuemax={100}` on the track div
   - Not-found/forbidden states use `role="alert"` for screen reader announcements
 ---
+
+## 2026-02-26 - US-006
+Session: bcd75233-206d-4c8e-a4a5-1d790ebd009e
+- Restyled action detail page shell in `src/app/visits/[id]/actions/[actionId]/page.tsx` to Ledger UI
+- Page layout: replaced `max-w-4xl mx-auto` with full-bleed `min-h-screen bg-bg` + progressive padding wrapper on all 3 render paths (notFoundState, forbiddenState, main)
+- Back links: `text-accent hover:text-accent-hover font-semibold uppercase` (replaced `text-gray-500 hover:text-gray-700`)
+- `notFoundState()` helper: sharp corners, `bg-danger-bg border-danger/20 text-danger`, added `role="alert"` — removed `rounded-lg border-red-200 bg-red-50`
+- `forbiddenState()` helper: sharp corners, `bg-warning-bg border-warning-border text-warning-text`, added `role="alert"` — removed `rounded-lg border-yellow-200 bg-yellow-50`
+- Files changed: src/app/visits/[id]/actions/[actionId]/page.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - This page has 3 render paths sharing the same layout pattern — notFoundState (used for both visit-not-found and action-not-found), forbiddenState, and the main success path. All 3 need the same full-bleed + progressive padding wrapper.
+  - The notFoundState helper is parameterized (title, description) and used twice with different messages — update both usages via the shared helper, not inline.
+  - No test assertions broke because the page test file uses only semantic queries (getByText, getByRole) — no class name assertions exist.
+---
