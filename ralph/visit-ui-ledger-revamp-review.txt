@@ -1,0 +1,48 @@
+# Visit UI Ledger Revamp — Final Review
+
+## Summary
+Restyled all school visit pages and components to the Ledger UI design system:
+emerald green corporate brutalist (sharp corners, thick accent borders, uppercase
+headers, monospace numbers, minimal shadows). 14 user stories completed across
+15 iterations.
+
+## Files Changed (17 files)
+- src/app/globals.css — 19 CSS custom properties + @theme inline tokens + focus suppression
+- src/lib/theme.ts — (new) dynamic inline style helper
+- src/lib/visit-actions.ts — shared statusBadgeClass() helper
+- src/lib/visit-actions.test.ts — 4 new tests for statusBadgeClass
+- src/app/visits/page.tsx — visits list (full-bleed, tables, filters)
+- src/app/visits/[id]/page.tsx — visit detail (card, progress bar, a11y)
+- src/app/visits/[id]/actions/[actionId]/page.tsx — action detail shell
+- src/app/dashboard/page.tsx — Recent Visits table + Start Visit button only
+- src/components/SchoolTabs.tsx — tab nav + visit history section
+- src/components/SchoolTabs.test.tsx — updated class assertions
+- src/components/VisitsTab.tsx — loading/error states
+- src/components/visits/ActionPointList.tsx — action card list
+- src/components/visits/ActionTypePickerModal.tsx — action picker modal
+- src/components/visits/ActionDetailForm.tsx — form fields, buttons, alerts
+- src/components/visits/ClassroomObservationForm.tsx — rubric form, sticky bar
+- src/components/visits/CompleteVisitButton.tsx — GPS alerts, complete button
+- src/components/visits/NewVisitForm.tsx — GPS states, start visit form
+
+## Verification
+- grep: zero rounded-md/rounded-lg on data elements (only rounded-full on badges)
+- grep: zero shadow on cards (only shadow-xl on modal, intentional per style guide)
+- grep: zero bg-blue-600/bg-green-600, zero focus:ring-*
+- grep: zero hardcoded gray-*/blue-*/green-*/red-*/yellow-* in visit source files
+- dashboard/page.tsx: remaining rounded-lg/shadow are in non-visit sections (header,
+  stat cards, permission errors) — correctly out of scope per US-004
+- npm run build: passes
+- npm run test: 1104/1104 tests pass (74 files, 4 new tests added in US-014)
+
+## Design Decisions
+- Modals keep shadow-xl (style guide exception)
+- dashboard non-visit elements unchanged (scoped per US-004)
+- font-mono applied to parent containers, not <span>-wrapped numbers (RTL compat)
+- All alert states use role="alert" for accessibility
+- Progress bar has role="progressbar" + aria-valuenow/min/max
+
+## Recommendations
+- Consider extending Ledger UI to dashboard non-visit elements (header, stat cards)
+- Consider extending to admin pages and login page for full visual consistency
+- The rounded-full exception on status badges is intentional and should be preserved
