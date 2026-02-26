@@ -174,7 +174,7 @@
         "Verify in browser using agent-browser: open an action detail form, check form field styling, button styles, alert styling"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -191,3 +191,31 @@ Session: 2433ce56-28db-420b-98e6-71af0fb84f7c
   - Radio accent: use `accent-accent` (Tailwind v4 utility from @theme token) instead of `accent-[var(--color-accent)]`
   - Tests use only semantic queries (getByRole, getByText, getByLabelText) — CSS-only changes don't break any tests
 ---
+
+## 2026-02-26 - US-009
+Session: 781f6339-1a65-4240-ac5e-4bf08bb978d5
+- Restyled `src/components/visits/ActionDetailForm.tsx` to Ledger UI design system
+- Header card: `bg-white shadow rounded-lg` → `bg-bg-card border border-border` (sharp, no shadow)
+- Action type title: added `uppercase tracking-tight text-text-primary` (replaced `text-gray-900`)
+- Description: `text-text-secondary` (replaced `text-gray-500`)
+- Status badge: simplified to `inline-flex ${statusBadgeClass()}` — removed redundant sizing classes already in helper
+- Timestamps: `text-text-muted font-mono` on parent container (replaced `text-gray-500`)
+- Warning alerts (unsupported version + generic): sharp, `bg-warning-bg border-warning-border text-warning-text`, added `role="alert"`
+- Error alert: sharp, `bg-danger-bg border-danger/20 text-danger`, added `role="alert"`. Error detail list: `text-danger`
+- GPS acquiring alert: sharp, `bg-bg-card-alt border-border text-text-primary`. Cancel: `text-accent`
+- Read-only notice: sharp, `bg-bg-card-alt border-border text-text-secondary`
+- Form card: `bg-white shadow rounded-lg` → `bg-bg-card border border-border` (sharp, no shadow)
+- Form title: `font-bold text-text-primary uppercase tracking-wide` (replaced `font-semibold text-gray-900`)
+- Field labels: `text-xs font-bold uppercase tracking-wide text-text-muted` (replaced `text-sm font-medium text-gray-700`)
+- Inputs/textareas: `border-2 border-border focus:border-accent` sharp (removed `rounded-md shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500`). Disabled: `bg-bg-card-alt`
+- Save button: `bg-accent font-bold uppercase` (replaced `bg-blue-600 rounded-md font-medium`)
+- End button: `bg-accent font-bold uppercase` (replaced `bg-green-600 rounded-md font-medium`)
+- Removed ALL `rounded-md`, `rounded-lg`, `shadow`, hardcoded `gray-*`/`blue-*`/`green-*`/`yellow-*`/`red-*` classes
+- Files changed: src/components/visits/ActionDetailForm.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - ActionDetailForm tests use only semantic queries — CSS-only changes never break tests (consistent with ActionPointList, ActionTypePickerModal)
+  - The dynamic `FieldConfig[]` renderer (lines ~730-758) generates N labels + inputs based on action type config — label/input style changes apply to ALL generated fields via the shared template
+  - All alert states (warning, error, GPS, read-only) should get `role="alert"` for accessibility
+  - `statusBadgeClass()` already includes `rounded-full px-2.5 py-0.5 text-xs font-medium` — callers only need `inline-flex ${statusBadgeClass(status)}`
+---
