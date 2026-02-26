@@ -249,7 +249,7 @@
         "Verify in browser using agent-browser: navigate to a school page, click Visits tab, check tab styling, visit row styling, status badges"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

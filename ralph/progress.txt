@@ -292,3 +292,31 @@ Session: 97d1b080-3ce8-4d09-9e0c-cb8be1c2fdcd
   - API error alert is separate from GPS errors — it catches fetch failures. Uses `role="alert"` for screen reader announcements
   - LoadingLink className is pass-through — update classes in the caller (NewVisitForm), NOT in LoadingLink.tsx itself
 ---
+
+## 2026-02-26 - US-013
+Session: 2c122857-1707-4f4e-95b6-5135b7a98299
+- Restyled `src/components/SchoolTabs.tsx` to Ledger UI design system
+- Tab nav: `border-b border-gray-200` → `border-b-2 border-border`
+- Active tab: `border-blue-500 text-blue-600` → `border-accent text-accent`, added `uppercase font-bold`
+- Inactive tab: `text-gray-500 hover:text-gray-700 hover:border-gray-300` → `text-text-secondary hover:text-text-primary hover:border-border`
+- VisitHistorySection empty state: `bg-gray-50 border-gray-200 rounded-lg` → `bg-bg-card-alt border-border` (sharp), muted text uppercase
+- Start Visit buttons: `rounded-md bg-green-600` → `bg-accent font-bold uppercase tracking-wide` (sharp)
+- Visit rows: `bg-gray-50 rounded-lg` → `bg-bg-card-alt border-b border-border` (sharp)
+- Container: `bg-white shadow rounded-lg` → `bg-bg-card border border-border` (sharp, no shadow)
+- Section header: `font-semibold text-gray-900` → `font-bold text-text-primary uppercase tracking-wide`
+- View/Continue links: `text-blue-600` → `text-accent font-bold uppercase`
+- Timestamps: `text-gray-500` → `text-text-muted font-mono`
+- Status badges already using shared `statusBadgeClass()` from US-002
+- Restyled `src/components/VisitsTab.tsx` to Ledger UI
+- Loading spinner: `border-blue-600` → `border-accent`
+- Loading text: `text-gray-600` → `text-text-secondary`
+- Error state: `bg-red-50 border-red-200 rounded-lg text-red-800` → `bg-danger-bg border-danger/20 text-danger` (sharp)
+- Updated `src/components/SchoolTabs.test.tsx`: active tab assertions from `border-blue-500`/`text-blue-600` → `border-accent`/`text-accent`
+- Files changed: src/components/SchoolTabs.tsx, src/components/VisitsTab.tsx, src/components/SchoolTabs.test.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - SchoolTabs.test.tsx has className assertions (unlike most visit component tests) — must update when restyling tab classes
+  - The `border-transparent` assertion on inactive tabs still passes since we kept `border-transparent` in the inactive state
+  - VisitsTab is very small (55 lines) — only a loading spinner, error state, and a render of VisitHistorySection
+  - Empty state text gets `uppercase tracking-wide` treatment matching other empty states in the Ledger UI
+---
