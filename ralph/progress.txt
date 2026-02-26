@@ -105,3 +105,27 @@ Session: 45aeb0c4-094a-4561-8201-cb185492a155
   - Dashboard visit restyling is scoped — only Recent Visits table + Start Visit button. Do NOT restyle school cards, pagination, search, stats, or nav elements.
   - The `statusBadgeClass()` integration was already done in US-002, so this step only needed visual class changes.
 ---
+
+## 2026-02-26 - US-005
+Session: 770207b2-8c63-4071-9a80-e149ac084a05
+- Restyled `src/app/visits/[id]/page.tsx` to Ledger UI design system
+- Page layout: replaced `max-w-4xl mx-auto` with full-bleed `min-h-screen bg-bg` + progressive padding wrapper
+- Back link: `text-accent hover:text-accent-hover font-semibold uppercase` (replaced `text-gray-500`)
+- Visit info card: sharp corners (`bg-bg-card border border-border`), removed shadow and rounded-lg
+- Title: added `uppercase tracking-tight text-text-primary`
+- Visit date: `text-text-secondary` (replaced `text-gray-500`)
+- Timestamps: `text-text-muted font-mono` (replaced `text-gray-400`)
+- Status badge: simplified to `inline-flex ${statusBadgeClass()}` — removed redundant sizing classes already in helper
+- Progress bar: sharp (removed `rounded-full` on track and fill), added `role="progressbar"` + `aria-valuenow`/`aria-valuemin`/`aria-valuemax` accessibility attrs
+- Progress fill: `bg-accent` (replaced `bg-green-600`)
+- Progress numbers: added `font-mono`
+- Read-only notices: `bg-bg-card-alt border border-border` sharp (replaced `bg-gray-50 rounded-md`)
+- Not-found state: sharp, theme danger (`bg-danger-bg border-danger/20 text-danger`), added `role="alert"`
+- Forbidden state: sharp, theme warning (`bg-warning-bg border-warning-border text-warning-text`), added `role="alert"`
+- Files changed: src/app/visits/[id]/page.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - `statusBadgeClass()` already includes `rounded-full px-2.5 py-0.5 text-xs font-medium` — callers only need `inline-flex ${statusBadgeClass(status)}`, no extra sizing/font classes
+  - Progress bar accessibility: add `role="progressbar"` + `aria-valuenow`/`aria-valuemin={0}`/`aria-valuemax={100}` on the track div
+  - Not-found/forbidden states use `role="alert"` for screen reader announcements
+---

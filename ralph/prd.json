@@ -97,7 +97,7 @@
         "Verify in browser using agent-browser: navigate to a visit detail page, check card styling, progress bar, back link, status badge"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
