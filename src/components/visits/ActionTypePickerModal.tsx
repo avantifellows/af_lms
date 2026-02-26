@@ -42,11 +42,15 @@ export default function ActionTypePickerModal({
           <p className="mt-1 text-sm text-text-muted">Pick one action type to create a pending card.</p>
         </div>
 
-        <div className="max-h-80 space-y-2 overflow-y-auto px-5 py-4">
+        <div className="space-y-2 px-5 py-4">
           {ACTION_TYPE_VALUES.map((actionType) => (
             <label
               key={actionType}
-              className="flex cursor-pointer items-start gap-3 border border-border px-3 py-2 hover:bg-hover-bg"
+              className={`flex cursor-pointer items-center gap-4 border-2 px-4 py-3 transition-colors ${
+                selectedType === actionType
+                  ? "border-accent bg-success-bg"
+                  : "border-border hover:bg-hover-bg hover:border-accent/50"
+              }`}
             >
               <input
                 type="radio"
@@ -56,9 +60,9 @@ export default function ActionTypePickerModal({
                 onChange={() => {
                   setSelectedType(actionType);
                 }}
-                className="mt-0.5 accent-accent"
+                className="h-5 w-5 accent-accent"
               />
-              <span className="text-sm text-text-primary">{getActionTypeLabel(actionType)}</span>
+              <span className="text-base font-medium text-text-primary">{getActionTypeLabel(actionType)}</span>
             </label>
           ))}
         </div>

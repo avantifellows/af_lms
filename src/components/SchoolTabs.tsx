@@ -85,7 +85,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
         {visits.map((visit) => (
           <div
             key={visit.id}
-            className="flex justify-between items-center p-3 bg-bg-card-alt border-b border-border"
+            className="flex justify-between items-center p-4 bg-bg-card border border-border rounded-lg shadow-sm hover:shadow-md hover:border-accent transition-all duration-150"
           >
             <div>
               <div className="flex items-center gap-2">
@@ -120,7 +120,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
             </div>
             <Link
               href={`/visits/${visit.id}`}
-              className="text-sm text-accent hover:text-accent-hover font-bold uppercase"
+              className="px-5 py-2.5 text-sm font-bold uppercase tracking-wide border-2 border-accent text-accent hover:bg-accent hover:text-text-on-accent transition-colors"
             >
               {visit.status === "completed" ? "View" : "Continue"}
             </Link>

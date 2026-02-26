@@ -258,7 +258,7 @@ export default function ActionPointList({
 
   return (
     <div className="bg-bg-card border border-border overflow-hidden">
-      <div className="px-6 py-4 border-b-2 border-border-accent flex items-center justify-between gap-3">
+      <div className="px-4 sm:px-6 py-4 border-b-2 border-border-accent flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Action Points</h2>
           <span className="text-xs text-text-muted">
@@ -274,7 +274,7 @@ export default function ActionPointList({
               setIsAddModalOpen(true);
             }}
             disabled={isBusy}
-            className="inline-flex items-center bg-accent px-3 py-2 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center justify-center bg-accent px-4 py-2.5 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50 w-full sm:w-auto"
           >
             Add Action Point
           </button>
@@ -282,19 +282,19 @@ export default function ActionPointList({
       </div>
 
       {warning && (
-        <div className="mx-6 mt-4 border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-text" role="alert">
+        <div className="mx-4 sm:mx-6 mt-4 border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-text" role="alert">
           {warning}
         </div>
       )}
 
       {error && (
-        <div className="mx-6 mt-4 border border-danger/20 bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
+        <div className="mx-4 sm:mx-6 mt-4 border border-danger/20 bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
           {error}
         </div>
       )}
 
       {startState === "acquiring" && startingActionId !== null && (
-        <div className="mx-6 mt-4 flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-2">
+        <div className="mx-4 sm:mx-6 mt-4 flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-2">
           <span className="text-sm text-text-primary">Getting location to start action...</span>
           <button
             type="button"
@@ -309,7 +309,7 @@ export default function ActionPointList({
       )}
 
       {items.length === 0 ? (
-        <div className="px-6 py-8 text-sm text-text-muted uppercase tracking-wide">
+        <div className="px-4 sm:px-6 py-8 text-sm text-text-muted uppercase tracking-wide">
           No action points added yet.
         </div>
       ) : (
@@ -320,9 +320,9 @@ export default function ActionPointList({
               data-testid={`action-card-${action.id}`}
               data-action-type={action.action_type}
               data-action-status={action.status}
-              className="px-6 py-4 border-b border-border"
+              className="px-4 sm:px-6 py-4 border-b border-border"
             >
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
                 <div>
                   <div className="text-sm font-medium text-text-primary">
                     {formatActionType(action.action_type)}
@@ -332,7 +332,7 @@ export default function ActionPointList({
                   </div>
                 </div>
                 <span
-                  className={`inline-flex ${statusBadgeClass(action.status)}`}
+                  className={`inline-flex shrink-0 self-start sm:self-auto ${statusBadgeClass(action.status)}`}
                 >
                   {formatActionStatus(action.status)}
                 </span>

@@ -162,13 +162,13 @@ export default async function VisitDetailPage({ params }: PageProps) {
         </Link>
       </div>
 
-      <div className="bg-bg-card border border-border p-6 mb-6">
-        <div className="flex justify-between items-start">
+      <div className="bg-bg-card border border-border p-4 sm:p-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
           <div>
-            <h1 className="text-2xl font-bold text-text-primary uppercase tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">
               {visit.school_name || visit.school_code}
             </h1>
-            <p className="mt-1 text-text-secondary">
+            <p className="mt-1 text-text-secondary text-sm sm:text-base">
               Visit on {new Date(visit.visit_date).toLocaleDateString("en-IN", {
                 year: "numeric",
                 month: "short",
@@ -188,7 +188,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
             </div>
           </div>
           <span
-            className={`inline-flex ${statusBadgeClass(visit.status)}`}
+            className={`inline-flex shrink-0 ${statusBadgeClass(visit.status)}`}
           >
             {formatVisitStatus(visit.status)}
           </span>
