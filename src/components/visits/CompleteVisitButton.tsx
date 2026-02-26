@@ -128,16 +128,16 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
   return (
     <div className="space-y-2">
       {warning && (
-        <p className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2">
+        <p role="alert" className="text-sm text-warning-text bg-warning-bg border border-warning-border px-3 py-2">
           {warning}
         </p>
       )}
 
       {error && (
-        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+        <div role="alert" className="text-sm text-danger bg-danger-bg border border-danger/20 px-3 py-2">
           <p>{error.message}</p>
           {error.details.length > 0 && (
-            <ul className="mt-1 list-disc pl-5" data-testid="complete-visit-error-details">
+            <ul className="mt-1 list-disc pl-5 text-danger" data-testid="complete-visit-error-details">
               {error.details.map((detail, index) => (
                 <li key={`${detail}-${index}`}>{detail}</li>
               ))}
@@ -147,14 +147,14 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
       )}
 
       {state === "acquiring" && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-          <span className="text-sm text-blue-800">Getting your location...</span>
+        <div className="flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-2">
+          <span className="text-sm text-text-primary">Getting your location...</span>
           <button
             type="button"
             onClick={() => {
               cancelRef.current?.();
             }}
-            className="text-xs font-medium text-blue-700 underline hover:text-blue-900"
+            className="text-xs font-medium text-accent underline hover:text-accent-hover"
           >
             Cancel
           </button>
@@ -165,7 +165,7 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
         type="button"
         onClick={handleCompleteVisit}
         disabled={disabled || isBusy}
-        className="inline-flex items-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {state === "acquiring"
           ? "Acquiring location..."
