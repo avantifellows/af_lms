@@ -88,39 +88,39 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
       : null;
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="bg-white shadow rounded-lg p-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">
+    <main className="min-h-screen bg-bg px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+      <div className="bg-bg-card border border-border p-6">
+        <h1 className="text-2xl font-bold text-text-primary uppercase tracking-tight mb-6">
           Start New School Visit
         </h1>
 
         {/* School code display */}
         <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
             School Code
           </label>
           <input
             type="text"
             value={udise}
             disabled
-            className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600"
+            className="w-full px-3 py-2 border-2 border-border bg-bg-card-alt text-text-secondary"
           />
         </div>
 
         {/* GPS Status */}
         <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-2">
             Location
           </label>
 
           {gpsState.status === "acquiring" && (
-            <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-md">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            <div className="flex items-center gap-3 p-4 bg-bg-card-alt border border-border">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
               <div>
-                <p className="text-sm font-medium text-blue-800">
+                <p className="text-sm font-medium text-text-primary">
                   Getting your location...
                 </p>
-                <p className="text-xs text-blue-600 mt-1">
+                <p className="text-xs text-text-secondary mt-1">
                   This may take a moment. Stay in an open area for best results.
                 </p>
               </div>
@@ -130,7 +130,7 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
                   cancelRef.current?.();
                   setGpsState({ status: "idle" });
                 }}
-                className="ml-auto text-sm text-blue-700 hover:text-blue-900 underline"
+                className="ml-auto text-sm text-accent hover:text-accent-hover underline"
               >
                 Cancel
               </button>
@@ -139,17 +139,17 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
 
           {gpsState.status === "acquired" && (
             <div
-              className={`p-4 rounded-md border ${
+              className={`p-4 border ${
                 accuracyStatus === "good"
-                  ? "bg-green-50 border-green-200"
-                  : "bg-yellow-50 border-yellow-200"
+                  ? "bg-success-bg border-border-accent"
+                  : "bg-warning-bg border-warning-border"
               }`}
             >
               <p
                 className={`text-sm font-medium ${
                   accuracyStatus === "good"
-                    ? "text-green-800"
-                    : "text-yellow-800"
+                    ? "text-accent"
+                    : "text-warning-text"
                 }`}
               >
                 {accuracyStatus === "good"
@@ -157,10 +157,10 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
                   : "Location acquired (moderate accuracy)"}
               </p>
               <p
-                className={`text-xs mt-1 ${
+                className={`text-xs mt-1 font-mono ${
                   accuracyStatus === "good"
-                    ? "text-green-600"
-                    : "text-yellow-600"
+                    ? "text-text-secondary"
+                    : "text-warning-text"
                 }`}
               >
                 Accuracy: ~{Math.round(gpsState.location.accuracy)}m
@@ -171,12 +171,12 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
           )}
 
           {gpsState.status === "error" && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-sm font-medium text-red-800">
+            <div className="p-4 bg-danger-bg border border-danger/20">
+              <p className="text-sm font-medium text-danger">
                 {gpsState.error.message}
               </p>
               {gpsState.error.code === "PERMISSION_DENIED" ? (
-                <div className="mt-3 text-sm text-red-700 space-y-2">
+                <div className="mt-3 text-sm text-danger space-y-2">
                   <p className="font-medium">How to enable location:</p>
                   <ol className="list-decimal list-inside space-y-1 text-xs">
                     <li>Tap the lock/settings icon in your browser&apos;s address bar</li>
@@ -188,7 +188,7 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
                 <button
                   type="button"
                   onClick={acquireLocation}
-                  className="mt-2 text-sm text-red-700 hover:text-red-900 underline"
+                  className="mt-2 text-sm text-accent hover:text-accent-hover underline"
                 >
                   Try again
                 </button>
@@ -200,7 +200,7 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
             <button
               type="button"
               onClick={acquireLocation}
-              className="w-full p-4 border-2 border-dashed border-gray-300 rounded-md text-sm text-gray-600 hover:border-gray-400 hover:text-gray-700"
+              className="w-full p-4 border-2 border-dashed border-border text-sm text-text-secondary hover:border-border-accent hover:text-text-primary"
             >
               Tap to get location
             </button>
@@ -209,8 +209,8 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
 
         {/* API Error */}
         {apiError && (
-          <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-md">
-            <p className="text-sm text-red-800">{apiError}</p>
+          <div className="mb-6 p-3 bg-danger-bg border border-danger/20" role="alert">
+            <p className="text-sm text-danger">{apiError}</p>
           </div>
         )}
 
@@ -220,27 +220,27 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
             type="button"
             onClick={handleStartVisit}
             disabled={gpsState.status !== "acquired" || isSubmitting}
-            className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 py-2.5 px-5 border border-transparent text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? "Starting..." : "Start Visit"}
           </button>
           <LoadingLink
             href={`/school/${udise}`}
             loadingText="Going back..."
-            className="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="py-2.5 px-5 border border-border text-sm font-bold text-text-secondary bg-bg-card hover:bg-hover-bg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel and go back
           </LoadingLink>
         </div>
       </div>
 
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="font-medium text-blue-900 mb-2">Visit Workflow</h3>
-        <p className="text-sm text-blue-800 mb-2">
+      <div className="mt-6 bg-success-bg border border-border-accent p-4">
+        <h3 className="font-medium text-text-primary mb-2">Visit Workflow</h3>
+        <p className="text-sm text-text-secondary mb-2">
           Once you start the visit, create action points as needed and move each
           action through its lifecycle:
         </p>
-        <ol className="text-sm text-blue-800 list-decimal list-inside space-y-1">
+        <ol className="text-sm text-text-secondary list-decimal list-inside space-y-1">
           <li>Add an action point (for example, Classroom Observation or Principal Meeting).</li>
           <li>Start an action to capture start GPS and timestamp.</li>
           <li>Open in-progress actions to fill details and save updates.</li>
