@@ -3,6 +3,11 @@ import userEvent from "@testing-library/user-event";
 
 import ActionPointList, { type VisitActionListItem } from "./ActionPointList";
 
+const mockPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -40,6 +45,7 @@ function makeAction(overrides: Partial<VisitActionListItem>): VisitActionListIte
 describe("ActionPointList", () => {
   beforeEach(() => {
     mockGetAccurateLocation.mockReset();
+    mockPush.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -286,6 +292,7 @@ describe("ActionPointList", () => {
       expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
       expect(screen.getByText("In Progress")).toBeInTheDocument();
+      expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/101");
     });
   });
 });

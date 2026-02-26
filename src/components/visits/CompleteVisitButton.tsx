@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import Toast from "@/components/Toast";
 import { getAccurateLocation } from "@/lib/geolocation";
 
 type CompleteState = "idle" | "acquiring" | "submitting";
@@ -74,6 +75,8 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
   const [warning, setWarning] = useState<string | null>(null);
 
   const isBusy = state !== "idle";
+  const dismissError = useCallback(() => setError(null), []);
+  const dismissWarning = useCallback(() => setWarning(null), []);
 
   async function handleCompleteVisit() {
     if (disabled || isBusy) {
@@ -128,22 +131,11 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
   return (
     <div className="space-y-2">
       {warning && (
-        <p role="alert" className="text-sm text-warning-text bg-warning-bg border border-warning-border px-3 py-2">
-          {warning}
-        </p>
+        <Toast variant="warning" message={warning} onDismiss={dismissWarning} />
       )}
 
       {error && (
-        <div role="alert" className="text-sm text-danger bg-danger-bg border border-danger/20 px-3 py-2">
-          <p>{error.message}</p>
-          {error.details.length > 0 && (
-            <ul className="mt-1 list-disc pl-5 text-danger" data-testid="complete-visit-error-details">
-              {error.details.map((detail, index) => (
-                <li key={`${detail}-${index}`}>{detail}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <Toast variant="error" message={error.message} details={error.details} onDismiss={dismissError} />
       )}
 
       {state === "acquiring" && (

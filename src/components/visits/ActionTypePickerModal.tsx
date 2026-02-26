@@ -43,28 +43,36 @@ export default function ActionTypePickerModal({
         </div>
 
         <div className="space-y-2 px-5 py-4">
-          {ACTION_TYPE_VALUES.map((actionType) => (
-            <label
-              key={actionType}
-              className={`flex cursor-pointer items-center gap-4 border-2 px-4 py-3 transition-colors ${
-                selectedType === actionType
-                  ? "border-accent bg-success-bg"
-                  : "border-border hover:bg-hover-bg hover:border-accent/50"
-              }`}
-            >
-              <input
-                type="radio"
-                name="action-type"
-                value={actionType}
-                checked={selectedType === actionType}
-                onChange={() => {
-                  setSelectedType(actionType);
-                }}
-                className="h-5 w-5 accent-accent"
-              />
-              <span className="text-base font-medium text-text-primary">{getActionTypeLabel(actionType)}</span>
-            </label>
-          ))}
+          {ACTION_TYPE_VALUES.map((actionType) => {
+            const enabled = actionType === "classroom_observation";
+            return (
+              <label
+                key={actionType}
+                className={`flex items-center gap-4 border-2 px-4 py-3 transition-colors ${
+                  !enabled
+                    ? "cursor-not-allowed border-border opacity-40"
+                    : selectedType === actionType
+                      ? "cursor-pointer border-accent bg-success-bg"
+                      : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="action-type"
+                  value={actionType}
+                  checked={selectedType === actionType}
+                  disabled={!enabled}
+                  onChange={() => {
+                    setSelectedType(actionType);
+                  }}
+                  className="h-5 w-5 accent-accent"
+                />
+                <span className={`text-base font-medium ${enabled ? "text-text-primary" : "text-text-muted"}`}>
+                  {getActionTypeLabel(actionType)}
+                </span>
+              </label>
+            );
+          })}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">

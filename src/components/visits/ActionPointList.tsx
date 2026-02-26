@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import Toast from "@/components/Toast";
 import { getAccurateLocation } from "@/lib/geolocation";
 import {
   ACTION_STATUS_VALUES,
@@ -121,6 +123,7 @@ export default function ActionPointList({
   actions,
   readOnly = false,
 }: ActionPointListProps) {
+  const router = useRouter();
   const [items, setItems] = useState<VisitActionListItem[]>(actions);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -134,6 +137,9 @@ export default function ActionPointList({
   const isBusy = useMemo(() => {
     return isAdding || deletingActionId !== null || startingActionId !== null;
   }, [deletingActionId, isAdding, startingActionId]);
+
+  const dismissError = useCallback(() => setError(null), []);
+  const dismissWarning = useCallback(() => setWarning(null), []);
 
   async function handleAddAction(actionType: string) {
     setError(null);
@@ -245,6 +251,7 @@ export default function ActionPointList({
       setItems((current) =>
         current.map((action) => (action.id === startedAction.id ? startedAction : action))
       );
+      router.push(`/visits/${visitId}/actions/${actionId}`);
     } catch (err) {
       if (!isLocationCancelled(err)) {
         setError(extractErrorMessage(err, "Failed to start action point"));
@@ -282,15 +289,11 @@ export default function ActionPointList({
       </div>
 
       {warning && (
-        <div className="mx-4 sm:mx-6 mt-4 border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-text" role="alert">
-          {warning}
-        </div>
+        <Toast variant="warning" message={warning} onDismiss={dismissWarning} />
       )}
 
       {error && (
-        <div className="mx-4 sm:mx-6 mt-4 border border-danger/20 bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
-          {error}
-        </div>
+        <Toast variant="error" message={error} onDismiss={dismissError} />
       )}
 
       {startState === "acquiring" && startingActionId !== null && (

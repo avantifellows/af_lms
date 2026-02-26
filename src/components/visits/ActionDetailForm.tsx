@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import Toast from "@/components/Toast";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
 import {
   CURRENT_RUBRIC_VERSION,
@@ -451,6 +452,9 @@ export default function ActionDetailForm({
   const [warning, setWarning] = useState<string | null>(null);
   const cancelEndRef = useRef<(() => void) | null>(null);
 
+  const dismissError = useCallback(() => setError(null), []);
+  const dismissWarning = useCallback(() => setWarning(null), []);
+
   const config = useMemo(() => {
     if (isActionType(action.action_type)) {
       return ACTION_FORM_CONFIGS[action.action_type];
@@ -656,7 +660,7 @@ export default function ActionDetailForm({
         </div>
       </div>
 
-      {unsupportedVersionMessage ? (
+      {unsupportedVersionMessage && (
         <p
           className="text-sm text-warning-text bg-warning-bg border border-warning-border px-3 py-2"
           data-testid="classroom-unsupported-version-warning"
@@ -664,27 +668,14 @@ export default function ActionDetailForm({
         >
           {unsupportedVersionMessage}
         </p>
-      ) : warning && (
-        <p className="text-sm text-warning-text bg-warning-bg border border-warning-border px-3 py-2" role="alert">
-          {warning}
-        </p>
+      )}
+
+      {!unsupportedVersionMessage && warning && (
+        <Toast variant="warning" message={warning} onDismiss={dismissWarning} />
       )}
 
       {error && (
-        <div
-          className="text-sm text-danger bg-danger-bg border border-danger/20 px-3 py-2"
-          data-testid="action-error"
-          role="alert"
-        >
-          <p>{error.message}</p>
-          {error.details.length > 0 && (
-            <ul className="mt-1 list-disc pl-5 text-danger" data-testid="action-error-details">
-              {error.details.map((detail, index) => (
-                <li key={`${detail}-${index}`}>{detail}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <Toast variant="error" message={error.message} details={error.details} onDismiss={dismissError} />
       )}
 
       {state === "acquiring" && (
