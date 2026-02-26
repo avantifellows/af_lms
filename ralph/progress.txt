@@ -262,3 +262,33 @@ Session: caf5814d-2a84-4d29-85b3-a2268fd53067
   - Warning/error alerts get `role="alert"` for accessibility — no test assertions check for this yet but it's the right pattern
   - GPS acquiring alert uses `bg-bg-card-alt border-border` (neutral info style) — same as ActionPointList and ActionDetailForm GPS alerts
 ---
+
+## 2026-02-26 - US-012
+Session: 97d1b080-3ce8-4d09-9e0c-cb8be1c2fdcd
+- Restyled `src/components/visits/NewVisitForm.tsx` to Ledger UI design system
+- Page layout: `mx-auto max-w-2xl` → full-bleed `min-h-screen bg-bg` + progressive padding wrapper
+- Card: `bg-white shadow rounded-lg` → `bg-bg-card border border-border` (sharp, no shadow)
+- Title: added `uppercase tracking-tight text-text-primary` (replaced `text-gray-900`)
+- Field labels: `text-sm font-medium text-gray-700` → `text-xs font-bold uppercase tracking-wide text-text-muted`
+- School code input: `rounded-md border-gray-300 bg-gray-100` → `border-2 border-border bg-bg-card-alt` (sharp)
+- GPS Acquiring: `bg-blue-50 border-blue-200 rounded-md` → `bg-bg-card-alt border-border` (sharp). Spinner: `border-accent`. Cancel: `text-accent`
+- GPS Acquired (good): `bg-green-50 border-green-200` → `bg-success-bg border-border-accent`. Text: `text-accent`
+- GPS Acquired (moderate): `bg-yellow-50 border-yellow-200` → `bg-warning-bg border-warning-border`. Text: `text-warning-text`
+- GPS accuracy value: `font-mono` on parent `<p>` (NOT wrapped in `<span>` — would break RTL getByText)
+- GPS Error: `bg-red-50 border-red-200 rounded-md` → `bg-danger-bg border-danger/20` (sharp). Text: `text-danger`. Try again: `text-accent`
+- GPS Idle: `rounded-md border-dashed border-gray-300` → `border-dashed border-border` (sharp)
+- API Error: `bg-red-50 rounded-md` → `bg-danger-bg border-danger/20` (sharp), added `role="alert"`
+- Start Visit button: `rounded-md bg-green-600 shadow-sm focus:ring-*` → `bg-accent font-bold uppercase tracking-wide` (sharp, no ring/shadow)
+- Cancel/back LoadingLink: `rounded-md border-gray-300 shadow-sm focus:ring-*` → `border-border bg-bg-card hover:bg-hover-bg` (sharp, no ring/shadow)
+- Info box: `bg-blue-50 border-blue-200 rounded-lg` → `bg-success-bg border-border-accent` (sharp)
+- Removed ALL `rounded-md`, `rounded-lg`, `shadow`, `shadow-sm`, `focus:ring-*`, `focus:outline-none` classes
+- Removed ALL hardcoded `gray-*`/`blue-*`/`green-*`/`red-*`/`yellow-*` color classes
+- Files changed: src/components/visits/NewVisitForm.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - NewVisitForm tests use semantic queries + regex patterns (`/Accuracy: ~50m/`) — CSS-only changes never break tests
+  - GPS accuracy `font-mono`: use on parent `<p>` element, NOT in a `<span>` wrapper around the number — RTL `getByText(/Accuracy: ~50m/)` would break with split text nodes
+  - GPS states follow consistent pattern: acquiring=neutral (`bg-bg-card-alt border-border`), good=success (`bg-success-bg border-border-accent`), moderate=warning (`bg-warning-bg border-warning-border`), error=danger (`bg-danger-bg border-danger/20`), idle=dashed border
+  - API error alert is separate from GPS errors — it catches fetch failures. Uses `role="alert"` for screen reader announcements
+  - LoadingLink className is pass-through — update classes in the caller (NewVisitForm), NOT in LoadingLink.tsx itself
+---
