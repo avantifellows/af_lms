@@ -212,7 +212,7 @@
         "Verify in browser using agent-browser: check CompleteVisitButton on an in-progress visit"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -245,3 +245,20 @@ Session: cc654c81-2fc3-455b-8df8-2789619979ea
   - Textarea input pattern: `border-2 border-border focus:border-accent focus:outline-none disabled:bg-bg-card-alt` — consistent across all visit forms
   - Label pattern: `text-xs font-bold uppercase tracking-wide text-text-muted` — consistent across ActionDetailForm and ClassroomObservationForm
 ---
+
+## 2026-02-26 - US-011
+Session: caf5814d-2a84-4d29-85b3-a2268fd53067
+- Restyled `src/components/visits/CompleteVisitButton.tsx` to Ledger UI design system
+- Warning alert: `rounded-md bg-yellow-50 border-yellow-200 text-yellow-700` → `bg-warning-bg border-warning-border text-warning-text` (sharp), added `role="alert"`
+- Error alert: `rounded-md bg-red-50 border-red-200 text-red-700` → `bg-danger-bg border-danger/20 text-danger` (sharp), added `role="alert"`. Error detail list: added `text-danger`
+- GPS acquiring alert: `rounded-md bg-blue-50 border-blue-200` → `bg-bg-card-alt border-border` (sharp). Text: `text-text-primary`. Cancel: `text-accent hover:text-accent-hover`
+- Complete button: `rounded-md bg-green-600 px-4 py-2 font-medium` → `bg-accent px-5 py-2.5 font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover` (sharp, larger padding)
+- Preserved 3-state machine text (idle/acquiring/submitting)
+- Removed ALL `rounded-md`, hardcoded `yellow-*`/`red-*`/`blue-*`/`green-*` classes
+- Files changed: src/components/visits/CompleteVisitButton.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - CompleteVisitButton tests use only semantic queries — CSS-only changes never break tests (consistent with all other visit components)
+  - Warning/error alerts get `role="alert"` for accessibility — no test assertions check for this yet but it's the right pattern
+  - GPS acquiring alert uses `bg-bg-card-alt border-border` (neutral info style) — same as ActionPointList and ActionDetailForm GPS alerts
+---
