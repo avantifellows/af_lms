@@ -75,7 +75,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    const validRoles = ["teacher", "program_manager", "admin"];
+    const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
     const userRole = role && validRoles.includes(role) ? role : undefined;
 
     await query(

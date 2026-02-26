@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validRoles = ["teacher", "program_manager", "admin"];
+    const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
     const userRole = validRoles.includes(role) ? role : "teacher";
 
     const result = await query<{ id: number }>(

@@ -1,6 +1,6 @@
 # Project Context: `af_lms` (Avanti Fellows LMS / JNV Ops UI)
 
-Last updated: 2026-02-15
+Last updated: 2026-02-25
 Audience: engineers + AI coding agents onboarding to this repo
 
 ---
@@ -12,7 +12,7 @@ This repository contains an **internal Next.js web app** used by **Avanti Fellow
 - Browse JNV schools a user has access to
 - View student rosters for a school (read-heavy)
 - Update student fields and enrollment-related metadata (write operations)
-- Program Manager (PM) workflow for **school visits** (geo-tracking implemented; visit section forms WIP)
+- Program Manager (PM) workflow for **school visits** (per-action tracking with GPS; see §3.5)
 - Curriculum tracking **POC** (client-side only; stored in `localStorage`)
 - Quiz analytics (BigQuery-backed charts + student results)
 - Admin UI for access control (`user_permission`) + some metadata management
@@ -143,38 +143,80 @@ Admin sections:
 - Batches: `src/app/admin/batches/page.tsx` (edit batch `metadata` via DB Service)
 - Schools: `src/app/admin/schools/page.tsx` (edit `school.program_ids`)
 
-### 3.5 PM Visits (`/visits/*`)
+### 3.5 PM Visits (`/visits/*`) — Per-Action Tracking
 
-Implemented pages:
-- List: `src/app/visits/page.tsx`
-- Visit overview: `src/app/visits/[id]/page.tsx`
-- Principal meeting form: `src/app/visits/[id]/principal/page.tsx`
-- Start new visit: `src/app/school/[udise]/visit/new/page.tsx` (server component) + `src/components/visits/NewVisitForm.tsx` (client component with GPS)
+**Model:** Each school visit has multiple **action points** — discrete tasks the PM performs (e.g. classroom observation, principal meeting). Each action is its own DB row with its own lifecycle, GPS, and timestamps.
 
-Not implemented (linked from overview, but pages do not exist yet):
-- `/visits/[id]/leadership`, `/observations`, `/students`, `/staff`, `/feedback`
+#### Visit lifecycle
+- Visits have exactly **2 states**: `in_progress` → `completed` (no separate "ended" concept)
+- Visits start with **zero actions**; PM adds action points on-demand
+- **Completion requires**: ≥1 completed `classroom_observation` whose `data` passes strict rubric validation + no actions left `in_progress` + valid GPS
 
-Visit data is stored in Postgres table `lms_pm_school_visits` as JSONB with section keys like:
-`principalMeeting`, `leadershipMeetings`, `classroomObservations`, `studentDiscussions`, `staffMeetings`, `teacherFeedback`, `issueLog`.
+#### Classroom observation rubric contract (v1)
+- Top-level payload keys are rubric-only: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`
+- Legacy classroom keys (`class_details`, `observations`, `support_needed`) are not part of active payloads and are sanitized from edit/save paths
+- Validation behavior:
+  - PATCH while action is `in_progress`: lenient rubric validation (partial allowed)
+  - PATCH while action is `completed`: strict rubric validation
+  - END classroom observation action: strict rubric validation
+  - COMPLETE visit: at least one completed classroom observation with strict-valid rubric payload
+- Unsupported rubric version behavior:
+  - UI detects unknown explicit `rubric_version` and renders classroom observation as read-only (save/end blocked)
+  - API rejects unsupported `rubric_version` with `422` and details for PATCH/END/COMPLETE checks
+  - Missing `rubric_version` on legacy/empty rows bootstraps to current supported version in client state
 
-#### Geo-tracking (Phase 1 — code complete)
+#### Action lifecycle
+- Actions follow `pending → in_progress → completed`
+- **Start** captures GPS + timestamp; **End** captures GPS + timestamp
+- Multiple actions can be `in_progress` simultaneously
+- **Pending-only deletion** (soft delete: `deleted_at` set, row retained)
+- 8 MVP action types: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback
+- Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
-Visit-level GPS tracking records PM location at visit start and end:
-- **Start visit**: GPS captured on create; `inserted_at` serves as start timestamp (no separate `started_at`)
-- **End visit**: GPS captured via `POST /api/pm/visits/[id]/end`; `ended_at` set server-side (`NOW()`)
-- **Three distinct states**: Started (visit exists) → Ended (`ended_at` set) → Completed (`status='completed'`, disabled for Phase 1)
-- **GPS validation**: accept ≤100m, warn 100–500m, reject >500m (`src/lib/geo-validation.ts`)
-- **Client geolocation**: `src/lib/geolocation.ts` — `watchPosition` with 60s timeout, cancel support, secure-origin check
-- **End visit UI**: `src/components/visits/EndVisitButton.tsx` — client component with GPS capture + API call
-- **Privacy**: only visit owner PM + admins (level 4) can view exact lat/lng; coordinates not logged server-side
-- **Timestamps**: all stored as UTC (`TIMESTAMP` without TZ); `visit_date` derived server-side via `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`; UI displays in `Asia/Kolkata`
-- **Permissions**: PM can end own visit; admin can end any visit; idempotent (re-ending returns success, no overwrite)
-- **"Complete visit" is disabled** for Phase 1 (UI removed, API `PUT` handler still exists but unused)
+#### Implemented pages
+- List: `src/app/visits/page.tsx` (2-state list, admin/program_admin filters)
+- Visit detail: `src/app/visits/[id]/page.tsx` (action card list, complete button, read-only on completed)
+- Action detail: `src/app/visits/[id]/actions/[actionId]/page.tsx` (dynamic form by action type, save/end)
+- Start new visit: `src/app/school/[udise]/visit/new/page.tsx` (server) + `src/components/visits/NewVisitForm.tsx` (client, GPS)
+- Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
-DB columns added to `lms_pm_school_visits` (migration in db-service repo):
-`start_lat`, `start_lng`, `start_accuracy`, `ended_at`, `end_lat`, `end_lng`, `end_accuracy` + index on `ended_at`.
+#### Key components
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions
+- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions
+- `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type)
+- `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 
-Planning docs: `.planning/school-visit-geo-tracking/`
+#### Shared helpers
+- `src/lib/visit-actions.ts` — `ACTION_TYPES` map, `ActionType` union, status constants
+- `src/lib/visits-policy.ts` — shared auth/scope/locking helpers used across all visit routes
+- `src/lib/geo-validation.ts` — GPS validation (accept ≤100m, warn 100–500m, reject >500m)
+- `src/lib/geolocation.ts` — client `watchPosition` helper (60s timeout, cancel, secure-origin check)
+
+#### GPS + timestamps
+- All `*_at` timestamps stored as UTC (`TIMESTAMP` without TZ)
+- `visit_date` derived server-side via `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`; UI displays in `Asia/Kolkata`
+- GPS captured at action start, action end, and visit completion
+- **Privacy**: raw coordinates never returned in API responses or logged
+
+#### Role semantics
+- **PM owner**: read/write own visits and actions
+- **Admin** (`role="admin"`): scoped read/write (same GPS + validation rules apply)
+- **Program admin**: scoped read-only (can list/view but cannot add/start/end/complete)
+- **Passcode users**: blocked on all visit routes; UI redirects to school page
+
+#### DB schema
+- `lms_pm_school_visits`: visit-level data with `start_lat/lng/accuracy`, `completed_at`, `end_lat/lng/accuracy`, `status` (`in_progress`/`completed`)
+- `lms_pm_school_visit_actions`: per-action rows with `action_type`, `status`, `started_at`, `start_lat/lng/accuracy`, `ended_at`, `end_lat/lng/accuracy`, `data` (JSONB form payload), `deleted_at` (soft delete)
+- **Dropped columns** (hard cutover): `lms_pm_school_visits.data` (JSONB blob) and `lms_pm_school_visits.ended_at`
+- DB migration lives in db-service repo: `priv/repo/migrations/20260217120000_add_visit_actions_and_update_school_visits.exs`
+
+Planning docs: `docs/ai/school-visit-action-points/`
+
+#### Classroom observation rollout status (2026-02-25)
+- Implementation phases 1-5 are complete for the rubric rollout documented in `docs/ai/classroom-observation/2026-02-21-classroom-observation-implementation-and-testing-plan.md`
+- Manual frontend QA runbook is complete with `10/10` test cases passing (`docs/ai/classroom-observation/phase-5-manual-frontend-test-cases.md`)
+- Agent-browser exploratory testing was also run for role/session/geolocation flows (`docs/ai/agent-browser-testing.md`)
+- In-repo consumer impact audit is complete for classroom observation payload usage; BigQuery quiz analytics and curriculum flows do not consume `lms_pm_school_visit_actions.data`
 
 ### 3.6 Curriculum tracking (POC)
 
@@ -234,7 +276,7 @@ Routes that use DB Service (non-exhaustive):
 - `src/app/api/batches/route.ts` / `src/app/api/batches/[id]/route.ts` (admin batch metadata)
 
 **Exception — direct Postgres writes:**
-- PM visit mutations (`POST` create, `PATCH` section update, `PUT` complete, `POST` end) write directly to Postgres via `src/lib/db.ts`, bypassing DB Service.
+- PM visit mutations (create visit, action CRUD, action start/end, visit complete) write directly to Postgres via `src/lib/db.ts`, bypassing DB Service.
 
 Operational implication:
 - Local development needs both Postgres read access AND DB Service token for student/batch writes.
@@ -271,7 +313,8 @@ E2E tests:
 - `e2e/`: Playwright test suite
   - `e2e/fixtures/auth.ts`: session injection via NextAuth JWT; exports `adminPage`/`pmPage`/`teacherPage`/`passcodePage` fixtures; all page fixtures collect V8 coverage (not just the default page)
   - `e2e/helpers/test-users.ts`: deterministic test personas upserted into `user_permission`
-  - `e2e/helpers/db.ts`: `resetDatabase()` loads dump into `af_lms_test`; `dropDatabase()` cleans up
+  - `e2e/helpers/db.ts`: `resetDatabase()` loads dump into `af_lms_test`; runs versioned SQL migrations from `e2e/fixtures/migrations/*.sql`; `dropDatabase()` cleans up; `seedTestVisit()` / `seedVisitAction()` for visit test data
+  - `e2e/fixtures/migrations/*.sql`: versioned schema migrations applied after dump restore (tracked via `e2e_schema_migrations` table); used to bridge schema gaps between dump and current codebase
   - `e2e/tests/*.spec.ts`: smoke, dashboard, school, permissions, visits specs
   - `e2e/fixtures/db-dump.sql`: local dev DB dump (gitignored; developer creates via `pg_dump`)
 
@@ -300,8 +343,12 @@ Students:
 
 PM visits:
 - `src/app/api/pm/visits/route.ts` (GET list, POST create with GPS)
-- `src/app/api/pm/visits/[id]/route.ts` (GET with geo fields, PATCH section update, PUT complete)
-- `src/app/api/pm/visits/[id]/end/route.ts` (POST end visit with GPS)
+- `src/app/api/pm/visits/[id]/route.ts` (GET visit + actions)
+- `src/app/api/pm/visits/[id]/actions/route.ts` (GET list actions, POST create action)
+- `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` (GET single action, PATCH data, DELETE pending-only soft delete)
+- `src/app/api/pm/visits/[id]/actions/[actionId]/start/route.ts` (POST start action with GPS)
+- `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts` (POST end action with GPS)
+- `src/app/api/pm/visits/[id]/complete/route.ts` (POST complete visit with GPS + validation rules)
 
 Admin:
 - `src/app/api/admin/users/route.ts` (GET/POST)
@@ -366,8 +413,9 @@ npm run test:unit:coverage # Run with V8 coverage report
 ```
 
 Key details:
-- Test files live alongside source: `src/**/*.test.ts`
-- No DB or server needed — tests cover pure/sync functions (geo-validation, permissions, curriculum helpers)
+- Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
+- No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
+- 1100 tests across 74 files (as of 2026-02-23 full-suite run)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
@@ -442,15 +490,13 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - Hardcoded school passcodes in `src/lib/permissions.ts` (rotation requires deploy; avoid leaking)
 - DB SSL uses `rejectUnauthorized: false` (security trade-off)
 - No request timeouts when calling DB Service (a slow DB Service can hang requests)
-- PM visit **section pages** are mostly unimplemented (only principal meeting exists; leadership/observations/students/staff/feedback pages missing)
-- Visit completion (`PUT` with JSON `{ action: "complete" }`) exists in API but is **disabled in UI** for Phase 1 (geo-tracking uses separate Start/End flow)
 - Potential schema drift between scripts and production DB (timestamps + missing columns)
 - `src/proxy.ts` is treated as a **Next.js middleware** (build output shows `Proxy (Middleware)`) and redirects unauthenticated users away from protected routes; behavior overlaps with per-page `getServerSession()` guards.
-- Unit tests cover only pure/sync lib functions so far; no unit tests for API routes or React components yet
 - `npm run lint` currently fails due to:
   - `scripts/check-metadata.js` using `require()` (rule `@typescript-eslint/no-require-imports`)
   - a hooks dependency warning in `src/components/EditStudentModal.tsx`
 - `next build` warns about **multiple lockfiles** in a parent directory and may infer the workspace root incorrectly; consider setting `turbopack.root` or removing the extra lockfile if applicable.
+- E2E DB dump (`e2e/fixtures/db-dump.sql`) is pre-cutover; versioned SQL migrations in `e2e/fixtures/migrations/` bridge the gap. Once a post-cutover dump is regenerated, the compat migrations can be removed.
 
 ---
 
@@ -466,8 +512,9 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - Student edit UI: `src/components/EditStudentModal.tsx`
 - Student table + dropout UI: `src/components/StudentTable.tsx`
 - PM visits API: `src/app/api/pm/visits/**`
-- PM visits UI: `src/app/visits/**`
-- Visit geo-tracking: `src/lib/geo-validation.ts` (server), `src/lib/geolocation.ts` (client), `src/components/visits/EndVisitButton.tsx`, `src/components/visits/NewVisitForm.tsx`
+- PM visits UI: `src/app/visits/**`, `src/components/visits/**`
+- Visit shared helpers: `src/lib/visit-actions.ts` (action types), `src/lib/visits-policy.ts` (auth/scope/locking)
+- Visit geo: `src/lib/geo-validation.ts` (server validation), `src/lib/geolocation.ts` (client watchPosition), `src/components/visits/CompleteVisitButton.tsx`, `src/components/visits/NewVisitForm.tsx`
 - Admin UI: `src/app/admin/**`
 - Batch metadata admin: `src/app/admin/batches/**` + `src/app/api/batches/**`
 - Quiz analytics: `src/lib/bigquery.ts`, `src/app/api/quiz-analytics/**`, `src/components/QuizAnalyticsSection.tsx`

@@ -49,7 +49,7 @@ interface VisitHistoryProps {
     visit_date: string;
     status: string;
     inserted_at?: string | null;
-    ended_at?: string | null;
+    completed_at?: string | null;
   }[];
   schoolCode: string;
 }
@@ -100,16 +100,12 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
                   className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                     visit.status === "completed"
                       ? "bg-green-100 text-green-800"
-                      : visit.ended_at
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-yellow-100 text-yellow-800"
+                      : "bg-yellow-100 text-yellow-800"
                   }`}
                 >
                   {visit.status === "completed"
                     ? "Completed"
-                    : visit.ended_at
-                      ? "Ended"
-                      : "In Progress"}
+                    : "In Progress"}
                 </span>
               </div>
               <div className="text-xs text-gray-500 mt-1">
@@ -118,9 +114,9 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
                     Started: {new Date(visit.inserted_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
                   </span>
                 )}
-                {visit.ended_at && (
+                {visit.completed_at && (
                   <span className="ml-3">
-                    Ended: {new Date(visit.ended_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
+                    Completed: {new Date(visit.completed_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
                   </span>
                 )}
               </div>
@@ -129,7 +125,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
               href={`/visits/${visit.id}`}
               className="text-sm text-blue-600 hover:text-blue-800"
             >
-              {visit.status === "completed" || visit.ended_at ? "View" : "Continue"}
+              {visit.status === "completed" ? "View" : "Continue"}
             </Link>
           </div>
         ))}

@@ -34,12 +34,14 @@ const LEVEL_COLORS: Record<number, string> = {
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
+  program_admin: "Program Admin",
   program_manager: "Program Manager",
   teacher: "Teacher",
 };
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-purple-100 text-purple-800",
+  program_admin: "bg-cyan-100 text-cyan-800",
   program_manager: "bg-indigo-100 text-indigo-800",
   teacher: "bg-gray-100 text-gray-800",
 };

@@ -1,51 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getUserPermission, getFeatureAccess, canAccessSchoolSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
+import {
+  apiError,
+  buildVisitScopePredicate,
+  canAccessVisitSchoolScope,
+  isScopedVisitsRole,
+  parseJsonBody,
+  requireVisitsAccess,
+  resolveSchoolRegionForScope,
+} from "@/lib/visits-policy";
 
-// GET /api/pm/visits - List visits for current PM
+// GET /api/pm/visits - List visits in actor scope
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireVisitsAccess(session, "view");
+  if (!access.ok) {
+    return access.response;
   }
-
-  const permission = await getUserPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canView) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { actor } = access;
 
   const searchParams = request.nextUrl.searchParams;
-  const schoolCode = searchParams.get("school_code");
-  const status = searchParams.get("status");
-  const limit = parseInt(searchParams.get("limit") || "50", 10);
+  const schoolCode = searchParams.get("school_code")?.trim() || "";
+  const status = searchParams.get("status")?.trim() || "";
+  const pmEmail = searchParams.get("pm_email")?.trim() || "";
+  const parsedLimit = Number.parseInt(searchParams.get("limit") || "50", 10);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50;
 
-  let queryText = `
-    SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
-           v.data, v.inserted_at, v.updated_at, v.ended_at,
-           s.name as school_name
-    FROM lms_pm_school_visits v
-    LEFT JOIN school s ON s.code = v.school_code
-    WHERE v.pm_email = $1
-  `;
-  const params: (string | number)[] = [session.user.email];
-  let paramIndex = 2;
+  if (pmEmail && actor.role === "program_manager") {
+    return apiError(403, "Forbidden");
+  }
+
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIndex = 1;
+
+  if (actor.role === "program_manager") {
+    whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
+    params.push(actor.email);
+    paramIndex++;
+  } else if (pmEmail) {
+    whereClauses.push(`LOWER(v.pm_email) = LOWER($${paramIndex})`);
+    params.push(pmEmail);
+    paramIndex++;
+  }
 
   if (schoolCode) {
-    queryText += ` AND v.school_code = $${paramIndex}`;
+    whereClauses.push(`v.school_code = $${paramIndex}`);
     params.push(schoolCode);
     paramIndex++;
   }
 
   if (status) {
-    queryText += ` AND v.status = $${paramIndex}`;
+    whereClauses.push(`v.status = $${paramIndex}`);
     params.push(status);
     paramIndex++;
   }
 
+  if (isScopedVisitsRole(actor)) {
+    const scope = buildVisitScopePredicate(actor, {
+      startIndex: paramIndex,
+      schoolCodeColumn: "v.school_code",
+      schoolRegionColumn: "s.region",
+    });
+    if (scope.clause) {
+      whereClauses.push(scope.clause);
+      params.push(...scope.params);
+      paramIndex += scope.params.length;
+    }
+  }
+
+  let queryText = `
+    SELECT v.id, v.school_code, s.name as school_name, v.pm_email, v.visit_date, v.status,
+           v.completed_at, v.inserted_at, v.updated_at
+    FROM lms_pm_school_visits v
+    LEFT JOIN school s ON s.code = v.school_code
+  `;
+  if (whereClauses.length > 0) {
+    queryText += ` WHERE ${whereClauses.join(" AND ")}`;
+  }
   queryText += ` ORDER BY v.visit_date DESC, v.inserted_at DESC LIMIT $${paramIndex}`;
   params.push(limit);
 
@@ -57,90 +92,55 @@ export async function GET(request: NextRequest) {
 // POST /api/pm/visits - Create a new visit with GPS
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireVisitsAccess(session, "edit");
+  if (!access.ok) {
+    return access.response;
   }
+  const { actor } = access;
 
-  const permission = await getUserPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canEdit) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const bodyResult = await parseJsonBody(request);
+  if (!bodyResult.ok) {
+    return bodyResult.response;
   }
+  const body = bodyResult.body;
+  const schoolCode = typeof body.school_code === "string" ? body.school_code.trim() : "";
 
-  const body = await request.json();
-  const { school_code } = body;
-
-  if (!school_code) {
-    return NextResponse.json(
-      { error: "school_code is required" },
-      { status: 400 }
-    );
+  if (!schoolCode) {
+    return apiError(400, "school_code is required");
   }
 
   // Validate GPS reading
   const gps = validateGpsReading(body, "start");
   if (!gps.valid) {
-    return NextResponse.json({ error: gps.error }, { status: 400 });
-  }
-
-  // Verify PM has access to this school using already-fetched permission
-  if (!permission) {
-    return NextResponse.json({ error: "No permission record" }, { status: 403 });
+    return apiError(422, gps.error || "Invalid GPS reading");
   }
 
   // Fetch region only when needed for level 2 access check
-  let schoolRegion: string | undefined;
-  if (permission.level === 2) {
-    const schoolResult = await query<{ region: string }>(
-      `SELECT region FROM school WHERE code = $1`,
-      [school_code]
-    );
-    if (schoolResult.length === 0) {
-      return NextResponse.json({ error: "School not found" }, { status: 404 });
-    }
-    schoolRegion = schoolResult[0].region;
+  const schoolScope = await resolveSchoolRegionForScope(actor.permission, schoolCode);
+  if (!schoolScope.exists) {
+    return apiError(404, "School not found");
   }
+  const schoolRegion = schoolScope.schoolRegion;
 
-  if (!canAccessSchoolSync(permission, school_code, schoolRegion)) {
-    return NextResponse.json(
-      { error: "You do not have access to this school" },
-      { status: 403 }
-    );
+  if (!canAccessVisitSchoolScope(actor, schoolCode, schoolRegion)) {
+    return apiError(403, "Forbidden");
   }
-
-  // Create initial empty visit data structure
-  const initialData = {
-    principalMeeting: null,
-    leadershipMeetings: null,
-    classroomObservations: [],
-    studentDiscussions: {
-      groupDiscussions: [],
-      individualDiscussions: [],
-    },
-    staffMeetings: {
-      individualMeetings: [],
-      teamMeeting: null,
-    },
-    teacherFeedback: [],
-    issueLog: [],
-  };
 
   // visit_date derived server-side as IST date; start GPS stored in dedicated columns
   const result = await query<{ id: number; visit_date: string }>(
     `INSERT INTO lms_pm_school_visits
-       (school_code, pm_email, visit_date, status, data,
+       (school_code, pm_email, visit_date, status,
         start_lat, start_lng, start_accuracy)
      VALUES (
        $1, $2,
        (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
-       'in_progress', $3,
-       $4, $5, $6
+       'in_progress',
+       $3, $4, $5
      )
      RETURNING id, visit_date`,
     [
-      school_code,
-      session.user.email,
-      JSON.stringify(initialData),
+      schoolCode,
+      actor.email,
       gps.reading!.lat,
       gps.reading!.lng,
       gps.reading!.accuracy,
