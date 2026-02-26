@@ -170,3 +170,24 @@ Session: 0575c70d-cae9-45c7-9ca9-2da756c12383
   - Warning/error alerts should get `role="alert"` for accessibility even though not explicitly in test assertions
   - The `divide-y divide-gray-200` → per-card `border-b border-border` pattern is consistent with how visits list page and dashboard tables were done
 ---
+
+## 2026-02-26 - US-008
+Session: 2433ce56-28db-420b-98e6-71af0fb84f7c
+- Restyled `src/components/visits/ActionTypePickerModal.tsx` to Ledger UI design system
+- Backdrop: `bg-black/40` → `bg-black/50`
+- Modal container: removed `rounded-lg`, kept `shadow-xl`, used `bg-bg-card`
+- Header: `border-b border-gray-200` → `border-b-4 border-border-accent`, title `uppercase tracking-tight font-bold text-text-primary`
+- Subtitle: `text-text-muted` (replaced `text-gray-500`)
+- Radio options: removed `rounded-md`, `border border-border` (replaced `border-gray-200`), `hover:bg-hover-bg` (replaced `hover:bg-gray-50`), added `accent-accent` on radio input
+- Option text: `text-text-primary` (replaced `text-gray-800`)
+- Footer: `border-t border-border` (replaced `border-gray-200`)
+- Cancel button: sharp secondary (`border-border bg-bg-card text-text-secondary hover:bg-hover-bg`) — removed `rounded-md`
+- Add button: `bg-accent uppercase font-bold` (replaced `bg-blue-600 rounded-md font-medium`)
+- Files changed: src/components/visits/ActionTypePickerModal.tsx
+- npm run build passes, npm run test passes (1100/1100)
+- **Learnings for future iterations:**
+  - ActionTypePickerModal is a small component (91 lines) — all changes are CSS class swaps, no logic changes
+  - Modal `shadow-xl` is kept per style guide spec (modals are the one exception to the "no shadow" rule)
+  - Radio accent: use `accent-accent` (Tailwind v4 utility from @theme token) instead of `accent-[var(--color-accent)]`
+  - Tests use only semantic queries (getByRole, getByText, getByLabelText) — CSS-only changes don't break any tests
+---

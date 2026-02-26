@@ -152,7 +152,7 @@
         "Verify in browser using agent-browser: open action type picker on a visit, check modal styling, radio options, buttons"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
