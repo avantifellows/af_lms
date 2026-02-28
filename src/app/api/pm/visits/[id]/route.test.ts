@@ -177,7 +177,7 @@ describe("GET /api/pm/visits/[id]", () => {
     expect(visitParams).toEqual(["10"]);
 
     const [actionsQueryText, actionsParams] = mockQuery.mock.calls[1] as [string, unknown[]];
-    expect(actionsQueryText).toContain("FROM lms_pm_visit_actions");
+    expect(actionsQueryText).toContain("FROM lms_pm_school_visit_actions");
     expect(actionsQueryText).toContain("deleted_at IS NULL");
     expect(actionsQueryText).toContain("ORDER BY inserted_at ASC, id ASC");
     expect(actionsQueryText).not.toContain("start_lat");

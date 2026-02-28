@@ -24,6 +24,7 @@ const editUser = {
   regions: ["North"],
   program_ids: [1, 2],
   read_only: false,
+  full_name: null as string | null,
 };
 
 function renderModal(overrides: Partial<typeof defaultProps> = {}) {
@@ -497,6 +498,7 @@ describe("AddUserModal — form submission (create)", () => {
           role: "teacher",
           read_only: false,
           program_ids: [1],
+          full_name: null,
           email: "new@example.com",
           school_codes: [],
           regions: null,

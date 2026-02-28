@@ -109,6 +109,9 @@ function buildValidClassroomData() {
   return {
     rubric_version: CURRENT_RUBRIC_VERSION,
     params,
+    teacher_id: 1,
+    teacher_name: "Test Teacher",
+    grade: "10",
   };
 }
 
@@ -383,7 +386,7 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     expect(json.action.end_lng).toBeUndefined();
 
     const [updateQueryText, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
-    expect(updateQueryText).toContain("UPDATE lms_pm_visit_actions");
+    expect(updateQueryText).toContain("UPDATE lms_pm_school_visit_actions");
     expect(updateQueryText).toContain("status = 'completed'");
     expect(updateQueryText).toContain("ended_at = (NOW() AT TIME ZONE 'UTC')");
     expect(updateQueryText).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");

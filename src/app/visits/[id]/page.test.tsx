@@ -267,7 +267,7 @@ describe("VisitDetailPage", () => {
     expect(visitParams).toEqual(["42"]);
 
     const [actionsSql, actionsParams] = mockQuery.mock.calls[1] as [string, unknown[]];
-    expect(actionsSql).toContain("FROM lms_pm_visit_actions");
+    expect(actionsSql).toContain("FROM lms_pm_school_visit_actions");
     expect(actionsSql).toContain("deleted_at IS NULL");
     expect(actionsSql).toContain("ORDER BY inserted_at ASC, id ASC");
     expect(actionsParams).toEqual(["42"]);

@@ -27,6 +27,7 @@ interface VisitAction {
   visit_id: number;
   action_type: string;
   status: string;
+  data?: Record<string, unknown>;
   started_at: string | null;
   ended_at: string | null;
   inserted_at: string;
@@ -54,7 +55,7 @@ async function getVisitDetail(id: string): Promise<VisitDetail> {
   }
 
   const actions = await query<VisitAction>(
-    `SELECT id, visit_id, action_type, status,
+    `SELECT id, visit_id, action_type, status, data,
             started_at, ended_at, inserted_at, updated_at
      FROM lms_pm_school_visit_actions
      WHERE visit_id = $1
