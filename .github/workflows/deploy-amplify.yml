@@ -5,7 +5,7 @@ on:
     branches:
       - main
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       deploy_type:
@@ -104,10 +104,10 @@ jobs:
       - name: Set preview branch name
         id: preview
         run: |
-          # Use the actual git branch name from the PR
-          GIT_BRANCH="${{ github.event.pull_request.head.ref }}"
-          PREVIEW_URL="https://${GIT_BRANCH}.${AMPLIFY_APP_ID}.amplifyapp.com"
-          echo "branch=${GIT_BRANCH}" >> $GITHUB_OUTPUT
+          # All PRs deploy to the same stable staging URL
+          BRANCH="staging"
+          PREVIEW_URL="https://${BRANCH}.${AMPLIFY_APP_ID}.amplifyapp.com"
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
           echo "url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
           echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
@@ -186,31 +186,6 @@ jobs:
                 body: body
               });
             }
-
-  # Cleanup preview when PR is closed
-  cleanup-preview:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Delete preview branch
-        run: |
-          # Use the actual git branch name from the PR
-          BRANCH="${{ github.event.pull_request.head.ref }}"
-
-          aws amplify delete-branch \
-            --app-id ${{ env.AMPLIFY_APP_ID }} \
-            --branch-name "$BRANCH" \
-            2>/dev/null || echo "Branch $BRANCH not found or already deleted"
-
-          echo "Cleaned up preview branch: $BRANCH"
 
   # Deploy to production when merged to main
   deploy-production:
