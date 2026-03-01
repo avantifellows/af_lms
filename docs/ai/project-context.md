@@ -1,6 +1,6 @@
 # Project Context: `af_lms` (Avanti Fellows LMS / JNV Ops UI)
 
-Last updated: 2026-02-25
+Last updated: 2026-03-01
 Audience: engineers + AI coding agents onboarding to this repo
 
 ---
@@ -66,7 +66,7 @@ Google-authenticated users must have a row in `user_permission`:
   - `2`: Regions (`regions[]`)
   - `1`: Schools (`school_codes[]`)
 - `role` (feature set):
-  - `teacher` | `program_manager` | `admin`
+  - `teacher` | `program_manager` | `program_admin` | `admin`
 - `program_ids` (feature gating + filtering):
   - Non-admins are expected to have **at least one** `program_id`.
   - Constants live in `src/lib/permissions.ts`:
@@ -114,7 +114,7 @@ Core behavior:
 - Access checks:
   - Passcode users: only their own school
   - Google users: `canAccessSchool()` based on `user_permission.level` and region/school codes
-- Loads students via joins on `group_user` + `group(type='school')` + `user` + `student`
+- Loads students via joins on `group_user` + `group(type=’school’)` + `user` + `student`
 - Computes grade via `enrollment_record` (current grade) + `grade`
 - Computes program via a LATERAL join through batch/program membership
 
@@ -133,13 +133,14 @@ Enrollment behaviors:
 Tabs:
 - Tabs exist for Enrollment/Curriculum/Performance/Mentorship/Visits.
 - **Currently, non-Enrollment tabs are only shown to level-4 admins** (`isAdmin()`).
+- Visits tab: "Start Visit" / "Start New Visit" buttons are gated by `canEdit` — hidden for read-only/view-only users (e.g. `program_admin`).
 
 ### 3.4 Admin UI (`/admin/*`)
 
 Admin entry: `src/app/admin/page.tsx`
 
 Admin sections:
-- Users: `src/app/admin/users/page.tsx` (CRUD `user_permission`)
+- Users: `src/app/admin/users/page.tsx` (CRUD `user_permission`; supports `full_name` field)
 - Batches: `src/app/admin/batches/page.tsx` (edit batch `metadata` via DB Service)
 - Schools: `src/app/admin/schools/page.tsx` (edit `school.program_ids`)
 
@@ -153,12 +154,18 @@ Admin sections:
 - **Completion requires**: ≥1 completed `classroom_observation` whose `data` passes strict rubric validation + no actions left `in_progress` + valid GPS
 
 #### Classroom observation rubric contract (v1)
-- Top-level payload keys are rubric-only: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`
+- Top-level payload keys: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`, `teacher_id`, `teacher_name`, `grade`
 - Legacy classroom keys (`class_details`, `observations`, `support_needed`) are not part of active payloads and are sanitized from edit/save paths
+- **Teacher/grade selection** (added 2026-02-28):
+  - PM must select a **teacher** (from dropdown) and **grade** (10/11/12) before the rubric form renders
+  - Teachers are fetched from `GET /api/pm/teachers?school_code=...` (queries `user_permission` for `role='teacher'` with matching school/region/level access)
+  - Selected teacher's `id` and display name are stored as `teacher_id` / `teacher_name`; selected grade stored as `grade`
+  - `VALID_GRADES` exported from `src/lib/classroom-observation-rubric.ts`: `["10", "11", "12"]`
+- **Action card stats**: `ActionPointList` shows per-observation summary on cards — teacher name, grade, score (current/45), and progress (answered/total params with %)
 - Validation behavior:
   - PATCH while action is `in_progress`: lenient rubric validation (partial allowed)
-  - PATCH while action is `completed`: strict rubric validation
-  - END classroom observation action: strict rubric validation
+  - PATCH while action is `completed`: strict rubric validation (requires valid `grade`)
+  - END classroom observation action: strict rubric validation (requires valid `grade`)
   - COMPLETE visit: at least one completed classroom observation with strict-valid rubric payload
 - Unsupported rubric version behavior:
   - UI detects unknown explicit `rubric_version` and renders classroom observation as read-only (save/end blocked)
@@ -168,9 +175,11 @@ Admin sections:
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
 - **Start** captures GPS + timestamp; **End** captures GPS + timestamp
+- Starting an action auto-redirects the PM to the action detail page
 - Multiple actions can be `in_progress` simultaneously
 - **Pending-only deletion** (soft delete: `deleted_at` set, row retained)
-- 8 MVP action types: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback
+- 8 action types defined in code: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback
+- **Currently only `classroom_observation` is enabled** in the picker UI; other types are visible but disabled
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
 #### Implemented pages
@@ -181,16 +190,20 @@ Admin sections:
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
-- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions
-- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress)
+- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (only `classroom_observation` enabled)
+- `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields
 - `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
+- `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
 
 #### Shared helpers
-- `src/lib/visit-actions.ts` — `ACTION_TYPES` map, `ActionType` union, status constants
+- `src/lib/visit-actions.ts` — `ACTION_TYPES` map, `ActionType` union, status constants, `statusBadgeClass()` helper
 - `src/lib/visits-policy.ts` — shared auth/scope/locking helpers used across all visit routes
+- `src/lib/classroom-observation-rubric.ts` — rubric config, score computation, lenient/strict validation, `VALID_GRADES`, `ClassroomObservationData` type
 - `src/lib/geo-validation.ts` — GPS validation (accept ≤100m, warn 100–500m, reject >500m)
 - `src/lib/geolocation.ts` — client `watchPosition` helper (60s timeout, cancel, secure-origin check)
+- `src/lib/theme.ts` — Ledger UI theme token object for dynamic inline styles (17 color/style properties)
 
 #### GPS + timestamps
 - All `*_at` timestamps stored as UTC (`TIMESTAMP` without TZ)
@@ -212,11 +225,13 @@ Admin sections:
 
 Planning docs: `docs/ai/school-visit-action-points/`
 
-#### Classroom observation rollout status (2026-02-25)
+#### Classroom observation rollout status (2026-03-01)
 - Implementation phases 1-5 are complete for the rubric rollout documented in `docs/ai/classroom-observation/2026-02-21-classroom-observation-implementation-and-testing-plan.md`
 - Manual frontend QA runbook is complete with `10/10` test cases passing (`docs/ai/classroom-observation/phase-5-manual-frontend-test-cases.md`)
 - Agent-browser exploratory testing was also run for role/session/geolocation flows (`docs/ai/agent-browser-testing.md`)
 - In-repo consumer impact audit is complete for classroom observation payload usage; BigQuery quiz analytics and curriculum flows do not consume `lms_pm_school_visit_actions.data`
+- Teacher/grade selection added (2026-02-28): PM selects teacher + grade before rubric; action cards show observation stats
+- Ledger UI visual redesign applied to all visit pages and components (2026-02-26)
 
 ### 3.6 Curriculum tracking (POC)
 
@@ -297,9 +312,10 @@ Top-level (high-signal):
 
 App code:
 - `src/app/`: App Router pages + route handlers (`src/app/api/**`)
-- `src/components/`: UI components (tables, modals, charts)
-- `src/lib/`: auth/permissions/db/bigquery helpers
+- `src/components/`: UI components (tables, modals, charts, Toast)
+- `src/lib/`: auth/permissions/db/bigquery helpers, classroom-observation-rubric, theme tokens
 - `src/types/`: shared TS types (NextAuth session typing, quiz, curriculum)
+- `docs/UI-Style-Guide.md`: Ledger UI design system reference
 
 Unit tests:
 - `vitest.config.ts`: Vitest config (V8 coverage, `@/*` path alias)
@@ -342,6 +358,7 @@ Students:
 - `src/app/api/student/dropout/route.ts` (POST → PATCH to DB Service dropout)
 
 PM visits:
+- `src/app/api/pm/teachers/route.ts` (GET teachers for a school by code — queries `user_permission` for `role='teacher'` with matching school/region/level access)
 - `src/app/api/pm/visits/route.ts` (GET list, POST create with GPS)
 - `src/app/api/pm/visits/[id]/route.ts` (GET visit + actions)
 - `src/app/api/pm/visits/[id]/actions/route.ts` (GET list actions, POST create action)
@@ -415,7 +432,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 Key details:
 - Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
 - No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
-- 1100 tests across 74 files (as of 2026-02-23 full-suite run)
+- 1142 tests across 75 files (as of 2026-03-01)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
@@ -512,9 +529,13 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - Student edit UI: `src/components/EditStudentModal.tsx`
 - Student table + dropout UI: `src/components/StudentTable.tsx`
 - PM visits API: `src/app/api/pm/visits/**`
+- PM teachers API: `src/app/api/pm/teachers/route.ts`
 - PM visits UI: `src/app/visits/**`, `src/components/visits/**`
+- Classroom observation rubric: `src/lib/classroom-observation-rubric.ts`, `src/components/visits/ClassroomObservationForm.tsx`
 - Visit shared helpers: `src/lib/visit-actions.ts` (action types), `src/lib/visits-policy.ts` (auth/scope/locking)
 - Visit geo: `src/lib/geo-validation.ts` (server validation), `src/lib/geolocation.ts` (client watchPosition), `src/components/visits/CompleteVisitButton.tsx`, `src/components/visits/NewVisitForm.tsx`
+- Toast notifications: `src/components/Toast.tsx`
+- Ledger UI theme: `src/lib/theme.ts` (inline style tokens), `src/app/globals.css` (CSS variables), `docs/UI-Style-Guide.md`
 - Admin UI: `src/app/admin/**`
 - Batch metadata admin: `src/app/admin/batches/**` + `src/app/api/batches/**`
 - Quiz analytics: `src/lib/bigquery.ts`, `src/app/api/quiz-analytics/**`, `src/components/QuizAnalyticsSection.tsx`
