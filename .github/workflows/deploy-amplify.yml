@@ -94,6 +94,13 @@ jobs:
     environment: Preview
 
     steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+
+      - name: Push PR code to staging branch
+        run: |
+          git push origin HEAD:refs/heads/staging --force
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
