@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
+  VALID_GRADES,
   computeTotalScore,
   validateClassroomObservationComplete,
   validateClassroomObservationSave,
@@ -135,12 +136,38 @@ describe("validateClassroomObservationComplete", () => {
     expect(unknownVersion.errors).toContain("Unsupported classroom observation rubric_version: 2.0");
   });
 
-  it("accepts a fully complete payload", () => {
+  it("accepts a fully complete payload with teacher and grade", () => {
+    const result = validateClassroomObservationComplete({
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: buildCompleteParams(),
+      teacher_id: 42,
+      teacher_name: "Jane Doe",
+      grade: "11",
+    });
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it("rejects missing teacher_id, teacher_name, and grade", () => {
     const result = validateClassroomObservationComplete({
       rubric_version: CURRENT_RUBRIC_VERSION,
       params: buildCompleteParams(),
     });
-    expect(result).toEqual({ valid: true, errors: [] });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("teacher_id is required");
+    expect(result.errors).toContain("teacher_name is required");
+    expect(result.errors).toContain("grade is required");
+  });
+
+  it("rejects empty teacher_name", () => {
+    const result = validateClassroomObservationComplete({
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: buildCompleteParams(),
+      teacher_id: 1,
+      teacher_name: "",
+      grade: "10",
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("teacher_name is required");
   });
 
   it("rejects time_management score=0 because valid scores are 1, 2, 3", () => {
@@ -150,11 +177,101 @@ describe("validateClassroomObservationComplete", () => {
     const result = validateClassroomObservationComplete({
       rubric_version: CURRENT_RUBRIC_VERSION,
       params,
+      teacher_id: 1,
+      teacher_name: "Teacher",
+      grade: "10",
     });
 
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
       "Invalid score for Class structure - Time management. Allowed scores: 1, 2, 3"
     );
+  });
+});
+
+describe("teacher_id, teacher_name, and grade validation", () => {
+  it("VALID_GRADES contains 10, 11, 12", () => {
+    expect(VALID_GRADES).toEqual(["10", "11", "12"]);
+  });
+
+  describe("lenient (save)", () => {
+    it("accepts payload with valid teacher_id, teacher_name, and grade", () => {
+      const result = validateClassroomObservationSave({
+        teacher_id: 5,
+        teacher_name: "Alice",
+        grade: "12",
+      });
+      expect(result).toEqual({ valid: true, errors: [] });
+    });
+
+    it("accepts payload without teacher_id, teacher_name, or grade (all optional)", () => {
+      expect(validateClassroomObservationSave({})).toEqual({ valid: true, errors: [] });
+    });
+
+    it("rejects teacher_id that is not a positive integer", () => {
+      for (const badValue of [0, -1, 1.5, "1", NaN, true]) {
+        const result = validateClassroomObservationSave({ teacher_id: badValue });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toContain("teacher_id must be a positive integer");
+      }
+    });
+
+    it("rejects teacher_name that is not a string", () => {
+      const result = validateClassroomObservationSave({ teacher_name: 123 });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("teacher_name must be a string");
+    });
+
+    it("rejects invalid grade values", () => {
+      for (const badGrade of ["9", "13", 10, "ten", ""]) {
+        const result = validateClassroomObservationSave({ grade: badGrade });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toContain("grade must be one of: 10, 11, 12");
+      }
+    });
+
+    it("accepts each valid grade", () => {
+      for (const grade of VALID_GRADES) {
+        const result = validateClassroomObservationSave({ grade });
+        expect(result).toEqual({ valid: true, errors: [] });
+      }
+    });
+  });
+
+  describe("strict (complete)", () => {
+    it("requires teacher_id, teacher_name, and grade", () => {
+      const result = validateClassroomObservationComplete({
+        rubric_version: CURRENT_RUBRIC_VERSION,
+        params: buildCompleteParams(),
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("teacher_id is required");
+      expect(result.errors).toContain("teacher_name is required");
+      expect(result.errors).toContain("grade is required");
+    });
+
+    it("rejects invalid teacher_id type even when present", () => {
+      const result = validateClassroomObservationComplete({
+        rubric_version: CURRENT_RUBRIC_VERSION,
+        params: buildCompleteParams(),
+        teacher_id: "abc",
+        teacher_name: "Teacher",
+        grade: "10",
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("teacher_id must be a positive integer");
+    });
+
+    it("rejects invalid grade in strict mode", () => {
+      const result = validateClassroomObservationComplete({
+        rubric_version: CURRENT_RUBRIC_VERSION,
+        params: buildCompleteParams(),
+        teacher_id: 1,
+        teacher_name: "Teacher",
+        grade: "9",
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("grade must be one of: 10, 11, 12");
+    });
   });
 });

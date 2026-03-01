@@ -12,6 +12,7 @@ interface UserPermission {
   regions: string[] | null;
   program_ids: number[] | null;
   read_only: boolean;
+  full_name: string | null;
 }
 
 interface UserListProps {
@@ -120,6 +121,9 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                 Email
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                Name
+              </th>
+              <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                 Role
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
@@ -144,6 +148,9 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                   {user.email.toLowerCase() === currentUserEmail.toLowerCase() && (
                     <span className="ml-2 text-xs text-gray-400">(you)</span>
                   )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                  {user.full_name || "\u2014"}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
                   <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${ROLE_COLORS[user.role] || ROLE_COLORS.teacher}`}>

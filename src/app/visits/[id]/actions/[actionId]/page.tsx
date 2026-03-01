@@ -174,6 +174,7 @@ export default async function VisitActionDetailPage({ params }: PageProps) {
           initialAction={detail.action}
           canWrite={canWrite}
           isAdmin={permission.role === "admin"}
+          schoolCode={detail.visit.school_code}
         />
       </div>
     </main>

@@ -148,7 +148,7 @@ describe("GET /api/pm/visits/[id]/actions", () => {
     await expect(res.json()).resolves.toEqual({ actions: ACTION_ROWS });
 
     const [actionsQueryText, actionsParams] = mockQuery.mock.calls[1] as [string, unknown[]];
-    expect(actionsQueryText).toContain("FROM lms_pm_visit_actions");
+    expect(actionsQueryText).toContain("FROM lms_pm_school_visit_actions");
     expect(actionsQueryText).toContain("deleted_at IS NULL");
     expect(actionsQueryText).toContain("ORDER BY inserted_at ASC, id ASC");
     expect(actionsQueryText).not.toContain("start_lat");
@@ -357,7 +357,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
     await expect(res.json()).resolves.toEqual({ action: createdAction });
 
     const [insertQueryText, insertParams] = mockQuery.mock.calls[1] as [string, unknown[]];
-    expect(insertQueryText).toContain("INSERT INTO lms_pm_visit_actions");
+    expect(insertQueryText).toContain("INSERT INTO lms_pm_school_visit_actions");
     expect(insertQueryText).toContain("(visit_id, action_type, status, data)");
     expect(insertQueryText).toContain("'pending'");
     expect(insertQueryText).toContain("'{}'::jsonb");
