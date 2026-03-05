@@ -9,12 +9,7 @@ import {
   type ParamData,
   type RubricParameter,
 } from "@/lib/classroom-observation-rubric";
-
-interface Teacher {
-  id: number;
-  email: string;
-  full_name: string | null;
-}
+import { getTeacherDisplayName, type Teacher } from "@/lib/teacher-utils";
 
 interface ClassroomObservationFormProps {
   data: Record<string, unknown>;
@@ -45,10 +40,6 @@ function isValidScore(parameter: RubricParameter, score: unknown): score is numb
   }
 
   return parameter.options.some((option) => option.score === score);
-}
-
-function getTeacherDisplayName(teacher: Teacher): string {
-  return teacher.full_name || teacher.email;
 }
 
 export default function ClassroomObservationForm({

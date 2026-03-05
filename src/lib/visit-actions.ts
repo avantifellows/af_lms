@@ -7,6 +7,7 @@ export const ACTION_TYPES = {
   individual_staff_meeting: "Individual Staff Meeting",
   team_staff_meeting: "Team Staff Meeting",
   teacher_feedback: "Teacher Feedback",
+  af_team_interaction: "AF Team Interaction",
 } as const;
 
 export type ActionType = keyof typeof ACTION_TYPES;

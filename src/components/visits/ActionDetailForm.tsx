@@ -201,6 +201,11 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
       },
     ],
   },
+  af_team_interaction: {
+    title: "AF Team Interaction Details",
+    description: "Record observations from team interaction with teachers.",
+    fields: [],
+  },
 };
 
 const FALLBACK_FORM_CONFIG: ActionFormConfig = {
