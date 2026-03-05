@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that allows school administrators to view and manage student enrollments. Features dual authentication (Google OAuth + school passcodes) with permission-based access control.
 
-PM school-visit flows include per-action tracking with GPS and a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45).
+PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), and an AF team interaction checklist (9 binary questions with multiselect teacher dropdown).
 
 ## Development Commands
 
@@ -111,6 +111,14 @@ Visit tables:
   - `docs/ai/classroom-observation/phase-5-manual-frontend-test-cases.md`
   - `docs/ai/agent-browser-testing.md`
 
+### PM Visits: AF Team Interaction (v1)
+- 9-question binary checklist with multiselect teacher dropdown across 4 sections
+- Payload: `{ teachers: [{ id, name }], questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all 9 answered + ≥1 teacher)
+- Visit completion does NOT require AF team interaction — only `classroom_observation` is required
+- Config/validation: `src/lib/af-team-interaction.ts`; shared teacher utils: `src/lib/teacher-utils.ts`
+- Form component: `src/components/visits/AFTeamInteractionForm.tsx`
+
 ### Key Patterns
 - Server components for data fetching (`getServerSession` + direct DB queries)
 - Client components for interactivity (`"use client"` directive)
@@ -142,7 +150,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (75 files, 1142 tests as of 2026-03-01)
+### Test files (78 files, 1228 tests as of 2026-03-05)
 
 **Library tests** (high-signal):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
@@ -157,6 +165,8 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/lib/visit-actions.test.ts` — ACTION_TYPES map + ActionType exhaustiveness
 - `src/lib/visits-policy.test.ts` — shared visit auth/scope/locking policy helpers
 - `src/lib/classroom-observation-rubric.test.ts` — rubric config integrity, score computation, lenient/strict validation rules
+- `src/lib/af-team-interaction.test.ts` — AF team interaction config integrity, lenient/strict validation rules
+- `src/lib/teacher-utils.test.ts` — shared teacher display name helper
 - `src/proxy.test.ts` — middleware redirect logic
 
 **API route tests** (high-signal):
@@ -197,6 +207,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/components/visits/ActionPointList.test.tsx` — action card interactions (add/start/delete/open)
 - `src/components/visits/ActionTypePickerModal.test.tsx` — action type picker
 - `src/components/visits/ClassroomObservationForm.test.tsx` — rubric form rendering, scoring summary behavior, data updates
+- `src/components/visits/AFTeamInteractionForm.test.tsx` — AF team interaction form rendering, teacher multiselect, binary questions, validation
 - `src/components/visits/CompleteVisitButton.test.tsx` — GPS capture + completion rules
 - `src/components/visits/NewVisitForm.test.tsx` — start visit GPS flow
 - `src/components/SchoolTabs.test.tsx`, `src/components/VisitsTab.test.tsx` — visit tab rendering
