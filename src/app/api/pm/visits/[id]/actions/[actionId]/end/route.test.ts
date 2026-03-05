@@ -14,6 +14,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
@@ -97,6 +98,16 @@ const COMPLETED_ACTION = {
   end_accuracy: "15.00",
   updated_at: "2026-02-19T10:25:00.000Z",
 };
+
+function buildValidAFTeamData() {
+  const questions = Object.fromEntries(
+    AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    teachers: [{ id: 1, name: "Teacher A" }],
+    questions,
+  };
+}
 
 function buildValidClassroomData() {
   const params = Object.fromEntries(
@@ -449,5 +460,145 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ action: COMPLETED_ACTION });
+  });
+
+  it("returns 422 when AF team interaction data is incomplete", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "af_team_interaction",
+        data: { teachers: [{ id: 1, name: "A" }], questions: {} },
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
+    expect(json.details.length).toBeGreaterThan(0);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 422 when AF team interaction stored data is null", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "af_team_interaction",
+        data: null,
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid AF team interaction data",
+      details: ["Data must be an object"],
+    });
+  });
+
+  it("returns 422 when AF team interaction has empty teachers", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "af_team_interaction",
+        data: { ...buildValidAFTeamData(), teachers: [] },
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("At least one teacher")])
+    );
+  });
+
+  it("ends AF team interaction successfully when data is complete", async () => {
+    setupPmEdit();
+    const afTeamData = buildValidAFTeamData();
+    const completedAFAction = {
+      ...COMPLETED_ACTION,
+      action_type: "af_team_interaction",
+      data: afTeamData,
+    };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "af_team_interaction",
+          data: afTeamData,
+        },
+      ])
+      .mockResolvedValueOnce([completedAFAction]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.status).toBe("completed");
+    expect(json.action.action_type).toBe("af_team_interaction");
+  });
+
+  it("concurrent fallback validates AF team interaction data", async () => {
+    setupPmEdit();
+    const incompleteData = { teachers: [{ id: 1, name: "A" }], questions: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "af_team_interaction",
+          data: buildValidAFTeamData(),
+        },
+      ])
+      // UPDATE returns 0 rows (concurrent)
+      .mockResolvedValueOnce([])
+      // Re-fetch returns action still in_progress with incomplete data
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "af_team_interaction",
+          data: incompleteData,
+        },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
   });
 });

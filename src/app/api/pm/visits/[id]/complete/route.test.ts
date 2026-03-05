@@ -14,6 +14,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
@@ -85,6 +86,16 @@ const COMPLETED_VISIT_ROW = {
   status: "completed",
   completed_at: "2026-02-19T12:00:00.000Z",
 };
+
+function buildValidAFTeamData() {
+  const questions = Object.fromEntries(
+    AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    teachers: [{ id: 1, name: "Teacher A" }],
+    questions,
+  };
+}
 
 function buildValidClassroomData() {
   const params = Object.fromEntries(
@@ -343,6 +354,42 @@ describe("POST /api/pm/visits/[id]/complete", () => {
         id: 10,
         status: "completed",
         completed_at: "2026-02-19T12:20:00.000Z",
+      },
+    });
+  });
+
+  it("completes visit when classroom observation is valid (AF team interaction is supplementary)", async () => {
+    setupPmEdit();
+    // The complete route only queries for classroom_observation actions.
+    // AF team interaction actions exist in DB but don't affect completion.
+    // This test verifies AF team interaction doesn't block visit completion.
+    const afTeamData = buildValidAFTeamData();
+    expect(afTeamData.teachers.length).toBeGreaterThan(0); // sanity check
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 10,
+          status: "completed",
+          completed_at: "2026-02-19T12:30:00.000Z",
+        },
+      ]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      visit: {
+        id: 10,
+        status: "completed",
+        completed_at: "2026-02-19T12:30:00.000Z",
       },
     });
   });

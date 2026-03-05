@@ -3,6 +3,10 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import {
+  validateAFTeamInteractionComplete,
+  validateAFTeamInteractionSave,
+} from "@/lib/af-team-interaction";
+import {
   validateClassroomObservationComplete,
   validateClassroomObservationSave,
 } from "@/lib/classroom-observation-rubric";
@@ -180,6 +184,17 @@ export async function PATCH(
 
     if (!validation.valid) {
       return apiError(422, "Invalid classroom observation data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "af_team_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validateAFTeamInteractionComplete(data)
+        : validateAFTeamInteractionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid AF team interaction data", validation.errors);
     }
   }
 
