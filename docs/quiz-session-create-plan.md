@@ -1,46 +1,52 @@
-# Quiz Session Create (EnableStudents) — af_lms Plan
+# Quiz Session Create (EnableStudents) — af_lms Plan (Updated)
 
 ## Scope
 - Quiz sessions only.
 - Only for `EnableStudents` auth group.
 - Only `sign-in` sessions with `ID,DOB`.
 - `id_generation = false`.
-- Single-screen Create modal (no multi-step timeline).
- - Timing is continuous and not editable by teachers.
+- Single-screen Create modal (no multi-step wizard).
+- Timing is **continuous**; start defaults to now, end is teacher-provided.
 
-## What We Need To Build In af_lms
-1) **Quiz Sessions tab** under school page (JNV school view).  
-2) **List view** for quiz sessions tied to the current school.  
-3) **Create modal** (single screen) with prefilled + dropdown-driven fields.  
-4) **Server routes** in `af_lms` for:
-   - Fetching batch options (school batches + fallback to all EnableStudents batches)
-   - Fetching sessions list (quiz only, school-scoped)
-   - Creating a session (POST `/session` to db-service)
-   - Publishing SNS `action: db_id` to trigger sessionCreator lambda
+## What’s Built in af_lms
+1) **Quiz Sessions tab** on the school page.
+2) **List view** of quiz sessions scoped to this school.
+3) **Create modal** (single screen) with auto-derived fields + required inputs.
+4) **Details modal** (read-only) with links + copy actions.
+5) **Regenerate** action in table (3‑dot menu), disabled when status is `pending`.
+6) **Auto refresh** every 30s to update status.
+7) **Server routes**:
+   - Fetch batches (school‑scoped + fallback).
+   - Fetch sessions list.
+   - Create session (db‑service).
+   - Regenerate session (SNS).
+8) **Seed script** to populate `school_batch` from the mapping sheet.
 
-## Data Sources (DB-Service + LMS DB)
-- **db-service** (via `DB_SERVICE_URL`):
-  - `GET /batch` (filter batches)
-  - `GET /session` (list quiz sessions)
-  - `POST /session` (create session)
-  - `GET /school-batch` (map school → batches)
-- **af_lms DB** (via `src/lib/db.ts`):
-  - Current school lookup (already done on school page)
-  - No enrollment_record queries for this feature
-  - `school_batch` is kept up-to-date from the new sheet mapping
+## Data Sources
+- **af_lms DB** (`src/lib/db.ts`)
+  - `school_batch`, `batch` for batch dropdown + filtering
+  - `session` for list view (quiz sessions only)
+- **db-service** (`DB_SERVICE_URL`)
+  - `POST /session` to create the quiz session row
+- **SNS**
+  - Publish `{ action: "db_id", id: <session_pk_id>, environment: APP_ENV }` to trigger `sessionCreator`
 
 ## Batch Filtering (Resolved)
-We will show batches relevant to **this school** and **this teacher’s program ids**.
+- Use **school_batch mapping** from the sheet (seeded into `school_batch`).
+- Only **class batches** are shown (leaf batches; names shown, not ids).
+- Filter to teacher’s `program_ids`.
+- If school mapping is missing, fallback to all `EnableStudents` batches for teacher’s programs.
 
-**Approach:**
-- Use `/school-batch?school_id=...` as the mapping source.
-- Fetch those batches and filter by:
-  - `auth_group_id == EnableStudents`
-  - `program_id IN teacher.program_ids`
+## Derived Fields (Auto)
+From selected class batches:
+- **Parent batch**: from `parent_id` (must be same for all selections)
+- **Grade**: parsed from batch id (e.g. `EnableStudents_11_...` → `11`)
+- **Stream**: parsed from batch id (`_Engg_` → `engineering`, `_Med_` → `medical`)
+- **Course**: `medical → NEET`, `engineering → JEE`
 
-## Create Payload (Example + Annotations)
-Below is the exact shape we will POST to db-service. It matches quiz-creator + sessionCreator expectations.
+Validations enforce that all selected class batches share the same parent, grade, and stream.
 
+## Create Payload (db-service) — Example + Notes
 ```jsonc
 {
   "name": "<user input>",
@@ -56,15 +62,15 @@ Below is the exact shape we will POST to db-service. It matches quiz-creator + s
   "signup_form_id": null,
   "popup_form_id": null,
 
-  // Session identifiers — lambda fills after SNS
+  // IDs/links are filled by sessionCreator after SNS
   "session_id": "",
   "platform_id": "",
   "platform_link": "",
   "portal_link": "",
 
-  // Timing — continuous only, not editable by teacher
-  "start_time": "<auto now>",
-  "end_time": "<auto now + default duration>",
+  // Timing
+  "start_time": "<teacher input, default now>",
+  "end_time": "<teacher input>",
   "repeat_schedule": { "type": "continuous", "params": [1,2,3,4,5,6,7] },
   "is_active": true,
 
@@ -72,84 +78,79 @@ Below is the exact shape we will POST to db-service. It matches quiz-creator + s
 
   "meta_data": {
     "group": "EnableStudents",
-    "parent_id": "<parent batch id>",
+    "parent_id": "<derived parent batch id>",
     "batch_id": "<comma-separated class batch ids>",
-    "grade": 10,
+    "grade": 11,
+    "stream": "engineering",
+    "course": "JEE",
 
-    "course": "<user input>",
-    "stream": "<user input>",
+    "test_type": "<user input>",
     "test_format": "<user input>",
     "test_purpose": "<user input>",
-    "test_type": "<user input>",
-    "gurukul_format_type": "qa",
     "optional_limits": "<user input>",
     "cms_test_id": "<full CMS url>",
 
+    // Defaults from quiz-creator
+    "gurukul_format_type": "qa",
     "show_answers": true,
     "show_scores": true,
     "shuffle": false,
+    "test_takers_count": 100,
 
     "next_step_url": "<optional>",
     "next_step_text": "<optional>",
 
-    "test_takers_count": 100,
+    // Required by sessionCreator
     "status": "pending",
-    "date_created": "<set on create>"
+    "date_created": "<set on create>",
+    "marking_scheme": "<4,-1 or 1,0 depending on test_type>",
+    "has_synced_to_bq": false,
+    "infinite_session": false,
+    "number_of_fields_in_popup_form": "",
+
+    // Filled later by sessionCreator
+    "shortened_link": "",
+    "report_link": "",
+    "shortened_omr_link": "",
+    "admin_testing_link": ""
   }
 }
 ```
 
-## UI: Single-Screen Create Modal (Fields + Dropdown Sources)
+## Create Modal — Teacher Inputs
+Required:
+- **Session Name** (text)
+- **Class Batches** (multi‑select, names shown)
+- **Test Type** (dropdown)
+- **Test Format** (dropdown)
+- **Test Purpose** (dropdown)
+- **Optional Limits** (dropdown)
+- **CMS URL** (full CMS url)
+- **Start Time** (datetime, default now)
+- **End Time** (datetime)
 
-### Prefilled + Hidden
-- `platform = quiz`
-- `group = EnableStudents`
-- `type = sign-in`
-- `auth_type = ID,DOB`
-- `redirection = true`
-- `id_generation = false`
-- `signup_form = false`
-- `popup_form = false`
-- `repeat_schedule = continuous`
+Optional (only if enabled):
+- **Next Step URL**
+- **Next Step Text**
 
-### User Inputs (with dropdown sources)
-1) **Session Name** — text
-   - No default template yet.
+Auto‑filled (read‑only):
+- Parent batch
+- Grade
+- Stream
+- Course
+- Show answers/scores/shuffle defaults (from quiz‑creator)
+- Test takers count = 100
 
-2) **Grade** — dropdown
-   - Options: **10 / 11 / 12** (hardcoded list).
+## List View (Table)
+- Columns: **Name**, **Class Batches**, **Start**, **End**, **Portal Link**, **Admin Link**, **Status**, **Actions**
+- Link icons in table; only icon click opens link.
+- Row click opens details modal (read‑only).
+- Top filter by **Class Batch**.
 
-3) **Parent Batch** — dropdown
-   - Source: `/school-batch` mapping filtered by `EnableStudents` + teacher program ids.
-   - Fallback: all `EnableStudents` batches (like quiz-creator), still filtered by program ids.
+## Env / Config
+Add these to Amplify env / `.env.production`:
+- `DB_SERVICE_URL`, `DB_SERVICE_TOKEN`
+- `AF_ACCESS_KEY_ID`, `AF_SECRET_ACCESS_KEY`, `AF_TOPIC_ARN`, `APP_ENV`
 
-4) **Class Batch** — multi-select dropdown
-   - Source: child batches of selected parent batch.
-
-5) **Quiz Details** (all user input):
-   - **Test Type** (from quiz-creator): `assessment`, `homework`, `form`, `omr-assessment`
-   - **Test Format**: `part_test`, `major_test`, `chapter_test`, `combined_chapter_test`, `full_syllabus_test`, `evaluation_test`, `hiring_test`, `mock_test`, `homework`, `questionnaire`
-   - **Test Purpose**: `baseline`, `endline`, `weekly_test`, `monthly_test`, `reshuffling_test`, `selection_test`, `one_time`, `practice_test`, `class_hw`, `assignment`
-   - **Course**: `NEET`, `Catalyst`, `Alpha`, `Hiring`, `Certification`, `Foundation`, `Photon`, `JEE`, `CUET`, `CA`, `CLAT`
-   - **Stream**: `engineering`, `medical`, `maths`, `science`, `maths_science`, `physics`, `chemistry`, `biology`, `pcmb`, `botany`, `zoology`, `pcmba`, `tbd`, `business_studies`, `economics`, `nda`, `Others`, `ca`, `clat`
-   - **Optional Limits**: `N/A`, `NEET`, `JEE`, `CUET`, `NA`
-   - **CMS URL**: full CMS URL string required (text input)
-   - **Gurukul Format**: fixed to `Q & A` (qa) by default
-   - **Show Answers / Show Scores / Shuffle**: switches with defaults same as quiz-creator (show_answers=true, show_scores=true, shuffle=false)
-   - **Next Step**: toggle; if on → ask for `next_step_url` + `next_step_text`
-
-6) **Expected Attendance** — default `100` (not editable)
-
-## List View (Quiz Sessions Table)
-- Source: db-service `GET /session` with `is_quiz=true` and group filter `EnableStudents`.
-- Filter by parent batch ids for this school.
-- Show key columns: name, grade, batch, start/end, status, active.
-
-## SNS + Lambda Trigger
-- Add SNS publish helper in af_lms (like quiz-creator’s `Aws.js`).
-- On successful POST `/session`, publish:
-  - `{ action: "db_id", id: <session_pk_id>, environment: APP_ENV }`
-- Lambda `sessionCreator` will create quiz, update session links, etc.
-
-## Open Questions / Needs Before Implementation
-1) **Session naming**: should we keep name empty or auto-fill a simple template?
+## Open Question
+- **Session naming default** (no template yet). Decide if we want a standard prefix.
