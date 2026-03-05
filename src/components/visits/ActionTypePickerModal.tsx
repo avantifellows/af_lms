@@ -44,7 +44,7 @@ export default function ActionTypePickerModal({
 
         <div className="space-y-2 px-5 py-4">
           {ACTION_TYPE_VALUES.map((actionType) => {
-            const enabled = actionType === "classroom_observation";
+            const enabled = actionType === "classroom_observation" || actionType === "af_team_interaction";
             return (
               <label
                 key={actionType}
