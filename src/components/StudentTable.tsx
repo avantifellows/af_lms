@@ -94,11 +94,10 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow overflow-hidden">
       {/* Main card content - always visible */}
-      <div className="p-4">
-        <div className="flex items-center justify-between gap-4">
-          {/* Left side - Student info */}
+      <div className="p-3 sm:p-4">
+        {/* Top row: name + expand button */}
+        <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            {/* Name and badges */}
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base font-semibold text-gray-900">
                 {[student.first_name, student.last_name].filter(Boolean).join(" ") || "—"}
@@ -114,64 +113,62 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
                 </span>
               )}
             </div>
-
-            {/* Key info row */}
-            <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-600">
-              <div>
-                <span className="text-gray-400">Student ID/G10 Roll No.: </span>
-                <span className="font-medium text-gray-700">{student.student_id || "—"}</span>
-              </div>
-              <div>
-                <span className="text-gray-400">APAAR: </span>
-                <span className="font-medium text-gray-700">{student.apaar_id || "—"}</span>
-              </div>
-              <div>
-                <span className="text-gray-400">DOB: </span>
-                <span className="text-gray-700">{formatDate(student.date_of_birth)}</span>
-              </div>
-            </div>
           </div>
-
-          {/* Right side - Action buttons */}
-          <div className="flex items-center gap-2 shrink-0">
-            {canEdit && !isDropout && (
-              <>
-                <button
-                  onClick={onEdit}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors shadow-sm"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={onDropout}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors shadow-sm"
-                >
-                  Dropout
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
-              aria-label={expanded ? "Collapse" : "Expand"}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors shrink-0"
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            <svg
+              className={`w-5 h-5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                className={`w-5 h-5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Key info row */}
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
+          <div>
+            <span className="text-gray-400 text-xs">ID: </span>
+            <span className="font-medium text-gray-700">{student.student_id || "—"}</span>
+          </div>
+          <div>
+            <span className="text-gray-400 text-xs">APAAR: </span>
+            <span className="font-medium text-gray-700">{student.apaar_id || "—"}</span>
+          </div>
+          <div>
+            <span className="text-gray-400 text-xs">DOB: </span>
+            <span className="text-gray-700">{formatDate(student.date_of_birth)}</span>
           </div>
         </div>
+
+        {/* Action buttons */}
+        {canEdit && !isDropout && (
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={onEdit}
+              className="px-3 sm:px-4 py-1.5 sm:py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors shadow-sm"
+            >
+              Edit
+            </button>
+            <button
+              onClick={onDropout}
+              className="px-3 sm:px-4 py-1.5 sm:py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors shadow-sm"
+            >
+              Dropout
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Expanded content */}
       {expanded && (
         <div className="px-4 pb-3 pt-3 border-t border-gray-100 bg-gray-50">
-          <div className="grid grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
             <div>
               <span className="text-gray-400 text-xs uppercase tracking-wide">Phone</span>
               <p className="text-gray-900 font-medium">{student.phone || "—"}</p>
@@ -277,7 +274,7 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
             This action cannot be undone.
           </p>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-900 mb-1">
                 Dropout Date
@@ -391,17 +388,17 @@ export default function StudentTable({
           <div className="flex border-b border-gray-200">
             <button
               onClick={() => handleTabChange("active")}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === "active"
                   ? "border-blue-600 text-blue-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
-              Active Students ({students.length})
+              Active ({students.length})
             </button>
             <button
               onClick={() => handleTabChange("dropout")}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === "dropout"
                   ? "border-blue-600 text-blue-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
@@ -414,7 +411,7 @@ export default function StudentTable({
       )}
 
       {/* Grade filter - centered */}
-      <div className="max-w-3xl mx-auto mb-4 flex items-center gap-4">
+      <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
         <label
           htmlFor="gradeFilter"
           className="text-sm font-medium text-gray-700"

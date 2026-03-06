@@ -162,11 +162,12 @@ describe("VisitsListPage (server component)", () => {
     expect(screen.getByText("All Visits")).toBeInTheDocument();
     expect(screen.getByText("1 total (1 in progress)")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
-    expect(screen.getByText("Test School A")).toBeInTheDocument();
-    expect(screen.getByText("Code: SC001")).toBeInTheDocument();
+    // Rendered in both mobile card and desktop table
+    expect(screen.getAllByText("Test School A").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Code: SC001").length).toBeGreaterThanOrEqual(1);
 
-    const continueLink = screen.getByText("Continue");
-    expect(continueLink.closest("a")).toHaveAttribute("href", "/visits/1");
+    const continueLinks = screen.getAllByText("Continue");
+    expect(continueLinks[0].closest("a")).toHaveAttribute("href", "/visits/1");
   });
 
   it("renders completed visits with View links and uses completed_at timestamp", async () => {
@@ -178,16 +179,17 @@ describe("VisitsListPage (server component)", () => {
 
     expect(screen.getByText("1 total (0 in progress)")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Completed" })).toBeInTheDocument();
-    expect(screen.getByText("Test School B")).toBeInTheDocument();
-    expect(screen.getByText("Code: SC002")).toBeInTheDocument();
+    // Rendered in both mobile card and desktop table
+    expect(screen.getAllByText("Test School B").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Code: SC002").length).toBeGreaterThanOrEqual(1);
 
     const completedDate = formatISTDate(completedVisit.completed_at);
     const insertedDate = formatISTDate(completedVisit.inserted_at);
-    expect(screen.getByText(completedDate)).toBeInTheDocument();
+    expect(screen.getAllByText(completedDate).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(insertedDate)).not.toBeInTheDocument();
 
-    const viewLink = screen.getByText("View");
-    expect(viewLink.closest("a")).toHaveAttribute("href", "/visits/2");
+    const viewLinks = screen.getAllByText("View");
+    expect(viewLinks[0].closest("a")).toHaveAttribute("href", "/visits/2");
   });
 
   it("keeps visits list as a two-state UI with no ended state", async () => {
@@ -228,7 +230,7 @@ describe("VisitsListPage (server component)", () => {
     render(jsx);
 
     expect(screen.getAllByText("SC003").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Code: SC003")).toBeInTheDocument();
+    expect(screen.getAllByText("Code: SC003").length).toBeGreaterThanOrEqual(1);
   });
 
   it("queries PM visits with role-safe pm filter", async () => {

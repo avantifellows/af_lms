@@ -21,6 +21,7 @@ vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
@@ -266,7 +267,7 @@ describe("VisitDetailPage", () => {
     expect(visitParams).toEqual(["42"]);
 
     const [actionsSql, actionsParams] = mockQuery.mock.calls[1] as [string, unknown[]];
-    expect(actionsSql).toContain("FROM lms_pm_visit_actions");
+    expect(actionsSql).toContain("FROM lms_pm_school_visit_actions");
     expect(actionsSql).toContain("deleted_at IS NULL");
     expect(actionsSql).toContain("ORDER BY inserted_at ASC, id ASC");
     expect(actionsParams).toEqual(["42"]);

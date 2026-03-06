@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   try {
     const body = await request.json();
-    const { level, role, school_codes, regions, program_ids, read_only } = body;
+    const { level, role, school_codes, regions, program_ids, read_only, full_name } = body;
 
     if (level && (level < 1 || level > 3)) {
       return NextResponse.json(
@@ -86,9 +86,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
            regions = $4,
            program_ids = COALESCE($5, program_ids),
            read_only = COALESCE($6, read_only),
+           full_name = $7,
            updated_at = NOW()
-       WHERE id = $7`,
-      [level, userRole, school_codes || null, regions || null, program_ids || null, read_only, id]
+       WHERE id = $8`,
+      [level, userRole, school_codes || null, regions || null, program_ids || null, read_only, full_name ?? null, id]
     );
 
     return NextResponse.json({ success: true });

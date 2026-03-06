@@ -83,7 +83,7 @@ describe("CompleteVisitButton", () => {
         screen.getByText("At least one completed classroom observation is required to complete visit")
       ).toBeInTheDocument();
     });
-    expect(screen.getByTestId("complete-visit-error-details")).toBeInTheDocument();
+    expect(screen.getByTestId("toast-error-details")).toBeInTheDocument();
     expect(screen.getByText("Action 101: rubric_version is required")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Complete Visit" })).toBeEnabled();
 
