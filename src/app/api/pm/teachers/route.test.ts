@@ -75,6 +75,27 @@ describe("GET /api/pm/teachers", () => {
     expect(body.error).toBe("school_code query parameter is required");
   });
 
+  it("returns 403 when PM cannot access the requested school", async () => {
+    mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
+    // Level 1 PM with access to SCH999 only
+    stubPermission({ level: 1, school_codes: ["SCH999"] });
+    // school region lookup
+    mockQuery.mockResolvedValueOnce([{ region: "Jaipur" }] as never);
+
+    const response = await GET(teachersRequest("SCH001"));
+    expect(response.status).toBe(403);
+  });
+
+  it("returns 403 when level-2 PM region does not match school", async () => {
+    mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
+    stubPermission({ level: 2, regions: ["Patna"] });
+    // school region is Jaipur, PM only has Patna
+    mockQuery.mockResolvedValueOnce([{ region: "Jaipur" }] as never);
+
+    const response = await GET(teachersRequest("SCH001"));
+    expect(response.status).toBe(403);
+  });
+
   it("returns teachers for a valid school_code", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     stubPermission();
