@@ -339,32 +339,22 @@ jobs:
             --branch-name main \
             --environment-variables "$ENV_VARS"
 
-      - name: Stop any in-progress jobs
+      # Amplify auto-build is enabled on main — it triggers a build on every
+      # push automatically. The env vars synced above will be picked up by
+      # that build. No need to call start-job (which races with auto-build).
+      - name: Verify build is running
         run: |
-          JOB_ID=$(aws amplify list-jobs \
+          LATEST=$(aws amplify list-jobs \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name main \
             --max-results 1 \
-            --query "jobSummaries[?status=='PENDING' || status=='RUNNING' || status=='PROVISIONING'].jobId | [0]" \
-            --output text 2>/dev/null || true)
-
-          if [ -n "$JOB_ID" ] && [ "$JOB_ID" != "None" ]; then
-            echo "Stopping existing job: $JOB_ID"
-            aws amplify stop-job \
-              --app-id ${{ env.AMPLIFY_APP_ID }} \
-              --branch-name main \
-              --job-id "$JOB_ID" || true
-            sleep 5
-          fi
-
-      - name: Trigger production build
-        run: |
-          aws amplify start-job \
-            --app-id ${{ env.AMPLIFY_APP_ID }} \
-            --branch-name main \
-            --job-type RELEASE
+            --query "jobSummaries[0].{id:jobId,status:status,commit:commitId}" \
+            --output table 2>/dev/null || true)
 
           echo "============================================"
-          echo "Production deployment triggered!"
-          echo "URL: ${{ steps.url.outputs.value }}"
+          echo "Production env vars synced."
+          echo "Amplify auto-build will deploy to: ${{ steps.url.outputs.value }}"
+          echo ""
+          echo "Latest job:"
+          echo "$LATEST"
           echo "============================================"
