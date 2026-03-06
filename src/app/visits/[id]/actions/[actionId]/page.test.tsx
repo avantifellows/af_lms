@@ -134,6 +134,14 @@ describe("VisitActionDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    // Default fetch mock for teacher API (ClassroomObservationForm fetches teachers on mount)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ teachers: [] }),
+      })
+    );
   });
 
   it("loads the classroom observation renderer for classroom_observation actions", async () => {
@@ -169,6 +177,9 @@ describe("VisitActionDetailPage", () => {
           action_type: "classroom_observation",
           data: {
             rubric_version: "2.0",
+            teacher_id: 1,
+            teacher_name: "Alice Teacher",
+            grade: "10",
             params: {
               teacher_on_time: { score: 1 },
             },
@@ -207,24 +218,26 @@ describe("VisitActionDetailPage", () => {
         }),
       ]);
 
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            action: makeAction({
-              action_type: "classroom_observation",
-              data: {
-                rubric_version: CURRENT_RUBRIC_VERSION,
-                params: {
-                  teacher_on_time: { score: 1, remarks: "Observed" },
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "classroom_observation",
+                data: {
+                  rubric_version: CURRENT_RUBRIC_VERSION,
+                  params: {
+                    teacher_on_time: { score: 1, remarks: "Observed" },
+                  },
+                  observer_summary_strengths: "Strong opening",
                 },
-                observer_summary_strengths: "Strong opening",
-              },
+              }),
             }),
-          }),
-      })
-    ) as unknown as typeof fetch;
+        })
+      ) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
@@ -234,10 +247,10 @@ describe("VisitActionDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url).toBe("/api/pm/visits/1/actions/101");
     expect(init.method).toBe("PATCH");
 
@@ -275,6 +288,7 @@ describe("VisitActionDetailPage", () => {
 
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
       .mockImplementationOnce(() =>
         Promise.resolve({
           ok: true,
@@ -320,18 +334,18 @@ describe("VisitActionDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "End Action" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
     });
 
-    const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [saveUrl, saveInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
     expect(saveInit.method).toBe("PATCH");
 
     const saveBody = JSON.parse(String(saveInit.body)) as { data: Record<string, unknown> };
     expect(saveBody.data.rubric_version).toBe(CURRENT_RUBRIC_VERSION);
 
-    const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const [endUrl, endInit] = fetchMock.mock.calls[2] as [string, RequestInit];
     expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
     expect(endInit.method).toBe("POST");
     expect(endInit.body).toBe(
@@ -360,17 +374,19 @@ describe("VisitActionDetailPage", () => {
       cancel: vi.fn(),
     });
 
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: false,
-        status: 422,
-        json: () =>
-          Promise.resolve({
-            error: "Validation failed",
-            details: ["Missing score for Teacher Grooming", "Missing score for Gender Sensitivity Parameters"],
-          }),
-      })
-    ) as unknown as typeof fetch;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Validation failed",
+              details: ["Missing score for Teacher Grooming", "Missing score for Gender Sensitivity Parameters"],
+            }),
+        })
+      ) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
@@ -385,7 +401,7 @@ describe("VisitActionDetailPage", () => {
 
     expect(screen.getByText("Missing score for Teacher Grooming")).toBeInTheDocument();
     expect(screen.getByText("Missing score for Gender Sensitivity Parameters")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(mockGetAccurateLocation).not.toHaveBeenCalled();
   });
 
@@ -412,6 +428,7 @@ describe("VisitActionDetailPage", () => {
 
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
       .mockImplementationOnce(() =>
         Promise.resolve({
           ok: true,
@@ -456,7 +473,7 @@ describe("VisitActionDetailPage", () => {
     });
 
     expect(screen.getByText("Missing score for Teacher Grooming")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
 

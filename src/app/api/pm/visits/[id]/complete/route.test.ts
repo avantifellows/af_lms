@@ -97,6 +97,9 @@ function buildValidClassroomData() {
   return {
     rubric_version: CURRENT_RUBRIC_VERSION,
     params,
+    teacher_id: 1,
+    teacher_name: "Test Teacher",
+    grade: "10",
   };
 }
 

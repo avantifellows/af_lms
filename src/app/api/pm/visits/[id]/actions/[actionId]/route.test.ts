@@ -96,6 +96,9 @@ function buildValidClassroomData() {
   return {
     rubric_version: CURRENT_RUBRIC_VERSION,
     params,
+    teacher_id: 1,
+    teacher_name: "Test Teacher",
+    grade: "10",
   };
 }
 
@@ -584,7 +587,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ action: updated });
 
     const [updateQueryText, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
-    expect(updateQueryText).toContain("UPDATE lms_pm_visit_actions");
+    expect(updateQueryText).toContain("UPDATE lms_pm_school_visit_actions");
     expect(updateQueryText).toContain("SET data = $3::jsonb");
     expect(updateQueryText).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
     expect(updateQueryText).not.toContain("status =");
@@ -701,7 +704,7 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ success: true });
 
     const [deleteQueryText, deleteParams] = mockQuery.mock.calls[2] as [string, unknown[]];
-    expect(deleteQueryText).toContain("UPDATE lms_pm_visit_actions");
+    expect(deleteQueryText).toContain("UPDATE lms_pm_school_visit_actions");
     expect(deleteQueryText).toContain("deleted_at = (NOW() AT TIME ZONE 'UTC')");
     expect(deleteQueryText).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
     expect(deleteQueryText).toContain("deleted_at IS NULL");

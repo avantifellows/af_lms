@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import Toast from "@/components/Toast";
+import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
 import {
   ACTION_STATUS_VALUES,
@@ -116,6 +117,50 @@ function formatTimestamp(value: string | null): string {
   return new Date(value).toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
   });
+}
+
+interface ClassroomObservationStats {
+  teacherName: string | null;
+  grade: string | null;
+  answeredCount: number;
+  totalParams: number;
+  score: number;
+  maxScore: number;
+}
+
+function getClassroomObservationStats(data: Record<string, unknown> | undefined): ClassroomObservationStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const teacherName = typeof data.teacher_name === "string" ? data.teacher_name : null;
+  const grade = typeof data.grade === "string" ? data.grade : null;
+  const params = data.params && typeof data.params === "object" && !Array.isArray(data.params)
+    ? (data.params as Record<string, unknown>)
+    : {};
+
+  let answeredCount = 0;
+  let score = 0;
+
+  for (const parameter of CLASSROOM_OBSERVATION_RUBRIC.parameters) {
+    const paramValue = params[parameter.key];
+    if (paramValue && typeof paramValue === "object" && "score" in paramValue) {
+      const paramScore = (paramValue as { score: unknown }).score;
+      if (typeof paramScore === "number" && parameter.options.some((o) => o.score === paramScore)) {
+        answeredCount += 1;
+        score += paramScore;
+      }
+    }
+  }
+
+  return {
+    teacherName,
+    grade,
+    answeredCount,
+    totalParams: CLASSROOM_OBSERVATION_RUBRIC.parameters.length,
+    score,
+    maxScore: CLASSROOM_OBSERVATION_RUBRIC.maxScore,
+  };
 }
 
 export default function ActionPointList({
@@ -344,6 +389,37 @@ export default function ActionPointList({
                 <span>Started: {formatTimestamp(action.started_at)}</span>
                 <span>Ended: {formatTimestamp(action.ended_at)}</span>
               </div>
+              {action.action_type === "classroom_observation" && (() => {
+                const stats = getClassroomObservationStats(action.data);
+                if (!stats) {
+                  return null;
+                }
+
+                const progressPercent = stats.totalParams === 0
+                  ? 0
+                  : Math.round((stats.answeredCount / stats.totalParams) * 100);
+
+                return (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`observation-stats-${action.id}`}>
+                    {stats.teacherName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Teacher:</span> {stats.teacherName}
+                      </span>
+                    )}
+                    {stats.grade && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Grade:</span> {stats.grade}
+                      </span>
+                    )}
+                    <span className="font-mono text-accent font-bold">
+                      Score: {stats.score}/{stats.maxScore}
+                    </span>
+                    <span className="font-mono text-text-secondary">
+                      {stats.answeredCount}/{stats.totalParams} ({progressPercent}%)
+                    </span>
+                  </div>
+                );
+              })()}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {action.status === "pending" && !readOnly && (
                   <>

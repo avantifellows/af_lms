@@ -29,10 +29,11 @@ export async function GET() {
     regions: string[] | null;
     program_ids: number[] | null;
     read_only: boolean;
+    full_name: string | null;
     inserted_at: string;
     updated_at: string;
   }>(
-    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, inserted_at, updated_at
+    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name, inserted_at, updated_at
      FROM user_permission
      ORDER BY level DESC, role, email`
   );
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { email, level, role, school_codes, regions, program_ids, read_only } = body;
+    const { email, level, role, school_codes, regions, program_ids, read_only, full_name } = body;
 
     if (!email || !level) {
       return NextResponse.json(
@@ -83,8 +84,8 @@ export async function POST(request: NextRequest) {
     const userRole = validRoles.includes(role) ? role : "teacher";
 
     const result = await query<{ id: number }>(
-      `INSERT INTO user_permission (email, level, role, school_codes, regions, program_ids, read_only)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO user_permission (email, level, role, school_codes, regions, program_ids, read_only, full_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (email) DO UPDATE SET
          level = EXCLUDED.level,
          role = EXCLUDED.role,
@@ -92,9 +93,10 @@ export async function POST(request: NextRequest) {
          regions = EXCLUDED.regions,
          program_ids = EXCLUDED.program_ids,
          read_only = EXCLUDED.read_only,
+         full_name = EXCLUDED.full_name,
          updated_at = NOW()
        RETURNING id`,
-      [email, level, userRole, school_codes || null, regions || null, program_ids, read_only || false]
+      [email, level, userRole, school_codes || null, regions || null, program_ids, read_only || false, full_name || null]
     );
 
     return NextResponse.json({ id: result[0].id, success: true });

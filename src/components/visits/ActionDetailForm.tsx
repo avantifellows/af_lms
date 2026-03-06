@@ -29,6 +29,7 @@ interface ActionDetailFormProps {
   initialAction: ActionRecord;
   canWrite: boolean;
   isAdmin: boolean;
+  schoolCode: string;
 }
 
 type FormState = "idle" | "saving" | "acquiring" | "ending";
@@ -310,6 +311,18 @@ function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
     sanitized.observer_summary_improvements = data.observer_summary_improvements;
   }
 
+  if (typeof data.teacher_id === "number" && Number.isFinite(data.teacher_id) && data.teacher_id > 0) {
+    sanitized.teacher_id = data.teacher_id;
+  }
+
+  if (typeof data.teacher_name === "string") {
+    sanitized.teacher_name = data.teacher_name;
+  }
+
+  if (typeof data.grade === "string") {
+    sanitized.grade = data.grade;
+  }
+
   return sanitized;
 }
 
@@ -442,6 +455,7 @@ export default function ActionDetailForm({
   initialAction,
   canWrite,
   isAdmin,
+  schoolCode,
 }: ActionDetailFormProps) {
   const [action, setAction] = useState<ActionRecord>(() => normalizeActionForState(initialAction));
   const [formData, setFormData] = useState<Record<string, unknown>>(() =>
@@ -717,6 +731,7 @@ export default function ActionDetailForm({
             data={formData}
             setData={setFormData}
             disabled={!canSave || isBusy}
+            schoolCode={schoolCode}
           />
         ) : (
           config.fields.map((field) => (
