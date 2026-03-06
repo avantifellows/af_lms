@@ -252,6 +252,7 @@ export async function DELETE(
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE visit_id = $1
        AND id = $2
+       AND status = 'pending'
        AND deleted_at IS NULL
      RETURNING id`,
     [id, actionId]
