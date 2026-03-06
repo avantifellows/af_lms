@@ -382,7 +382,7 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const visitsContent = (
-    <VisitsTab schoolCode={school.code} />
+    <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />
   );
 
   const curriculumContent = (
