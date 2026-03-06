@@ -11,6 +11,7 @@ interface UserPermission {
   regions: string[] | null;
   program_ids: number[] | null;
   read_only: boolean;
+  full_name: string | null;
 }
 
 // Program definitions
@@ -38,6 +39,7 @@ const labelClassName = "block text-sm font-medium text-gray-700";
 
 export default function AddUserModal({ user, regions, onClose, onSave }: AddUserModalProps) {
   const [email, setEmail] = useState(user?.email || "");
+  const [fullName, setFullName] = useState(user?.full_name || "");
   const [level, setLevel] = useState(user?.level || 1);
   const [role, setRole] = useState(user?.role || "teacher");
   const [selectedRegions, setSelectedRegions] = useState<string[]>(user?.regions || []);
@@ -98,6 +100,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
         role,
         read_only: isAdminRole ? false : readOnly,
         program_ids: isAdminRole ? PROGRAMS.map((p) => p.id) : selectedPrograms,
+        full_name: fullName.trim() || null,
       };
 
       if (!isEditing) {
@@ -192,6 +195,20 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
             </div>
 
             <div>
+              <label className={labelClassName}>Full Name</label>
+              <input
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="e.g. Priya Sharma"
+                className={inputClassName}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Display name shown in teacher dropdowns and reports
+              </p>
+            </div>
+
+            <div>
               <label className={labelClassName}>Role</label>
               <select
                 value={role}
@@ -200,10 +217,12 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
               >
                 <option value="teacher">Teacher - Student management view</option>
                 <option value="program_manager">Program Manager - School visits + student management</option>
+                <option value="program_admin">Program Admin - Scoped oversight with read-only visits</option>
                 <option value="admin">Admin - Full access + user management</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
                 {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools"}
+                {role === "program_admin" && "Program Admins can oversee scoped schools; visit workflows are read-only"}
                 {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
                 {role === "admin" && "Admins have full access to all features, all schools, and all programs"}
               </p>

@@ -15,6 +15,7 @@ interface UserPermission {
   regions: string[] | null;
   program_ids: number[] | null;
   read_only: boolean;
+  full_name: string | null;
 }
 
 interface Region {
@@ -24,7 +25,7 @@ interface Region {
 
 async function getUsers(): Promise<UserPermission[]> {
   return query<UserPermission>(
-    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only
+    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name
      FROM user_permission
      ORDER BY level DESC, role, email`
   );
