@@ -150,218 +150,274 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
   const completed = visits.filter((v) => v.status === "completed");
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">All Visits</h1>
-        <div className="text-sm text-gray-500">
-          {visits.length} total ({inProgress.length} in progress)
+    <main className="min-h-screen bg-bg">
+      <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-6 border-b-4 border-border-accent pb-4">
+          <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">All Visits</h1>
+          <div className="text-sm text-text-secondary font-mono">
+            {visits.length} total ({inProgress.length} in progress)
+          </div>
         </div>
+
+        {isScopedRole && (
+          <form method="get" className="mb-6 bg-bg-card border border-border p-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label htmlFor="school_code" className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+                  School Code
+                </label>
+                <input
+                  id="school_code"
+                  name="school_code"
+                  defaultValue={scopedFilters.schoolCode || ""}
+                  placeholder="e.g. 70705"
+                  className="w-full border-2 border-border px-3 py-2 text-sm bg-bg-input focus:border-accent"
+                />
+              </div>
+              <div>
+                <label htmlFor="status" className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+                  Status
+                </label>
+                <select
+                  id="status"
+                  name="status"
+                  defaultValue={scopedFilters.status || ""}
+                  className="w-full border-2 border-border px-3 py-2 text-sm bg-bg-input focus:border-accent"
+                >
+                  <option value="">All</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="pm_email" className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+                  PM Email
+                </label>
+                <input
+                  id="pm_email"
+                  name="pm_email"
+                  type="email"
+                  defaultValue={scopedFilters.pmEmail || ""}
+                  placeholder="pm@avantifellows.org"
+                  className="w-full border-2 border-border px-3 py-2 text-sm bg-bg-input focus:border-accent"
+                />
+              </div>
+              <div className="flex items-end gap-2 sm:col-span-1">
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover flex-1 sm:flex-none"
+                >
+                  Apply
+                </button>
+                <Link
+                  href="/visits"
+                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-secondary bg-bg-card-alt border border-border hover:bg-hover-bg flex-1 sm:flex-none"
+                >
+                  Reset
+                </Link>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {/* In Progress Section */}
+        {inProgress.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2">
+              In Progress
+            </h2>
+
+            {/* Mobile: card layout */}
+            <div className="sm:hidden space-y-3">
+              {inProgress.map((visit) => (
+                <div key={visit.id} className="bg-bg-card border border-border p-4">
+                  <div className="flex justify-between items-start gap-3 mb-3">
+                    <div>
+                      <div className="text-sm font-medium text-text-primary">
+                        {visit.school_name || visit.school_code}
+                      </div>
+                      <div className="text-xs text-text-muted">Code: {visit.school_code}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono mb-3">
+                    <span>Visit: {new Date(visit.visit_date).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata" })}</span>
+                    <span>Started: {new Date(visit.inserted_at).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata" })}</span>
+                  </div>
+                  <Link
+                    href={`/visits/${visit.id}`}
+                    className="inline-flex items-center justify-center w-full px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+                  >
+                    Continue
+                  </Link>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table layout */}
+            <div className="hidden sm:block bg-bg-card border border-border overflow-hidden">
+              <table className="min-w-full">
+                <thead className="bg-bg-card-alt border-b-2 border-border-accent">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
+                      School
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Visit Date
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Started
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-bg-card">
+                  {inProgress.map((visit) => (
+                    <tr key={visit.id} className="border-b border-border/40 hover:bg-hover-bg">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-text-primary">
+                          {visit.school_name || visit.school_code}
+                        </div>
+                        <div className="text-xs text-text-muted">
+                          Code: {visit.school_code}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary font-mono">
+                        {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary font-mono">
+                        {new Date(visit.inserted_at).toLocaleDateString("en-IN", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                        <Link
+                          href={`/visits/${visit.id}`}
+                          className="inline-flex items-center px-3 py-1 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+                        >
+                          Continue
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Completed Section */}
+        {completed.length > 0 && (
+          <div>
+            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2">Completed</h2>
+
+            {/* Mobile: card layout */}
+            <div className="sm:hidden space-y-3">
+              {completed.map((visit) => (
+                <div key={visit.id} className="bg-bg-card border border-border p-4">
+                  <div className="mb-3">
+                    <div className="text-sm font-medium text-text-primary">
+                      {visit.school_name || visit.school_code}
+                    </div>
+                    <div className="text-xs text-text-muted">Code: {visit.school_code}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted font-mono mb-3">
+                    <span>Visit: {new Date(visit.visit_date).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata" })}</span>
+                    <span>Completed: {new Date(visit.completed_at || visit.inserted_at).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Kolkata" })}</span>
+                  </div>
+                  <Link
+                    href={`/visits/${visit.id}`}
+                    className="inline-flex items-center justify-center w-full px-4 py-2.5 text-sm font-bold uppercase tracking-wide border-2 border-accent text-accent hover:bg-accent hover:text-text-on-accent transition-colors"
+                  >
+                    View
+                  </Link>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table layout */}
+            <div className="hidden sm:block bg-bg-card border border-border overflow-hidden">
+              <table className="min-w-full">
+                <thead className="bg-bg-card-alt border-b-2 border-border-accent">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
+                      School
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Visit Date
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Completed
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-text-muted uppercase tracking-wider">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-bg-card">
+                  {completed.map((visit) => (
+                    <tr key={visit.id} className="border-b border-border/40 hover:bg-hover-bg">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-text-primary">
+                          {visit.school_name || visit.school_code}
+                        </div>
+                        <div className="text-xs text-text-muted">
+                          Code: {visit.school_code}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary font-mono">
+                        {new Date(visit.visit_date).toLocaleDateString("en-IN", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary font-mono">
+                        {new Date(visit.completed_at || visit.inserted_at).toLocaleDateString("en-IN", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                        <Link
+                          href={`/visits/${visit.id}`}
+                          className="text-accent hover:text-accent-hover font-bold uppercase"
+                        >
+                          View
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {visits.length === 0 && (
+          <div className="text-center py-12">
+            <div className="text-text-muted mb-4 uppercase tracking-wide">No visits recorded yet.</div>
+            <Link
+              href="/dashboard"
+              className="text-accent hover:text-accent-hover font-bold uppercase"
+            >
+              Go to dashboard to start a visit
+            </Link>
+          </div>
+        )}
       </div>
-
-      {isScopedRole && (
-        <form method="get" className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <label htmlFor="school_code" className="block text-xs font-medium text-gray-600 mb-1">
-                School Code
-              </label>
-              <input
-                id="school_code"
-                name="school_code"
-                defaultValue={scopedFilters.schoolCode || ""}
-                placeholder="e.g. 70705"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label htmlFor="status" className="block text-xs font-medium text-gray-600 mb-1">
-                Status
-              </label>
-              <select
-                id="status"
-                name="status"
-                defaultValue={scopedFilters.status || ""}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white"
-              >
-                <option value="">All</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="pm_email" className="block text-xs font-medium text-gray-600 mb-1">
-                PM Email
-              </label>
-              <input
-                id="pm_email"
-                name="pm_email"
-                type="email"
-                defaultValue={scopedFilters.pmEmail || ""}
-                placeholder="pm@avantifellows.org"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="flex items-end gap-2">
-              <button
-                type="submit"
-                className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-              >
-                Apply Filters
-              </button>
-              <Link
-                href="/visits"
-                className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200"
-              >
-                Reset
-              </Link>
-            </div>
-          </div>
-        </form>
-      )}
-
-      {/* In Progress Section */}
-      {inProgress.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            In Progress
-          </h2>
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    School
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Visit Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Started
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {inProgress.map((visit) => (
-                  <tr key={visit.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {visit.school_name || visit.school_code}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Code: {visit.school_code}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.visit_date).toLocaleDateString("en-IN", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "Asia/Kolkata",
-                      })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.inserted_at).toLocaleDateString("en-IN", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "Asia/Kolkata",
-                      })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                      <Link
-                        href={`/visits/${visit.id}`}
-                        className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                      >
-                        Continue
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Completed Section */}
-      {completed.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Completed</h2>
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    School
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Visit Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Completed
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {completed.map((visit) => (
-                  <tr key={visit.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {visit.school_name || visit.school_code}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Code: {visit.school_code}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.visit_date).toLocaleDateString("en-IN", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "Asia/Kolkata",
-                      })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(visit.completed_at || visit.inserted_at).toLocaleDateString("en-IN", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "Asia/Kolkata",
-                      })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                      <Link
-                        href={`/visits/${visit.id}`}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {visits.length === 0 && (
-        <div className="text-center py-12">
-          <div className="text-gray-500 mb-4">No visits recorded yet.</div>
-          <Link
-            href="/dashboard"
-            className="text-blue-600 hover:text-blue-800"
-          >
-            Go to dashboard to start a visit
-          </Link>
-        </div>
-      )}
     </main>
   );
 }

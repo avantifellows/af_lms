@@ -1,0 +1,125 @@
+name: E2E Coverage PR Comment
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  coverage-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post coverage comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'coverage/coverage-summary.json';
+
+            if (!fs.existsSync(path)) {
+              core.warning('No coverage/coverage-summary.json found. Run `npm run test:e2e` locally and commit the summary.');
+              return;
+            }
+
+            const summary = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const total = summary.total || {};
+            const metrics = ['statements', 'branches', 'functions', 'lines'];
+
+            const pctBar = (pct) => {
+              if (pct === '' || pct === undefined) return '\u2014';
+              const num = Number(pct);
+              let icon = '\ud83d\udd34';
+              if (num >= 80) icon = '\ud83d\udfe2';
+              else if (num >= 50) icon = '\ud83d\udfe1';
+              return `${icon} ${num.toFixed(1)}%`;
+            };
+
+            let body = `## \ud83d\udcca E2E Coverage Report\n\n`;
+            body += `| Metric | Covered | Total | Coverage |\n`;
+            body += `|--------|---------|-------|----------|\n`;
+
+            for (const m of metrics) {
+              if (total[m]) {
+                const label = m.charAt(0).toUpperCase() + m.slice(1);
+                body += `| **${label}** | ${total[m].covered} | ${total[m].total} | ${pctBar(total[m].pct)} |\n`;
+              }
+            }
+
+            // Clean Turbopack chunk names into readable file paths
+            // e.g. "localhost-3001/_next/.../af_lms_src_app_admin_page_tsx_..." -> "src/app/admin/page.tsx"
+            const cleanName = (name) => {
+              const match = name.match(/af_lms_(src_.+?)_[a-f0-9]{8}\._\.js$/);
+              if (match) {
+                return match[1]
+                  .replace(/_tsx$/, '.tsx')
+                  .replace(/_ts$/, '.ts')
+                  .replace(/_jsx$/, '.jsx')
+                  .replace(/_js$/, '.js')
+                  .replace(/_mjs$/, '.mjs')
+                  .replace(/_/g, '/');
+              }
+              // Fallback: strip URL prefix
+              return name.replace(/^localhost-\d+\/_next\/static\/chunks\//, '');
+            };
+
+            const files = Object.entries(summary)
+              .filter(([key]) => key !== 'total')
+              .map(([file, data]) => ({
+                file: cleanName(file),
+                statements: data.statements?.pct ?? '',
+                branches: data.branches?.pct ?? '',
+                functions: data.functions?.pct ?? '',
+                lines: data.lines?.pct ?? '',
+              }))
+              .sort((a, b) => {
+                const aMin = Math.min(...[a.statements, a.branches, a.functions, a.lines].filter(v => v !== ''));
+                const bMin = Math.min(...[b.statements, b.branches, b.functions, b.lines].filter(v => v !== ''));
+                return aMin - bMin;
+              })
+              .slice(0, 20);
+
+            if (files.length > 0) {
+              body += `\n<details>\n<summary>\ud83d\udcc1 Per-file breakdown (lowest coverage first)</summary>\n\n`;
+              body += `| File | Statements | Branches | Functions | Lines |\n`;
+              body += `|------|-----------|----------|-----------|-------|\n`;
+              for (const f of files) {
+                body += `| \`${f.file}\` | ${pctBar(f.statements)} | ${pctBar(f.branches)} | ${pctBar(f.functions)} | ${pctBar(f.lines)} |\n`;
+              }
+              body += `\n</details>\n`;
+            }
+
+            body += `\n---\n*Coverage collected locally via Playwright + V8. Run \`npm run test:e2e\` to update.*`;
+
+            // Find existing bot comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('E2E Coverage Report')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing comment #${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info('Created new coverage comment');
+            }

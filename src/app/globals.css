@@ -6,6 +6,27 @@
   --font-geist-sans: Arial, Helvetica, sans-serif;
   --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
+
+  /* Ledger UI design tokens */
+  --color-accent: #059669;
+  --color-accent-hover: #047857;
+  --color-bg: #F0F7F4;
+  --color-bg-card: #FFFFFF;
+  --color-bg-card-alt: #F5FAF7;
+  --color-bg-input: #FFFFFF;
+  --color-hover-bg: #E6F2EC;
+  --color-border: #D1E7DD;
+  --color-border-accent: #059669;
+  --color-text-primary: #2A2A2A;
+  --color-text-secondary: #6B6560;
+  --color-text-muted: #9A948D;
+  --color-text-on-accent: #FFFFFF;
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.08);
+  --color-success-bg: rgba(5, 150, 105, 0.08);
+  --color-warning-bg: #fef3c7;
+  --color-warning-border: #fcd34d;
+  --color-warning-text: #92400e;
 }
 
 @theme inline {
@@ -13,13 +34,36 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Ledger UI tokens */
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-bg: var(--color-bg);
+  --color-bg-card: var(--color-bg-card);
+  --color-bg-card-alt: var(--color-bg-card-alt);
+  --color-bg-input: var(--color-bg-input);
+  --color-hover-bg: var(--color-hover-bg);
+  --color-border: var(--color-border);
+  --color-border-accent: var(--color-border-accent);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-on-accent: var(--color-text-on-accent);
+  --color-danger: var(--color-danger);
+  --color-danger-bg: var(--color-danger-bg);
+  --color-success-bg: var(--color-success-bg);
+  --color-warning-bg: var(--color-warning-bg);
+  --color-warning-border: var(--color-warning-border);
+  --color-warning-text: var(--color-warning-text);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+input:focus, input:focus-visible,
+select:focus, select:focus-visible,
+textarea:focus, textarea:focus-visible,
+button:focus, button:focus-visible,
+a:focus, a:focus-visible {
+  outline: none;
+  --tw-ring-shadow: 0 0 #000 !important;
 }
 
 body {

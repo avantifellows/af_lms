@@ -13,9 +13,10 @@ interface Visit {
 
 interface Props {
   schoolCode: string;
+  canEdit?: boolean;
 }
 
-export default function VisitsTab({ schoolCode }: Props) {
+export default function VisitsTab({ schoolCode, canEdit = false }: Props) {
   const [visits, setVisits] = useState<Visit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +37,7 @@ export default function VisitsTab({ schoolCode }: Props) {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+      <div className="bg-danger-bg border border-danger/20 p-4 text-danger">
         {error}
       </div>
     );
@@ -45,11 +46,11 @@ export default function VisitsTab({ schoolCode }: Props) {
   if (visits === null) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-3 text-gray-600">Loading visit history...</span>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
+        <span className="ml-3 text-text-secondary">Loading visit history...</span>
       </div>
     );
   }
 
-  return <VisitHistorySection visits={visits} schoolCode={schoolCode} />;
+  return <VisitHistorySection visits={visits} schoolCode={schoolCode} canEdit={canEdit} />;
 }
