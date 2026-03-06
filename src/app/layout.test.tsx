@@ -3,11 +3,6 @@ import { render, screen } from "@testing-library/react";
 
 // ---- mocks ----
 
-vi.mock("next/font/google", () => ({
-  Geist: () => ({ variable: "--font-geist-sans" }),
-  Geist_Mono: () => ({ variable: "--font-geist-mono" }),
-}));
-
 vi.mock("./globals.css", () => ({}));
 
 vi.mock("@/components/Providers", () => ({
@@ -33,7 +28,7 @@ describe("RootLayout", () => {
     expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
-  it("returns JSX with font variables and antialiased class", () => {
+  it("returns JSX with antialiased body class", () => {
     // Call the function directly to inspect the JSX tree,
     // since jsdom flattens nested <html>/<body> elements
     const jsx = RootLayout({ children: <span>test</span> });
@@ -44,8 +39,6 @@ describe("RootLayout", () => {
 
     // Check the <body> className via the JSX tree
     const body = jsx.props.children;
-    expect(body.props.className).toContain("--font-geist-sans");
-    expect(body.props.className).toContain("--font-geist-mono");
     expect(body.props.className).toContain("antialiased");
   });
 

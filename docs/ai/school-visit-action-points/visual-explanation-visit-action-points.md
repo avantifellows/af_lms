@@ -182,7 +182,7 @@ lms_pm_school_visits (the visit)
          │
          │ has many
          ▼
-lms_pm_visit_actions (the action cards)
+lms_pm_school_visit_actions (the action cards)
 ┌────┬──────────┬────────────────────┬────────────┬──────────┐
 │ id │ visit_id │ action_type        │ status     │ data     │
 ├────┼──────────┼────────────────────┼────────────┼──────────┤

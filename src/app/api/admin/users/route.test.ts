@@ -120,7 +120,7 @@ describe("POST /api/admin/users", () => {
       body: {
         email: "u@test.com",
         level: 2,
-        role: "program_manager",
+        role: "program_admin",
         program_ids: [1, 2],
         school_codes: ["70705"],
       },

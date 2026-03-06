@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import NewVisitForm from "./NewVisitForm";
 
 const mockPush = vi.fn();
@@ -9,7 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/components/LoadingLink", () => ({
-  default: ({ href, children, className }: any) => (
+  default: ({ href, children, className }: { href: string; children: ReactNode; className?: string }) => (
     <a href={href} className={className}>
       {children}
     </a>
@@ -20,8 +21,8 @@ const mockGetAccurateLocation = vi.fn();
 const mockGetAccuracyStatus = vi.fn(() => "good" as const);
 
 vi.mock("@/lib/geolocation", () => ({
-  getAccurateLocation: (...args: any[]) => mockGetAccurateLocation(...args),
-  getAccuracyStatus: (...args: any[]) => mockGetAccuracyStatus(...args),
+  getAccurateLocation: (...args: unknown[]) => mockGetAccurateLocation(...args),
+  getAccuracyStatus: (...args: unknown[]) => mockGetAccuracyStatus(...args),
 }));
 
 describe("NewVisitForm", () => {
@@ -143,12 +144,13 @@ describe("NewVisitForm", () => {
       cancel: vi.fn(),
     });
 
-    const mockFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ id: 99 }),
-      })
-    ) as any;
+    const mockFetch = vi.fn(
+      () =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ id: 99 }),
+        } as unknown as Response)
+    ) as unknown as typeof fetch;
     vi.stubGlobal("fetch", mockFetch);
 
     render(<NewVisitForm udise="12345678" />);
@@ -192,8 +194,8 @@ describe("NewVisitForm", () => {
         Promise.resolve({
           ok: false,
           json: () => Promise.resolve({ error: "Duplicate visit today" }),
-        })
-      ) as any
+        } as unknown as Response)
+      ) as unknown as typeof fetch
     );
 
     render(<NewVisitForm udise="12345678" />);
@@ -224,10 +226,13 @@ describe("NewVisitForm", () => {
 
     expect(screen.getByText("Visit Workflow")).toBeInTheDocument();
     expect(
-      screen.getByText(/Principal Meeting & Core Operations Review/)
+      screen.getByText(/create action points as needed/i)
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Feedback & Issue Log/)
+      screen.getByText(/Add an action point/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Complete the visit after at least one Classroom Observation/i)
     ).toBeInTheDocument();
   });
 
@@ -341,8 +346,8 @@ describe("NewVisitForm", () => {
         Promise.resolve({
           ok: false,
           json: () => Promise.resolve({}),
-        })
-      ) as any
+        } as unknown as Response)
+      ) as unknown as typeof fetch
     );
 
     render(<NewVisitForm udise="12345678" />);
@@ -371,7 +376,7 @@ describe("NewVisitForm", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => Promise.reject("network down")) as any
+      vi.fn(() => Promise.reject("network down")) as unknown as typeof fetch
     );
 
     render(<NewVisitForm udise="12345678" />);

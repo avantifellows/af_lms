@@ -51,8 +51,10 @@ describe("SchoolTabs", () => {
   it("applies active styling to the selected tab button", () => {
     render(<SchoolTabs tabs={tabs} defaultTab="visits" />);
     const visitsBtn = screen.getByText("Visits");
-    expect(visitsBtn.className).toContain("border-blue-500");
-    expect(visitsBtn.className).toContain("text-blue-600");
+    expect(visitsBtn.className).toContain("border-accent");
+    expect(visitsBtn.className).toContain("text-accent");
+    expect(visitsBtn.className).toContain("uppercase");
+    expect(visitsBtn.className).toContain("font-bold");
 
     const studentsBtn = screen.getByText("Students");
     expect(studentsBtn.className).toContain("border-transparent");
@@ -60,11 +62,17 @@ describe("SchoolTabs", () => {
 });
 
 describe("VisitHistorySection", () => {
-  it("shows 'No visits recorded yet' and 'Start First Visit' link when empty", () => {
-    render(<VisitHistorySection visits={[]} schoolCode="ABC123" />);
+  it("shows 'No visits recorded yet' and 'Start First Visit' link when empty and canEdit", () => {
+    render(<VisitHistorySection visits={[]} schoolCode="ABC123" canEdit />);
     expect(screen.getByText("No visits recorded yet")).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "Start First Visit" });
     expect(link).toHaveAttribute("href", "/school/ABC123/visit/new");
+  });
+
+  it("hides 'Start First Visit' link when empty and canEdit is false", () => {
+    render(<VisitHistorySection visits={[]} schoolCode="ABC123" />);
+    expect(screen.getByText("No visits recorded yet")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Start First Visit" })).not.toBeInTheDocument();
   });
 
   it("renders visit dates and status badges when visits provided", () => {
@@ -74,14 +82,14 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: "2026-01-15T09:00:00Z",
-        ended_at: "2026-01-15T15:00:00Z",
+        completed_at: "2026-01-15T15:00:00Z",
       },
       {
         id: 2,
         visit_date: "2026-01-20",
         status: "in_progress",
         inserted_at: "2026-01-20T10:00:00Z",
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
@@ -90,18 +98,34 @@ describe("VisitHistorySection", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
-  it("shows 'Ended' badge for non-completed visits with ended_at", () => {
+  it("does not render an 'Ended' status badge", () => {
     const visits = [
       {
         id: 3,
         visit_date: "2026-02-01",
         status: "in_progress",
         inserted_at: "2026-02-01T09:00:00Z",
-        ended_at: "2026-02-01T14:00:00Z",
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
-    expect(screen.getByText("Ended")).toBeInTheDocument();
+    expect(screen.queryByText("Ended")).not.toBeInTheDocument();
+  });
+
+  it("uses completed_at for completed timestamp rendering", () => {
+    const visits = [
+      {
+        id: 4,
+        visit_date: "2026-02-10",
+        status: "completed",
+        inserted_at: "2026-02-10T09:00:00Z",
+        completed_at: "2026-02-10T10:30:00Z",
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="ABC123" />);
+
+    expect(screen.getByText(/^Started:/)).toBeInTheDocument();
+    expect(screen.getByText(/^Completed:/)).toBeInTheDocument();
   });
 
   it("shows 'View' link for completed visits", () => {
@@ -111,7 +135,7 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: null,
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
@@ -119,28 +143,28 @@ describe("VisitHistorySection", () => {
     expect(link).toHaveAttribute("href", "/visits/1");
   });
 
-  it("shows 'View' link for ended visits", () => {
+  it("shows 'Continue' link for in-progress visits", () => {
     const visits = [
       {
         id: 2,
         visit_date: "2026-01-20",
-        status: "active",
+        status: "in_progress",
         inserted_at: null,
-        ended_at: "2026-01-20T15:00:00Z",
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
-    expect(screen.getByRole("link", { name: "View" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue" })).toBeInTheDocument();
   });
 
-  it("shows 'Continue' link for in-progress visits without ended_at", () => {
+  it("shows 'Continue' link for in-progress visits without completed_at", () => {
     const visits = [
       {
         id: 3,
         visit_date: "2026-01-25",
         status: "in_progress",
         inserted_at: "2026-01-25T09:00:00Z",
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
@@ -148,19 +172,33 @@ describe("VisitHistorySection", () => {
     expect(link).toHaveAttribute("href", "/visits/3");
   });
 
-  it("shows 'Start New Visit' link when visits exist", () => {
+  it("shows 'Start New Visit' link when visits exist and canEdit", () => {
     const visits = [
       {
         id: 1,
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: null,
-        ended_at: null,
+        completed_at: null,
+      },
+    ];
+    render(<VisitHistorySection visits={visits} schoolCode="XYZ" canEdit />);
+    const link = screen.getByRole("link", { name: "Start New Visit" });
+    expect(link).toHaveAttribute("href", "/school/XYZ/visit/new");
+  });
+
+  it("hides 'Start New Visit' link when canEdit is false", () => {
+    const visits = [
+      {
+        id: 1,
+        visit_date: "2026-01-15",
+        status: "completed",
+        inserted_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="XYZ" />);
-    const link = screen.getByRole("link", { name: "Start New Visit" });
-    expect(link).toHaveAttribute("href", "/school/XYZ/visit/new");
+    expect(screen.queryByRole("link", { name: "Start New Visit" })).not.toBeInTheDocument();
   });
 
   it("renders Visit History heading when visits exist", () => {
@@ -170,7 +208,7 @@ describe("VisitHistorySection", () => {
         visit_date: "2026-01-15",
         status: "completed",
         inserted_at: null,
-        ended_at: null,
+        completed_at: null,
       },
     ];
     render(<VisitHistorySection visits={visits} schoolCode="SCH001" />);
