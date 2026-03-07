@@ -23,6 +23,17 @@ async function setGoodGps(page: Page) {
 }
 
 async function fillClassroomRubricScores(page: Page) {
+  // Select teacher and grade (required before rubric is visible)
+  const teacherSelect = page.getByTestId("teacher-select");
+  await expect(teacherSelect).toBeVisible();
+  const teacherOptions = teacherSelect.locator("option:not([disabled])");
+  await expect(teacherOptions.first()).toBeAttached();
+  await teacherSelect.selectOption({ index: 1 });
+
+  const gradeSelect = page.getByTestId("grade-select");
+  await expect(gradeSelect).toBeVisible();
+  await gradeSelect.selectOption("10");
+
   const rubricCards = page.locator('[data-testid^="rubric-param-"]');
   await expect(rubricCards).toHaveCount(19);
 
@@ -115,16 +126,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     await pmPage.getByRole("button", { name: "Add Action Point" }).click();
     const dialog = pmPage.getByRole("dialog");
-    await dialog.getByLabel("Teacher Feedback").click();
+    await dialog.getByLabel("AF Team Interaction").click();
     await dialog.getByRole("button", { name: "Add" }).click();
 
-    const pendingCard = pmPage.locator('[data-action-type="teacher_feedback"]').first();
+    const pendingCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
     await expect(pendingCard).toBeVisible();
     await expect(pendingCard.getByRole("button", { name: "Start" })).toBeVisible();
     await expect(pendingCard.getByRole("button", { name: "Delete" })).toBeVisible();
 
     await pendingCard.getByRole("button", { name: "Delete" }).click();
-    await expect(pmPage.locator('[data-action-type="teacher_feedback"]')).toHaveCount(0);
+    await expect(pmPage.locator('[data-action-type="af_team_interaction"]')).toHaveCount(0);
   });
 
   test("pm-can-start-and-end-classroom-observation", async ({ pmPage }) => {
@@ -139,9 +150,6 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     const actionCard = pmPage.getByTestId(`action-card-${actionId}`);
     await actionCard.getByRole("button", { name: "Start" }).click();
-    await expect(actionCard.getByRole("link", { name: "Open" })).toBeVisible();
-    await actionCard.getByRole("link", { name: "Open" }).click();
-
     await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
     await fillClassroomRubricScores(pmPage);
 
@@ -170,7 +178,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     expect(requestOrder).toEqual(["patch", "end"]);
 
     const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
-      `SELECT status, data FROM lms_pm_visit_actions WHERE id = $1`,
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
       [actionId]
     );
     const actionRow = actionRows.rows[0];
@@ -196,8 +204,6 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     const actionCard = pmPage.getByTestId(`action-card-${actionId}`);
     await actionCard.getByRole("button", { name: "Start" }).click();
-    await actionCard.getByRole("link", { name: "Open" }).click();
-
     await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
     await pmPage.getByRole("button", { name: "End Action" }).click();
 
@@ -411,6 +417,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       data: buildCompleteClassroomObservationData(),
     });
 
+    await adminPage.reload();
     await adminPage.getByRole("button", { name: "Complete Visit" }).click();
     await expect(adminPage.getByText("This visit is completed and read-only.")).toBeVisible();
   });
@@ -512,14 +519,10 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await dialog.getByLabel("AF Team Interaction").click();
     await dialog.getByRole("button", { name: "Add" }).click();
 
-    // Start the action
+    // Start the action (auto-navigates to action detail)
     const actionCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
     await expect(actionCard).toBeVisible();
     await actionCard.getByRole("button", { name: "Start" }).click();
-    await expect(actionCard.getByRole("link", { name: "Open" })).toBeVisible();
-
-    // Open action detail
-    await actionCard.getByRole("link", { name: "Open" }).click();
     await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
     const actionId = pmPage.url().split("/actions/")[1]!;
 
@@ -547,7 +550,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     // DB assertion
     const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
-      `SELECT status, data FROM lms_pm_visit_actions WHERE id = $1`,
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
       [actionId]
     );
     const actionRow = actionRows.rows[0];
@@ -590,7 +593,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     // DB assertion: action stays in_progress
     const actionRows = await pool.query<{ status: string }>(
-      `SELECT status FROM lms_pm_visit_actions WHERE id = $1`,
+      `SELECT status FROM lms_pm_school_visit_actions WHERE id = $1`,
       [actionId]
     );
     expect(actionRows.rows[0]?.status).toBe("in_progress");

@@ -203,6 +203,9 @@ export function buildCompleteClassroomObservationData(): Record<string, unknown>
 
   return {
     rubric_version: CURRENT_RUBRIC_VERSION,
+    teacher_id: 1,
+    teacher_name: "E2E Test Teacher",
+    grade: "10",
     params,
     observer_summary_strengths: "Strong student engagement and concept clarity.",
     observer_summary_improvements: "Improve recap pacing near class closure.",
@@ -248,7 +251,7 @@ export async function seedVisitAction(
   const endAccuracy = endedAt ? 45 : null;
 
   const result = await pool.query(
-    `INSERT INTO lms_pm_visit_actions (
+    `INSERT INTO lms_pm_school_visit_actions (
        visit_id,
        action_type,
        status,
