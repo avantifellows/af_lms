@@ -66,4 +66,54 @@ describe("ActionTypePickerModal", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("af_team_interaction radio is selectable (not disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const radio = screen.getByLabelText("AF Team Interaction");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits af_team_interaction when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("AF Team Interaction"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("af_team_interaction");
+  });
+
+  it("other 7 action types remain disabled", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const enabledTypes = new Set(["classroom_observation", "af_team_interaction"]);
+    const disabledTypes = ACTION_TYPE_VALUES.filter((t) => !enabledTypes.has(t));
+
+    expect(disabledTypes).toHaveLength(7);
+    for (const actionType of disabledTypes) {
+      const radio = screen.getByLabelText(getActionTypeLabel(actionType));
+      expect(radio).toBeDisabled();
+    }
+  });
 });

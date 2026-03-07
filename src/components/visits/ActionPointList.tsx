@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import Toast from "@/components/Toast";
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
 import {
@@ -161,6 +162,46 @@ function getClassroomObservationStats(data: Record<string, unknown> | undefined)
     score,
     maxScore: CLASSROOM_OBSERVATION_RUBRIC.maxScore,
   };
+}
+
+export interface AFTeamInteractionStats {
+  teacherCount: number;
+  answeredCount: number;
+  totalQuestions: number;
+}
+
+export function getAFTeamInteractionStats(
+  data: Record<string, unknown> | undefined
+): AFTeamInteractionStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const teachers = data.teachers;
+  const teacherCount = Array.isArray(teachers) ? teachers.length : 0;
+
+  const questions = data.questions;
+  let answeredCount = 0;
+  if (questions && typeof questions === "object" && !Array.isArray(questions)) {
+    const questionsRecord = questions as Record<string, unknown>;
+    for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
+      const value = questionsRecord[key];
+      if (value && typeof value === "object" && "answer" in value) {
+        const answer = (value as { answer: unknown }).answer;
+        if (typeof answer === "boolean") {
+          answeredCount += 1;
+        }
+      }
+    }
+  }
+
+  const totalQuestions = AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.length;
+
+  if (teacherCount === 0 && answeredCount === 0) {
+    return null;
+  }
+
+  return { teacherCount, answeredCount, totalQuestions };
 }
 
 export default function ActionPointList({
@@ -416,6 +457,27 @@ export default function ActionPointList({
                     </span>
                     <span className="font-mono text-text-secondary">
                       {stats.answeredCount}/{stats.totalParams} ({progressPercent}%)
+                    </span>
+                  </div>
+                );
+              })()}
+              {action.action_type === "af_team_interaction" && (() => {
+                const stats = getAFTeamInteractionStats(action.data);
+                if (!stats) {
+                  return null;
+                }
+
+                const progressPercent = stats.totalQuestions === 0
+                  ? 0
+                  : Math.round((stats.answeredCount / stats.totalQuestions) * 100);
+
+                return (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`af-team-stats-${action.id}`}>
+                    <span className="text-text-secondary">
+                      <span className="text-text-muted">Teachers:</span> {stats.teacherCount}
+                    </span>
+                    <span className="font-mono text-text-secondary">
+                      {stats.answeredCount}/{stats.totalQuestions} ({progressPercent}%)
                     </span>
                   </div>
                 );

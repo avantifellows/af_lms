@@ -3,7 +3,9 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import Toast from "@/components/Toast";
+import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import {
   CURRENT_RUBRIC_VERSION,
   getRubricConfig,
@@ -58,6 +60,8 @@ interface StructuredError {
 }
 
 const CLASSROOM_ACTION_TYPE = "classroom_observation";
+const AF_TEAM_ACTION_TYPE = "af_team_interaction" as const;
+const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE]);
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   principal_meeting: {
@@ -201,6 +205,11 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
       },
     ],
   },
+  af_team_interaction: {
+    title: "AF Team Interaction Details",
+    description: "Record observations from team interaction with teachers.",
+    fields: [],
+  },
 };
 
 const FALLBACK_FORM_CONFIG: ActionFormConfig = {
@@ -336,9 +345,61 @@ function bootstrapClassroomPayload(data: unknown): Record<string, unknown> {
   return sanitized;
 }
 
+function sanitizeAFTeamPayload(data: Record<string, unknown>): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { teachers: [], questions: {} };
+  }
+
+  const teachers: Array<{ id: number; name: string }> = [];
+  if (Array.isArray(data.teachers)) {
+    for (const entry of data.teachers) {
+      if (
+        isPlainObject(entry) &&
+        typeof entry.id === "number" &&
+        Number.isFinite(entry.id) &&
+        typeof entry.name === "string"
+      ) {
+        teachers.push({ id: entry.id, name: entry.name });
+      }
+    }
+  }
+
+  const questions: Record<string, unknown> = {};
+  if (isPlainObject(data.questions)) {
+    for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
+      const value = (data.questions as Record<string, unknown>)[key];
+      if (isPlainObject(value)) {
+        const entry: Record<string, unknown> = {};
+        if (value.answer === null || typeof value.answer === "boolean") {
+          entry.answer = value.answer;
+        }
+        if (typeof value.remark === "string") {
+          entry.remark = value.remark;
+        }
+        if (Object.keys(entry).length > 0) {
+          questions[key] = entry;
+        }
+      }
+    }
+  }
+
+  return { teachers, questions };
+}
+
+function bootstrapAFTeamPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { teachers: [], questions: {} };
+  }
+  return sanitizeAFTeamPayload(data);
+}
+
 function normalizeFormDataForAction(actionType: string, data: unknown): Record<string, unknown> {
   if (actionType === CLASSROOM_ACTION_TYPE) {
     return bootstrapClassroomPayload(data);
+  }
+
+  if (actionType === AF_TEAM_ACTION_TYPE) {
+    return bootstrapAFTeamPayload(data);
   }
 
   if (!isPlainObject(data)) {
@@ -351,6 +412,10 @@ function normalizeFormDataForAction(actionType: string, data: unknown): Record<s
 function sanitizePatchData(actionType: string, data: Record<string, unknown>): Record<string, unknown> {
   if (actionType === CLASSROOM_ACTION_TYPE) {
     return bootstrapClassroomPayload(data);
+  }
+
+  if (actionType === AF_TEAM_ACTION_TYPE) {
+    return sanitizeAFTeamPayload(data);
   }
 
   return data;
@@ -562,7 +627,11 @@ export default function ActionDetailForm({
     setError(null);
     setWarning(null);
 
-    if (isClassroomObservation) {
+    if (SAVE_BEFORE_END_TYPES.has(action.action_type)) {
+      const saveErrorMessage = isClassroomObservation
+        ? "Could not save observation. Fix errors and try End again."
+        : "Could not save form data. Fix errors and try End again.";
+
       setState("saving");
 
       try {
@@ -570,7 +639,7 @@ export default function ActionDetailForm({
 
         if (!saveResult.ok) {
           setError({
-            message: "Could not save observation. Fix errors and try End again.",
+            message: saveErrorMessage,
             details: saveResult.error.details,
           });
           return;
@@ -580,7 +649,7 @@ export default function ActionDetailForm({
         setFormData(saveResult.action.data ?? {});
       } catch {
         setError({
-          message: "Could not save observation. Fix errors and try End again.",
+          message: saveErrorMessage,
           details: [],
         });
         return;
@@ -608,9 +677,12 @@ export default function ActionDetailForm({
       if (!response.ok) {
         const parsedError = parseApiError(payload, "Failed to end action");
 
-        if (isClassroomObservation && response.status === 422) {
+        if (SAVE_BEFORE_END_TYPES.has(action.action_type) && response.status === 422) {
+          const endErrorMessage = isClassroomObservation
+            ? "Please complete all required rubric scores before ending this observation."
+            : "Please complete all required fields before ending this interaction.";
           setError({
-            message: "Please complete all required rubric scores before ending this observation.",
+            message: endErrorMessage,
             details: parsedError.details,
           });
           return;
@@ -728,6 +800,13 @@ export default function ActionDetailForm({
 
         {isClassroomObservation ? (
           <ClassroomObservationForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
+            schoolCode={schoolCode}
+          />
+        ) : action.action_type === AF_TEAM_ACTION_TYPE ? (
+          <AFTeamInteractionForm
             data={formData}
             setData={setFormData}
             disabled={!canSave || isBusy}

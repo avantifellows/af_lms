@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
+import { validateAFTeamInteractionComplete } from "@/lib/af-team-interaction";
 import { authOptions } from "@/lib/auth";
 import { validateClassroomObservationComplete } from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
@@ -86,6 +87,20 @@ function classroomValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid classroom observation data", validation.errors);
 }
 
+function afTeamValidationError(action: VisitActionRow) {
+  if (action.action_type !== "af_team_interaction") {
+    return null;
+  }
+
+  const validation = validateAFTeamInteractionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid AF team interaction data", validation.errors);
+}
+
+
 // POST /api/pm/visits/[id]/actions/[actionId]/end - end action with end GPS
 export async function POST(
   request: NextRequest,
@@ -147,6 +162,11 @@ export async function POST(
     return invalidClassroomData;
   }
 
+  const invalidAFTeamData = afTeamValidationError(existingAction);
+  if (invalidAFTeamData) {
+    return invalidAFTeamData;
+  }
+
   const ended = await query<VisitActionRow>(
     `UPDATE lms_pm_school_visit_actions
      SET status = 'completed',
@@ -187,6 +207,12 @@ export async function POST(
   if (invalidCurrentClassroomData) {
     return invalidCurrentClassroomData;
   }
+
+  const invalidCurrentAFTeamData = afTeamValidationError(current);
+  if (invalidCurrentAFTeamData) {
+    return invalidCurrentAFTeamData;
+  }
+
 
   return apiError(409, "Action cannot be ended from current state");
 }

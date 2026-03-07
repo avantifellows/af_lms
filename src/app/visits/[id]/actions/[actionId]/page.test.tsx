@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CURRENT_RUBRIC_VERSION } from "@/lib/classroom-observation-rubric";
 
 const {
@@ -648,5 +649,257 @@ describe("VisitActionDetailPage", () => {
     const [actionSql, actionParams] = mockQuery.mock.calls[1] as [string, unknown[]];
     expect(actionSql).toContain("deleted_at IS NULL");
     expect(actionParams).toEqual(["1", "101"]);
+  });
+
+  it("loads the AF Team Interaction renderer for af_team_interaction actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "af_team_interaction",
+          data: {},
+        }),
+      ]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("AF Team Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-af_team_interaction")).toHaveLength(2);
+  });
+
+  it("bootstraps AF team payload and strips unknown keys on PATCH", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "af_team_interaction",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "af_team_interaction",
+                data: { teachers: [], questions: {} },
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ teachers: [], questions: {} });
+    expect(body.data).not.toHaveProperty("attendees");
+    expect(body.data).not.toHaveProperty("key_discussion");
+  });
+
+  it("auto-saves AF team interaction data before calling /end", async () => {
+    setupPmAuth();
+    const afTeamData = {
+      teachers: [{ id: 1, name: "Alice" }],
+      questions: Object.fromEntries(
+        AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+      ),
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "af_team_interaction",
+          data: afTeamData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "af_team_interaction",
+                data: afTeamData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "af_team_interaction",
+                status: "completed",
+                ended_at: "2026-02-19T10:00:00.000Z",
+                data: afTeamData,
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
+    });
+
+    const [saveUrl, saveInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    const [endUrl, endInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+  });
+
+  it("shows AF team interaction save failure details and does not call /end", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "af_team_interaction",
+          data: { teachers: [{ id: 1, name: "Alice" }], questions: {} },
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Validation failed",
+              details: ["Missing answer for question"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not save form data. Fix errors and try End again.")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Missing answer for question")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockGetAccurateLocation).not.toHaveBeenCalled();
+  });
+
+  it("shows AF team interaction /end 422 guidance with type-specific message", async () => {
+    setupPmAuth();
+    const afTeamData = {
+      teachers: [{ id: 1, name: "Alice" }],
+      questions: Object.fromEntries(
+        AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+      ),
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "af_team_interaction",
+          data: afTeamData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "af_team_interaction",
+                data: afTeamData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Incomplete data",
+              details: ["At least one teacher must be selected"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Please complete all required fields before ending this interaction.")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("At least one teacher must be selected")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
 });

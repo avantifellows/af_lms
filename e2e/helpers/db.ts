@@ -3,6 +3,7 @@ import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import { insertTestUsers } from "./test-users";
+import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
@@ -202,9 +203,26 @@ export function buildCompleteClassroomObservationData(): Record<string, unknown>
 
   return {
     rubric_version: CURRENT_RUBRIC_VERSION,
+    teacher_id: 1,
+    teacher_name: "E2E Test Teacher",
+    grade: "10",
     params,
     observer_summary_strengths: "Strong student engagement and concept clarity.",
     observer_summary_improvements: "Improve recap pacing near class closure.",
+  };
+}
+
+/**
+ * Canonical strict-valid AF team interaction payload for completed action fixtures.
+ */
+export function buildCompleteAFTeamInteractionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return {
+    teachers: [{ id: 1, name: "Test Teacher" }],
+    questions,
   };
 }
 
@@ -233,7 +251,7 @@ export async function seedVisitAction(
   const endAccuracy = endedAt ? 45 : null;
 
   const result = await pool.query(
-    `INSERT INTO lms_pm_visit_actions (
+    `INSERT INTO lms_pm_school_visit_actions (
        visit_id,
        action_type,
        status,

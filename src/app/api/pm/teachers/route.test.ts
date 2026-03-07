@@ -96,6 +96,7 @@ describe("GET /api/pm/teachers", () => {
     expect(response.status).toBe(403);
   });
 
+
   it("returns teachers for a valid school_code", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     stubPermission();

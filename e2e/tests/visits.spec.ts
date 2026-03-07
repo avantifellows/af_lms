@@ -1,10 +1,12 @@
 import { test, expect } from "../fixtures/auth";
 import {
+  buildCompleteAFTeamInteractionData,
   buildCompleteClassroomObservationData,
   getTestPool,
   seedTestVisit,
   seedVisitAction,
 } from "../helpers/db";
+import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
 import type { Page } from "@playwright/test";
 import type { Pool } from "pg";
 
@@ -21,6 +23,17 @@ async function setGoodGps(page: Page) {
 }
 
 async function fillClassroomRubricScores(page: Page) {
+  // Select teacher and grade (required before rubric is visible)
+  const teacherSelect = page.getByTestId("teacher-select");
+  await expect(teacherSelect).toBeVisible();
+  const teacherOptions = teacherSelect.locator("option:not([disabled])");
+  await expect(teacherOptions.first()).toBeAttached();
+  await teacherSelect.selectOption({ index: 1 });
+
+  const gradeSelect = page.getByTestId("grade-select");
+  await expect(gradeSelect).toBeVisible();
+  await gradeSelect.selectOption("10");
+
   const rubricCards = page.locator('[data-testid^="rubric-param-"]');
   await expect(rubricCards).toHaveCount(19);
 
@@ -32,6 +45,14 @@ async function fillClassroomRubricScores(page: Page) {
   await expect(page.getByTestId("rubric-answered-summary")).toHaveText("Answered: 19/19");
 }
 
+async function fillAFTeamInteractionForm(page: Page) {
+  await page.getByTestId("af-team-select-all").click();
+  for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
+    await page.getByTestId(`af-team-${key}-yes`).check();
+  }
+  await expect(page.getByTestId("af-team-progress")).toContainText("Answered: 9/9");
+}
+
 test.beforeAll(async () => {
   pool = getTestPool();
 
@@ -40,14 +61,27 @@ test.beforeAll(async () => {
   );
   if (schoolResult.rows.length > 0) {
     schoolCode = schoolResult.rows[0].code as string;
-    return;
+  } else {
+    schoolCode = "E2EAHM001";
+    await pool.query(
+      `INSERT INTO school (code, name, region, inserted_at, updated_at)
+       SELECT $1::varchar, 'E2E Test School Ahmedabad', 'AHMEDABAD', NOW(), NOW()
+       WHERE NOT EXISTS (SELECT 1 FROM school WHERE code = $1::varchar)`,
+      [schoolCode]
+    );
   }
 
-  schoolCode = "E2EAHM001";
+  // Seed teachers for AF team interaction tests
   await pool.query(
-    `INSERT INTO school (code, name, region, inserted_at, updated_at)
-     SELECT $1::varchar, 'E2E Test School Ahmedabad', 'AHMEDABAD', NOW(), NOW()
-     WHERE NOT EXISTS (SELECT 1 FROM school WHERE code = $1::varchar)`,
+    `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
+     VALUES ('e2e-af-teacher-1@test.local', 1, 'teacher', ARRAY[$1::TEXT], 'AF Test Teacher One', false)
+     ON CONFLICT (email) DO UPDATE SET school_codes = ARRAY[$1::TEXT], full_name = 'AF Test Teacher One'`,
+    [schoolCode]
+  );
+  await pool.query(
+    `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
+     VALUES ('e2e-af-teacher-2@test.local', 1, 'teacher', ARRAY[$1::TEXT], 'AF Test Teacher Two', false)
+     ON CONFLICT (email) DO UPDATE SET school_codes = ARRAY[$1::TEXT], full_name = 'AF Test Teacher Two'`,
     [schoolCode]
   );
 });
@@ -92,16 +126,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     await pmPage.getByRole("button", { name: "Add Action Point" }).click();
     const dialog = pmPage.getByRole("dialog");
-    await dialog.getByLabel("Teacher Feedback").click();
+    await dialog.getByLabel("AF Team Interaction").click();
     await dialog.getByRole("button", { name: "Add" }).click();
 
-    const pendingCard = pmPage.locator('[data-action-type="teacher_feedback"]').first();
+    const pendingCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
     await expect(pendingCard).toBeVisible();
     await expect(pendingCard.getByRole("button", { name: "Start" })).toBeVisible();
     await expect(pendingCard.getByRole("button", { name: "Delete" })).toBeVisible();
 
     await pendingCard.getByRole("button", { name: "Delete" }).click();
-    await expect(pmPage.locator('[data-action-type="teacher_feedback"]')).toHaveCount(0);
+    await expect(pmPage.locator('[data-action-type="af_team_interaction"]')).toHaveCount(0);
   });
 
   test("pm-can-start-and-end-classroom-observation", async ({ pmPage }) => {
@@ -116,9 +150,6 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     const actionCard = pmPage.getByTestId(`action-card-${actionId}`);
     await actionCard.getByRole("button", { name: "Start" }).click();
-    await expect(actionCard.getByRole("link", { name: "Open" })).toBeVisible();
-    await actionCard.getByRole("link", { name: "Open" }).click();
-
     await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
     await fillClassroomRubricScores(pmPage);
 
@@ -147,7 +178,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     expect(requestOrder).toEqual(["patch", "end"]);
 
     const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
-      `SELECT status, data FROM lms_pm_visit_actions WHERE id = $1`,
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
       [actionId]
     );
     const actionRow = actionRows.rows[0];
@@ -173,8 +204,6 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     const actionCard = pmPage.getByTestId(`action-card-${actionId}`);
     await actionCard.getByRole("button", { name: "Start" }).click();
-    await actionCard.getByRole("link", { name: "Open" }).click();
-
     await pmPage.waitForURL(`/visits/${visitId}/actions/${actionId}`);
     await pmPage.getByRole("button", { name: "End Action" }).click();
 
@@ -388,6 +417,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       data: buildCompleteClassroomObservationData(),
     });
 
+    await adminPage.reload();
     await adminPage.getByRole("button", { name: "Complete Visit" }).click();
     await expect(adminPage.getByText("This visit is completed and read-only.")).toBeVisible();
   });
@@ -475,5 +505,169 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       }
     );
     expect(legacyEndResponse.status()).toBe(404);
+  });
+
+  test("pm-creates-starts-fills-and-ends-af-team-interaction", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+
+    // Add AF Team Interaction via picker
+    await pmPage.getByRole("button", { name: "Add Action Point" }).click();
+    const dialog = pmPage.getByRole("dialog");
+    await dialog.getByLabel("AF Team Interaction").click();
+    await dialog.getByRole("button", { name: "Add" }).click();
+
+    // Start the action (auto-navigates to action detail)
+    const actionCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
+    await expect(actionCard).toBeVisible();
+    await actionCard.getByRole("button", { name: "Start" }).click();
+    await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
+    const actionId = pmPage.url().split("/actions/")[1]!;
+
+    // Fill the form
+    await fillAFTeamInteractionForm(pmPage);
+
+    // Track save-before-end request order
+    const requestOrder: string[] = [];
+    pmPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PATCH" && url.pathname.includes(`/actions/${actionId}`)) {
+        requestOrder.push("patch");
+      }
+      if (request.method() === "POST" && url.pathname.includes(`/actions/${actionId}/end`)) {
+        requestOrder.push("end");
+      }
+    });
+
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+    expect(requestOrder).toEqual(["patch", "end"]);
+
+    // DB assertion
+    const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
+      [actionId]
+    );
+    const actionRow = actionRows.rows[0];
+    expect(actionRow?.status).toBe("completed");
+
+    const teachers = actionRow?.data?.teachers;
+    expect(Array.isArray(teachers)).toBe(true);
+    expect((teachers as unknown[]).length).toBeGreaterThan(0);
+
+    const questions = actionRow?.data?.questions as Record<string, unknown>;
+    expect(Object.keys(questions)).toHaveLength(9);
+    for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
+      expect((questions[key] as Record<string, unknown>)?.answer).toBe(true);
+    }
+
+    // Navigate back and check card stats
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
+    const refreshedCard = pmPage.getByTestId(`action-card-${actionId}`);
+    await expect(refreshedCard.getByTestId(`af-team-stats-${actionId}`)).toContainText("9/9 (100%)");
+  });
+
+  test("af-team-end-blocked-when-data-incomplete", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "af_team_interaction",
+      status: "in_progress",
+      data: { teachers: [], questions: {} },
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
+
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+
+    await expect(
+      pmPage.getByText("Please complete all required fields before ending this interaction.")
+    ).toBeVisible();
+    await expect(pmPage.getByRole("button", { name: "End Action" })).toBeVisible();
+
+    // DB assertion: action stays in_progress
+    const actionRows = await pool.query<{ status: string }>(
+      `SELECT status FROM lms_pm_school_visit_actions WHERE id = $1`,
+      [actionId]
+    );
+    expect(actionRows.rows[0]?.status).toBe("in_progress");
+  });
+
+  test("visit-cannot-complete-with-only-af-team-interaction", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "af_team_interaction",
+      status: "completed",
+      data: buildCompleteAFTeamInteractionData(),
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(
+      pmPage.getByText("At least one completed classroom observation is required to complete visit")
+    ).toBeVisible();
+  });
+
+  test("program-admin-read-only-af-team-interaction", async ({ programAdminPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "af_team_interaction",
+      status: "in_progress",
+      data: buildCompleteAFTeamInteractionData(),
+    });
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    const actionCard = programAdminPage.locator('[data-action-type="af_team_interaction"]').first();
+    await expect(actionCard).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+
+    await programAdminPage.goto(`/visits/${visitId}/actions/${actionId}`);
+    await expect(programAdminPage.getByRole("button", { name: "Save" })).toHaveCount(0);
+    await expect(programAdminPage.getByRole("button", { name: "End Action" })).toHaveCount(0);
+
+    // Teacher names displayed as static text (not checkboxes)
+    await expect(programAdminPage.getByText("Test Teacher")).toBeVisible();
+    await expect(programAdminPage.locator('input[type="checkbox"]')).toHaveCount(0);
+
+    // Radio buttons exist but are disabled
+    const radios = programAdminPage.locator('input[type="radio"]');
+    const radioCount = await radios.count();
+    expect(radioCount).toBeGreaterThan(0);
+    for (let i = 0; i < radioCount; i++) {
+      await expect(radios.nth(i)).toBeDisabled();
+    }
+  });
+
+  test("visit-completes-with-both-classroom-and-af-team-interaction", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+      data: buildCompleteClassroomObservationData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "af_team_interaction",
+      status: "completed",
+      data: buildCompleteAFTeamInteractionData(),
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+
+    // Assert both action cards visible
+    await expect(pmPage.locator('[data-action-type="classroom_observation"]').first()).toBeVisible();
+    await expect(pmPage.locator('[data-action-type="af_team_interaction"]').first()).toBeVisible();
+
+    await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+    await expect(pmPage.getByText("This visit is completed and read-only.")).toBeVisible();
+    await expect(pmPage.getByRole("button", { name: "Complete Visit" })).toHaveCount(0);
   });
 });

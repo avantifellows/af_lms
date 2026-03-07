@@ -1,7 +1,12 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import ActionPointList, { type VisitActionListItem } from "./ActionPointList";
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+
+import ActionPointList, {
+  getAFTeamInteractionStats,
+  type VisitActionListItem,
+} from "./ActionPointList";
 
 const mockPush = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -294,5 +299,175 @@ describe("ActionPointList", () => {
       expect(screen.getByText("In Progress")).toBeInTheDocument();
       expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/101");
     });
+  });
+
+  describe("AF Team Interaction stats on action cards", () => {
+    it("renders stats for af_team_interaction card with teachers and answered questions", () => {
+      render(
+        <ActionPointList
+          visitId={10}
+          actions={[
+            makeAction({
+              id: 50,
+              action_type: "af_team_interaction",
+              status: "in_progress",
+              started_at: "2026-03-05T09:00:00.000Z",
+              data: {
+                teachers: [{ id: 1, name: "Alice" }],
+                questions: { op_class_duration: { answer: true } },
+              },
+            }),
+          ]}
+        />
+      );
+
+      const statsEl = screen.getByTestId("af-team-stats-50");
+      expect(statsEl).toHaveTextContent("Teachers:");
+      expect(statsEl).toHaveTextContent("1");
+      expect(statsEl).toHaveTextContent("1/9");
+    });
+
+    it("shows 0/9 when data has teachers but no questions answered", () => {
+      render(
+        <ActionPointList
+          visitId={10}
+          actions={[
+            makeAction({
+              id: 51,
+              action_type: "af_team_interaction",
+              status: "in_progress",
+              started_at: "2026-03-05T09:00:00.000Z",
+              data: {
+                teachers: [{ id: 1, name: "Alice" }],
+                questions: {},
+              },
+            }),
+          ]}
+        />
+      );
+
+      const statsEl = screen.getByTestId("af-team-stats-51");
+      expect(statsEl).toHaveTextContent("0/9 (0%)");
+    });
+
+    it("shows nothing when data is empty/undefined", () => {
+      render(
+        <ActionPointList
+          visitId={10}
+          actions={[
+            makeAction({
+              id: 52,
+              action_type: "af_team_interaction",
+              status: "pending",
+              data: undefined,
+            }),
+          ]}
+        />
+      );
+
+      expect(screen.queryByTestId("af-team-stats-52")).not.toBeInTheDocument();
+    });
+
+    it("shows nothing for non-af_team_interaction action types", () => {
+      render(
+        <ActionPointList
+          visitId={10}
+          actions={[
+            makeAction({
+              id: 53,
+              action_type: "principal_meeting",
+              status: "in_progress",
+              started_at: "2026-03-05T09:00:00.000Z",
+              data: {
+                teachers: [{ id: 1, name: "Alice" }],
+                questions: { op_class_duration: { answer: true } },
+              },
+            }),
+          ]}
+        />
+      );
+
+      expect(screen.queryByTestId("af-team-stats-53")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("getAFTeamInteractionStats", () => {
+  it("returns correct counts for partial payload — 2 teachers, 5 of 9 answered", () => {
+    const questions: Record<string, { answer: boolean }> = {};
+    const keys = AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.slice(0, 5);
+    for (const key of keys) {
+      questions[key] = { answer: true };
+    }
+    const result = getAFTeamInteractionStats({
+      teachers: [
+        { id: 1, name: "Alice" },
+        { id: 2, name: "Bob" },
+      ],
+      questions,
+    });
+    expect(result).toEqual({ teacherCount: 2, answeredCount: 5, totalQuestions: 9 });
+  });
+
+  it("returns correct counts for complete payload — all 9 answered", () => {
+    const questions: Record<string, { answer: boolean }> = {};
+    for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
+      questions[key] = { answer: false };
+    }
+    const result = getAFTeamInteractionStats({
+      teachers: [{ id: 1, name: "Alice" }],
+      questions,
+    });
+    expect(result).toEqual({ teacherCount: 1, answeredCount: 9, totalQuestions: 9 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getAFTeamInteractionStats(undefined)).toBeNull();
+  });
+
+  it("returns null for empty object (both counts are 0)", () => {
+    expect(getAFTeamInteractionStats({})).toBeNull();
+  });
+
+  it("returns null for non-object data", () => {
+    expect(getAFTeamInteractionStats("string" as unknown as Record<string, unknown>)).toBeNull();
+    expect(getAFTeamInteractionStats(null as unknown as Record<string, unknown>)).toBeNull();
+  });
+
+  it("ignores unknown question keys — only counts known keys", () => {
+    const result = getAFTeamInteractionStats({
+      teachers: [{ id: 1, name: "Alice" }],
+      questions: {
+        unknown_key: { answer: true },
+        op_class_duration: { answer: true },
+      },
+    });
+    expect(result).toEqual({ teacherCount: 1, answeredCount: 1, totalQuestions: 9 });
+  });
+
+  it("does NOT count null answers — only true or false count as answered", () => {
+    const result = getAFTeamInteractionStats({
+      teachers: [{ id: 1, name: "Alice" }],
+      questions: { op_class_duration: { answer: null } },
+    });
+    expect(result).toEqual({ teacherCount: 1, answeredCount: 0, totalQuestions: 9 });
+  });
+
+  it("handles non-array teachers gracefully — teacherCount: 0", () => {
+    const result = getAFTeamInteractionStats({
+      teachers: "not an array",
+      questions: { op_class_duration: { answer: true } },
+    });
+    expect(result).toEqual({ teacherCount: 0, answeredCount: 1, totalQuestions: 9 });
+  });
+
+  it("counts teachers correctly even if questions is missing", () => {
+    const result = getAFTeamInteractionStats({
+      teachers: [
+        { id: 1, name: "Alice" },
+        { id: 2, name: "Bob" },
+      ],
+    });
+    expect(result).toEqual({ teacherCount: 2, answeredCount: 0, totalQuestions: 9 });
   });
 });
