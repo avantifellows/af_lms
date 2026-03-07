@@ -119,6 +119,7 @@ Visit tables:
 - Config/validation: `src/lib/af-team-interaction.ts`; shared teacher utils: `src/lib/teacher-utils.ts`
 - Form component: `src/components/visits/AFTeamInteractionForm.tsx`
 
+
 ### Key Patterns
 - Server components for data fetching (`getServerSession` + direct DB queries)
 - Client components for interactivity (`"use client"` directive)

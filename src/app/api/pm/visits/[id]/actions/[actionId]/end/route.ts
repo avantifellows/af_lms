@@ -100,6 +100,7 @@ function afTeamValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid AF team interaction data", validation.errors);
 }
 
+
 // POST /api/pm/visits/[id]/actions/[actionId]/end - end action with end GPS
 export async function POST(
   request: NextRequest,
@@ -211,6 +212,7 @@ export async function POST(
   if (invalidCurrentAFTeamData) {
     return invalidCurrentAFTeamData;
   }
+
 
   return apiError(409, "Action cannot be ended from current state");
 }

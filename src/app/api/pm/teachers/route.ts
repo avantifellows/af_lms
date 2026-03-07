@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { apiError, requireVisitsAccess } from "@/lib/visits-policy";
+import { apiError, canAccessVisitSchoolScope, requireVisitsAccess } from "@/lib/visits-policy";
 
 interface TeacherRow {
   id: number;
@@ -30,6 +30,12 @@ export async function GET(request: NextRequest) {
     [schoolCode]
   );
   const schoolRegion = schoolRows[0]?.region ?? null;
+
+  // Check if the user can access this school
+  if (!canAccessVisitSchoolScope(access.actor, schoolCode, schoolRegion)) {
+    return apiError(403, "Forbidden");
+  }
+
 
   // Match teachers who either:
   // 1. Have this school_code in their school_codes array (level 1), OR

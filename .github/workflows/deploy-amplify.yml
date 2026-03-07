@@ -66,13 +66,52 @@ jobs:
           fi
 
       - name: Sync Preview environment variables
+        env:
+          DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL: ${{ steps.preview.outputs.url }}
+          DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
+          DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
-
+          ENV_VARS=$(jq -n \
+            --arg a "$DATABASE_HOST" \
+            --arg b "$DATABASE_PORT" \
+            --arg c "$DATABASE_USER" \
+            --arg d "$DATABASE_PASSWORD" \
+            --arg e "$DATABASE_NAME" \
+            --arg f "$GOOGLE_CLIENT_ID" \
+            --arg g "$GOOGLE_CLIENT_SECRET" \
+            --arg h "$NEXTAUTH_SECRET" \
+            --arg i "$NEXTAUTH_URL" \
+            --arg j "$DB_SERVICE_URL" \
+            --arg k "$DB_SERVICE_TOKEN" \
+            --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
+            '{
+              DATABASE_HOST: $a,
+              DATABASE_PORT: $b,
+              DATABASE_USER: $c,
+              DATABASE_PASSWORD: $d,
+              DATABASE_NAME: $e,
+              GOOGLE_CLIENT_ID: $f,
+              GOOGLE_CLIENT_SECRET: $g,
+              NEXTAUTH_SECRET: $h,
+              NEXTAUTH_URL: $i,
+              DB_SERVICE_URL: $j,
+              DB_SERVICE_TOKEN: $k,
+              GOOGLE_SERVICE_ACCOUNT_JSON: $l
+            }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "DATABASE_HOST=${{ secrets.DATABASE_HOST }},DATABASE_PORT=${{ secrets.DATABASE_PORT }},DATABASE_USER=${{ secrets.DATABASE_USER }},DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},DATABASE_NAME=${{ secrets.DATABASE_NAME }},GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
+            --environment-variables "$ENV_VARS"
 
       - name: Trigger preview build
         run: |
@@ -135,13 +174,52 @@ jobs:
           fi
 
       - name: Sync Preview environment variables
+        env:
+          DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL: ${{ steps.preview.outputs.url }}
+          DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
+          DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
-
+          ENV_VARS=$(jq -n \
+            --arg a "$DATABASE_HOST" \
+            --arg b "$DATABASE_PORT" \
+            --arg c "$DATABASE_USER" \
+            --arg d "$DATABASE_PASSWORD" \
+            --arg e "$DATABASE_NAME" \
+            --arg f "$GOOGLE_CLIENT_ID" \
+            --arg g "$GOOGLE_CLIENT_SECRET" \
+            --arg h "$NEXTAUTH_SECRET" \
+            --arg i "$NEXTAUTH_URL" \
+            --arg j "$DB_SERVICE_URL" \
+            --arg k "$DB_SERVICE_TOKEN" \
+            --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
+            '{
+              DATABASE_HOST: $a,
+              DATABASE_PORT: $b,
+              DATABASE_USER: $c,
+              DATABASE_PASSWORD: $d,
+              DATABASE_NAME: $e,
+              GOOGLE_CLIENT_ID: $f,
+              GOOGLE_CLIENT_SECRET: $g,
+              NEXTAUTH_SECRET: $h,
+              NEXTAUTH_URL: $i,
+              DB_SERVICE_URL: $j,
+              DB_SERVICE_TOKEN: $k,
+              GOOGLE_SERVICE_ACCOUNT_JSON: $l
+            }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name "$BRANCH" \
-            --environment-variables "DATABASE_HOST=${{ secrets.DATABASE_HOST }},DATABASE_PORT=${{ secrets.DATABASE_PORT }},DATABASE_USER=${{ secrets.DATABASE_USER }},DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},DATABASE_NAME=${{ secrets.DATABASE_NAME }},GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},NEXTAUTH_URL=${{ steps.preview.outputs.url }}"
+            --environment-variables "$ENV_VARS"
 
       - name: Trigger preview build
         run: |
@@ -215,20 +293,68 @@ jobs:
           echo "value=${URL}" >> $GITHUB_OUTPUT
 
       - name: Sync production environment variables
+        env:
+          DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL: ${{ steps.url.outputs.value }}
+          DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
+          DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
+          ENV_VARS=$(jq -n \
+            --arg a "$DATABASE_HOST" \
+            --arg b "$DATABASE_PORT" \
+            --arg c "$DATABASE_USER" \
+            --arg d "$DATABASE_PASSWORD" \
+            --arg e "$DATABASE_NAME" \
+            --arg f "$GOOGLE_CLIENT_ID" \
+            --arg g "$GOOGLE_CLIENT_SECRET" \
+            --arg h "$NEXTAUTH_SECRET" \
+            --arg i "$NEXTAUTH_URL" \
+            --arg j "$DB_SERVICE_URL" \
+            --arg k "$DB_SERVICE_TOKEN" \
+            --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
+            '{
+              DATABASE_HOST: $a,
+              DATABASE_PORT: $b,
+              DATABASE_USER: $c,
+              DATABASE_PASSWORD: $d,
+              DATABASE_NAME: $e,
+              GOOGLE_CLIENT_ID: $f,
+              GOOGLE_CLIENT_SECRET: $g,
+              NEXTAUTH_SECRET: $h,
+              NEXTAUTH_URL: $i,
+              DB_SERVICE_URL: $j,
+              DB_SERVICE_TOKEN: $k,
+              GOOGLE_SERVICE_ACCOUNT_JSON: $l
+            }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name main \
-            --environment-variables "DATABASE_HOST=${{ secrets.DATABASE_HOST }},DATABASE_PORT=${{ secrets.DATABASE_PORT }},DATABASE_USER=${{ secrets.DATABASE_USER }},DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }},DATABASE_NAME=${{ secrets.DATABASE_NAME }},GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},NEXTAUTH_URL=${{ steps.url.outputs.value }}"
+            --environment-variables "$ENV_VARS"
 
-      - name: Trigger production build
+      # Amplify auto-build is enabled on main — it triggers a build on every
+      # push automatically. The env vars synced above will be picked up by
+      # that build. No need to call start-job (which races with auto-build).
+      - name: Verify build is running
         run: |
-          aws amplify start-job \
+          LATEST=$(aws amplify list-jobs \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
             --branch-name main \
-            --job-type RELEASE
+            --max-results 1 \
+            --query "jobSummaries[0].{id:jobId,status:status,commit:commitId}" \
+            --output table 2>/dev/null || true)
 
           echo "============================================"
-          echo "Production deployment triggered!"
-          echo "URL: ${{ steps.url.outputs.value }}"
+          echo "Production env vars synced."
+          echo "Amplify auto-build will deploy to: ${{ steps.url.outputs.value }}"
+          echo ""
+          echo "Latest job:"
+          echo "$LATEST"
           echo "============================================"

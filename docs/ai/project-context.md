@@ -185,6 +185,7 @@ Admin sections:
 - Config and validation: `src/lib/af-team-interaction.ts`
 - Shared teacher utilities: `src/lib/teacher-utils.ts` (`Teacher` interface, `getTeacherDisplayName()`)
 
+
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
 - **Start** captures GPS + timestamp; **End** captures GPS + timestamp
