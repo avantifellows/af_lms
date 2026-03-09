@@ -80,7 +80,7 @@
         "NOTE: existing COMPLETE route tests WILL break — that is expected and fixed in US-008"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Reference implementation plan Phase 2.3. This is a confirmed product decision — no visits exist on production yet. Existing tests that complete visits with only classroom observation will fail; they are updated in US-008."
     },
     {

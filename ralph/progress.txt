@@ -88,3 +88,15 @@ Session: 01f1ce90-1ff6-4776-b2f5-dce8f1b75946
   - 1259 tests still passing across 79 files (no new tests needed for this story)
 ---
 
+## 2026-03-09 - US-005
+Session: a10be337-ec97-422e-8739-e5bf3bf16fff
+- Added visit completion rule change: now requires all 3 action types (classroom_observation + af_team_interaction + individual_af_teacher_interaction)
+- Files changed:
+  - `src/app/api/pm/visits/[id]/complete/route.ts` — added sequential checks for completed af_team_interaction and individual_af_teacher_interaction after existing classroom_observation check
+- **Learnings for future iterations:**
+  - Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher)
+  - Used `LIMIT 1` since only existence check is needed (unlike classroom observation which validates rubric data)
+  - 3 existing complete route tests now fail as expected — they need mocks for the 2 new queries (fixed in US-008)
+  - The mock `query` returns `undefined` when mock queue is exhausted, causing `TypeError: Cannot read properties of undefined (reading 'length')` — this is expected
+  - 1259 tests total, 3 expected failures in complete route (9 pass + 3 fail = 12 tests in file)
+---
