@@ -19,6 +19,7 @@ import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
 } from "@/lib/classroom-observation-rubric";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
@@ -106,6 +107,23 @@ function buildValidAFTeamData() {
   return {
     teachers: [{ id: 1, name: "Teacher A" }],
     questions,
+  };
+}
+
+function buildValidIndividualTeacherData(teacherIds: number[] = [1]) {
+  const questions = Object.fromEntries(
+    INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.map((key) => [
+      key,
+      { answer: true },
+    ])
+  );
+  return {
+    teachers: teacherIds.map((id) => ({
+      id,
+      name: `Teacher ${id}`,
+      attendance: "present" as const,
+      questions,
+    })),
   };
 }
 
@@ -601,5 +619,211 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.error).toBe("Invalid AF team interaction data");
+  });
+
+  it("returns 422 when individual teacher interaction data is incomplete", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "individual_af_teacher_interaction",
+        data: {
+          teachers: [
+            { id: 1, name: "Teacher 1", attendance: "present", questions: {} },
+          ],
+        },
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual teacher interaction data");
+    expect(json.details.length).toBeGreaterThan(0);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 422 when individual teacher interaction stored data is null", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([
+      {
+        ...IN_PROGRESS_ACTION,
+        action_type: "individual_af_teacher_interaction",
+        data: null,
+      },
+    ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid individual teacher interaction data",
+      details: ["Data must be an object"],
+    });
+  });
+
+  it("returns 422 when not all school teachers are recorded", async () => {
+    setupPmEdit();
+    const data = buildValidIndividualTeacherData([1]);
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_af_teacher_interaction",
+          data,
+        },
+      ])
+      // allTeachersRecordedError query returns 2 teachers but data only has teacher 1
+      .mockResolvedValueOnce([
+        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+        { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Not all teachers at this school have been recorded");
+    expect(json.details).toEqual(["Missing: Teacher 2"]);
+  });
+
+  it("ends individual teacher interaction with absent/on_leave teachers (no questions needed)", async () => {
+    setupPmEdit();
+    const data = {
+      teachers: [
+        { id: 1, name: "Teacher 1", attendance: "on_leave" as const, questions: {} },
+        { id: 2, name: "Teacher 2", attendance: "absent" as const, questions: {} },
+      ],
+    };
+    const completedAction = {
+      ...COMPLETED_ACTION,
+      action_type: "individual_af_teacher_interaction",
+      data,
+    };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_af_teacher_interaction",
+          data,
+        },
+      ])
+      // allTeachersRecordedError — all teachers accounted for
+      .mockResolvedValueOnce([
+        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+        { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
+      ])
+      .mockResolvedValueOnce([completedAction]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.status).toBe("completed");
+    expect(json.action.action_type).toBe("individual_af_teacher_interaction");
+  });
+
+  it("ends individual teacher interaction successfully when all teachers recorded with valid data", async () => {
+    setupPmEdit();
+    const data = buildValidIndividualTeacherData([1, 2]);
+    const completedAction = {
+      ...COMPLETED_ACTION,
+      action_type: "individual_af_teacher_interaction",
+      data,
+    };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_af_teacher_interaction",
+          data,
+        },
+      ])
+      // allTeachersRecordedError — both teachers in DB match data
+      .mockResolvedValueOnce([
+        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+        { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
+      ])
+      .mockResolvedValueOnce([completedAction]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.status).toBe("completed");
+    expect(json.action.action_type).toBe("individual_af_teacher_interaction");
+  });
+
+  it("concurrent fallback validates individual teacher interaction data", async () => {
+    setupPmEdit();
+    const validData = buildValidIndividualTeacherData([1]);
+    const incompleteData = {
+      teachers: [
+        { id: 1, name: "Teacher 1", attendance: "present" as const, questions: {} },
+      ],
+    };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_af_teacher_interaction",
+          data: validData,
+        },
+      ])
+      // allTeachersRecordedError for pre-update path — passes
+      .mockResolvedValueOnce([
+        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+      ])
+      // UPDATE returns 0 rows (concurrent)
+      .mockResolvedValueOnce([])
+      // Re-fetch returns action still in_progress with incomplete data
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_af_teacher_interaction",
+          data: incompleteData,
+        },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual teacher interaction data");
   });
 });
