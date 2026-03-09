@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -195,7 +195,7 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getByTestId("classroom-unsupported-version-warning")).toHaveTextContent(
       "Unsupported classroom observation rubric version: 2.0"
     );
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
     expect(screen.getByTestId("rubric-param-teacher_on_time")).toBeInTheDocument();
   });
@@ -246,7 +246,7 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -522,7 +522,7 @@ describe("VisitActionDetailPage", () => {
     const keyDiscussion = screen.getByLabelText("Key Discussion");
     await user.clear(keyDiscussion);
     await user.type(keyDiscussion, "Updated note");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -600,7 +600,7 @@ describe("VisitActionDetailPage", () => {
     render(jsx);
 
     expect(screen.getByText("Completed actions are read-only for your role.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
   });
 
@@ -613,7 +613,7 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Now" })).toBeInTheDocument();
   });
 
   it("always enforces view-only state when visit is completed", async () => {
@@ -632,7 +632,7 @@ describe("VisitActionDetailPage", () => {
     render(jsx);
 
     expect(screen.getByText("This visit is completed and read-only.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
   });
 
@@ -644,7 +644,7 @@ describe("VisitActionDetailPage", () => {
     render(jsx);
 
     expect(screen.getByText("Action not found")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
 
     const [actionSql, actionParams] = mockQuery.mock.calls[1] as [string, unknown[]];
@@ -701,7 +701,7 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -953,7 +953,7 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1164,5 +1164,216 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getByText("Missing teacher: Bob Smith")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
+  });
+
+  describe("auto-save", () => {
+    it("shows 'Unsaved changes' after form data change", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit()])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      vi.useFakeTimers();
+
+      const keyDiscussion = screen.getByLabelText("Key Discussion");
+      fireEvent.change(keyDiscussion, { target: { value: "New note" } });
+
+      expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
+
+      vi.useRealTimers();
+    });
+
+    it("auto-saves after 2s debounce and shows 'Saved'", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit()])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const fetchMock = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                data: { attendees: "Principal, PM", key_discussion: "New note", preserved_key: "keep-me" },
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+      vi.stubGlobal("fetch", fetchMock);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      vi.useFakeTimers();
+
+      const keyDiscussion = screen.getByLabelText("Key Discussion");
+      fireEvent.change(keyDiscussion, { target: { value: "New note" } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Saved");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("/api/pm/visits/1/actions/101");
+      expect(init.method).toBe("PATCH");
+
+      vi.useRealTimers();
+    });
+
+    it("auto-dismisses 'Saved' after 3s", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit()])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const fetchMock = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                data: { attendees: "Principal, PM", key_discussion: "New", preserved_key: "keep-me" },
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+      vi.stubGlobal("fetch", fetchMock);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      vi.useFakeTimers();
+
+      const keyDiscussion = screen.getByLabelText("Key Discussion");
+      fireEvent.change(keyDiscussion, { target: { value: "New" } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Saved");
+
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      expect(screen.queryByTestId("auto-save-status")).not.toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it("shows 'Save failed' on auto-save error", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit()])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const fetchMock = vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: "Server error" }),
+        })
+      ) as unknown as typeof fetch;
+      vi.stubGlobal("fetch", fetchMock);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      vi.useFakeTimers();
+
+      const keyDiscussion = screen.getByLabelText("Key Discussion");
+      fireEvent.change(keyDiscussion, { target: { value: "Fail" } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Save failed");
+
+      vi.useRealTimers();
+    });
+
+    it("does not show auto-save indicator in read-only mode", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit({ status: "completed", completed_at: "2026-02-19T11:00:00.000Z" })])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      expect(screen.queryByTestId("auto-save-status")).not.toBeInTheDocument();
+    });
+
+    it("manual 'Save Now' cancels pending auto-save", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit()])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const fetchMock = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                data: { attendees: "Principal, PM", key_discussion: "Manual", preserved_key: "keep-me" },
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+      vi.stubGlobal("fetch", fetchMock);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      vi.useFakeTimers();
+
+      const keyDiscussion = screen.getByLabelText("Key Discussion");
+      fireEvent.change(keyDiscussion, { target: { value: "Manual" } });
+
+      expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
+
+      // Submit form (triggers handleSave which cancels auto-save timer)
+      await act(async () => {
+        fireEvent.submit(screen.getByTestId("action-renderer-principal_meeting"));
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Advance past debounce — auto-save should not fire since it was cancelled
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it("beforeunload is prevented when there are unsaved changes", async () => {
+      setupPmAuth();
+      mockQuery
+        .mockResolvedValueOnce([makeVisit()])
+        .mockResolvedValueOnce([makeAction()]);
+
+      const jsx = await VisitActionDetailPage(pageProps());
+      render(jsx);
+
+      const keyDiscussion = screen.getByLabelText("Key Discussion");
+      fireEvent.change(keyDiscussion, { target: { value: "Unsaved" } });
+
+      const event = new Event("beforeunload", { cancelable: true });
+      const spy = vi.spyOn(event, "preventDefault");
+      window.dispatchEvent(event);
+      expect(spy).toHaveBeenCalled();
+    });
   });
 });

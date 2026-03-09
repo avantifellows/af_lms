@@ -1,6 +1,6 @@
 # Project Context: `af_lms` (Avanti Fellows LMS / JNV Ops UI)
 
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 Audience: engineers + AI coding agents onboarding to this repo
 
 ---
@@ -209,6 +209,14 @@ Admin sections:
 - **Three action types are enabled** in the picker UI: `classroom_observation`, `af_team_interaction`, and `individual_af_teacher_interaction`; other types are visible but disabled
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
+#### Auto-save
+- Action detail forms auto-save via `useAutoSave` hook (`src/hooks/use-auto-save.ts`) — debounces PATCH calls 2s after last change
+- Status indicator shows at top of page: "Unsaved changes" → "Saving..." → "Saved" (auto-dismisses after 3s) / "Save failed"
+- Manual "Save Now" button cancels any pending auto-save timer; "End Action" flushes/cancels auto-save before its force-save sequence
+- `beforeunload` browser warning fires when unsaved changes exist
+- Auto-save updates action metadata (e.g. `updated_at`) via `onSuccess` but does NOT overwrite `formData` — avoids clobbering edits made during the network round-trip
+- No changes to child form components or PATCH API route — reuses existing `persistActionData()` and `sanitizePatchData()`
+
 #### Implemented pages
 - List: `src/app/visits/page.tsx` (2-state list, admin/program_admin filters)
 - Visit detail: `src/app/visits/[id]/page.tsx` (action card list, complete button, read-only on completed)
@@ -222,11 +230,12 @@ Admin sections:
 - `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields
 - `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks
 - `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers
-- `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type)
+- `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type, integrates auto-save hook, inline `SaveStatusIndicator`)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
 
 #### Shared helpers
+- `src/hooks/use-auto-save.ts` — custom React hook for debounced auto-save with status tracking, flush/cancel controls, and `beforeunload` guard
 - `src/lib/visit-actions.ts` — `ACTION_TYPES` map (10 types), `ActionType` union, status constants, `statusBadgeClass()` helper
 - `src/lib/visits-policy.ts` — shared auth/scope/locking helpers used across all visit routes
 - `src/lib/classroom-observation-rubric.ts` — rubric config, score computation, lenient/strict validation, `VALID_GRADES`, `ClassroomObservationData` type
@@ -464,7 +473,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 Key details:
 - Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
 - No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
-- 1315 tests across 80 files (as of 2026-03-09)
+- 1341 tests across 81 files (as of 2026-03-10)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
@@ -565,6 +574,7 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - PM teachers API: `src/app/api/pm/teachers/route.ts`
 - PM visits UI: `src/app/visits/**`, `src/components/visits/**`
 - Classroom observation rubric: `src/lib/classroom-observation-rubric.ts`, `src/components/visits/ClassroomObservationForm.tsx`
+- Auto-save hook: `src/hooks/use-auto-save.ts` (debounce, status, flush/cancel); integrated in `ActionDetailForm.tsx`
 - Visit shared helpers: `src/lib/visit-actions.ts` (action types), `src/lib/visits-policy.ts` (auth/scope/locking)
 - Visit geo: `src/lib/geo-validation.ts` (server validation), `src/lib/geolocation.ts` (client watchPosition), `src/components/visits/CompleteVisitButton.tsx`, `src/components/visits/NewVisitForm.tsx`
 - Toast notifications: `src/components/Toast.tsx`
