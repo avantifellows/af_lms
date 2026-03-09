@@ -22,9 +22,10 @@ describe("visit-actions", () => {
       team_staff_meeting: true,
       teacher_feedback: true,
       af_team_interaction: true,
+      individual_af_teacher_interaction: true,
     };
 
-    expect(Object.keys(exhaustiveByType)).toHaveLength(9);
+    expect(Object.keys(exhaustiveByType)).toHaveLength(10);
     expect(ACTION_TYPE_VALUES).toEqual(Object.keys(ACTION_TYPES));
   });
 

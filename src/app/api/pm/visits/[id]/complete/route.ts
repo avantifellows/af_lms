@@ -166,6 +166,44 @@ export async function POST(
     );
   }
 
+  const completedAFTeamActions = await query<{ id: number }>(
+    `SELECT a.id
+     FROM lms_pm_school_visit_actions a
+     WHERE a.visit_id = $1
+       AND a.deleted_at IS NULL
+       AND a.action_type = 'af_team_interaction'
+       AND a.status = 'completed'
+     LIMIT 1`,
+    [id]
+  );
+
+  if (completedAFTeamActions.length === 0) {
+    return apiError(
+      422,
+      "At least one completed AF Team Interaction is required to complete visit",
+      ["No completed AF Team Interaction action found for this visit"]
+    );
+  }
+
+  const completedIndividualTeacherActions = await query<{ id: number }>(
+    `SELECT a.id
+     FROM lms_pm_school_visit_actions a
+     WHERE a.visit_id = $1
+       AND a.deleted_at IS NULL
+       AND a.action_type = 'individual_af_teacher_interaction'
+       AND a.status = 'completed'
+     LIMIT 1`,
+    [id]
+  );
+
+  if (completedIndividualTeacherActions.length === 0) {
+    return apiError(
+      422,
+      "At least one completed Individual AF Teacher Interaction is required to complete visit",
+      ["No completed Individual AF Teacher Interaction action found for this visit"]
+    );
+  }
+
   const updatedVisit = await query<Pick<VisitAccessRow, "id" | "status" | "completed_at">>(
     `UPDATE lms_pm_school_visits v
      SET status = 'completed',

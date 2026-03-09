@@ -10,6 +10,10 @@ import {
   validateClassroomObservationComplete,
   validateClassroomObservationSave,
 } from "@/lib/classroom-observation-rubric";
+import {
+  validateIndividualTeacherComplete,
+  validateIndividualTeacherSave,
+} from "@/lib/individual-af-teacher-interaction";
 import { query } from "@/lib/db";
 import {
   apiError,
@@ -198,6 +202,16 @@ export async function PATCH(
     }
   }
 
+  if (action.action_type === "individual_af_teacher_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validateIndividualTeacherComplete(data)
+        : validateIndividualTeacherSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid individual teacher interaction data", validation.errors);
+    }
+  }
 
   const updated = await query<VisitActionRow>(
     `UPDATE lms_pm_school_visit_actions

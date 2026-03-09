@@ -98,6 +98,37 @@ describe("ActionTypePickerModal", () => {
     expect(onSubmit).toHaveBeenCalledWith("af_team_interaction");
   });
 
+  it("individual_af_teacher_interaction radio is selectable (not disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const radio = screen.getByLabelText("Individual AF Teacher Interaction");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits individual_af_teacher_interaction when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("Individual AF Teacher Interaction"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("individual_af_teacher_interaction");
+  });
+
   it("other 7 action types remain disabled", () => {
     render(
       <ActionTypePickerModal
@@ -107,7 +138,7 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    const enabledTypes = new Set(["classroom_observation", "af_team_interaction"]);
+    const enabledTypes = new Set(["classroom_observation", "af_team_interaction", "individual_af_teacher_interaction"]);
     const disabledTypes = ACTION_TYPE_VALUES.filter((t) => !enabledTypes.has(t));
 
     expect(disabledTypes).toHaveLength(7);

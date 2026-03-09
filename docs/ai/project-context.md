@@ -1,6 +1,6 @@
 # Project Context: `af_lms` (Avanti Fellows LMS / JNV Ops UI)
 
-Last updated: 2026-03-05
+Last updated: 2026-03-09
 Audience: engineers + AI coding agents onboarding to this repo
 
 ---
@@ -151,7 +151,7 @@ Admin sections:
 #### Visit lifecycle
 - Visits have exactly **2 states**: `in_progress` → `completed` (no separate "ended" concept)
 - Visits start with **zero actions**; PM adds action points on-demand
-- **Completion requires**: ≥1 completed `classroom_observation` whose `data` passes strict rubric validation + no actions left `in_progress` + valid GPS (AF team interaction is supplementary — not required for visit completion)
+- **Completion requires**: all 3 action types — ≥1 completed `classroom_observation` (strict rubric validation) + ≥1 completed `af_team_interaction` + ≥1 completed `individual_af_teacher_interaction` + no actions left `in_progress` + valid GPS. Checks are sequential and short-circuit on first missing type.
 
 #### Classroom observation rubric contract (v1)
 - Top-level payload keys: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`, `teacher_id`, `teacher_name`, `grade`
@@ -181,10 +181,23 @@ Admin sections:
   - PATCH while `in_progress`: lenient (accepts partial data, ignores unknown question keys)
   - PATCH while `completed`: strict validation
   - END action: strict validation (requires ≥1 teacher + all 9 questions answered with boolean)
-  - COMPLETE visit: does NOT require AF team interaction — only classroom observation is required
+  - COMPLETE visit: requires at least one completed AF team interaction (alongside classroom observation and individual teacher interaction)
 - Config and validation: `src/lib/af-team-interaction.ts`
 - Shared teacher utilities: `src/lib/teacher-utils.ts` (`Teacher` interface, `getTeacherDisplayName()`)
 
+#### Individual AF Teacher Interaction (v1)
+- A per-teacher 13-question binary checklist with attendance gating
+- Top-level payload keys: `teachers` (array of `{ id, name, attendance, questions: { [key]: { answer: boolean|null, remark?: string } } }`)
+- Attendance options: `present`, `on_leave`, `absent` — only `present` teachers require question answers
+- 5 sections: Operational Health (1 question), Syllabus Track (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
+- Question keys: `oh_class_duration`, `st_grade11_syllabus`, `st_grade11_testing`, `st_grade12_syllabus`, `st_grade12_testing`, `sp_student_performance`, `sp_girls_performance`, `sn_academics`, `sn_school_operations`, `sn_co_curriculars`, `mp_monthly_plan`, `mp_classroom_observations`, `mp_student_feedback`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (all present teachers need all 13 questions answered + ≥1 teacher) + all school teachers must be recorded (DB check against `user_permission`)
+  - COMPLETE visit: requires at least one completed individual AF teacher interaction
+- Config and validation: `src/lib/individual-af-teacher-interaction.ts`
+- Form component: `src/components/visits/IndividualAFTeacherInteractionForm.tsx`
 
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
@@ -192,8 +205,8 @@ Admin sections:
 - Starting an action auto-redirects the PM to the action detail page
 - Multiple actions can be `in_progress` simultaneously
 - **Pending-only deletion** (soft delete: `deleted_at` set, row retained)
-- 9 action types defined in code: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction
-- **Two action types are enabled** in the picker UI: `classroom_observation` and `af_team_interaction`; other types are visible but disabled
+- 10 action types defined in code: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction, Individual AF Teacher Interaction
+- **Three action types are enabled** in the picker UI: `classroom_observation`, `af_team_interaction`, and `individual_af_teacher_interaction`; other types are visible but disabled
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
 #### Implemented pages
@@ -204,20 +217,22 @@ Admin sections:
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
-- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress) and AF team interaction stats (teacher count, answered questions)
-- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation` and `af_team_interaction` enabled)
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), and individual teacher interaction stats (recorded teachers, attendance breakdown)
+- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation`, `af_team_interaction`, and `individual_af_teacher_interaction` enabled)
 - `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields
 - `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks
+- `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers
 - `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
 
 #### Shared helpers
-- `src/lib/visit-actions.ts` — `ACTION_TYPES` map (9 types), `ActionType` union, status constants, `statusBadgeClass()` helper
+- `src/lib/visit-actions.ts` — `ACTION_TYPES` map (10 types), `ActionType` union, status constants, `statusBadgeClass()` helper
 - `src/lib/visits-policy.ts` — shared auth/scope/locking helpers used across all visit routes
 - `src/lib/classroom-observation-rubric.ts` — rubric config, score computation, lenient/strict validation, `VALID_GRADES`, `ClassroomObservationData` type
 - `src/lib/af-team-interaction.ts` — AF team interaction config (4 sections, 9 questions), `AFTeamInteractionData` type, lenient/strict validation
-- `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by both ClassroomObservationForm and AFTeamInteractionForm)
+- `src/lib/individual-af-teacher-interaction.ts` — individual teacher interaction config (5 sections, 13 questions), per-teacher attendance-gated validation
+- `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by ClassroomObservationForm, AFTeamInteractionForm, and IndividualAFTeacherInteractionForm)
 - `src/lib/geo-validation.ts` — GPS validation (accept ≤100m, warn 100–500m, reject >500m)
 - `src/lib/geolocation.ts` — client `watchPosition` helper (60s timeout, cancel, secure-origin check)
 - `src/lib/theme.ts` — Ledger UI theme token object for dynamic inline styles (17 color/style properties)
@@ -449,7 +464,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 Key details:
 - Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
 - No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
-- 1228 tests across 78 files (as of 2026-03-05)
+- 1315 tests across 80 files (as of 2026-03-09)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
@@ -472,7 +487,7 @@ Key details:
 - Auth is injected via NextAuth JWT cookies — no real Google login needed
 - Uses `.next-test/` build dir so it coexists with a running dev server
 - Single worker, sequential execution (shared test DB)
-- 34 tests across 5 spec files (as of 2026-03-05)
+- 39 tests across 5 spec files (as of 2026-03-09)
 - V8 coverage is collected automatically; `coverage/coverage-summary.json` is generated
 - Commit `coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CURRENT_RUBRIC_VERSION } from "@/lib/classroom-observation-rubric";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 
 const {
   mockGetServerSession,
@@ -899,6 +900,268 @@ describe("VisitActionDetailPage", () => {
     });
 
     expect(screen.getByText("At least one teacher must be selected")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
+  });
+
+  it("loads the Individual AF Teacher Interaction renderer for the action type", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_af_teacher_interaction",
+          data: { teachers: [] },
+        }),
+      ]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Individual AF Teacher Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-individual_af_teacher_interaction")).toHaveLength(2);
+  });
+
+  it("bootstraps null individual teacher interaction data to { teachers: [] }", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_af_teacher_interaction",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "individual_af_teacher_interaction",
+                data: { teachers: [] },
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ teachers: [] });
+  });
+
+  it("auto-saves individual teacher interaction data before calling /end", async () => {
+    setupPmAuth();
+    const individualTeacherData = {
+      teachers: [
+        {
+          id: 1,
+          name: "Alice",
+          attendance: "present",
+          questions: Object.fromEntries(
+            INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+          ),
+        },
+      ],
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_af_teacher_interaction",
+          data: individualTeacherData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "individual_af_teacher_interaction",
+                data: individualTeacherData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "individual_af_teacher_interaction",
+                status: "completed",
+                ended_at: "2026-02-19T10:00:00.000Z",
+                data: individualTeacherData,
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
+    });
+
+    const [saveUrl, saveInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    const [endUrl, endInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+  });
+
+  it("shows individual teacher save failure details and does not call /end", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_af_teacher_interaction",
+          data: { teachers: [{ id: 1, name: "Alice", attendance: "present", questions: {} }] },
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Validation failed",
+              details: ["Alice: Missing answer for question"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not save form data. Fix errors and try End again.")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Alice: Missing answer for question")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockGetAccurateLocation).not.toHaveBeenCalled();
+  });
+
+  it("shows individual teacher /end 422 guidance with type-specific message mentioning record all teachers", async () => {
+    setupPmAuth();
+    const individualTeacherData = {
+      teachers: [
+        {
+          id: 1,
+          name: "Alice",
+          attendance: "present",
+          questions: Object.fromEntries(
+            INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+          ),
+        },
+      ],
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_af_teacher_interaction",
+          data: individualTeacherData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ teachers: [] }) })
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "individual_af_teacher_interaction",
+                data: individualTeacherData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Not all teachers recorded",
+              details: ["Missing teacher: Bob Smith"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Please complete all required fields and record all teachers before ending this interaction.")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Missing teacher: Bob Smith")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
