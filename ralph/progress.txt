@@ -111,3 +111,15 @@ Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
   - `buildValidIndividualTeacherData()` creates a single present teacher with all 13 questions answered — reusable for strict validation tests
   - 1266 total tests (1263 pass + 3 expected complete route failures from US-005)
 ---
+
+## 2026-03-09 - US-007
+Session: 4daebfc3-9ce9-44e9-ae3e-044c5f1cce6b
+- Added 6 END route unit tests for individual_af_teacher_interaction validation including all-teachers DB check
+- Files changed:
+  - `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.test.ts` — added `buildValidIndividualTeacherData()` helper, 6 new tests (incomplete data 422, null data 422, missing teachers 422, absent/on_leave success, full success, concurrent fallback validation)
+- **Learnings for future iterations:**
+  - END route for individual teacher has extra query mock needed: `allTeachersRecordedError()` queries `user_permission` table — mock must return teacher list before the UPDATE mock
+  - Query flow for successful individual teacher END: visit → action → teacher list (allTeachersRecordedError) → UPDATE RETURNING
+  - Concurrent fallback test: pre-update path passes all validations (valid data + all teachers), UPDATE returns 0 rows, re-fetch returns incomplete data → 422
+  - 1272 total tests (1269 pass + 3 expected complete route failures from US-005)
+---

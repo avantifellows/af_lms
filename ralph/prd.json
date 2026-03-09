@@ -117,7 +117,7 @@
         "All tests pass: `npx vitest run src/app/api/pm/visits/\\[id\\]/actions/\\[actionId\\]/end/route.test.ts`"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Reference implementation plan Phase 2.5. Must mock the teacher query (user_permission query for school teachers) to return a known set of teacher IDs."
     },
     {
