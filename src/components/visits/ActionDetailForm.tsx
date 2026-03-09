@@ -5,7 +5,9 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import Toast from "@/components/Toast";
 import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
+import IndividualAFTeacherInteractionForm from "@/components/visits/IndividualAFTeacherInteractionForm";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import {
   CURRENT_RUBRIC_VERSION,
   getRubricConfig,
@@ -61,7 +63,8 @@ interface StructuredError {
 
 const CLASSROOM_ACTION_TYPE = "classroom_observation";
 const AF_TEAM_ACTION_TYPE = "af_team_interaction" as const;
-const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE]);
+const INDIVIDUAL_TEACHER_ACTION_TYPE = "individual_af_teacher_interaction" as const;
+const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE]);
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   principal_meeting: {
@@ -398,6 +401,63 @@ function bootstrapAFTeamPayload(data: unknown): Record<string, unknown> {
   return sanitizeAFTeamPayload(data);
 }
 
+function sanitizeIndividualTeacherPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { teachers: [] };
+  }
+
+  const teachers: Array<Record<string, unknown>> = [];
+  if (Array.isArray(data.teachers)) {
+    for (const entry of data.teachers) {
+      if (
+        !isPlainObject(entry) ||
+        typeof entry.id !== "number" ||
+        !Number.isFinite(entry.id) ||
+        typeof entry.name !== "string"
+      ) {
+        continue;
+      }
+
+      const sanitizedEntry: Record<string, unknown> = {
+        id: entry.id,
+        name: entry.name,
+        attendance: typeof entry.attendance === "string" ? entry.attendance : "present",
+      };
+
+      const questions: Record<string, unknown> = {};
+      if (isPlainObject(entry.questions)) {
+        for (const key of INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys) {
+          const value = (entry.questions as Record<string, unknown>)[key];
+          if (isPlainObject(value)) {
+            const qEntry: Record<string, unknown> = {};
+            if (value.answer === null || typeof value.answer === "boolean") {
+              qEntry.answer = value.answer;
+            }
+            if (typeof value.remark === "string") {
+              qEntry.remark = value.remark;
+            }
+            if (Object.keys(qEntry).length > 0) {
+              questions[key] = qEntry;
+            }
+          }
+        }
+      }
+
+      sanitizedEntry.questions = questions;
+      teachers.push(sanitizedEntry);
+    }
+  }
+
+  return { teachers };
+}
+
+function bootstrapIndividualTeacherPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { teachers: [] };
+  }
+  return sanitizeIndividualTeacherPayload(data);
+}
+
 function normalizeFormDataForAction(actionType: string, data: unknown): Record<string, unknown> {
   if (actionType === CLASSROOM_ACTION_TYPE) {
     return bootstrapClassroomPayload(data);
@@ -405,6 +465,10 @@ function normalizeFormDataForAction(actionType: string, data: unknown): Record<s
 
   if (actionType === AF_TEAM_ACTION_TYPE) {
     return bootstrapAFTeamPayload(data);
+  }
+
+  if (actionType === INDIVIDUAL_TEACHER_ACTION_TYPE) {
+    return bootstrapIndividualTeacherPayload(data);
   }
 
   if (!isPlainObject(data)) {
@@ -421,6 +485,10 @@ function sanitizePatchData(actionType: string, data: Record<string, unknown>): R
 
   if (actionType === AF_TEAM_ACTION_TYPE) {
     return sanitizeAFTeamPayload(data);
+  }
+
+  if (actionType === INDIVIDUAL_TEACHER_ACTION_TYPE) {
+    return sanitizeIndividualTeacherPayload(data);
   }
 
   return data;
@@ -685,7 +753,9 @@ export default function ActionDetailForm({
         if (SAVE_BEFORE_END_TYPES.has(action.action_type) && response.status === 422) {
           const endErrorMessage = isClassroomObservation
             ? "Please complete all required rubric scores before ending this observation."
-            : "Please complete all required fields before ending this interaction.";
+            : action.action_type === INDIVIDUAL_TEACHER_ACTION_TYPE
+              ? "Please complete all required fields and record all teachers before ending this interaction."
+              : "Please complete all required fields before ending this interaction.";
           setError({
             message: endErrorMessage,
             details: parsedError.details,
@@ -812,6 +882,13 @@ export default function ActionDetailForm({
           />
         ) : action.action_type === AF_TEAM_ACTION_TYPE ? (
           <AFTeamInteractionForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
+            schoolCode={schoolCode}
+          />
+        ) : action.action_type === INDIVIDUAL_TEACHER_ACTION_TYPE ? (
+          <IndividualAFTeacherInteractionForm
             data={formData}
             setData={setFormData}
             disabled={!canSave || isBusy}
