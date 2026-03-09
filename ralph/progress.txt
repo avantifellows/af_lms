@@ -135,3 +135,14 @@ Session: d26959fe-8253-48db-9ff5-0511ca25196a
   - Short-circuit test verifies only 3 queries fired when classroom check fails (never reaches AF team/individual teacher)
   - 1275 tests passing across 79 files (all green, 3 previously broken tests now fixed)
 ---
+
+## 2026-03-09 - US-009
+Session: 3253f547-55fa-4d67-805f-181f54f7a949
+- Enabled individual_af_teacher_interaction in the action type picker modal
+- Files changed:
+  - `src/components/visits/ActionTypePickerModal.tsx` — added `individual_af_teacher_interaction` to the enabled check (line 47)
+  - `src/components/visits/ActionTypePickerModal.test.tsx` — added 2 new tests (radio selectable, submit calls onSubmit), updated disabled count 8→7 with 3 enabled types
+- **Learnings for future iterations:**
+  - Enabling a new action type in the picker is a one-line change + test updates
+  - Test count now 1277 across 79 files
+---

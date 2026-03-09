@@ -151,7 +151,7 @@
         "`npm run build` passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Reference implementation plan Phase 3.1. Small change — just add the type to the enabled check."
     },
     {
