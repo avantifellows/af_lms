@@ -264,7 +264,7 @@
         "`npx tsc --noEmit` passes"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "Reference implementation plan Phase 4.1-4.2. Follow existing `seedTestVisit()`/`seedVisitAction()` patterns in `e2e/helpers/db.ts`. Teacher seeding must be idempotent against dump data."
     },
     {

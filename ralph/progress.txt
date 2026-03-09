@@ -212,3 +212,17 @@ Session: 112990fc-c05c-4622-8fad-46439bd741a1
   - Save failure message for individual teacher uses the generic "Could not save form data" (same as AF team), but END 422 has unique message mentioning "record all teachers"
   - 1315 tests passing across 80 files after this change
 ---
+
+## 2026-03-09 - US-015
+Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
+- Added E2E test infrastructure: data builders and teacher seeding for individual teacher interaction
+- Files changed:
+  - `e2e/helpers/db.ts` — added `buildCompleteIndividualTeacherInteractionData()` (strict-valid payload builder with all 13 questions answered true), `seedIndividualTeacherTestTeachers()` (upserts 3 deterministic teacher user_permission rows, cleans up stray teacher rows while preserving AF team test teachers), imported `INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG`
+  - `e2e/tests/visits.spec.ts` — added `fillIndividualTeacherInteractionForm()` helper (selects first teacher from dropdown, verifies present attendance, answers all 13 questions with Yes), imported new helpers and config
+- **Learnings for future iterations:**
+  - `seedIndividualTeacherTestTeachers()` cleanup query must preserve AF team test teacher emails to avoid breaking existing AF team E2E tests
+  - `buildCompleteIndividualTeacherInteractionData()` accepts optional `teacherIds` array (like `buildCompleteClassroomObservationData` is static, but individual teacher needs to match actual DB teacher IDs)
+  - `fillIndividualTeacherInteractionForm()` extracts teacher ID from the section's `data-testid` attribute since it's dynamically assigned from the DB
+  - All pre-existing tsc errors are in test files (Vitest globals) — no errors in e2e/ files
+  - 1315 tests still passing across 80 files (no new unit tests — this is E2E infrastructure only)
+---
