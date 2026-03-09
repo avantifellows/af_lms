@@ -98,7 +98,7 @@ describe("ActionTypePickerModal", () => {
     expect(onSubmit).toHaveBeenCalledWith("af_team_interaction");
   });
 
-  it("other 7 action types remain disabled", () => {
+  it("other 8 action types remain disabled", () => {
     render(
       <ActionTypePickerModal
         isOpen
@@ -110,7 +110,7 @@ describe("ActionTypePickerModal", () => {
     const enabledTypes = new Set(["classroom_observation", "af_team_interaction"]);
     const disabledTypes = ACTION_TYPE_VALUES.filter((t) => !enabledTypes.has(t));
 
-    expect(disabledTypes).toHaveLength(7);
+    expect(disabledTypes).toHaveLength(8);
     for (const actionType of disabledTypes) {
       const radio = screen.getByLabelText(getActionTypeLabel(actionType));
       expect(radio).toBeDisabled();

@@ -210,6 +210,11 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
     description: "Record observations from team interaction with teachers.",
     fields: [],
   },
+  individual_af_teacher_interaction: {
+    title: "Individual AF Teacher Interaction Details",
+    description: "Record individual interactions with each teacher at the school.",
+    fields: [],
+  },
 };
 
 const FALLBACK_FORM_CONFIG: ActionFormConfig = {
