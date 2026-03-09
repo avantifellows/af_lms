@@ -146,3 +146,20 @@ Session: 3253f547-55fa-4d67-805f-181f54f7a949
   - Enabling a new action type in the picker is a one-line change + test updates
   - Test count now 1277 across 79 files
 ---
+
+## 2026-03-09 - US-010
+Session: df98f051-627f-4854-9541-9f7d93487498
+- Created IndividualAFTeacherInteractionForm.tsx component (~310 lines)
+- Files changed:
+  - `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — NEW: per-teacher collapsible accordion form with attendance gating, question sections, add/remove/progress
+- **Learnings for future iterations:**
+  - Component follows AFTeamInteractionForm pattern but with per-teacher nesting: each teacher gets their own collapsible section with attendance radios + questions
+  - Attendance gating: when attendance changes to on_leave/absent, questions are cleared (`questions: {}`)
+  - Add Teacher uses a `<select>` dropdown with `onChange` + reset pattern (not a separate button + dropdown) for simplicity
+  - `expandedIds` state (Set<number>) tracks which teacher sections are open — multiple can be open simultaneously
+  - `remainingTeachers` = fetched - recorded; when empty + all fetched are recorded, shows "All teachers recorded" message
+  - Progress bar shows `Recorded: X/Y teachers` + attendance breakdown — always visible (unlike AF team form which gates on teacher selection)
+  - Read-only mode: sections are collapsed by default, expandable to static text (no radios/textareas)
+  - Remark reveal state uses `${teacherId}-${questionKey}` composite keys since remarks are per-teacher-per-question
+  - 1277 tests still passing across 79 files (no test changes needed — component tests are in US-011)
+---
