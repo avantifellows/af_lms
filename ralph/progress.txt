@@ -163,3 +163,16 @@ Session: df98f051-627f-4854-9541-9f7d93487498
   - Remark reveal state uses `${teacherId}-${questionKey}` composite keys since remarks are per-teacher-per-question
   - 1277 tests still passing across 79 files (no test changes needed — component tests are in US-011)
 ---
+
+## 2026-03-09 - US-011
+Session: 509ad335-a883-425c-848d-d1ffbfafa4a0
+- Created comprehensive unit tests for IndividualAFTeacherInteractionForm component (25 tests)
+- Files changed:
+  - `src/components/visits/IndividualAFTeacherInteractionForm.test.tsx` — NEW: 25 tests across 8 describe blocks (teacher fetch 3, add teacher + sections 6, collapsible behavior 4, editing + removing 5, progress bar 1, disabled/read-only 3, edge cases 2, remark interaction 1)
+- **Learnings for future iterations:**
+  - RTL `getByText("Present", { selector: "p span + *" })` doesn't work for sibling text nodes — use `getByText("Attendance:")` to verify the static label instead
+  - `userEvent.selectOptions(select, "1")` works with `<select>` + `onChange` handler for the Add Teacher dropdown pattern
+  - `buildTeacherEntry()` helper with attendance + answerAll params is reusable for both test setup and edge case verification
+  - Read-only mode (`disabled=true`) renders `<p>` elements with "Yes"/"No" text instead of radio inputs — can verify count with `getAllByText("Yes")`
+  - 1302 tests passing across 80 files after this change
+---
