@@ -310,7 +310,9 @@ af_team_interaction: {
 ---
 
 ### 2.3 COMPLETE route — NO CHANGE
-Visit completion does **not** require `af_team_interaction`. Only `classroom_observation` remains required. **Product implication**: a visit with only AF Team Interactions (no classroom observation) cannot be completed. This is intentional.
+> **⚠️ SUPERSEDED (2026-03-09):** Visit completion now requires all 3 action types: `classroom_observation` + `af_team_interaction` + `individual_af_teacher_interaction`. See `individual-af-teacher-interaction` branch.
+
+~~Visit completion does **not** require `af_team_interaction`. Only `classroom_observation` remains required. **Product implication**: a visit with only AF Team Interactions (no classroom observation) cannot be completed. This is intentional.~~
 
 #### Verification
 - [ ] Confirm no code changes needed in `src/app/api/pm/visits/[id]/complete/route.ts`
@@ -374,7 +376,7 @@ New test scenarios (mirroring existing `classroom_observation` tests):
 #### Implementation checklist — test cases to write
 - [ ] Test: visit completes successfully with completed `af_team_interaction` alongside required completed `classroom_observation`
   - Mock: visit with 2 actions — one `classroom_observation` (completed, strict-valid rubric) + one `af_team_interaction` (completed, strict-valid payload)
-  - Assert: 200, visit `status: "completed"` (AF team interaction is supplementary, not mandatory for completion)
+  - Assert: 200, visit `status: "completed"` (**⚠️ SUPERSEDED:** AF team interaction is now mandatory for completion as of 2026-03-09)
 
 #### Verification
 - [ ] All tests pass: `npx vitest run src/app/api/pm/visits/\\[id\\]/complete/route.test.ts`
@@ -901,7 +903,7 @@ Update these files to reflect the new action type:
 - [ ] Section 3.5, enabled types: update "Currently only `classroom_observation` is enabled" → "Currently `classroom_observation` and `af_team_interaction` are enabled"
 - [ ] Section 3.5: add AF team interaction data shape summary (teachers array + 9 binary questions with remarks)
 - [ ] Section 3.5: add validation rules (lenient: partial OK, ignores unknown question keys; strict: all 9 answered + ≥1 teacher)
-- [ ] Section 3.5: document that visit completion does NOT require `af_team_interaction` (only `classroom_observation`)
+- [ ] ~~Section 3.5: document that visit completion does NOT require `af_team_interaction` (only `classroom_observation`)~~ **⚠️ SUPERSEDED (2026-03-09):** Visit completion now requires all 3 action types.
 - [ ] Section 3.5, key components: add `AFTeamInteractionForm.tsx` entry
 - [ ] Section 3.5, shared helpers: add `af-team-interaction.ts` and `teacher-utils.ts` entries
 - [ ] Update unit test count: files 75 → 78, tests 1142 → ~1217
