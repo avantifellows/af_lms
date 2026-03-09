@@ -65,3 +65,14 @@ Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
   - 1259 tests passing across 79 files after this change
 ---
 
+## 2026-03-09 - US-003
+Session: e417cdc1-e67b-4813-b65d-d04121e23c73
+- Added PATCH route validation for individual_af_teacher_interaction action type
+- Files changed:
+  - `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` — imported validation functions, added validation block after af_team_interaction block
+- **Learnings for future iterations:**
+  - Adding validation to PATCH route is trivial — just follow the existing af_team_interaction/classroom_observation pattern
+  - Lenient for in_progress, strict for completed — same conditional pattern as other action types
+  - 1259 tests still passing across 79 files (no new tests needed for this story)
+---
+
