@@ -100,3 +100,14 @@ Session: a10be337-ec97-422e-8739-e5bf3bf16fff
   - The mock `query` returns `undefined` when mock queue is exhausted, causing `TypeError: Cannot read properties of undefined (reading 'length')` — this is expected
   - 1259 tests total, 3 expected failures in complete route (9 pass + 3 fail = 12 tests in file)
 ---
+
+## 2026-03-09 - US-006
+Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
+- Added 7 PATCH route unit tests for individual_af_teacher_interaction validation
+- Files changed:
+  - `src/app/api/pm/visits/[id]/actions/[actionId]/route.test.ts` — added `buildValidIndividualTeacherData()` helper, 7 new tests (3 lenient success, 2 lenient rejection, 1 strict rejection, 1 strict success)
+- **Learnings for future iterations:**
+  - Individual teacher PATCH tests follow exact same pattern as AF team interaction tests — set up action_type, mock DB returns, assert status codes
+  - `buildValidIndividualTeacherData()` creates a single present teacher with all 13 questions answered — reusable for strict validation tests
+  - 1266 total tests (1263 pass + 3 expected complete route failures from US-005)
+---
