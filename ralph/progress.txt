@@ -242,3 +242,18 @@ Session: 5086446e-62c7-4f1b-ad9f-d4cea360a1f0
   - Program admin read-only for individual teacher uses completely different render path (static text, no radios) unlike AF team interaction (disabled radios) — verify `input[type="radio"]` count is 0, not just disabled
   - 1315 unit tests still passing (no new unit tests in this story — E2E only)
 ---
+
+## 2026-03-09 - US-017
+Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
+- Updated all documentation to reflect new individual_af_teacher_interaction action type and 3-type visit completion rule
+- Files changed:
+  - `CLAUDE.md` — added Individual AF Teacher Interaction section, added Visit Completion Rule section, updated project overview, updated test counts (80 files, 1315 tests), added new test file entries
+  - `docs/ai/project-context.md` — added Individual AF Teacher Interaction section under §3.5, updated completion requirements to 3-type rule, updated action types 9→10, enabled 2→3, updated key components/helpers/stats, updated test counts (unit: 1315/80, E2E: 39/5)
+  - `docs/ai/af-team-interaction/2026-03-05-af-team-interaction-implementation-plan.md` — annotated 3 "supplementary/not required" statements as superseded
+  - `ralph/archive/2026-03-06-af-team-interaction/prd-af-team-interaction.md` — annotated 4 statements (line 16, 67, 238, 252) as superseded (gitignored, local only)
+  - `MEMORY.md` (auto-memory) — updated unit test count to 1315/80, E2E count to 39/5
+- **Learnings for future iterations:**
+  - The complete route test "supplementary" name was already updated in US-008 — no remaining references in source code
+  - The archived PRD is gitignored so changes don't need committing
+  - Always update test counts in 3 places: CLAUDE.md, docs/ai/project-context.md, and MEMORY.md
+---

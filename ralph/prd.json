@@ -299,7 +299,7 @@
         "Update auto-memory `MEMORY.md` with new unit test and E2E test counts"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "Reference implementation plan Phase 5. Be thorough — the old 'only classroom observation required' rule appears in multiple files. All must be updated."
     },
     {
