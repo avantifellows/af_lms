@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 
+import { useAutoSave, type AutoSaveStatus } from "@/hooks/use-auto-save";
+
 import Toast from "@/components/Toast";
 import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
@@ -587,6 +589,30 @@ function readActionFromPayload(payload: unknown): ActionRecord | null {
   };
 }
 
+const AUTO_SAVE_STATUS_CONFIG: Record<
+  Exclude<AutoSaveStatus, "idle">,
+  { label: string; className: string }
+> = {
+  unsaved: { label: "Unsaved changes", className: "text-warning-text" },
+  saving: { label: "Saving...", className: "text-text-muted" },
+  saved: { label: "Saved", className: "text-accent" },
+  error: { label: "Save failed", className: "text-danger" },
+};
+
+function SaveStatusIndicator({ status }: { status: AutoSaveStatus }) {
+  if (status === "idle") return null;
+  const config = AUTO_SAVE_STATUS_CONFIG[status];
+  return (
+    <span
+      role="status"
+      data-testid="auto-save-status"
+      className={`text-sm font-medium ${config.className}`}
+    >
+      {config.label}
+    </span>
+  );
+}
+
 export default function ActionDetailForm({
   visitId,
   visitStatus,
@@ -632,6 +658,18 @@ export default function ActionDetailForm({
     action.status === "in_progress";
   const isBusy = state !== "idle";
 
+  const { saveStatus, cancelAutoSave, flushAndCancel, markSynced } = useAutoSave({
+    formData,
+    actionType: action.action_type,
+    canSave,
+    isBusy,
+    persistFn: persistActionData,
+    sanitizeFn: sanitizePatchData,
+    onSuccess: (updatedAction) => {
+      setAction((prev) => ({ ...prev, ...updatedAction } as ActionRecord));
+    },
+  });
+
   async function persistActionData(dataToPersist: Record<string, unknown>) {
     const response = await fetch(`/api/pm/visits/${visitId}/actions/${action.id}`, {
       method: "PATCH",
@@ -671,6 +709,7 @@ export default function ActionDetailForm({
       return;
     }
 
+    cancelAutoSave();
     setError(null);
     setWarning(null);
     setState("saving");
@@ -685,6 +724,7 @@ export default function ActionDetailForm({
 
       setAction(result.action);
       setFormData(result.action.data ?? {});
+      markSynced(result.action.data ?? {});
     } catch (err) {
       setError(extractErrorState(err, "Failed to save action details"));
     } finally {
@@ -697,6 +737,7 @@ export default function ActionDetailForm({
       return;
     }
 
+    await flushAndCancel();
     setError(null);
     setWarning(null);
 
@@ -720,6 +761,7 @@ export default function ActionDetailForm({
 
         setAction(saveResult.action);
         setFormData(saveResult.action.data ?? {});
+        markSynced(saveResult.action.data ?? {});
       } catch {
         setError({
           message: saveErrorMessage,
@@ -785,6 +827,7 @@ export default function ActionDetailForm({
       const normalizedEndedAction = normalizeActionForState(endedAction);
       setAction(normalizedEndedAction);
       setFormData(normalizedEndedAction.data ?? {});
+      markSynced(normalizedEndedAction.data ?? {});
     } catch (err) {
       if (!isLocationCancelled(err)) {
         setError(extractErrorState(err, "Failed to end action"));
@@ -820,6 +863,8 @@ export default function ActionDetailForm({
           <span>Ended: {formatTimestamp(action.ended_at)}</span>
         </div>
       </div>
+
+      {canSave && <SaveStatusIndicator status={saveStatus} />}
 
       {unsupportedVersionMessage && (
         <p
@@ -933,7 +978,7 @@ export default function ActionDetailForm({
               disabled={isBusy}
               className="inline-flex items-center bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {state === "saving" ? "Saving..." : "Save"}
+              {state === "saving" ? "Saving..." : "Save Now"}
             </button>
           )}
           {canEnd && (

@@ -164,7 +164,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (80 files, 1315 tests as of 2026-03-09)
+### Test files (81 files, 1341 tests as of 2026-03-10)
 
 **Library tests** (high-signal):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
@@ -183,6 +183,9 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/lib/individual-af-teacher-interaction.test.ts` — individual teacher interaction config integrity, attendance-gated lenient/strict validation rules
 - `src/lib/teacher-utils.test.ts` — shared teacher display name helper
 - `src/proxy.test.ts` — middleware redirect logic
+
+**Hook tests** (high-signal):
+- `src/hooks/use-auto-save.test.ts` — auto-save hook: debounce, status transitions, flush/cancel, beforeunload, sanitizeFn integration
 
 **API route tests** (high-signal):
 - `src/app/api/admin/schools/route.test.ts` — GET list/search schools
