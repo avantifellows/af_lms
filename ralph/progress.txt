@@ -189,3 +189,15 @@ Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
   - Individual teacher gets its own END 422 message: "Please complete all required fields and record all teachers before ending this interaction."
   - 1302 tests still passing across 80 files (no test changes needed — page tests are in US-014)
 ---
+
+## 2026-03-09 - US-013
+Session: 74f84d5c-2d1c-45c2-a963-a6953eefd38f
+- Added action card stats for individual_af_teacher_interaction: interface, stats function, rendering, and tests
+- Files changed:
+  - `src/components/visits/ActionPointList.tsx` — imported config, added `IndividualTeacherInteractionStats` interface + `getIndividualTeacherInteractionStats()` function, added rendering block with `data-testid='individual-teacher-stats-{id}'`
+  - `src/components/visits/ActionPointList.test.tsx` — added 8 new tests: 4 component rendering tests (stats with attendance breakdown, multiple present, empty/undefined, non-matching type) + 4 standalone stats unit tests (mixed attendance, undefined, empty array, no teachers key)
+- **Learnings for future iterations:**
+  - Individual teacher stats pattern is simpler than AF team (no question progress) — just count teachers by attendance type
+  - Stats return null for empty teachers array (not just missing key) — unlike AF team which returns null only when both counts are 0
+  - 1310 tests passing across 80 files after this change
+---
