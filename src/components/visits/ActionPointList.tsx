@@ -7,6 +7,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import Toast from "@/components/Toast";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { getAccurateLocation } from "@/lib/geolocation";
 import {
   ACTION_STATUS_VALUES,
@@ -202,6 +203,45 @@ export function getAFTeamInteractionStats(
   }
 
   return { teacherCount, answeredCount, totalQuestions };
+}
+
+export interface IndividualTeacherInteractionStats {
+  recordedCount: number;
+  presentCount: number;
+  onLeaveCount: number;
+  absentCount: number;
+}
+
+export function getIndividualTeacherInteractionStats(
+  data: Record<string, unknown> | undefined
+): IndividualTeacherInteractionStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const teachers = data.teachers;
+  if (!Array.isArray(teachers) || teachers.length === 0) {
+    return null;
+  }
+
+  let presentCount = 0;
+  let onLeaveCount = 0;
+  let absentCount = 0;
+
+  for (const entry of teachers) {
+    if (!entry || typeof entry !== "object") continue;
+    const attendance = (entry as Record<string, unknown>).attendance;
+    if (attendance === "present") presentCount++;
+    else if (attendance === "on_leave") onLeaveCount++;
+    else if (attendance === "absent") absentCount++;
+  }
+
+  return {
+    recordedCount: teachers.length,
+    presentCount,
+    onLeaveCount,
+    absentCount,
+  };
 }
 
 export default function ActionPointList({
@@ -478,6 +518,20 @@ export default function ActionPointList({
                     </span>
                     <span className="font-mono text-text-secondary">
                       {stats.answeredCount}/{stats.totalQuestions} ({progressPercent}%)
+                    </span>
+                  </div>
+                );
+              })()}
+              {action.action_type === "individual_af_teacher_interaction" && (() => {
+                const stats = getIndividualTeacherInteractionStats(action.data);
+                if (!stats) {
+                  return null;
+                }
+
+                return (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`individual-teacher-stats-${action.id}`}>
+                    <span className="text-text-secondary">
+                      <span className="text-text-muted">Teachers:</span> {stats.recordedCount} ({stats.presentCount} present, {stats.onLeaveCount} leave, {stats.absentCount} absent)
                     </span>
                   </div>
                 );

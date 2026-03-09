@@ -5,6 +5,7 @@ import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 
 import ActionPointList, {
   getAFTeamInteractionStats,
+  getIndividualTeacherInteractionStats,
   type VisitActionListItem,
 } from "./ActionPointList";
 
@@ -469,5 +470,131 @@ describe("getAFTeamInteractionStats", () => {
       ],
     });
     expect(result).toEqual({ teacherCount: 2, answeredCount: 0, totalQuestions: 9 });
+  });
+});
+
+describe("Individual Teacher Interaction stats on action cards", () => {
+  it("renders stats with attendance breakdown for individual_af_teacher_interaction card", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 60,
+            action_type: "individual_af_teacher_interaction",
+            status: "in_progress",
+            started_at: "2026-03-09T09:00:00.000Z",
+            data: {
+              teachers: [
+                { id: 1, name: "Alice", attendance: "present", questions: {} },
+                { id: 2, name: "Bob", attendance: "on_leave", questions: {} },
+                { id: 3, name: "Charlie", attendance: "absent", questions: {} },
+              ],
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("individual-teacher-stats-60");
+    expect(statsEl).toHaveTextContent("Teachers:");
+    expect(statsEl).toHaveTextContent("3 (1 present, 1 leave, 1 absent)");
+  });
+
+  it("renders correct counts with multiple present teachers", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 61,
+            action_type: "individual_af_teacher_interaction",
+            status: "in_progress",
+            started_at: "2026-03-09T09:00:00.000Z",
+            data: {
+              teachers: [
+                { id: 1, name: "Alice", attendance: "present", questions: {} },
+                { id: 2, name: "Bob", attendance: "present", questions: {} },
+              ],
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("individual-teacher-stats-61");
+    expect(statsEl).toHaveTextContent("2 (2 present, 0 leave, 0 absent)");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 62,
+            action_type: "individual_af_teacher_interaction",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("individual-teacher-stats-62")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing for non-individual_af_teacher_interaction action types", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 63,
+            action_type: "principal_meeting",
+            status: "in_progress",
+            started_at: "2026-03-09T09:00:00.000Z",
+            data: {
+              teachers: [
+                { id: 1, name: "Alice", attendance: "present", questions: {} },
+              ],
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("individual-teacher-stats-63")).not.toBeInTheDocument();
+  });
+});
+
+describe("getIndividualTeacherInteractionStats", () => {
+  it("returns correct counts for mixed attendance", () => {
+    const result = getIndividualTeacherInteractionStats({
+      teachers: [
+        { id: 1, name: "Alice", attendance: "present", questions: {} },
+        { id: 2, name: "Bob", attendance: "on_leave", questions: {} },
+        { id: 3, name: "Charlie", attendance: "absent", questions: {} },
+        { id: 4, name: "Diana", attendance: "present", questions: {} },
+      ],
+    });
+    expect(result).toEqual({
+      recordedCount: 4,
+      presentCount: 2,
+      onLeaveCount: 1,
+      absentCount: 1,
+    });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getIndividualTeacherInteractionStats(undefined)).toBeNull();
+  });
+
+  it("returns null for empty teachers array", () => {
+    expect(getIndividualTeacherInteractionStats({ teachers: [] })).toBeNull();
+  });
+
+  it("returns null for data without teachers key", () => {
+    expect(getIndividualTeacherInteractionStats({})).toBeNull();
   });
 });
