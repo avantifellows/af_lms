@@ -2,11 +2,14 @@ import { test, expect } from "../fixtures/auth";
 import {
   buildCompleteAFTeamInteractionData,
   buildCompleteClassroomObservationData,
+  buildCompleteIndividualTeacherInteractionData,
   getTestPool,
+  seedIndividualTeacherTestTeachers,
   seedTestVisit,
   seedVisitAction,
 } from "../helpers/db";
 import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individual-af-teacher-interaction";
 import type { Page } from "@playwright/test";
 import type { Pool } from "pg";
 
@@ -51,6 +54,34 @@ async function fillAFTeamInteractionForm(page: Page) {
     await page.getByTestId(`af-team-${key}-yes`).check();
   }
   await expect(page.getByTestId("af-team-progress")).toContainText("Answered: 9/9");
+}
+
+async function fillIndividualTeacherInteractionForm(page: Page) {
+  // Wait for teacher list to load
+  const addSelect = page.getByTestId("add-teacher-select");
+  await expect(addSelect).toBeVisible();
+
+  // Select the first available teacher from the dropdown
+  const options = addSelect.locator("option:not([disabled])");
+  await expect(options.first()).toBeAttached();
+  await addSelect.selectOption({ index: 1 });
+
+  // The new teacher section should auto-expand; attendance defaults to "present"
+  const teacherSections = page.locator('[data-testid^="teacher-section-"]');
+  await expect(teacherSections).toHaveCount(1);
+
+  // Get the teacher ID from the section's data-testid
+  const sectionTestId = await teacherSections.first().getAttribute("data-testid");
+  const teacherId = sectionTestId!.replace("teacher-section-", "");
+
+  // Verify attendance is "present" (default)
+  const presentRadio = page.getByTestId(`teacher-${teacherId}-attendance-present`);
+  await expect(presentRadio).toBeChecked();
+
+  // Answer all 13 questions with "Yes"
+  for (const key of INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys) {
+    await page.getByTestId(`teacher-${teacherId}-${key}-yes`).check();
+  }
 }
 
 test.beforeAll(async () => {
