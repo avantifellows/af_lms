@@ -189,7 +189,7 @@ Admin sections:
 - A per-teacher 13-question binary checklist with attendance gating
 - Top-level payload keys: `teachers` (array of `{ id, name, attendance, questions: { [key]: { answer: boolean|null, remark?: string } } }`)
 - Attendance options: `present`, `on_leave`, `absent` — only `present` teachers require question answers
-- 5 sections: Operational Health (1 question), Student Tracking (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
+- 5 sections: Operational Health (1 question), Syllabus Track (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
 - Question keys: `oh_class_duration`, `st_grade11_syllabus`, `st_grade11_testing`, `st_grade12_syllabus`, `st_grade12_testing`, `sp_student_performance`, `sp_girls_performance`, `sn_academics`, `sn_school_operations`, `sn_co_curriculars`, `mp_monthly_plan`, `mp_classroom_observations`, `mp_student_feedback`
 - Validation:
   - PATCH while `in_progress`: lenient (accepts partial data)

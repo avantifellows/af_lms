@@ -122,7 +122,7 @@ Visit tables:
 - Per-teacher 13-question binary checklist with attendance gating across 5 sections
 - Payload: `{ teachers: [{ id, name, attendance, questions: { [key]: { answer: boolean|null, remark?: string } } }] }`
 - Attendance options: `present`, `on_leave`, `absent` — only `present` teachers require question answers
-- 5 sections: Operational Health (1 question), Student Tracking (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
+- 5 sections: Operational Health (1 question), Syllabus Track (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
 - Validation: lenient for in_progress (partial OK), strict for completed/end (all present teachers need all 13 answered + ≥1 teacher)
 - END route additionally checks all school teachers are recorded (queries `user_permission` table)
 - Config/validation: `src/lib/individual-af-teacher-interaction.ts`
