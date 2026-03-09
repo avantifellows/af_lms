@@ -123,3 +123,15 @@ Session: 4daebfc3-9ce9-44e9-ae3e-044c5f1cce6b
   - Concurrent fallback test: pre-update path passes all validations (valid data + all teachers), UPDATE returns 0 rows, re-fetch returns incomplete data → 422
   - 1272 total tests (1269 pass + 3 expected complete route failures from US-005)
 ---
+
+## 2026-03-09 - US-008
+Session: d26959fe-8253-48db-9ff5-0511ca25196a
+- Updated COMPLETE route tests for 3-type requirement (classroom + AF team + individual teacher)
+- Files changed:
+  - `src/app/api/pm/visits/[id]/complete/route.test.ts` — updated 2 successful completion test mocks (PM + admin) to include AF team + individual teacher query mocks, replaced "supplementary" test with 4 new tests (missing AF team 422, missing individual teacher 422, all 3 types success, short-circuit order verification)
+- **Learnings for future iterations:**
+  - Successful completion now requires 6 query mocks: visit → in-progress check → classroom actions → AF team check → individual teacher check → UPDATE
+  - Mock call index for UPDATE shifted from [3] to [5] due to 2 new queries
+  - Short-circuit test verifies only 3 queries fired when classroom check fails (never reaches AF team/individual teacher)
+  - 1275 tests passing across 79 files (all green, 3 previously broken tests now fixed)
+---
