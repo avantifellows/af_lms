@@ -162,7 +162,7 @@ export default async function VisitActionDetailPage({ params }: PageProps) {
   return (
     <main className="min-h-screen bg-bg">
       <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
-        <div className="mb-4">
+        <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 md:-mx-16 lg:-mx-32 xl:-mx-64 2xl:-mx-96 px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 bg-bg py-3 mb-1">
           <Link href={`/visits/${detail.visit.id}`} className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
             &larr; Back to Visit
           </Link>

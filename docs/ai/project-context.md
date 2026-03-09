@@ -220,16 +220,16 @@ Admin sections:
 #### Implemented pages
 - List: `src/app/visits/page.tsx` (2-state list, admin/program_admin filters)
 - Visit detail: `src/app/visits/[id]/page.tsx` (action card list, complete button, read-only on completed)
-- Action detail: `src/app/visits/[id]/actions/[actionId]/page.tsx` (dynamic form by action type, save/end)
+- Action detail: `src/app/visits/[id]/actions/[actionId]/page.tsx` (dynamic form by action type, save/end, sticky "Back to Visit" header)
 - Start new visit: `src/app/school/[udise]/visit/new/page.tsx` (server) + `src/components/visits/NewVisitForm.tsx` (client, GPS)
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
 - `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), and individual teacher interaction stats (recorded teachers, attendance breakdown)
 - `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation`, `af_team_interaction`, and `individual_af_teacher_interaction` enabled)
-- `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields
-- `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks
-- `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers
+- `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields; sticky progress summary (`top-12 z-10`, below page-level sticky header)
+- `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type, integrates auto-save hook, inline `SaveStatusIndicator`)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)

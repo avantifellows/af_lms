@@ -243,7 +243,7 @@ export default function ClassroomObservationForm({
       {/* Rubric form — visible only after both teacher and grade are selected */}
       {showRubric && (
         <>
-          <div className="sticky top-2 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2">
+          <div className="sticky top-12 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
               <span className="font-mono font-bold text-accent" data-testid="rubric-score-summary">
                 Score: {totalScore}/{CLASSROOM_OBSERVATION_RUBRIC.maxScore}
