@@ -5,6 +5,7 @@ import { validateAFTeamInteractionComplete } from "@/lib/af-team-interaction";
 import { authOptions } from "@/lib/auth";
 import { validateClassroomObservationComplete } from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
+import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-interaction";
 import { validateGpsReading } from "@/lib/geo-validation";
 import {
   apiError,
@@ -100,6 +101,52 @@ function afTeamValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid AF team interaction data", validation.errors);
 }
 
+function individualTeacherValidationError(action: VisitActionRow) {
+  if (action.action_type !== "individual_af_teacher_interaction") {
+    return null;
+  }
+
+  const validation = validateIndividualTeacherComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid individual teacher interaction data", validation.errors);
+}
+
+async function allTeachersRecordedError(
+  action: VisitActionRow,
+  schoolCode: string,
+  schoolRegion: string | null
+) {
+  if (action.action_type !== "individual_af_teacher_interaction") {
+    return null;
+  }
+
+  const allTeachers = await query<{ id: number; full_name: string | null; email: string }>(
+    `SELECT id, full_name, email FROM user_permission
+     WHERE role = 'teacher'
+       AND (
+         school_codes @> ARRAY[$1]::TEXT[]
+         OR ($2::TEXT IS NOT NULL AND regions @> ARRAY[$2]::TEXT[])
+         OR level = 3
+       )`,
+    [schoolCode, schoolRegion]
+  );
+
+  const data = action.data as { teachers?: Array<{ id: number }> };
+  const recordedIds = new Set((data.teachers ?? []).map((t) => t.id));
+  const missing = allTeachers.filter((t) => !recordedIds.has(t.id));
+
+  if (missing.length === 0) {
+    return null;
+  }
+
+  const missingNames = missing.map((t) => t.full_name || t.email);
+  return apiError(422, "Not all teachers at this school have been recorded", [
+    `Missing: ${missingNames.join(", ")}`,
+  ]);
+}
 
 // POST /api/pm/visits/[id]/actions/[actionId]/end - end action with end GPS
 export async function POST(
@@ -167,6 +214,20 @@ export async function POST(
     return invalidAFTeamData;
   }
 
+  const invalidIndividualTeacherData = individualTeacherValidationError(existingAction);
+  if (invalidIndividualTeacherData) {
+    return invalidIndividualTeacherData;
+  }
+
+  const missingTeachersError = await allTeachersRecordedError(
+    existingAction,
+    visit.school_code,
+    visit.school_region
+  );
+  if (missingTeachersError) {
+    return missingTeachersError;
+  }
+
   const ended = await query<VisitActionRow>(
     `UPDATE lms_pm_school_visit_actions
      SET status = 'completed',
@@ -213,6 +274,19 @@ export async function POST(
     return invalidCurrentAFTeamData;
   }
 
+  const invalidCurrentIndividualTeacherData = individualTeacherValidationError(current);
+  if (invalidCurrentIndividualTeacherData) {
+    return invalidCurrentIndividualTeacherData;
+  }
+
+  const currentMissingTeachersError = await allTeachersRecordedError(
+    current,
+    visit.school_code,
+    visit.school_region
+  );
+  if (currentMissingTeachersError) {
+    return currentMissingTeachersError;
+  }
 
   return apiError(409, "Action cannot be ended from current state");
 }
