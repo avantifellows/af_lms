@@ -226,3 +226,19 @@ Session: dd99c1c1-0bcc-4e6f-9708-ca0ed97196cd
   - All pre-existing tsc errors are in test files (Vitest globals) — no errors in e2e/ files
   - 1315 tests still passing across 80 files (no new unit tests — this is E2E infrastructure only)
 ---
+
+## 2026-03-09 - US-016
+Session: 5086446e-62c7-4f1b-ad9f-d4cea360a1f0
+- Added 5 new E2E tests + updated 5 existing E2E tests for individual teacher interaction
+- Files changed:
+  - `e2e/tests/visits.spec.ts` — added `seededTeachers` variable, `fillAllIndividualTeachers()` helper, 5 new tests (PM full lifecycle, END blocked missing teachers, absent/on_leave pass, visit completion requires 3 types, program admin read-only), updated `beforeAll` to seed individual teacher test teachers, updated 5 existing tests to seed all 3 action types for completion (`complete-blocked-without-rubric`, `complete-visit-success`, `moderate-gps-warning`, `admin-can-complete`, renamed `visit-completes-with-both` → `visit-completes-with-all-three-required-action-types`)
+- **Learnings for future iterations:**
+  - `as const` assertion cannot be applied to ternary expressions — use `const att: string = ...` or remove `as const`
+  - `fillAllIndividualTeachers()` pattern: count options at start, iterate with `selectOption({ index: 1 })` (always first non-disabled option), first teacher gets present+all questions, rest get absent attendance
+  - For tests that try to complete a visit successfully, ALL must seed 3 completed action types (classroom + AF team + individual teacher) — easy to miss existing tests when adding new completion requirements
+  - `page.request.get()` inherits browser context cookies — can call authenticated APIs directly without navigating
+  - The `allTeachersRecordedError()` in END route uses same SQL as `GET /api/pm/teachers` — both check school_codes, regions, and level=3 teachers. E2E tests must account for all teacher sources, not just seeded ones
+  - E2E tests for END validation: seed data via DB, navigate to action page, click End Action — the save-before-end pattern PATCHes current form data then POSTs /end, so seeded data is what gets validated
+  - Program admin read-only for individual teacher uses completely different render path (static text, no radios) unlike AF team interaction (disabled radios) — verify `input[type="radio"]` count is 0, not just disabled
+  - 1315 unit tests still passing (no new unit tests in this story — E2E only)
+---
