@@ -135,8 +135,8 @@ async function allTeachersRecordedError(
   );
 
   const data = action.data as { teachers?: Array<{ id: number }> };
-  const recordedIds = new Set((data.teachers ?? []).map((t) => t.id));
-  const missing = allTeachers.filter((t) => !recordedIds.has(t.id));
+  const recordedIds = new Set((data.teachers ?? []).map((t) => Number(t.id)));
+  const missing = allTeachers.filter((t) => !recordedIds.has(Number(t.id)));
 
   if (missing.length === 0) {
     return null;
