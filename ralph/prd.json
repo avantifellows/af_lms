@@ -64,7 +64,7 @@
         "Existing END route tests still pass: `npx vitest run src/app/api/pm/visits/\\[id\\]/actions/\\[actionId\\]/end/route.test.ts`"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Reference implementation plan Phase 2.2. IMPORTANT: school_codes and regions columns are TEXT[] arrays, NOT JSONB — use ARRAY[$1]::TEXT[] containment. The `visit.school_region` comes from the LEFT JOIN on school table in loadVisitAccessTarget()."
     },
     {

@@ -76,3 +76,15 @@ Session: e417cdc1-e67b-4813-b65d-d04121e23c73
   - 1259 tests still passing across 79 files (no new tests needed for this story)
 ---
 
+## 2026-03-09 - US-004
+Session: 01f1ce90-1ff6-4776-b2f5-dce8f1b75946
+- Added END route validation for individual_af_teacher_interaction with all-teachers DB check
+- Files changed:
+  - `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts` — imported `validateIndividualTeacherComplete`, added `individualTeacherValidationError()` (data shape check) and `allTeachersRecordedError()` (DB query to verify all school teachers recorded), wired both into pre-update and concurrent-fallback paths
+- **Learnings for future iterations:**
+  - END route has 2 validation paths (pre-update + concurrent fallback) — both must include new validations
+  - `allTeachersRecordedError()` is async (DB query) unlike other validation functions — uses same SQL as `GET /api/pm/teachers` with TEXT[] array containment
+  - `visit.school_code` and `visit.school_region` are both available from `loadVisitAccessTarget()` (LEFT JOIN on school table)
+  - 1259 tests still passing across 79 files (no new tests needed for this story)
+---
+
