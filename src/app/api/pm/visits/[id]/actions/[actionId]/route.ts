@@ -14,6 +14,10 @@ import {
   validateIndividualTeacherComplete,
   validateIndividualTeacherSave,
 } from "@/lib/individual-af-teacher-interaction";
+import {
+  validatePrincipalInteractionComplete,
+  validatePrincipalInteractionSave,
+} from "@/lib/principal-interaction";
 import { query } from "@/lib/db";
 import {
   apiError,
@@ -210,6 +214,17 @@ export async function PATCH(
 
     if (!validation.valid) {
       return apiError(422, "Invalid individual teacher interaction data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "principal_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validatePrincipalInteractionComplete(data)
+        : validatePrincipalInteractionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid principal interaction data", validation.errors);
     }
   }
 
