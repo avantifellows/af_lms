@@ -7,6 +7,7 @@ import { validateClassroomObservationComplete } from "@/lib/classroom-observatio
 import { query } from "@/lib/db";
 import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-interaction";
 import { validateGpsReading } from "@/lib/geo-validation";
+import { validatePrincipalInteractionComplete } from "@/lib/principal-interaction";
 import {
   apiError,
   enforceVisitWriteAccess,
@@ -114,6 +115,19 @@ function individualTeacherValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid individual teacher interaction data", validation.errors);
 }
 
+function principalInteractionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "principal_interaction") {
+    return null;
+  }
+
+  const validation = validatePrincipalInteractionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid principal interaction data", validation.errors);
+}
+
 async function allTeachersRecordedError(
   action: VisitActionRow,
   schoolCode: string,
@@ -219,6 +233,11 @@ export async function POST(
     return invalidIndividualTeacherData;
   }
 
+  const invalidPrincipalInteractionData = principalInteractionValidationError(existingAction);
+  if (invalidPrincipalInteractionData) {
+    return invalidPrincipalInteractionData;
+  }
+
   const missingTeachersError = await allTeachersRecordedError(
     existingAction,
     visit.school_code,
@@ -277,6 +296,11 @@ export async function POST(
   const invalidCurrentIndividualTeacherData = individualTeacherValidationError(current);
   if (invalidCurrentIndividualTeacherData) {
     return invalidCurrentIndividualTeacherData;
+  }
+
+  const invalidCurrentPrincipalInteractionData = principalInteractionValidationError(current);
+  if (invalidCurrentPrincipalInteractionData) {
+    return invalidCurrentPrincipalInteractionData;
   }
 
   const currentMissingTeachersError = await allTeachersRecordedError(

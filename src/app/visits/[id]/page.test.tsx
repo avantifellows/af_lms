@@ -108,7 +108,7 @@ function makeActions() {
     {
       id: 101,
       visit_id: 1,
-      action_type: "principal_meeting",
+      action_type: "leadership_meeting",
       status: "pending",
       started_at: null,
       ended_at: null,
@@ -208,7 +208,7 @@ describe("VisitDetailPage", () => {
 
     expect(screen.getByText("Action Points")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 action points completed")).toBeInTheDocument();
-    expect(screen.getByText("Principal Meeting")).toBeInTheDocument();
+    expect(screen.getByText("Leadership Meeting")).toBeInTheDocument();
     expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();
     expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);

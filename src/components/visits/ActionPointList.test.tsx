@@ -6,6 +6,7 @@ import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import ActionPointList, {
   getAFTeamInteractionStats,
   getIndividualTeacherInteractionStats,
+  getPrincipalInteractionStats,
   type VisitActionListItem,
 } from "./ActionPointList";
 
@@ -39,7 +40,7 @@ vi.mock("@/lib/geolocation", () => ({
 function makeAction(overrides: Partial<VisitActionListItem>): VisitActionListItem {
   return {
     id: 101,
-    action_type: "principal_meeting",
+    action_type: "leadership_meeting",
     status: "pending",
     started_at: null,
     ended_at: null,
@@ -81,7 +82,7 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 11, status: "pending", action_type: "principal_meeting" })]}
+        actions={[makeAction({ id: 11, status: "pending", action_type: "leadership_meeting" })]}
       />
     );
 
@@ -230,11 +231,11 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "principal_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
       />
     );
 
-    expect(screen.getByText("Principal Meeting")).toBeInTheDocument();
+    expect(screen.getByText("Leadership Meeting")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
@@ -244,7 +245,7 @@ describe("ActionPointList", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("Principal Meeting")).not.toBeInTheDocument();
+      expect(screen.queryByText("Leadership Meeting")).not.toBeInTheDocument();
       expect(screen.getByText("No action points added yet.")).toBeInTheDocument();
     });
   });
@@ -274,7 +275,7 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "principal_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
       />
     );
 
@@ -376,7 +377,7 @@ describe("ActionPointList", () => {
           actions={[
             makeAction({
               id: 53,
-              action_type: "principal_meeting",
+              action_type: "leadership_meeting",
               status: "in_progress",
               started_at: "2026-03-05T09:00:00.000Z",
               data: {
@@ -551,7 +552,7 @@ describe("Individual Teacher Interaction stats on action cards", () => {
         actions={[
           makeAction({
             id: 63,
-            action_type: "principal_meeting",
+            action_type: "leadership_meeting",
             status: "in_progress",
             started_at: "2026-03-09T09:00:00.000Z",
             data: {
@@ -596,5 +597,127 @@ describe("getIndividualTeacherInteractionStats", () => {
 
   it("returns null for data without teachers key", () => {
     expect(getIndividualTeacherInteractionStats({})).toBeNull();
+  });
+});
+
+describe("Principal Interaction stats on action cards", () => {
+  it("renders stats for principal_interaction card with answered questions", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 70,
+            action_type: "principal_interaction",
+            status: "in_progress",
+            started_at: "2026-03-10T09:00:00.000Z",
+            data: {
+              questions: {
+                oh_program_feedback: { answer: true },
+                ip_curriculum_progress: { answer: false },
+              },
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("principal-interaction-stats-70");
+    expect(statsEl).toHaveTextContent("2/7 (29%)");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 71,
+            action_type: "principal_interaction",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("principal-interaction-stats-71")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when no questions are answered", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 72,
+            action_type: "principal_interaction",
+            status: "in_progress",
+            started_at: "2026-03-10T09:00:00.000Z",
+            data: {
+              questions: {},
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("principal-interaction-stats-72")).not.toBeInTheDocument();
+  });
+});
+
+describe("getPrincipalInteractionStats", () => {
+  it("returns correct counts for partial payload — 3 of 7 answered", () => {
+    const result = getPrincipalInteractionStats({
+      questions: {
+        oh_program_feedback: { answer: true },
+        ip_curriculum_progress: { answer: false },
+        sp_student_performance: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 3, totalQuestions: 7 });
+  });
+
+  it("returns correct counts for complete payload — all 7 answered", () => {
+    const result = getPrincipalInteractionStats({
+      questions: {
+        oh_program_feedback: { answer: true },
+        ip_curriculum_progress: { answer: false },
+        ip_key_events: { answer: true },
+        sp_student_performance: { answer: true },
+        sn_concerns_raised: { answer: false },
+        mp_monthly_plan: { answer: true },
+        mp_permissions_obtained: { answer: false },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 7, totalQuestions: 7 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getPrincipalInteractionStats(undefined)).toBeNull();
+  });
+
+  it("returns null when no questions are answered (answeredCount is 0)", () => {
+    expect(getPrincipalInteractionStats({ questions: {} })).toBeNull();
+  });
+
+  it("does NOT count null answers — only true or false count as answered", () => {
+    const result = getPrincipalInteractionStats({
+      questions: {
+        oh_program_feedback: { answer: null },
+        ip_curriculum_progress: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 7 });
+  });
+
+  it("ignores unknown question keys — only counts known keys", () => {
+    const result = getPrincipalInteractionStats({
+      questions: {
+        unknown_key: { answer: true },
+        oh_program_feedback: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 7 });
   });
 });

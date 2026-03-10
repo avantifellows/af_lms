@@ -1,5 +1,5 @@
 export const ACTION_TYPES = {
-  principal_meeting: "Principal Meeting",
+  principal_interaction: "Principal Interaction",
   leadership_meeting: "Leadership Meeting",
   classroom_observation: "Classroom Observation",
   group_student_discussion: "Group Student Discussion",

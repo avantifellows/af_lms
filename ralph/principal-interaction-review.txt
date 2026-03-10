@@ -1,0 +1,46 @@
+# Principal Interaction Feature — Review Summary
+
+## What Was Done
+Added "Principal Interaction" as the 4th required action type for PM school visits.
+7-question binary checklist across 5 sections, no teacher selection (simplest form).
+Replaced legacy `principal_meeting` type with `principal_interaction` throughout.
+
+## Files Changed (51 files, +11046 / -122 lines)
+
+### New files (4 core + 2 test):
+- src/lib/principal-interaction.ts — config, types, lenient/strict validation
+- src/lib/principal-interaction.test.ts — 24 tests
+- src/components/visits/PrincipalInteractionForm.tsx — form component
+- src/components/visits/PrincipalInteractionForm.test.tsx — 16 tests
+
+### Modified source files:
+- src/lib/visit-actions.ts — replaced principal_meeting with principal_interaction
+- src/components/visits/ActionDetailForm.tsx — form wiring, sanitize/bootstrap, JSX dispatch
+- src/components/visits/ActionPointList.tsx — card stats for principal_interaction
+- src/components/visits/ActionTypePickerModal.tsx — enabled (3->4 types)
+- src/components/visits/NewVisitForm.tsx — text updates
+- src/app/api/pm/visits/[id]/actions/[actionId]/route.ts — PATCH validation
+- src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts — END validation
+- src/app/api/pm/visits/[id]/complete/route.ts — 4th completion check
+
+### Modified test files (12 files):
+- Updated default action_type from principal_meeting to leadership_meeting
+- Added principal_interaction-specific tests throughout
+
+### E2E + docs:
+- e2e/helpers/db.ts — buildCompletePrincipalInteractionData() helper
+- e2e/tests/visits.spec.ts — 8 updated tests + 1 new test
+- CLAUDE.md, docs/ai/project-context.md — documentation updates
+
+## Quality Checks
+- Unit tests: 83 files, 1402 tests — ALL PASSING
+- Build: SUCCESS (Next.js production build clean)
+- TypeScript: pre-existing errors only (VisitsTab.test.tsx, use-auto-save.test.ts)
+- Grep `principal_meeting` in src/: ZERO matches
+- Grep `principal_meeting` in e2e/: only in db-dump.sql (gitignored legacy data)
+- E2E: skipped (requires local DB dump not available)
+
+## Concerns / Recommendations
+- None. Feature is complete and all automated checks pass.
+- Pre-existing tsc errors in VisitsTab.test.tsx and use-auto-save.test.ts are unrelated.
+- E2E tests were written and seeded but cannot be verified without local DB dump.

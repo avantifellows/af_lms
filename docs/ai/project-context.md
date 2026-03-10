@@ -151,7 +151,7 @@ Admin sections:
 #### Visit lifecycle
 - Visits have exactly **2 states**: `in_progress` → `completed` (no separate "ended" concept)
 - Visits start with **zero actions**; PM adds action points on-demand
-- **Completion requires**: all 3 action types — ≥1 completed `classroom_observation` (strict rubric validation) + ≥1 completed `af_team_interaction` + ≥1 completed `individual_af_teacher_interaction` + no actions left `in_progress` + valid GPS. Checks are sequential and short-circuit on first missing type.
+- **Completion requires**: all 4 action types — ≥1 completed `classroom_observation` (strict rubric validation) + ≥1 completed `af_team_interaction` + ≥1 completed `individual_af_teacher_interaction` + ≥1 completed `principal_interaction` + no actions left `in_progress` + valid GPS. Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal interaction).
 
 #### Classroom observation rubric contract (v1)
 - Top-level payload keys: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`, `teacher_id`, `teacher_name`, `grade`
@@ -195,9 +195,22 @@ Admin sections:
   - PATCH while `in_progress`: lenient (accepts partial data)
   - PATCH while `completed`: strict validation
   - END action: strict validation (all present teachers need all 13 questions answered + ≥1 teacher) + all school teachers must be recorded (DB check against `user_permission`)
-  - COMPLETE visit: requires at least one completed individual AF teacher interaction
+  - COMPLETE visit: requires at least one completed individual AF teacher interaction (alongside classroom observation, AF team interaction, and principal interaction)
 - Config and validation: `src/lib/individual-af-teacher-interaction.ts`
 - Form component: `src/components/visits/IndividualAFTeacherInteractionForm.tsx`
+
+#### Principal Interaction (v1)
+- A 7-question binary checklist about the PM's interaction with the school Principal — no teacher selection (simplest form in the system)
+- Top-level payload keys: `questions` (record of question key → `{ answer: boolean|null, remark?: string }`)
+- 5 sections: Operational Health (1 question), Implementation Progress (2), Student Performance on Monthly Tests (1), Support Needed (1), Monthly Planning (2) — 7 total
+- Question keys: `oh_program_feedback`, `ip_curriculum_progress`, `ip_key_events`, `sp_student_performance`, `sn_concerns_raised`, `mp_monthly_plan`, `mp_permissions_obtained`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data, ignores unknown question keys)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (all 7 questions answered with non-null boolean)
+  - COMPLETE visit: requires at least one completed principal interaction (alongside classroom observation, AF team interaction, and individual teacher interaction)
+- Config and validation: `src/lib/principal-interaction.ts`
+- Form component: `src/components/visits/PrincipalInteractionForm.tsx`
 
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
@@ -205,8 +218,8 @@ Admin sections:
 - Starting an action auto-redirects the PM to the action detail page
 - Multiple actions can be `in_progress` simultaneously
 - **Pending-only deletion** (soft delete: `deleted_at` set, row retained)
-- 10 action types defined in code: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction, Individual AF Teacher Interaction
-- **Three action types are enabled** in the picker UI: `classroom_observation`, `af_team_interaction`, and `individual_af_teacher_interaction`; other types are visible but disabled
+- 10 action types defined in code: Principal Interaction, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction, Individual AF Teacher Interaction
+- **Four action types are enabled** in the picker UI: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, and `principal_interaction`; other 6 types are visible but disabled
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
 #### Auto-save
@@ -225,11 +238,12 @@ Admin sections:
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
-- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), and individual teacher interaction stats (recorded teachers, attendance breakdown)
-- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation`, `af_team_interaction`, and `individual_af_teacher_interaction` enabled)
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), individual teacher interaction stats (recorded teachers, attendance breakdown), and principal interaction stats (answered questions)
+- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, and `principal_interaction` enabled)
 - `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields; sticky progress summary (`top-12 z-10`, below page-level sticky header)
 - `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/PrincipalInteractionForm.tsx` — 7-question binary checklist with optional remarks, no teacher section; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type, integrates auto-save hook, inline `SaveStatusIndicator`)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
@@ -241,6 +255,7 @@ Admin sections:
 - `src/lib/classroom-observation-rubric.ts` — rubric config, score computation, lenient/strict validation, `VALID_GRADES`, `ClassroomObservationData` type
 - `src/lib/af-team-interaction.ts` — AF team interaction config (4 sections, 9 questions), `AFTeamInteractionData` type, lenient/strict validation
 - `src/lib/individual-af-teacher-interaction.ts` — individual teacher interaction config (5 sections, 13 questions), per-teacher attendance-gated validation
+- `src/lib/principal-interaction.ts` — principal interaction config (5 sections, 7 questions), lenient/strict validation (no teacher array)
 - `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by ClassroomObservationForm, AFTeamInteractionForm, and IndividualAFTeacherInteractionForm)
 - `src/lib/geo-validation.ts` — GPS validation (accept ≤100m, warn 100–500m, reject >500m)
 - `src/lib/geolocation.ts` — client `watchPosition` helper (60s timeout, cancel, secure-origin check)
@@ -473,7 +488,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 Key details:
 - Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
 - No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
-- 1341 tests across 81 files (as of 2026-03-10)
+- 1402 tests across 83 files (as of 2026-03-10)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 

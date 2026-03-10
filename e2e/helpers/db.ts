@@ -9,6 +9,7 @@ import {
   CURRENT_RUBRIC_VERSION,
 } from "../../src/lib/classroom-observation-rubric";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individual-af-teacher-interaction";
+import { PRINCIPAL_INTERACTION_CONFIG } from "../../src/lib/principal-interaction";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -254,6 +255,17 @@ export function buildCompleteIndividualTeacherInteractionData(
   });
 
   return { teachers };
+}
+
+/**
+ * Canonical strict-valid principal interaction payload for completed action fixtures.
+ */
+export function buildCompletePrincipalInteractionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return { questions };
 }
 
 /**

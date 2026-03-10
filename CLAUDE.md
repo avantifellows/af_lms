@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that allows school administrators to view and manage student enrollments. Features dual authentication (Google OAuth + school passcodes) with permission-based access control.
 
-PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), and an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating).
+PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), and a principal interaction checklist (7 binary questions, no teacher selection).
 
 ## Development Commands
 
@@ -128,9 +128,18 @@ Visit tables:
 - Config/validation: `src/lib/individual-af-teacher-interaction.ts`
 - Form component: `src/components/visits/IndividualAFTeacherInteractionForm.tsx`
 
+### PM Visits: Principal Interaction (v1)
+- 7-question binary checklist across 5 sections — no teacher selection (simplest form in the system)
+- Payload: `{ questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- 5 sections: Operational Health (1 question), Implementation Progress (2), Student Performance on Monthly Tests (1), Support Needed (1), Monthly Planning (2) — 7 total
+- Question keys: `oh_program_feedback`, `ip_curriculum_progress`, `ip_key_events`, `sp_student_performance`, `sn_concerns_raised`, `mp_monthly_plan`, `mp_permissions_obtained`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all 7 questions answered with non-null boolean)
+- Config/validation: `src/lib/principal-interaction.ts`
+- Form component: `src/components/visits/PrincipalInteractionForm.tsx`
+
 ### PM Visits: Visit Completion Rule
-- Visit completion requires all 3 action types: at least one completed `classroom_observation` (with strict-valid rubric), at least one completed `af_team_interaction`, and at least one completed `individual_af_teacher_interaction`
-- Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher)
+- Visit completion requires all 4 action types: at least one completed `classroom_observation` (with strict-valid rubric), at least one completed `af_team_interaction`, at least one completed `individual_af_teacher_interaction`, and at least one completed `principal_interaction`
+- Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal interaction)
 
 
 ### Key Patterns
@@ -164,7 +173,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (81 files, 1341 tests as of 2026-03-10)
+### Test files (83 files, 1402 tests as of 2026-03-10)
 
 **Library tests** (high-signal):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
@@ -181,6 +190,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/lib/classroom-observation-rubric.test.ts` — rubric config integrity, score computation, lenient/strict validation rules
 - `src/lib/af-team-interaction.test.ts` — AF team interaction config integrity, lenient/strict validation rules
 - `src/lib/individual-af-teacher-interaction.test.ts` — individual teacher interaction config integrity, attendance-gated lenient/strict validation rules
+- `src/lib/principal-interaction.test.ts` — principal interaction config integrity, lenient/strict validation rules
 - `src/lib/teacher-utils.test.ts` — shared teacher display name helper
 - `src/proxy.test.ts` — middleware redirect logic
 
@@ -227,6 +237,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/components/visits/ClassroomObservationForm.test.tsx` — rubric form rendering, scoring summary behavior, data updates
 - `src/components/visits/AFTeamInteractionForm.test.tsx` — AF team interaction form rendering, teacher multiselect, binary questions, validation
 - `src/components/visits/IndividualAFTeacherInteractionForm.test.tsx` — individual teacher interaction form rendering, per-teacher accordion, attendance gating, add/remove
+- `src/components/visits/PrincipalInteractionForm.test.tsx` — principal interaction form rendering, binary questions, read-only mode
 - `src/components/visits/CompleteVisitButton.test.tsx` — GPS capture + completion rules
 - `src/components/visits/NewVisitForm.test.tsx` — start visit GPS flow
 - `src/components/SchoolTabs.test.tsx`, `src/components/VisitsTab.test.tsx` — visit tab rendering

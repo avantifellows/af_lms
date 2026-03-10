@@ -13,7 +13,7 @@ import {
 describe("visit-actions", () => {
   it("defines all MVP action types with exhaustive ActionType coverage", () => {
     const exhaustiveByType: Record<ActionType, true> = {
-      principal_meeting: true,
+      principal_interaction: true,
       leadership_meeting: true,
       classroom_observation: true,
       group_student_discussion: true,

@@ -38,3 +38,156 @@ Started: Mon Mar 09 2026
 
 ---
 
+## 2026-03-10 - US-001
+Session: 8b17c8b5-d008-4741-97ee-d3268dece8a3
+- Created `src/lib/principal-interaction.ts` — config (5 sections, 7 questions), PrincipalInteractionData interface, lenient/strict validation (no teachers array, ALLOWED_TOP_LEVEL_KEYS = ["questions"] only)
+- Created `src/lib/principal-interaction.test.ts` — 24 tests: config integrity (4), lenient validation (13), strict validation (7)
+- All 1365 tests pass (82 files)
+- **Learnings for future iterations:**
+  - Pattern follows `af-team-interaction.ts` exactly but simpler (no teachers, no validateTeachers)
+  - `ALLOWED_TOP_LEVEL_KEYS` is `["questions"]` only — `teachers` is intentionally rejected as unknown field
+  - Question keys `sp_student_performance` and `mp_monthly_plan` overlap with AF Team/Individual Teacher — safe because each action has its own JSONB data column
+---
+
+## 2026-03-10 - US-002
+Session: 50661a13-251a-4404-b83b-03c660aec1cd
+- In `src/lib/visit-actions.ts`: replaced `principal_meeting: "Principal Meeting"` with `principal_interaction: "Principal Interaction"` (10 types total)
+- In `src/lib/visit-actions.test.ts`: replaced `principal_meeting: true` with `principal_interaction: true` in exhaustiveness record
+- In `src/components/visits/ActionDetailForm.tsx`: replaced `principal_meeting` entry in `ACTION_FORM_CONFIGS` with `principal_interaction` (title: "Principal Interaction Details", fields: [], for custom component)
+- In `src/app/visits/[id]/actions/[actionId]/page.test.tsx`: changed default `makeAction()` from `principal_meeting` to `leadership_meeting`, updated data fields, updated renderer test for `principal_interaction`, updated all label/testid references
+- All 1365 tests pass (82 files), build passes
+- **Learnings for future iterations:**
+  - Changing `ACTION_TYPES` keys cascades to `ACTION_FORM_CONFIGS` (Record<ActionType, ...>) and all tests using that key as default action_type — must update atomically
+  - `page.test.tsx` makeAction() default type drives many auto-save/save tests — changing it requires updating field labels and data throughout
+---
+
+## 2026-03-10 - US-003
+Session: 6f12029a-afb6-4a11-a0f3-7496446ea1e4
+- In `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`: added `principal_interaction` validation block (lenient for in_progress, strict for completed) after individual teacher block, imported `validatePrincipalInteractionSave` + `validatePrincipalInteractionComplete`
+- In `route.test.ts`: changed `BASE_ACTION_ROW.action_type` from `principal_meeting` to `leadership_meeting`, added `buildValidPrincipalInteractionData()` helper, added 4 new tests (lenient empty OK, lenient unknown keys rejected, strict incomplete rejected, strict complete accepted)
+- All 1369 tests pass (82 files)
+- **Learnings for future iterations:**
+  - PATCH validation follows exact same pattern as AF team / individual teacher: lenient for in_progress, strict for completed, error message `"Invalid principal interaction data"`
+  - `BASE_ACTION_ROW` default action_type is now `leadership_meeting` (a disabled type) to avoid triggering any custom validation
+---
+
+## 2026-03-10 - US-004
+Session: 58c2e506-f958-4f98-8b1d-2a15766df0ee
+- In `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`: added `principalInteractionValidationError()` function following `afTeamValidationError()` pattern, wired into both primary and concurrent-fallback validation chains
+- In `route.test.ts`: changed `PENDING_ACTION.action_type` from `principal_meeting` to `leadership_meeting`, added `buildValidPrincipalInteractionData()` helper, added 5 new tests (incomplete data 422, null data 422, all null answers 422, valid data 200, concurrent fallback validation)
+- All 1374 tests pass (82 files)
+- **Learnings for future iterations:**
+  - END validation follows exact same pattern as PATCH but only uses strict (complete) validation — no lenient path needed since END always requires fully completed data
+  - Principal interaction has no `allTeachersRecordedError` check — it's the simplest action type with no teacher-related validation
+  - Concurrent fallback chain mirrors primary chain exactly — any new validation function must be added to both
+---
+
+## 2026-03-10 - US-005
+Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
+- In `src/app/api/pm/visits/[id]/complete/route.ts`: added 4th sequential check after individual teacher — queries for ≥1 completed `principal_interaction` action, returns 422 with descriptive error if missing
+- In `route.test.ts`: added 7th `mockResolvedValueOnce` (principal_interaction) to 3 happy-path tests, updated `mockQuery.mock.calls[5]` → `[6]` for UPDATE query assertion, renamed "all 3 action types" → "all 4 action types", added new test for missing principal_interaction
+- All 1375 tests pass (82 files)
+- **Learnings for future iterations:**
+  - Check order is now: in-progress → classroom → AF team → individual teacher → principal interaction → UPDATE (6 queries before UPDATE in happy path)
+  - Tests that short-circuit before the new check (AF team missing, individual teacher missing, invalid rubric) did NOT need changes — they fail before reaching the principal_interaction check
+  - When adding a new check, the UPDATE query index shifts by 1 — must update `mockQuery.mock.calls[N]` assertions
+---
+
+## 2026-03-10 - US-006
+Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
+- Created `src/components/visits/PrincipalInteractionForm.tsx` — simplest form in the system: 7 binary questions across 5 sections, sticky progress "Answered: X/7", optional remarks, no teacher section, no fetch calls
+- Created `src/components/visits/PrincipalInteractionForm.test.tsx` — 16 tests: rendering (5 sections, 7 questions, progress '0/7', testid, no teacher UI), interactions (Yes/No radios, remark toggle, remark input, progress update, pre-existing remark), read-only mode (disabled radios, no Add remark, disabled textareas)
+- All 1391 tests pass (83 files)
+- **Learnings for future iterations:**
+  - Form follows `AFTeamInteractionForm.tsx` pattern but much simpler — no teacher section, no fetch, no gating, no loading/error states
+  - Question labels appear in both `<legend>` (sr-only) and `<p>` — use `getAllByText()` not `getByText()` in tests
+  - `data-testid` prefix is `principal-interaction-` (hyphenated) to match radio `name` attribute pattern
+  - No `Dispatch<SetStateAction<...>>` needed for `setData` prop — simple `(data: Record<string, unknown>) => void` works since there's no functional updater pattern needed (no teacher state to merge)
+---
+
+## 2026-03-10 - US-007
+Session: 999f4730-4bd5-484d-94c5-af5345b07094
+- In `src/components/visits/ActionDetailForm.tsx`: added `PRINCIPAL_INTERACTION_ACTION_TYPE` constant, added to `SAVE_BEFORE_END_TYPES`, imported `PrincipalInteractionForm` and `PRINCIPAL_INTERACTION_CONFIG`
+- Added `sanitizePrincipalInteractionPayload()` — follows `sanitizeAFTeamPayload` pattern minus teachers, iterates 7 known keys extracting answer (boolean|null) and remark (string), returns `{ questions: {} }`
+- Added `bootstrapPrincipalInteractionPayload()` — returns `{ questions: {} }` for non-objects, delegates to sanitize for plain objects
+- Added `principal_interaction` case in `normalizeFormDataForAction`, `sanitizePatchData`, and JSX dispatch (renders `PrincipalInteractionForm` with data/setData/disabled props, no schoolCode)
+- In `page.test.tsx`: updated renderer test to use `getAllByTestId(...).toHaveLength(2)` (outer form wrapper + inner PrincipalInteractionForm both have same testid)
+- All 1391 tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - When wiring a custom form component that sets its own `data-testid="action-renderer-{type}"`, the outer `<form>` in ActionDetailForm also sets the same testid — so tests must use `getAllByTestId` with `toHaveLength(2)` (same pattern as AF team and individual teacher)
+  - `principal_interaction` falls through to the generic end error message "Please complete all required fields before ending this interaction." which is correct (no teacher-specific message needed)
+  - `SAVE_BEFORE_END_TYPES` membership means the End flow first saves via PATCH before acquiring GPS + calling /end — important for data integrity
+---
+
+## 2026-03-10 - US-008
+Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
+- In `src/components/visits/ActionPointList.tsx`: imported `PRINCIPAL_INTERACTION_CONFIG`, added `getPrincipalInteractionStats()` (exported interface + function), added JSX rendering block for `principal_interaction` cards with answered/total progress and percentage
+- In `src/components/visits/ActionTypePickerModal.tsx`: added `|| actionType === "principal_interaction"` to enabled check — 4 types now enabled
+- In `src/components/visits/ActionPointList.test.tsx`: changed `makeAction()` default from `principal_meeting` to `leadership_meeting`, updated all 6 `principal_meeting` refs + 2 display-name assertions (`"Principal Meeting"` → `"Leadership Meeting"`), added 3 card-rendering tests + 6 unit tests for `getPrincipalInteractionStats`
+- In `src/components/visits/ActionTypePickerModal.test.tsx`: updated disabled count 7→6, enabled count 3→4, added 2 tests for `principal_interaction` (selectable + submit)
+- All 1402 tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - `getPrincipalInteractionStats` returns null when answeredCount is 0 (no stats to show) — unlike AF team which also shows teacher count
+  - Stats function follows AF team pattern but simpler — no teacher count, just answered/total questions
+  - `replace_all: true` in Edit tool is efficient for bulk renames like `principal_meeting` → `leadership_meeting`
+---
+
+## 2026-03-10 - US-009
+Session: ca36db6b-509c-42ff-9097-5e68a05eb26b
+- In `src/components/visits/NewVisitForm.tsx`: renamed "Principal Meeting" → "Principal Interaction" in instructional text, fixed outdated completion text to "all required action types are completed"
+- In `src/components/visits/NewVisitForm.test.tsx`: updated regex assertion for new completion text
+- In `src/hooks/use-auto-save.test.ts`: changed sample action type from `principal_meeting` → `leadership_meeting`
+- In `src/app/visits/[id]/page.test.tsx`: changed `makeActions()` default from `principal_meeting` → `leadership_meeting`, updated display-name assertion "Principal Meeting" → "Leadership Meeting"
+- In `src/app/api/pm/visits/[id]/route.test.ts`: changed sample action type to `leadership_meeting`
+- In `src/app/api/pm/visits/[id]/actions/route.test.ts`: replaced all 7 `principal_meeting` → `leadership_meeting` occurrences
+- Verified: zero `principal_meeting` or `Principal Meeting` references remain in `src/`
+- All 1402 tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - `replace_all: true` in Edit tool handles bulk renames efficiently — 7 occurrences in actions/route.test.ts done in one call
+  - Pre-existing tsc errors in test files (VisitsTab.test.tsx, use-auto-save.test.ts) are unrelated to feature work — build is the real quality gate
+  - E2E `principal_meeting` references remain in `e2e/` — those are handled by US-010
+---
+
+## 2026-03-10 - US-010
+Session: 0152bb1e-97fd-4bff-aad3-b0887dff73cf
+- Added `buildCompletePrincipalInteractionData()` to `e2e/helpers/db.ts` — returns `{ questions: { [key]: { answer: true } } }` for all 7 keys
+- Rename-only tests (3): `complete-blocked-without-rubric` (+ added `principal_interaction: completed` seed), `complete-blocked-when-any-action-in-progress`, `program-admin-read-only` — all `principal_meeting` → `leadership_meeting`
+- Completion-fix tests (4): `moderate-gps-warning-visible` (rename + add seed), `admin-can-complete-other-pm-visit` (changed to `principal_interaction: completed` with valid data), `complete-visit-success` (added seed), `visit-completes-with-all-three` → renamed to `visit-completes-with-all-four-required-action-types` (added seed + 4th card assertion)
+- New test: `visit-completion-requires-principal-interaction` — seeds classroom+af_team+individual_teacher completed, no principal_interaction, asserts 422 error message
+- Verified: zero `principal_meeting` references in `src/` and `e2e/tests/` (only `e2e/fixtures/db-dump.sql` has legacy data, which is gitignored)
+- All 1402 unit tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - `buildCompletePrincipalInteractionData()` follows existing pattern — simple `{ questions: { [key]: { answer: true } } }` (no teachers)
+  - `moderate-gps-warning-visible` test uses a pending seed (started+ended during test) for GPS testing — must keep it as a non-required type (`leadership_meeting`) to avoid 409 errors; add separate `principal_interaction: completed` seed for completion requirement
+  - `admin-can-complete-other-pm-visit` seeds `principal_interaction: completed` at start — after adding classroom+af_team+individual_teacher later, second completion attempt has all 4 types
+  - E2E tests cannot be run locally without `e2e/fixtures/db-dump.sql` (gitignored) — unit tests + build are the quality gates for this story
+---
+
+## 2026-03-10 - US-011
+Session: cf6d90a4-c5ca-44f1-a083-934cddc22353
+- In `CLAUDE.md`: added "PM Visits: Principal Interaction (v1)" section with payload shape, 7 questions across 5 sections, validation rules, config/form references
+- In `CLAUDE.md`: updated visit completion rule from 3 to 4 required types, added `principal_interaction` to the check sequence
+- In `CLAUDE.md`: added `principal-interaction.test.ts` and `PrincipalInteractionForm.test.tsx` to test inventory, updated test count (83 files, 1402 tests)
+- In `docs/ai/project-context.md`: added Principal Interaction subsection under §3.5 PM Visits
+- In `docs/ai/project-context.md`: updated action type counts (3 enabled → 4, 7 disabled → 6), updated picker/card/completion descriptions
+- In `docs/ai/project-context.md`: added `PrincipalInteractionForm.tsx` and `principal-interaction.ts` to component/helper lists
+- Verified: zero `principal_meeting` or `Principal Meeting` references in either documentation file
+- All 1402 unit tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - Documentation-only stories are fast — just grep for outdated references and update counts/descriptions
+  - Always verify zero remaining old-name references with grep after renaming
+---
+
+## 2026-03-10 - US-012
+Session: b4e2392a-aa25-4424-9d2c-40b63212240f
+- Reviewed all changes across the branch: 51 files changed, +11046/-122 lines
+- Verified TypeScript compiles (pre-existing errors only in VisitsTab.test.tsx, use-auto-save.test.ts)
+- Verified all 1402 unit tests pass (83 files)
+- Verified zero `principal_meeting` references in src/ and e2e/tests/ (only gitignored db-dump.sql)
+- Verified build passes cleanly
+- Created `ralph/principal-interaction-review.txt` with concise findings (46 lines)
+- **Learnings for future iterations:**
+  - Review stories are straightforward — run all checks in parallel, grep for stale references, document findings
+  - ralph/ directory is gitignored — must use `git add -f` for files in it
+---
+

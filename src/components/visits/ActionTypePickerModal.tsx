@@ -33,18 +33,18 @@ export default function ActionTypePickerModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="action-type-picker-title"
-        className="w-full max-w-lg bg-bg-card shadow-xl"
+        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-bg-card shadow-xl"
       >
-        <div className="border-b-4 border-border-accent px-5 py-4">
+        <div className="border-b-4 border-border-accent px-5 py-4 shrink-0">
           <h3 id="action-type-picker-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
             Add Action Point
           </h3>
           <p className="mt-1 text-sm text-text-muted">Pick one action type to create a pending card.</p>
         </div>
 
-        <div className="space-y-2 px-5 py-4">
+        <div className="space-y-2 px-5 py-4 overflow-y-auto">
           {ACTION_TYPE_VALUES.map((actionType) => {
-            const enabled = actionType === "classroom_observation" || actionType === "af_team_interaction" || actionType === "individual_af_teacher_interaction";
+            const enabled = actionType === "classroom_observation" || actionType === "af_team_interaction" || actionType === "individual_af_teacher_interaction" || actionType === "principal_interaction";
             return (
               <label
                 key={actionType}
@@ -75,7 +75,7 @@ export default function ActionTypePickerModal({
           })}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4 shrink-0">
           <button
             type="button"
             onClick={onClose}

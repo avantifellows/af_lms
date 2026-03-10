@@ -65,3 +65,4 @@ next-env.d.ts
 ralph/*
 .claude/commands
 .env.dont.touch
+plan-refine-agent-loop/*
