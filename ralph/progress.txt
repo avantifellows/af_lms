@@ -119,3 +119,16 @@ Session: 999f4730-4bd5-484d-94c5-af5345b07094
   - `SAVE_BEFORE_END_TYPES` membership means the End flow first saves via PATCH before acquiring GPS + calling /end — important for data integrity
 ---
 
+## 2026-03-10 - US-008
+Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
+- In `src/components/visits/ActionPointList.tsx`: imported `PRINCIPAL_INTERACTION_CONFIG`, added `getPrincipalInteractionStats()` (exported interface + function), added JSX rendering block for `principal_interaction` cards with answered/total progress and percentage
+- In `src/components/visits/ActionTypePickerModal.tsx`: added `|| actionType === "principal_interaction"` to enabled check — 4 types now enabled
+- In `src/components/visits/ActionPointList.test.tsx`: changed `makeAction()` default from `principal_meeting` to `leadership_meeting`, updated all 6 `principal_meeting` refs + 2 display-name assertions (`"Principal Meeting"` → `"Leadership Meeting"`), added 3 card-rendering tests + 6 unit tests for `getPrincipalInteractionStats`
+- In `src/components/visits/ActionTypePickerModal.test.tsx`: updated disabled count 7→6, enabled count 3→4, added 2 tests for `principal_interaction` (selectable + submit)
+- All 1402 tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - `getPrincipalInteractionStats` returns null when answeredCount is 0 (no stats to show) — unlike AF team which also shows teacher count
+  - Stats function follows AF team pattern but simpler — no teacher count, just answered/total questions
+  - `replace_all: true` in Edit tool is efficient for bulk renames like `principal_meeting` → `leadership_meeting`
+---
+
