@@ -90,7 +90,7 @@
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "The mock chain ordering is critical. Each happy-path test has sequential mockResolvedValueOnce calls. The new principal_interaction mock must be inserted at the right position."
     },
     {

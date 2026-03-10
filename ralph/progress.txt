@@ -82,3 +82,14 @@ Session: 58c2e506-f958-4f98-8b1d-2a15766df0ee
   - Concurrent fallback chain mirrors primary chain exactly — any new validation function must be added to both
 ---
 
+## 2026-03-10 - US-005
+Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
+- In `src/app/api/pm/visits/[id]/complete/route.ts`: added 4th sequential check after individual teacher — queries for ≥1 completed `principal_interaction` action, returns 422 with descriptive error if missing
+- In `route.test.ts`: added 7th `mockResolvedValueOnce` (principal_interaction) to 3 happy-path tests, updated `mockQuery.mock.calls[5]` → `[6]` for UPDATE query assertion, renamed "all 3 action types" → "all 4 action types", added new test for missing principal_interaction
+- All 1375 tests pass (82 files)
+- **Learnings for future iterations:**
+  - Check order is now: in-progress → classroom → AF team → individual teacher → principal interaction → UPDATE (6 queries before UPDATE in happy path)
+  - Tests that short-circuit before the new check (AF team missing, individual teacher missing, invalid rubric) did NOT need changes — they fail before reaching the principal_interaction check
+  - When adding a new check, the UPDATE query index shifts by 1 — must update `mockQuery.mock.calls[N]` assertions
+---
+
