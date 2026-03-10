@@ -162,7 +162,7 @@
         "TypeScript compiles (`npx tsc --noEmit`)"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Run `grep -r 'principal_meeting' src/ e2e/` after changes to verify zero remaining references."
     },
     {

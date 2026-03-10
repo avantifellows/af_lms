@@ -132,3 +132,19 @@ Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
   - `replace_all: true` in Edit tool is efficient for bulk renames like `principal_meeting` → `leadership_meeting`
 ---
 
+## 2026-03-10 - US-009
+Session: ca36db6b-509c-42ff-9097-5e68a05eb26b
+- In `src/components/visits/NewVisitForm.tsx`: renamed "Principal Meeting" → "Principal Interaction" in instructional text, fixed outdated completion text to "all required action types are completed"
+- In `src/components/visits/NewVisitForm.test.tsx`: updated regex assertion for new completion text
+- In `src/hooks/use-auto-save.test.ts`: changed sample action type from `principal_meeting` → `leadership_meeting`
+- In `src/app/visits/[id]/page.test.tsx`: changed `makeActions()` default from `principal_meeting` → `leadership_meeting`, updated display-name assertion "Principal Meeting" → "Leadership Meeting"
+- In `src/app/api/pm/visits/[id]/route.test.ts`: changed sample action type to `leadership_meeting`
+- In `src/app/api/pm/visits/[id]/actions/route.test.ts`: replaced all 7 `principal_meeting` → `leadership_meeting` occurrences
+- Verified: zero `principal_meeting` or `Principal Meeting` references remain in `src/`
+- All 1402 tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - `replace_all: true` in Edit tool handles bulk renames efficiently — 7 occurrences in actions/route.test.ts done in one call
+  - Pre-existing tsc errors in test files (VisitsTab.test.tsx, use-auto-save.test.ts) are unrelated to feature work — build is the real quality gate
+  - E2E `principal_meeting` references remain in `e2e/` — those are handled by US-010
+---
+
