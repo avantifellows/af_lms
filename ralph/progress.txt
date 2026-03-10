@@ -61,3 +61,13 @@ Session: 50661a13-251a-4404-b83b-03c660aec1cd
   - `page.test.tsx` makeAction() default type drives many auto-save/save tests — changing it requires updating field labels and data throughout
 ---
 
+## 2026-03-10 - US-003
+Session: 6f12029a-afb6-4a11-a0f3-7496446ea1e4
+- In `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`: added `principal_interaction` validation block (lenient for in_progress, strict for completed) after individual teacher block, imported `validatePrincipalInteractionSave` + `validatePrincipalInteractionComplete`
+- In `route.test.ts`: changed `BASE_ACTION_ROW.action_type` from `principal_meeting` to `leadership_meeting`, added `buildValidPrincipalInteractionData()` helper, added 4 new tests (lenient empty OK, lenient unknown keys rejected, strict incomplete rejected, strict complete accepted)
+- All 1369 tests pass (82 files)
+- **Learnings for future iterations:**
+  - PATCH validation follows exact same pattern as AF team / individual teacher: lenient for in_progress, strict for completed, error message `"Invalid principal interaction data"`
+  - `BASE_ACTION_ROW` default action_type is now `leadership_meeting` (a disabled type) to avoid triggering any custom validation
+---
+
