@@ -69,7 +69,7 @@ const ACTION_ROWS = [
   {
     id: 101,
     visit_id: 10,
-    action_type: "principal_meeting",
+    action_type: "leadership_meeting",
     status: "pending",
     data: {},
     started_at: null,
@@ -210,7 +210,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
-      body: JSON.stringify({ action_type: "principal_meeting" }),
+      body: JSON.stringify({ action_type: "leadership_meeting" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await POST(req as never, params);
@@ -226,7 +226,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
-      body: JSON.stringify({ action_type: "principal_meeting" }),
+      body: JSON.stringify({ action_type: "leadership_meeting" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await POST(req as never, params);
@@ -241,7 +241,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
-      body: JSON.stringify({ action_type: "principal_meeting" }),
+      body: JSON.stringify({ action_type: "leadership_meeting" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await POST(req as never, params);
@@ -258,7 +258,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
-      body: JSON.stringify({ action_type: "principal_meeting" }),
+      body: JSON.stringify({ action_type: "leadership_meeting" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await POST(req as never, params);
@@ -273,7 +273,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
-      body: JSON.stringify({ action_type: "principal_meeting" }),
+      body: JSON.stringify({ action_type: "leadership_meeting" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await POST(req as never, params);
@@ -288,7 +288,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
-      body: JSON.stringify({ action_type: "principal_meeting" }),
+      body: JSON.stringify({ action_type: "leadership_meeting" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await POST(req as never, params);

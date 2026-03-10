@@ -88,7 +88,7 @@ const ACTION_ROWS = [
   {
     id: 101,
     visit_id: 10,
-    action_type: "principal_meeting",
+    action_type: "leadership_meeting",
     status: "pending",
     data: {},
     started_at: null,

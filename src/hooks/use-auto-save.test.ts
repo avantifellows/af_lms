@@ -30,7 +30,7 @@ interface HookProps {
 function defaultProps(overrides: Partial<HookProps> = {}): HookProps {
   return {
     formData: { note: "initial" },
-    actionType: "principal_meeting",
+    actionType: "leadership_meeting",
     canSave: true,
     isBusy: false,
     persistFn: makePersistFn(),
