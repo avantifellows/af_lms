@@ -8,8 +8,10 @@ import Toast from "@/components/Toast";
 import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
 import IndividualAFTeacherInteractionForm from "@/components/visits/IndividualAFTeacherInteractionForm";
+import PrincipalInteractionForm from "@/components/visits/PrincipalInteractionForm";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
+import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import {
   CURRENT_RUBRIC_VERSION,
   getRubricConfig,
@@ -66,7 +68,8 @@ interface StructuredError {
 const CLASSROOM_ACTION_TYPE = "classroom_observation";
 const AF_TEAM_ACTION_TYPE = "af_team_interaction" as const;
 const INDIVIDUAL_TEACHER_ACTION_TYPE = "individual_af_teacher_interaction" as const;
-const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE]);
+const PRINCIPAL_INTERACTION_ACTION_TYPE = "principal_interaction" as const;
+const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE, PRINCIPAL_INTERACTION_ACTION_TYPE]);
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   principal_interaction: {
@@ -446,6 +449,40 @@ function bootstrapIndividualTeacherPayload(data: unknown): Record<string, unknow
   return sanitizeIndividualTeacherPayload(data);
 }
 
+function sanitizePrincipalInteractionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { questions: {} };
+  }
+
+  const questions: Record<string, unknown> = {};
+  if (isPlainObject(data.questions)) {
+    for (const key of PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys) {
+      const value = (data.questions as Record<string, unknown>)[key];
+      if (isPlainObject(value)) {
+        const entry: Record<string, unknown> = {};
+        if (value.answer === null || typeof value.answer === "boolean") {
+          entry.answer = value.answer;
+        }
+        if (typeof value.remark === "string") {
+          entry.remark = value.remark;
+        }
+        if (Object.keys(entry).length > 0) {
+          questions[key] = entry;
+        }
+      }
+    }
+  }
+
+  return { questions };
+}
+
+function bootstrapPrincipalInteractionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { questions: {} };
+  }
+  return sanitizePrincipalInteractionPayload(data);
+}
+
 function normalizeFormDataForAction(actionType: string, data: unknown): Record<string, unknown> {
   if (actionType === CLASSROOM_ACTION_TYPE) {
     return bootstrapClassroomPayload(data);
@@ -457,6 +494,10 @@ function normalizeFormDataForAction(actionType: string, data: unknown): Record<s
 
   if (actionType === INDIVIDUAL_TEACHER_ACTION_TYPE) {
     return bootstrapIndividualTeacherPayload(data);
+  }
+
+  if (actionType === PRINCIPAL_INTERACTION_ACTION_TYPE) {
+    return bootstrapPrincipalInteractionPayload(data);
   }
 
   if (!isPlainObject(data)) {
@@ -477,6 +518,10 @@ function sanitizePatchData(actionType: string, data: Record<string, unknown>): R
 
   if (actionType === INDIVIDUAL_TEACHER_ACTION_TYPE) {
     return sanitizeIndividualTeacherPayload(data);
+  }
+
+  if (actionType === PRINCIPAL_INTERACTION_ACTION_TYPE) {
+    return sanitizePrincipalInteractionPayload(data);
   }
 
   return data;
@@ -924,6 +969,12 @@ export default function ActionDetailForm({
             setData={setFormData}
             disabled={!canSave || isBusy}
             schoolCode={schoolCode}
+          />
+        ) : action.action_type === PRINCIPAL_INTERACTION_ACTION_TYPE ? (
+          <PrincipalInteractionForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
           />
         ) : (
           config.fields.map((field) => (

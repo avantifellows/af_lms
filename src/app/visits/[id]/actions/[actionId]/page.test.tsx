@@ -489,7 +489,7 @@ describe("VisitActionDetailPage", () => {
     render(jsx);
 
     expect(screen.getByText("Principal Interaction Details")).toBeInTheDocument();
-    expect(screen.getByTestId("action-renderer-principal_interaction")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-principal_interaction")).toHaveLength(2);
   });
 
   it("saves via PATCH and preserves unrelated fields in action data", async () => {
