@@ -105,3 +105,17 @@ Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
   - No `Dispatch<SetStateAction<...>>` needed for `setData` prop — simple `(data: Record<string, unknown>) => void` works since there's no functional updater pattern needed (no teacher state to merge)
 ---
 
+## 2026-03-10 - US-007
+Session: 999f4730-4bd5-484d-94c5-af5345b07094
+- In `src/components/visits/ActionDetailForm.tsx`: added `PRINCIPAL_INTERACTION_ACTION_TYPE` constant, added to `SAVE_BEFORE_END_TYPES`, imported `PrincipalInteractionForm` and `PRINCIPAL_INTERACTION_CONFIG`
+- Added `sanitizePrincipalInteractionPayload()` — follows `sanitizeAFTeamPayload` pattern minus teachers, iterates 7 known keys extracting answer (boolean|null) and remark (string), returns `{ questions: {} }`
+- Added `bootstrapPrincipalInteractionPayload()` — returns `{ questions: {} }` for non-objects, delegates to sanitize for plain objects
+- Added `principal_interaction` case in `normalizeFormDataForAction`, `sanitizePatchData`, and JSX dispatch (renders `PrincipalInteractionForm` with data/setData/disabled props, no schoolCode)
+- In `page.test.tsx`: updated renderer test to use `getAllByTestId(...).toHaveLength(2)` (outer form wrapper + inner PrincipalInteractionForm both have same testid)
+- All 1391 tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - When wiring a custom form component that sets its own `data-testid="action-renderer-{type}"`, the outer `<form>` in ActionDetailForm also sets the same testid — so tests must use `getAllByTestId` with `toHaveLength(2)` (same pattern as AF team and individual teacher)
+  - `principal_interaction` falls through to the generic end error message "Please complete all required fields before ending this interaction." which is correct (no teacher-specific message needed)
+  - `SAVE_BEFORE_END_TYPES` membership means the End flow first saves via PATCH before acquiring GPS + calling /end — important for data integrity
+---
+
