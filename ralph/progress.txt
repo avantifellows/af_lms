@@ -148,3 +148,18 @@ Session: ca36db6b-509c-42ff-9097-5e68a05eb26b
   - E2E `principal_meeting` references remain in `e2e/` — those are handled by US-010
 ---
 
+## 2026-03-10 - US-010
+Session: 0152bb1e-97fd-4bff-aad3-b0887dff73cf
+- Added `buildCompletePrincipalInteractionData()` to `e2e/helpers/db.ts` — returns `{ questions: { [key]: { answer: true } } }` for all 7 keys
+- Rename-only tests (3): `complete-blocked-without-rubric` (+ added `principal_interaction: completed` seed), `complete-blocked-when-any-action-in-progress`, `program-admin-read-only` — all `principal_meeting` → `leadership_meeting`
+- Completion-fix tests (4): `moderate-gps-warning-visible` (rename + add seed), `admin-can-complete-other-pm-visit` (changed to `principal_interaction: completed` with valid data), `complete-visit-success` (added seed), `visit-completes-with-all-three` → renamed to `visit-completes-with-all-four-required-action-types` (added seed + 4th card assertion)
+- New test: `visit-completion-requires-principal-interaction` — seeds classroom+af_team+individual_teacher completed, no principal_interaction, asserts 422 error message
+- Verified: zero `principal_meeting` references in `src/` and `e2e/tests/` (only `e2e/fixtures/db-dump.sql` has legacy data, which is gitignored)
+- All 1402 unit tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - `buildCompletePrincipalInteractionData()` follows existing pattern — simple `{ questions: { [key]: { answer: true } } }` (no teachers)
+  - `moderate-gps-warning-visible` test uses a pending seed (started+ended during test) for GPS testing — must keep it as a non-required type (`leadership_meeting`) to avoid 409 errors; add separate `principal_interaction: completed` seed for completion requirement
+  - `admin-can-complete-other-pm-visit` seeds `principal_interaction: completed` at start — after adding classroom+af_team+individual_teacher later, second completion attempt has all 4 types
+  - E2E tests cannot be run locally without `e2e/fixtures/db-dump.sql` (gitignored) — unit tests + build are the quality gates for this story
+---
+

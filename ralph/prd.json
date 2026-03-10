@@ -182,7 +182,7 @@
         "E2E tests pass (`npm run test:e2e`)"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "For moderate-gps-warning-visible: the test captures actionId from the pending seed and POSTs to /start + /end — using a completed action would cause 409. Keep leadership_meeting:pending for GPS testing, add separate principal_interaction:completed for the completion requirement."
     },
     {
