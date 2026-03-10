@@ -93,3 +93,15 @@ Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
   - When adding a new check, the UPDATE query index shifts by 1 — must update `mockQuery.mock.calls[N]` assertions
 ---
 
+## 2026-03-10 - US-006
+Session: e4f5ded5-3f04-44d4-8d07-23d13a814b59
+- Created `src/components/visits/PrincipalInteractionForm.tsx` — simplest form in the system: 7 binary questions across 5 sections, sticky progress "Answered: X/7", optional remarks, no teacher section, no fetch calls
+- Created `src/components/visits/PrincipalInteractionForm.test.tsx` — 16 tests: rendering (5 sections, 7 questions, progress '0/7', testid, no teacher UI), interactions (Yes/No radios, remark toggle, remark input, progress update, pre-existing remark), read-only mode (disabled radios, no Add remark, disabled textareas)
+- All 1391 tests pass (83 files)
+- **Learnings for future iterations:**
+  - Form follows `AFTeamInteractionForm.tsx` pattern but much simpler — no teacher section, no fetch, no gating, no loading/error states
+  - Question labels appear in both `<legend>` (sr-only) and `<p>` — use `getAllByText()` not `getByText()` in tests
+  - `data-testid` prefix is `principal-interaction-` (hyphenated) to match radio `name` attribute pattern
+  - No `Dispatch<SetStateAction<...>>` needed for `setData` prop — simple `(data: Record<string, unknown>) => void` works since there's no functional updater pattern needed (no teacher state to merge)
+---
+

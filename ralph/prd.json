@@ -108,7 +108,7 @@
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "This is the simplest form in the system. No async operations, no teacher fetching, no rubric scoring — just 7 binary questions with optional remarks."
     },
     {
