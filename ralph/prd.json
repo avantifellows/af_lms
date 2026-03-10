@@ -215,7 +215,7 @@
         "Create `ralph/principal-interaction-review.txt` with concise findings (under 50 lines): what was done, files changed, test counts, any concerns or recommendations"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "E2E tests (`npm run test:e2e`) require a local Postgres DB with dump loaded — skip if not available, note in review file."
     }
   ]
