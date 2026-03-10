@@ -69,7 +69,7 @@
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Error message pattern: `\"Invalid principal interaction data\"` with validation errors array — same pattern as afTeamValidationError."
     },
     {

@@ -71,3 +71,14 @@ Session: 6f12029a-afb6-4a11-a0f3-7496446ea1e4
   - `BASE_ACTION_ROW` default action_type is now `leadership_meeting` (a disabled type) to avoid triggering any custom validation
 ---
 
+## 2026-03-10 - US-004
+Session: 58c2e506-f958-4f98-8b1d-2a15766df0ee
+- In `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`: added `principalInteractionValidationError()` function following `afTeamValidationError()` pattern, wired into both primary and concurrent-fallback validation chains
+- In `route.test.ts`: changed `PENDING_ACTION.action_type` from `principal_meeting` to `leadership_meeting`, added `buildValidPrincipalInteractionData()` helper, added 5 new tests (incomplete data 422, null data 422, all null answers 422, valid data 200, concurrent fallback validation)
+- All 1374 tests pass (82 files)
+- **Learnings for future iterations:**
+  - END validation follows exact same pattern as PATCH but only uses strict (complete) validation — no lenient path needed since END always requires fully completed data
+  - Principal interaction has no `allTeachersRecordedError` check — it's the simplest action type with no teacher-related validation
+  - Concurrent fallback chain mirrors primary chain exactly — any new validation function must be added to both
+---
+
