@@ -38,3 +38,26 @@ Started: Mon Mar 09 2026
 
 ---
 
+## 2026-03-10 - US-001
+Session: 8b17c8b5-d008-4741-97ee-d3268dece8a3
+- Created `src/lib/principal-interaction.ts` — config (5 sections, 7 questions), PrincipalInteractionData interface, lenient/strict validation (no teachers array, ALLOWED_TOP_LEVEL_KEYS = ["questions"] only)
+- Created `src/lib/principal-interaction.test.ts` — 24 tests: config integrity (4), lenient validation (13), strict validation (7)
+- All 1365 tests pass (82 files)
+- **Learnings for future iterations:**
+  - Pattern follows `af-team-interaction.ts` exactly but simpler (no teachers, no validateTeachers)
+  - `ALLOWED_TOP_LEVEL_KEYS` is `["questions"]` only — `teachers` is intentionally rejected as unknown field
+  - Question keys `sp_student_performance` and `mp_monthly_plan` overlap with AF Team/Individual Teacher — safe because each action has its own JSONB data column
+---
+
+## 2026-03-10 - US-002
+Session: 50661a13-251a-4404-b83b-03c660aec1cd
+- In `src/lib/visit-actions.ts`: replaced `principal_meeting: "Principal Meeting"` with `principal_interaction: "Principal Interaction"` (10 types total)
+- In `src/lib/visit-actions.test.ts`: replaced `principal_meeting: true` with `principal_interaction: true` in exhaustiveness record
+- In `src/components/visits/ActionDetailForm.tsx`: replaced `principal_meeting` entry in `ACTION_FORM_CONFIGS` with `principal_interaction` (title: "Principal Interaction Details", fields: [], for custom component)
+- In `src/app/visits/[id]/actions/[actionId]/page.test.tsx`: changed default `makeAction()` from `principal_meeting` to `leadership_meeting`, updated data fields, updated renderer test for `principal_interaction`, updated all label/testid references
+- All 1365 tests pass (82 files), build passes
+- **Learnings for future iterations:**
+  - Changing `ACTION_TYPES` keys cascades to `ACTION_FORM_CONFIGS` (Record<ActionType, ...>) and all tests using that key as default action_type — must update atomically
+  - `page.test.tsx` makeAction() default type drives many auto-save/save tests — changing it requires updating field labels and data throughout
+---
+
