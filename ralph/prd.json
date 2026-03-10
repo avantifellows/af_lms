@@ -199,7 +199,7 @@
         "No remaining `principal_meeting` references in either documentation file"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

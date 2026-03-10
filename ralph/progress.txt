@@ -163,3 +163,18 @@ Session: 0152bb1e-97fd-4bff-aad3-b0887dff73cf
   - E2E tests cannot be run locally without `e2e/fixtures/db-dump.sql` (gitignored) — unit tests + build are the quality gates for this story
 ---
 
+## 2026-03-10 - US-011
+Session: cf6d90a4-c5ca-44f1-a083-934cddc22353
+- In `CLAUDE.md`: added "PM Visits: Principal Interaction (v1)" section with payload shape, 7 questions across 5 sections, validation rules, config/form references
+- In `CLAUDE.md`: updated visit completion rule from 3 to 4 required types, added `principal_interaction` to the check sequence
+- In `CLAUDE.md`: added `principal-interaction.test.ts` and `PrincipalInteractionForm.test.tsx` to test inventory, updated test count (83 files, 1402 tests)
+- In `docs/ai/project-context.md`: added Principal Interaction subsection under §3.5 PM Visits
+- In `docs/ai/project-context.md`: updated action type counts (3 enabled → 4, 7 disabled → 6), updated picker/card/completion descriptions
+- In `docs/ai/project-context.md`: added `PrincipalInteractionForm.tsx` and `principal-interaction.ts` to component/helper lists
+- Verified: zero `principal_meeting` or `Principal Meeting` references in either documentation file
+- All 1402 unit tests pass (83 files), build passes
+- **Learnings for future iterations:**
+  - Documentation-only stories are fast — just grep for outdated references and update counts/descriptions
+  - Always verify zero remaining old-name references with grep after renaming
+---
+
