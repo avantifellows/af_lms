@@ -101,11 +101,11 @@ function makeAction(overrides: Record<string, unknown> = {}) {
   return {
     id: 101,
     visit_id: 1,
-    action_type: "principal_meeting",
+    action_type: "leadership_meeting",
     status: "in_progress",
     data: {
-      attendees: "Principal, PM",
-      key_discussion: "Old note",
+      agenda: "Meeting agenda",
+      decisions: "Old decisions",
       preserved_key: "keep-me",
     },
     started_at: "2026-02-19T09:00:00.000Z",
@@ -479,17 +479,17 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
 
-  it("loads the principal meeting renderer for principal_meeting actions", async () => {
+  it("loads the principal interaction renderer for principal_interaction actions", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
-      .mockResolvedValueOnce([makeAction({ action_type: "principal_meeting" })]);
+      .mockResolvedValueOnce([makeAction({ action_type: "principal_interaction", data: {} })]);
 
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    expect(screen.getByText("Principal Meeting Details")).toBeInTheDocument();
-    expect(screen.getByTestId("action-renderer-principal_meeting")).toBeInTheDocument();
+    expect(screen.getByText("Principal Interaction Details")).toBeInTheDocument();
+    expect(screen.getByTestId("action-renderer-principal_interaction")).toBeInTheDocument();
   });
 
   it("saves via PATCH and preserves unrelated fields in action data", async () => {
@@ -505,8 +505,8 @@ describe("VisitActionDetailPage", () => {
           Promise.resolve({
             action: makeAction({
               data: {
-                attendees: "Principal, PM",
-                key_discussion: "Updated note",
+                agenda: "Meeting agenda",
+                decisions: "Updated decisions",
                 preserved_key: "keep-me",
               },
             }),
@@ -519,9 +519,9 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    const keyDiscussion = screen.getByLabelText("Key Discussion");
-    await user.clear(keyDiscussion);
-    await user.type(keyDiscussion, "Updated note");
+    const decisionsField = screen.getByLabelText("Decisions");
+    await user.clear(decisionsField);
+    await user.type(decisionsField, "Updated decisions");
     await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
@@ -533,7 +533,7 @@ describe("VisitActionDetailPage", () => {
     expect(init.method).toBe("PATCH");
 
     const parsedBody = JSON.parse(String(init.body)) as { data: Record<string, string> };
-    expect(parsedBody.data.key_discussion).toBe("Updated note");
+    expect(parsedBody.data.decisions).toBe("Updated decisions");
     expect(parsedBody.data.preserved_key).toBe("keep-me");
   });
 
@@ -1178,8 +1178,8 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "New note" } });
+      const decisionsField = screen.getByLabelText("Decisions");
+      fireEvent.change(decisionsField, { target: { value: "New note" } });
 
       expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
 
@@ -1198,7 +1198,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { attendees: "Principal, PM", key_discussion: "New note", preserved_key: "keep-me" },
+                data: { agenda: "Meeting agenda", decisions: "New note", preserved_key: "keep-me" },
               }),
             }),
         })
@@ -1210,8 +1210,8 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "New note" } });
+      const decisionsField = screen.getByLabelText("Decisions");
+      fireEvent.change(decisionsField, { target: { value: "New note" } });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1238,7 +1238,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { attendees: "Principal, PM", key_discussion: "New", preserved_key: "keep-me" },
+                data: { agenda: "Meeting agenda", decisions: "New", preserved_key: "keep-me" },
               }),
             }),
         })
@@ -1250,8 +1250,8 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "New" } });
+      const decisionsField = screen.getByLabelText("Decisions");
+      fireEvent.change(decisionsField, { target: { value: "New" } });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1288,8 +1288,8 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "Fail" } });
+      const decisionsField = screen.getByLabelText("Decisions");
+      fireEvent.change(decisionsField, { target: { value: "Fail" } });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1324,7 +1324,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { attendees: "Principal, PM", key_discussion: "Manual", preserved_key: "keep-me" },
+                data: { agenda: "Meeting agenda", decisions: "Manual", preserved_key: "keep-me" },
               }),
             }),
         })
@@ -1336,14 +1336,14 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "Manual" } });
+      const decisionsField = screen.getByLabelText("Decisions");
+      fireEvent.change(decisionsField, { target: { value: "Manual" } });
 
       expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
 
       // Submit form (triggers handleSave which cancels auto-save timer)
       await act(async () => {
-        fireEvent.submit(screen.getByTestId("action-renderer-principal_meeting"));
+        fireEvent.submit(screen.getByTestId("action-renderer-leadership_meeting"));
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1367,8 +1367,8 @@ describe("VisitActionDetailPage", () => {
       const jsx = await VisitActionDetailPage(pageProps());
       render(jsx);
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "Unsaved" } });
+      const decisionsField = screen.getByLabelText("Decisions");
+      fireEvent.change(decisionsField, { target: { value: "Unsaved" } });
 
       const event = new Event("beforeunload", { cancelable: true });
       const spy = vi.spyOn(event, "preventDefault");

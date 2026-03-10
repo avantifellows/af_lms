@@ -69,24 +69,10 @@ const INDIVIDUAL_TEACHER_ACTION_TYPE = "individual_af_teacher_interaction" as co
 const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE]);
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
-  principal_meeting: {
-    title: "Principal Meeting Details",
-    description: "Capture attendees, key discussion points, and follow-ups.",
-    fields: [
-      { key: "attendees", label: "Attendees", placeholder: "Who attended this meeting?" },
-      {
-        key: "key_discussion",
-        label: "Key Discussion",
-        placeholder: "What was discussed?",
-        multiline: true,
-      },
-      {
-        key: "follow_ups",
-        label: "Follow-ups",
-        placeholder: "Any follow-up actions?",
-        multiline: true,
-      },
-    ],
+  principal_interaction: {
+    title: "Principal Interaction Details",
+    description: "Record observations from the interaction with the school Principal.",
+    fields: [],
   },
   leadership_meeting: {
     title: "Leadership Meeting Details",
