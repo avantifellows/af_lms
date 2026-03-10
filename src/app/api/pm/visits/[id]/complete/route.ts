@@ -204,6 +204,25 @@ export async function POST(
     );
   }
 
+  const completedPrincipalInteractionActions = await query<{ id: number }>(
+    `SELECT a.id
+     FROM lms_pm_school_visit_actions a
+     WHERE a.visit_id = $1
+       AND a.deleted_at IS NULL
+       AND a.action_type = 'principal_interaction'
+       AND a.status = 'completed'
+     LIMIT 1`,
+    [id]
+  );
+
+  if (completedPrincipalInteractionActions.length === 0) {
+    return apiError(
+      422,
+      "At least one completed Principal Interaction is required to complete visit",
+      ["No completed principal_interaction action found"]
+    );
+  }
+
   const updatedVisit = await query<Pick<VisitAccessRow, "id" | "status" | "completed_at">>(
     `UPDATE lms_pm_school_visits v
      SET status = 'completed',
