@@ -3,8 +3,16 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { istToUTCDate, utcToISTDate } from "@/lib/quiz-session-time";
+import {
+  dbIstTimestampToUtcIso,
+  istToUTCDate,
+  utcToISTDate,
+} from "@/lib/quiz-session-time";
 import { publishMessage } from "@/lib/sns";
+import {
+  parseQuizTemplateResource,
+  type RawQuizTemplateResource,
+} from "@/lib/quiz-template-resource";
 
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
 const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
@@ -25,6 +33,21 @@ interface BatchRow {
   batch_id: string;
   parent_id: number | null;
   program_id: number | null;
+}
+
+interface CreateQuizSessionBody {
+  name?: string;
+  resourceId?: number;
+  grade?: number;
+  parentBatchId?: string;
+  classBatchIds?: string[];
+  stream?: string;
+  showAnswers?: boolean;
+  showScores?: boolean;
+  shuffle?: boolean;
+  gurukulFormatType?: string;
+  startTime?: string;
+  endTime?: string;
 }
 
 async function getBatchesForSchool(
@@ -60,6 +83,36 @@ async function getBatchesForSchool(
   }
 
   return batches;
+}
+
+async function fetchQuizTemplateResource(
+  resourceId: number
+): Promise<ReturnType<typeof parseQuizTemplateResource> | null> {
+  if (!DB_SERVICE_URL || !DB_SERVICE_TOKEN) {
+    return null;
+  }
+
+  const response = await fetch(`${DB_SERVICE_URL}/resource/${resourceId}`, {
+    headers: {
+      Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
+      accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Failed to fetch quiz template resource:", errorText);
+    throw new Error("Failed to fetch selected template");
+  }
+
+  const rawResource = (await response.json()) as RawQuizTemplateResource;
+  const parsed = parseQuizTemplateResource(rawResource);
+  return parsed.type === "quiz_template" ? parsed : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -110,7 +163,15 @@ export async function GET(request: NextRequest) {
 
   const sessions = await query<SessionRow>(
     `
-    SELECT s.*
+    SELECT
+      s.id,
+      s.name,
+      s.start_time::text AS start_time,
+      s.end_time::text AS end_time,
+      s.is_active,
+      s.portal_link,
+      s.meta_data,
+      s.platform
     FROM session s
     WHERE s.platform = 'quiz'
       AND s.meta_data->>'group' = 'EnableStudents'
@@ -133,8 +194,8 @@ export async function GET(request: NextRequest) {
 
     return {
       ...s,
-      start_time: s.start_time ? istToUTCDate(s.start_time) : null,
-      end_time: s.end_time ? istToUTCDate(s.end_time) : null,
+      start_time: s.start_time ? dbIstTimestampToUtcIso(s.start_time) : null,
+      end_time: s.end_time ? dbIstTimestampToUtcIso(s.end_time) : null,
       meta_data: meta
         ? {
             ...meta,
@@ -161,35 +222,91 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = await request.json();
+  const body = (await request.json()) as CreateQuizSessionBody;
 
-  const requiredFields = [
-    "name",
-    "grade",
-    "parentBatchId",
-    "classBatchIds",
-    "testType",
-    "testFormat",
-    "testPurpose",
-    "course",
-    "stream",
-    "optionalLimits",
-    "cmsUrl",
-    "startTime",
-    "endTime",
-  ];
-
-  for (const field of requiredFields) {
-    if (!body?.[field]) {
-      return NextResponse.json(
-        { error: `${field} is required` },
-        { status: 400 }
-      );
-    }
+  if (!body.resourceId || Number.isNaN(Number(body.resourceId))) {
+    return NextResponse.json({ error: "resourceId is required" }, { status: 400 });
   }
 
+  if (!body.parentBatchId) {
+    return NextResponse.json(
+      { error: "parentBatchId is required" },
+      { status: 400 }
+    );
+  }
+
+  if (!Array.isArray(body.classBatchIds) || body.classBatchIds.length === 0) {
+    return NextResponse.json(
+      { error: "At least one class batch is required" },
+      { status: 400 }
+    );
+  }
+
+  if (!body.grade || !body.stream) {
+    return NextResponse.json(
+      { error: "grade and stream are required" },
+      { status: 400 }
+    );
+  }
+
+  if (!body.startTime || !body.endTime) {
+    return NextResponse.json(
+      { error: "startTime and endTime are required" },
+      { status: 400 }
+    );
+  }
+
+  const selectedTemplate = await fetchQuizTemplateResource(Number(body.resourceId));
+  if (!selectedTemplate) {
+    return NextResponse.json(
+      { error: "Selected template was not found" },
+      { status: 404 }
+    );
+  }
+
+  if (selectedTemplate.grade !== null && selectedTemplate.grade !== Number(body.grade)) {
+    return NextResponse.json(
+      { error: "Selected template grade does not match selected batches" },
+      { status: 400 }
+    );
+  }
+
+  if (selectedTemplate.stream && selectedTemplate.stream !== body.stream) {
+    return NextResponse.json(
+      { error: "Selected template stream does not match selected batches" },
+      { status: 400 }
+    );
+  }
+
+  if (
+    !selectedTemplate.cmsLink ||
+    !selectedTemplate.testFormat ||
+    !selectedTemplate.testPurpose ||
+    !selectedTemplate.testType
+  ) {
+    return NextResponse.json(
+      { error: "Selected template is missing required paper metadata" },
+      { status: 400 }
+    );
+  }
+
+  const start = new Date(body.startTime);
+  const end = new Date(body.endTime);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    return NextResponse.json(
+      { error: "Invalid start or end time" },
+      { status: 400 }
+    );
+  }
+
+  const sessionName = body.name?.trim() || selectedTemplate.name;
+  const testType = selectedTemplate.testType || "assessment";
+  const gurukulFormatType = body.gurukulFormatType || "both";
+  const cmsLink = selectedTemplate.cmsLink;
+  const cmsSourceId = selectedTemplate.cmsSourceId;
+
   const payload = {
-    name: body.name,
+    name: sessionName,
     platform: "quiz",
     type: "sign-in",
     auth_type: "ID,DOB",
@@ -218,28 +335,42 @@ export async function POST(request: NextRequest) {
         ? body.classBatchIds.join(",")
         : body.classBatchIds,
       grade: Number(body.grade),
-      course: body.course,
+      course: selectedTemplate.course,
       stream: body.stream,
-      test_format: body.testFormat,
-      test_purpose: body.testPurpose,
-      test_type: body.testType,
-      gurukul_format_type: "qa",
+      resource_id: selectedTemplate.id,
+      resource_code: selectedTemplate.code,
+      resource_name: selectedTemplate.name,
+      test_code: selectedTemplate.code,
+      test_name: selectedTemplate.name,
+      test_format: selectedTemplate.testFormat,
+      test_purpose: selectedTemplate.testPurpose,
+      test_type: testType,
+      gurukul_format_type: gurukulFormatType,
       marking_scheme:
-        body.testType === "homework" || body.testType === "form" ? "1, 0" : "4,-1",
-      optional_limits: body.optionalLimits,
-      cms_test_id: body.cmsUrl,
+        testType === "homework" || testType === "form" ? "1,0" : "4,-1",
+      optional_limits: selectedTemplate.optionalLimits,
+      cms_test_id: cmsLink,
+      cms_link: cmsLink,
+      cms_source_id: cmsSourceId,
+      question_pdf: selectedTemplate.questionPdf,
+      solution_pdf: selectedTemplate.solutionPdf,
+      ranking_cutoff_date: selectedTemplate.rankingCutoffDate,
+      sheet_name: selectedTemplate.sheetName,
       has_synced_to_bq: false,
       infinite_session: false,
       report_link: "",
       shortened_link: "",
       shortened_omr_link: "",
       admin_testing_link: "",
+      admin_testing_omr_link: "",
       number_of_fields_in_popup_form: "",
       show_answers: body.showAnswers ?? true,
       show_scores: body.showScores ?? true,
       shuffle: body.shuffle ?? false,
-      next_step_url: body.nextStepEnabled ? body.nextStepUrl ?? "" : "",
-      next_step_text: body.nextStepEnabled ? body.nextStepText ?? "" : "",
+      next_step_url: "",
+      next_step_text: "",
+      single_page_mode: false,
+      single_page_header_text: "",
       test_takers_count: 100,
       status: "pending",
       date_created: utcToISTDate(new Date().toISOString()),

@@ -80,6 +80,12 @@ export const OptionalLimitOptions: Option[] = [
   { value: "NA", label: "NA" },
 ];
 
+export const GurukulFormatOptions: Option[] = [
+  { value: "qa", label: "Q & A" },
+  { value: "omr", label: "OMR" },
+  { value: "both", label: "Both" },
+];
+
 export const GradeOptions: Option[] = [
   { value: "10", label: "10" },
   { value: "11", label: "11" },
