@@ -12,6 +12,7 @@ interface UserPermission {
   regions: string[] | null;
   program_ids: number[] | null;
   read_only: boolean;
+  full_name: string | null;
 }
 
 interface UserListProps {
@@ -21,14 +22,12 @@ interface UserListProps {
 }
 
 const LEVEL_LABELS: Record<number, string> = {
-  4: "Admin",
   3: "All Schools",
   2: "Region",
   1: "School",
 };
 
 const LEVEL_COLORS: Record<number, string> = {
-  4: "bg-purple-100 text-purple-800",
   3: "bg-blue-100 text-blue-800",
   2: "bg-green-100 text-green-800",
   1: "bg-gray-100 text-gray-800",
@@ -36,12 +35,14 @@ const LEVEL_COLORS: Record<number, string> = {
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
+  program_admin: "Program Admin",
   program_manager: "Program Manager",
   teacher: "Teacher",
 };
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-purple-100 text-purple-800",
+  program_admin: "bg-cyan-100 text-cyan-800",
   program_manager: "bg-indigo-100 text-indigo-800",
   teacher: "bg-gray-100 text-gray-800",
 };
@@ -120,6 +121,9 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                 Email
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                Name
+              </th>
+              <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                 Role
               </th>
               <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
@@ -144,6 +148,9 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                   {user.email.toLowerCase() === currentUserEmail.toLowerCase() && (
                     <span className="ml-2 text-xs text-gray-400">(you)</span>
                   )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                  {user.full_name || "\u2014"}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
                   <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${ROLE_COLORS[user.role] || ROLE_COLORS.teacher}`}>

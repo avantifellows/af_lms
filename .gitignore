@@ -61,5 +61,7 @@ next-env.d.ts
 /temp_scripts/
 .env*.local
 
-ralph/
+.planning
+ralph/*
 .claude/commands
+.env.dont.touch
