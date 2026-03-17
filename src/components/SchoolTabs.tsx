@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { statusBadgeClass } from "@/lib/visit-actions";
 
 interface Tab {
   id: string;
@@ -21,16 +22,16 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
 
   return (
     <div>
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+      <div className="border-b-2 border-border mb-6 overflow-x-auto">
+        <nav className="-mb-px flex space-x-4 sm:space-x-8" aria-label="Tabs">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+              className={`whitespace-nowrap py-4 px-1 border-b-2 text-xs sm:text-sm uppercase font-bold ${
                 activeTab === tab.id
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  ? "border-accent text-accent"
+                  : "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
               }`}
             >
               {tab.label}
@@ -52,42 +53,47 @@ interface VisitHistoryProps {
     completed_at?: string | null;
   }[];
   schoolCode: string;
+  canEdit?: boolean;
 }
 
-export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
+export function VisitHistorySection({ visits, schoolCode, canEdit = false }: VisitHistoryProps) {
   if (visits.length === 0) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6 text-center">
-        <p className="text-gray-500">No visits recorded yet</p>
-        <Link
-          href={`/school/${schoolCode}/visit/new`}
-          className="inline-flex items-center mt-4 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
-        >
-          Start First Visit
-        </Link>
+      <div className="bg-bg-card-alt border border-border p-6 mb-6 text-center">
+        <p className="text-text-muted uppercase tracking-wide">No visits recorded yet</p>
+        {canEdit && (
+          <Link
+            href={`/school/${schoolCode}/visit/new`}
+            className="inline-flex items-center mt-4 px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+          >
+            Start First Visit
+          </Link>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="bg-white shadow rounded-lg p-6 mb-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">Visit History</h2>
-        <Link
-          href={`/school/${schoolCode}/visit/new`}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
-        >
-          Start New Visit
-        </Link>
+    <div className="bg-bg-card border border-border p-6 mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+        <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Visit History</h2>
+        {canEdit && (
+          <Link
+            href={`/school/${schoolCode}/visit/new`}
+            className="inline-flex items-center px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+          >
+            Start New Visit
+          </Link>
+        )}
       </div>
       <div className="space-y-3">
         {visits.map((visit) => (
           <div
             key={visit.id}
-            className="flex justify-between items-center p-3 bg-gray-50 rounded-lg"
+            className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 p-4 bg-bg-card border border-border rounded-lg shadow-sm hover:shadow-md hover:border-accent transition-all duration-150"
           >
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium">
                   {new Date(visit.visit_date).toLocaleDateString("en-IN", {
                     year: "numeric",
@@ -97,25 +103,21 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
                   })}
                 </span>
                 <span
-                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                    visit.status === "completed"
-                      ? "bg-green-100 text-green-800"
-                      : "bg-yellow-100 text-yellow-800"
-                  }`}
+                  className={`inline-flex ${statusBadgeClass(visit.status)}`}
                 >
                   {visit.status === "completed"
                     ? "Completed"
                     : "In Progress"}
                 </span>
               </div>
-              <div className="text-xs text-gray-500 mt-1">
+              <div className="text-xs text-text-muted font-mono mt-1 flex flex-wrap gap-x-3">
                 {visit.inserted_at && (
                   <span>
                     Started: {new Date(visit.inserted_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
                   </span>
                 )}
                 {visit.completed_at && (
-                  <span className="ml-3">
+                  <span>
                     Completed: {new Date(visit.completed_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
                   </span>
                 )}
@@ -123,7 +125,7 @@ export function VisitHistorySection({ visits, schoolCode }: VisitHistoryProps) {
             </div>
             <Link
               href={`/visits/${visit.id}`}
-              className="text-sm text-blue-600 hover:text-blue-800"
+              className="self-start sm:self-center px-5 py-2.5 text-sm font-bold uppercase tracking-wide border-2 border-accent text-accent hover:bg-accent hover:text-text-on-accent transition-colors shrink-0"
             >
               {visit.status === "completed" ? "View" : "Continue"}
             </Link>

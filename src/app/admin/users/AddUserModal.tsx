@@ -11,6 +11,7 @@ interface UserPermission {
   regions: string[] | null;
   program_ids: number[] | null;
   read_only: boolean;
+  full_name: string | null;
 }
 
 // Program definitions
@@ -38,6 +39,7 @@ const labelClassName = "block text-sm font-medium text-gray-700";
 
 export default function AddUserModal({ user, regions, onClose, onSave }: AddUserModalProps) {
   const [email, setEmail] = useState(user?.email || "");
+  const [fullName, setFullName] = useState(user?.full_name || "");
   const [level, setLevel] = useState(user?.level || 1);
   const [role, setRole] = useState(user?.role || "teacher");
   const [selectedRegions, setSelectedRegions] = useState<string[]>(user?.regions || []);
@@ -98,6 +100,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
         role,
         read_only: isAdminRole ? false : readOnly,
         program_ids: isAdminRole ? PROGRAMS.map((p) => p.id) : selectedPrograms,
+        full_name: fullName.trim() || null,
       };
 
       if (!isEditing) {
@@ -189,6 +192,20 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                 required
                 className={`${inputClassName} ${isEditing ? "bg-gray-100" : ""}`}
               />
+            </div>
+
+            <div>
+              <label className={labelClassName}>Full Name</label>
+              <input
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="e.g. Priya Sharma"
+                className={inputClassName}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Display name shown in teacher dropdowns and reports
+              </p>
             </div>
 
             <div>

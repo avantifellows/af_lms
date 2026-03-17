@@ -29,9 +29,17 @@ export function validateGpsReading(
   const lngKey = `${prefix}_lng`;
   const accKey = `${prefix}_accuracy`;
 
-  const lat = Number(body[latKey]);
-  const lng = Number(body[lngKey]);
-  const accuracy = Number(body[accKey]);
+  const rawLat = body[latKey];
+  const rawLng = body[lngKey];
+  const rawAcc = body[accKey];
+
+  if (rawLat == null || rawLat === "" || rawLng == null || rawLng === "" || rawAcc == null || rawAcc === "") {
+    return { valid: false, error: `${latKey}, ${lngKey}, and ${accKey} are required and must be numbers` };
+  }
+
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+  const accuracy = Number(rawAcc);
 
   if (isNaN(lat) || isNaN(lng) || isNaN(accuracy)) {
     return { valid: false, error: `${latKey}, ${lngKey}, and ${accKey} are required and must be numbers` };

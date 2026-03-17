@@ -34,6 +34,9 @@ export interface ClassroomObservationData {
   params: Record<string, ParamData>;
   observer_summary_strengths?: string;
   observer_summary_improvements?: string;
+  teacher_id?: number;
+  teacher_name?: string;
+  grade?: string;
 }
 
 export interface ValidationResult {
@@ -290,11 +293,16 @@ const RUBRICS_BY_VERSION: Record<string, RubricConfig> = {
   [CURRENT_RUBRIC_VERSION]: CLASSROOM_OBSERVATION_RUBRIC,
 };
 
+export const VALID_GRADES = ["10", "11", "12"] as const;
+
 const ALLOWED_TOP_LEVEL_KEYS = new Set([
   "rubric_version",
   "params",
   "observer_summary_strengths",
   "observer_summary_improvements",
+  "teacher_id",
+  "teacher_name",
+  "grade",
 ]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -338,6 +346,32 @@ function validateTopLevelShape(data: unknown): {
     typeof payload.observer_summary_improvements !== "string"
   ) {
     errors.push("observer_summary_improvements must be a string");
+  }
+
+  if ("teacher_id" in payload && payload.teacher_id !== undefined) {
+    if (
+      typeof payload.teacher_id !== "number" ||
+      !Number.isFinite(payload.teacher_id) ||
+      payload.teacher_id <= 0 ||
+      !Number.isInteger(payload.teacher_id)
+    ) {
+      errors.push("teacher_id must be a positive integer");
+    }
+  }
+
+  if ("teacher_name" in payload && payload.teacher_name !== undefined) {
+    if (typeof payload.teacher_name !== "string") {
+      errors.push("teacher_name must be a string");
+    }
+  }
+
+  if ("grade" in payload && payload.grade !== undefined) {
+    if (
+      typeof payload.grade !== "string" ||
+      !(VALID_GRADES as readonly string[]).includes(payload.grade)
+    ) {
+      errors.push("grade must be one of: 10, 11, 12");
+    }
   }
 
   return { errors, payload };
@@ -509,6 +543,18 @@ export function validateClassroomObservationComplete(data: unknown): ValidationR
   if (!rubric) {
     errors.push(`Unsupported classroom observation rubric_version: ${rubricVersion}`);
     return { valid: false, errors };
+  }
+
+  if (payload.teacher_id === undefined) {
+    errors.push("teacher_id is required");
+  }
+
+  if (payload.teacher_name === undefined || payload.teacher_name === "") {
+    errors.push("teacher_name is required");
+  }
+
+  if (payload.grade === undefined) {
+    errors.push("grade is required");
   }
 
   errors.push(...validateParams(payload.params, rubric, true));

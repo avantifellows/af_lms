@@ -142,7 +142,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (74 files, 1100 tests as of 2026-02-23)
+### Test files (75 files, 1142 tests as of 2026-03-01)
 
 **Library tests** (high-signal):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
@@ -166,6 +166,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/app/api/admin/users/[id]/route.test.ts` — DELETE/PATCH user management
 - `src/app/api/curriculum/chapters/route.test.ts` — GET chapters with topics (uses NextRequest)
 - `src/app/api/students/search/route.test.ts` — GET student search with school access control
+- `src/app/api/pm/teachers/route.test.ts` — GET teachers for a school (role/access filtering)
 - `src/app/api/pm/visits/route.test.ts` — GET/POST visits list + create with GPS
 - `src/app/api/pm/visits/[id]/route.test.ts` — GET visit + actions (no PATCH/PUT)
 - `src/app/api/pm/visits/[id]/actions/route.test.ts` — GET list / POST create action
