@@ -399,7 +399,7 @@
         "Review file summarizes: what was done, files changed, any concerns or recommendations"
       ],
       "priority": 25,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
