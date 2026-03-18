@@ -31,17 +31,18 @@ describe("StatCard", () => {
     expect(valueEl.className).toContain("text-3xl");
   });
 
-  it("has font-semibold on value", () => {
+  it("has font-bold on value", () => {
     render(<StatCard label="Count" value={10} />);
     const valueEl = screen.getByText("10");
-    expect(valueEl.className).toContain("font-semibold");
+    expect(valueEl.className).toContain("font-bold");
   });
 
-  it("renders label with text-sm text-gray-500", () => {
+  it("renders label with uppercase tracking-wider and theme text class", () => {
     render(<StatCard label="My Label" value={0} />);
     const labelEl = screen.getByText("My Label");
-    expect(labelEl.className).toContain("text-sm");
-    expect(labelEl.className).toContain("text-gray-500");
+    expect(labelEl.className).toContain("uppercase");
+    expect(labelEl.className).toContain("tracking-wider");
+    expect(labelEl.className).toContain("text-text-muted");
   });
 
   it("renders value of 0 correctly", () => {

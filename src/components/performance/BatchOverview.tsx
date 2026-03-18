@@ -35,22 +35,26 @@ function TestCard({
   return (
     <div
       onClick={onClick}
-      className="bg-white border border-gray-200 rounded-lg p-4 hover:border-blue-400 hover:shadow-md cursor-pointer transition-all"
+      className="bg-bg-card border border-border p-4 cursor-pointer transition-colors hover:border-accent/50 hover:bg-hover-bg"
     >
       <div className="flex items-start justify-between mb-3">
         <div className="min-w-0 flex-1">
-          <h4 className="text-sm font-semibold text-gray-900 truncate">{test.test_name}</h4>
-          <p className="text-xs text-gray-500">{test.start_date}</p>
+          <h4 className="text-sm font-bold text-text-primary truncate">
+            {test.test_name}
+          </h4>
+          <p className="text-xs text-text-muted">{test.start_date}</p>
         </div>
-        <span className="text-xs text-blue-600 shrink-0 ml-2">Details →</span>
+        <span className="text-xs font-bold uppercase tracking-wide text-accent shrink-0 ml-2">
+          Details &rarr;
+        </span>
       </div>
 
       <div>
-        <p className="text-xs text-gray-500">Attendance</p>
-        <p className="text-lg font-semibold text-gray-900">
+        <p className="text-xs uppercase tracking-wider text-text-muted">Attendance</p>
+        <p className="font-bold font-mono text-lg text-text-primary">
           {test.student_count}
           {participationPct != null && (
-            <span className="text-xs font-normal text-gray-500 ml-1">
+            <span className="text-xs font-normal ml-1 font-mono text-text-secondary">
               ({participationPct}% of enrolled)
             </span>
           )}
@@ -82,16 +86,16 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-3 text-gray-600">Loading batch overview...</span>
+      <div className="flex justify-center items-center h-[30vh]">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
+        <span className="ml-3 text-sm text-text-secondary">Loading batch overview...</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+      <div className="p-4 bg-danger-bg border border-danger text-danger">
         {error}
       </div>
     );
@@ -99,23 +103,22 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
 
   if (!data || data.tests.length === 0) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-        <p className="text-gray-500">No quiz data available for this grade yet.</p>
+      <div className="p-8 text-center bg-bg-card-alt border border-border">
+        <p className="text-sm text-text-muted">No quiz data available for this grade yet.</p>
       </div>
     );
   }
 
   const { totalEnrolled } = data;
 
-  // Filter tests by category
   const tests = data.tests.filter((t) =>
     testCategory === "chapter" ? isChapterTest(t.test_format) : !isChapterTest(t.test_format)
   );
 
   if (tests.length === 0) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-        <p className="text-gray-500">
+      <div className="p-8 text-center bg-bg-card-alt border border-border">
+        <p className="text-sm text-text-muted">
           No {testCategory === "chapter" ? "chapter" : "full"} tests available for this grade yet.
         </p>
       </div>
@@ -124,7 +127,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
         <StatCard label="Tests Conducted" value={tests.length} />
         <StatCard
           label="Avg Attendance"
@@ -135,7 +138,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
         {[...tests].reverse().map((t) => (
           <TestCard
             key={t.session_id}

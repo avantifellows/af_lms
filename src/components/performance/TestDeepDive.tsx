@@ -48,35 +48,37 @@ export default function TestDeepDive({
       <div className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          className="text-sm font-bold uppercase tracking-wide text-accent hover:text-accent-hover transition-colors"
         >
-          ← Back to Overview
+          &larr; Back to Overview
         </button>
-        <h2 className="text-lg font-semibold text-gray-900">{testName}</h2>
+        <h2 className="text-lg font-bold uppercase tracking-tight text-text-primary">
+          {testName}
+        </h2>
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span className="ml-3 text-gray-600">Loading test details...</span>
+        <div className="flex justify-center items-center h-[30vh]">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
+          <span className="ml-3 text-sm text-text-secondary">Loading test details...</span>
         </div>
       )}
 
       {error && !loading && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+        <div className="p-4 bg-danger-bg border border-danger text-danger">
           {error}
         </div>
       )}
 
       {data && !loading && (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            <StatCard label="Students Appeared" value={data.summary.students_appeared} />
-            <StatCard label="Avg Score" value={`${data.summary.avg_score}%`} />
-            <StatCard label="Min Score" value={`${data.summary.min_score}%`} />
-            <StatCard label="Max Score" value={`${data.summary.max_score}%`} />
-            <StatCard label="Avg Accuracy" value={`${data.summary.avg_accuracy}%`} />
-            <StatCard label="Avg Attempt Rate" value={`${data.summary.avg_attempt_rate}%`} />
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
+            <StatCard label="Students Appeared" value={data.summary.students_appeared} size="sm" />
+            <StatCard label="Avg Score" value={`${data.summary.avg_score}%`} size="sm" />
+            <StatCard label="Min Score" value={`${data.summary.min_score}%`} size="sm" />
+            <StatCard label="Max Score" value={`${data.summary.max_score}%`} size="sm" />
+            <StatCard label="Avg Accuracy" value={`${data.summary.avg_accuracy}%`} size="sm" />
+            <StatCard label="Avg Attempt Rate" value={`${data.summary.avg_attempt_rate}%`} size="sm" />
           </div>
 
           <SubjectAnalysisSection subjects={data.subjects} />

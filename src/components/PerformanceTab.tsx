@@ -41,7 +41,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+      <div className="p-4 bg-danger-bg border border-danger text-danger">
         {error}
       </div>
     );
@@ -49,17 +49,17 @@ export default function PerformanceTab({ schoolUdise }: Props) {
 
   if (grades === null) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-3 text-gray-600">Loading quiz data...</span>
+      <div className="flex justify-center items-center h-[30vh]">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
+        <span className="ml-3 text-sm text-text-secondary">Loading quiz data...</span>
       </div>
     );
   }
 
   if (grades.length === 0) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-        <p className="text-gray-500">No quiz data available for this school yet.</p>
+      <div className="p-8 text-center bg-bg-card-alt border border-border">
+        <p className="text-sm text-text-muted">No quiz data available for this school yet.</p>
       </div>
     );
   }
@@ -81,9 +81,11 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <label className="text-sm font-medium text-gray-700">Grade</label>
+        <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
+          Grade
+        </label>
         <select
-          className="rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          className="px-3 py-2 text-sm bg-bg-card border-2 border-border text-text-primary focus:outline-none focus:border-accent transition-colors"
           value={selectedGrade ?? ""}
           onChange={handleGradeChange}
         >
@@ -97,15 +99,15 @@ export default function PerformanceTab({ schoolUdise }: Props) {
       </div>
 
       {selectedGrade != null && activeView.type === "batch" && (
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+        <div className="flex gap-1">
           {(["chapter", "full"] as const).map((cat) => (
             <button
               key={cat}
               onClick={() => setTestCategory(cat)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-bold uppercase tracking-wide transition-colors ${
                 testCategory === cat
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-accent text-text-on-accent"
+                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
               }`}
             >
               {cat === "chapter" ? "Chapter Tests" : "Full Tests"}
@@ -115,8 +117,8 @@ export default function PerformanceTab({ schoolUdise }: Props) {
       )}
 
       {selectedGrade == null ? (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-          <p className="text-gray-500">Select a grade to view performance data.</p>
+        <div className="p-8 text-center bg-bg-card-alt border border-border">
+          <p className="text-sm text-text-muted">Select a grade to view performance data.</p>
         </div>
       ) : activeView.type === "batch" ? (
         <BatchOverview

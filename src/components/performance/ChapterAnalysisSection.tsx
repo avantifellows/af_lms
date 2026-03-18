@@ -1,28 +1,38 @@
 "use client";
 
+import { useState } from "react";
 import type { ChapterAnalysisRow } from "@/types/quiz";
 
 interface Props {
   chapters: ChapterAnalysisRow[];
 }
 
-function scoreColor(score: number): string {
-  if (score < 40) return "bg-red-50";
-  if (score < 60) return "bg-yellow-50";
-  return "bg-green-50";
+function scoreColorClass(score: number): string {
+  if (score < 40) return "bg-danger-bg";
+  if (score < 60) return "bg-warning-bg";
+  return "bg-success-bg";
 }
 
+const TH = "px-4 py-3 text-left text-xs uppercase tracking-wider font-bold bg-bg-card-alt text-text-muted";
+
 export default function ChapterAnalysisSection({ chapters }: Props) {
+  const [openSubjects, setOpenSubjects] = useState<Set<string>>(new Set());
+
   if (chapters.length === 0) {
     return (
-      <div className="bg-gray-50 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-gray-700 mb-2">Chapter Analysis</h3>
-        <p className="text-gray-500 text-sm">No chapter-level data available for this test.</p>
+      <div className="bg-bg-card border border-border">
+        <div className="px-4 md:px-6 py-3 md:py-4 border-b-2 border-border-accent">
+          <h3 className="font-bold uppercase tracking-wide text-sm md:text-base text-text-primary">
+            Chapter Analysis
+          </h3>
+        </div>
+        <div className="p-4 md:p-6">
+          <p className="text-sm text-text-muted">No chapter-level data available for this test.</p>
+        </div>
       </div>
     );
   }
 
-  // Group by subject
   const grouped = new Map<string, ChapterAnalysisRow[]>();
   for (const ch of chapters) {
     const list = grouped.get(ch.subject) || [];
@@ -32,45 +42,80 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
 
   const subjects = Array.from(grouped.keys());
 
+  // Open first subject by default
+  if (openSubjects.size === 0 && subjects.length > 0) {
+    openSubjects.add(subjects[0]);
+  }
+
+  const toggleSubject = (subject: string) => {
+    setOpenSubjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(subject)) next.delete(subject);
+      else next.add(subject);
+      return next;
+    });
+  };
+
   return (
-    <div className="bg-gray-50 rounded-lg p-4">
-      <h3 className="text-sm font-medium text-gray-700 mb-4">Chapter Analysis</h3>
-      <div className="space-y-4">
-        {subjects.map((subject, idx) => (
-          <details key={subject} open={idx === 0}>
-            <summary className="cursor-pointer text-sm font-medium text-gray-800 hover:text-blue-600 py-1">
-              {subject} ({grouped.get(subject)!.length} chapters)
-            </summary>
-            <div className="mt-2 overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Chapter</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Avg Score</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Accuracy</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Attempt Rate</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Questions</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Avg Time/Q</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {grouped.get(subject)!.map((ch) => (
-                    <tr key={`${ch.subject}-${ch.chapter_name}`} className={scoreColor(ch.avg_score)}>
-                      <td className="px-4 py-2 text-sm text-gray-900">{ch.chapter_name}</td>
-                      <td className="px-4 py-2 text-sm text-gray-900">{ch.avg_score}%</td>
-                      <td className="px-4 py-2 text-sm text-gray-900">{ch.accuracy}%</td>
-                      <td className="px-4 py-2 text-sm text-gray-900">{ch.attempt_rate}%</td>
-                      <td className="px-4 py-2 text-sm text-gray-900">{ch.questions}</td>
-                      <td className="px-4 py-2 text-sm text-gray-900">
-                        {ch.avg_time != null ? `${ch.avg_time}s` : "-"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+    <div className="bg-bg-card border border-border">
+      <div className="px-4 md:px-6 py-3 md:py-4 border-b-2 border-border-accent">
+        <h3 className="font-bold uppercase tracking-wide text-sm md:text-base text-text-primary">
+          Chapter Analysis
+        </h3>
+      </div>
+
+      <div className="p-4 md:p-6 space-y-4">
+        {subjects.map((subject) => {
+          const isOpen = openSubjects.has(subject);
+          return (
+            <div key={subject}>
+              <button
+                onClick={() => toggleSubject(subject)}
+                className={`flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors py-1 ${
+                  isOpen ? "text-accent" : "text-text-primary hover:text-accent"
+                }`}
+              >
+                <span className="w-1 h-4 bg-accent" />
+                {subject} ({grouped.get(subject)!.length} chapters)
+                <span className="text-xs">{isOpen ? "▼" : "▶"}</span>
+              </button>
+
+              {isOpen && (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b-2 border-border-accent">
+                        <th className={TH}>Chapter</th>
+                        <th className={TH}>Avg Score</th>
+                        <th className={TH}>Accuracy</th>
+                        <th className={TH}>Attempt Rate</th>
+                        <th className={TH}>Questions</th>
+                        <th className={TH}>Avg Time/Q</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.get(subject)!.map((ch) => (
+                        <tr
+                          key={`${ch.subject}-${ch.chapter_name}`}
+                          className={`border-b border-border/25 transition-colors hover:bg-hover-bg ${scoreColorClass(ch.avg_score)}`}
+                        >
+                          <td className="px-4 py-3 text-sm text-text-primary">{ch.chapter_name}</td>
+                          <td className="px-4 py-3 text-sm font-bold font-mono text-accent">{ch.avg_score}%</td>
+                          <td className="px-4 py-3 text-sm font-mono text-text-primary">{ch.accuracy}%</td>
+                          <td className="px-4 py-3 text-sm font-mono text-text-primary">{ch.attempt_rate}%</td>
+                          <td className="px-4 py-3 text-sm font-bold font-mono text-text-primary">{ch.questions}</td>
+                          <td className="px-4 py-3 text-sm font-mono text-text-primary">
+                            {ch.avg_time != null ? `${ch.avg_time}s` : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          </details>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
