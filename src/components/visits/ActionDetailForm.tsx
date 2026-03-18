@@ -8,9 +8,13 @@ import Toast from "@/components/Toast";
 import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
 import IndividualAFTeacherInteractionForm from "@/components/visits/IndividualAFTeacherInteractionForm";
+import GroupStudentDiscussionForm from "@/components/visits/GroupStudentDiscussionForm";
+import IndividualStudentDiscussionForm from "@/components/visits/IndividualStudentDiscussionForm";
 import PrincipalInteractionForm from "@/components/visits/PrincipalInteractionForm";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import {
   CURRENT_RUBRIC_VERSION,
@@ -69,7 +73,9 @@ const CLASSROOM_ACTION_TYPE = "classroom_observation";
 const AF_TEAM_ACTION_TYPE = "af_team_interaction" as const;
 const INDIVIDUAL_TEACHER_ACTION_TYPE = "individual_af_teacher_interaction" as const;
 const PRINCIPAL_INTERACTION_ACTION_TYPE = "principal_interaction" as const;
-const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE, PRINCIPAL_INTERACTION_ACTION_TYPE]);
+const GROUP_STUDENT_DISCUSSION_ACTION_TYPE = "group_student_discussion" as const;
+const INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE = "individual_student_discussion" as const;
+const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE, PRINCIPAL_INTERACTION_ACTION_TYPE, GROUP_STUDENT_DISCUSSION_ACTION_TYPE, INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE]);
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   principal_interaction: {
@@ -101,46 +107,14 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
     fields: [],
   },
   group_student_discussion: {
-    title: "Group Student Discussion Details",
-    description: "Capture discussion highlights from student groups.",
-    fields: [
-      {
-        key: "participant_group",
-        label: "Participant Group",
-        placeholder: "Which group of students participated?",
-      },
-      {
-        key: "discussion_points",
-        label: "Discussion Points",
-        placeholder: "What came up in discussion?",
-        multiline: true,
-      },
-      {
-        key: "next_steps",
-        label: "Next Steps",
-        placeholder: "Any agreed next steps?",
-        multiline: true,
-      },
-    ],
+    title: "Student Interaction Details",
+    description: "Record observations from student group interaction.",
+    fields: [],
   },
   individual_student_discussion: {
-    title: "Individual Student Discussion Details",
-    description: "Log the conversation and follow-up for a student interaction.",
-    fields: [
-      { key: "student_name", label: "Student Name", placeholder: "Who did you speak with?" },
-      {
-        key: "discussion_notes",
-        label: "Discussion Notes",
-        placeholder: "Summarize the discussion",
-        multiline: true,
-      },
-      {
-        key: "action_items",
-        label: "Action Items",
-        placeholder: "Any action items?",
-        multiline: true,
-      },
-    ],
+    title: "Individual Student Interaction Details",
+    description: "Record individual interactions with students.",
+    fields: [],
   },
   individual_staff_meeting: {
     title: "Individual Staff Meeting Details",
@@ -483,6 +457,99 @@ function bootstrapPrincipalInteractionPayload(data: unknown): Record<string, unk
   return sanitizePrincipalInteractionPayload(data);
 }
 
+function sanitizeGroupStudentDiscussionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { grade: null, questions: {} };
+  }
+
+  const grade = typeof data.grade === "number" && Number.isFinite(data.grade) ? data.grade : null;
+
+  const questions: Record<string, unknown> = {};
+  if (isPlainObject(data.questions)) {
+    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+      const value = (data.questions as Record<string, unknown>)[key];
+      if (isPlainObject(value)) {
+        const entry: Record<string, unknown> = {};
+        if (value.answer === null || typeof value.answer === "boolean") {
+          entry.answer = value.answer;
+        }
+        if (typeof value.remark === "string") {
+          entry.remark = value.remark;
+        }
+        if (Object.keys(entry).length > 0) {
+          questions[key] = entry;
+        }
+      }
+    }
+  }
+
+  return { grade, questions };
+}
+
+function bootstrapGroupStudentDiscussionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { grade: null, questions: {} };
+  }
+  return sanitizeGroupStudentDiscussionPayload(data);
+}
+
+function sanitizeIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { students: [] };
+  }
+
+  const students: Array<Record<string, unknown>> = [];
+  if (Array.isArray(data.students)) {
+    for (const entry of data.students) {
+      if (
+        !isPlainObject(entry) ||
+        typeof entry.id !== "number" ||
+        !Number.isFinite(entry.id) ||
+        typeof entry.name !== "string"
+      ) {
+        continue;
+      }
+
+      const sanitizedEntry: Record<string, unknown> = {
+        id: entry.id,
+        name: entry.name,
+        grade: typeof entry.grade === "number" ? entry.grade : null,
+      };
+
+      const questions: Record<string, unknown> = {};
+      if (isPlainObject(entry.questions)) {
+        for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+          const value = (entry.questions as Record<string, unknown>)[key];
+          if (isPlainObject(value)) {
+            const qEntry: Record<string, unknown> = {};
+            if (value.answer === null || typeof value.answer === "boolean") {
+              qEntry.answer = value.answer;
+            }
+            if (typeof value.remark === "string") {
+              qEntry.remark = value.remark;
+            }
+            if (Object.keys(qEntry).length > 0) {
+              questions[key] = qEntry;
+            }
+          }
+        }
+      }
+
+      sanitizedEntry.questions = questions;
+      students.push(sanitizedEntry);
+    }
+  }
+
+  return { students };
+}
+
+function bootstrapIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { students: [] };
+  }
+  return sanitizeIndividualStudentDiscussionPayload(data);
+}
+
 function normalizeFormDataForAction(actionType: string, data: unknown): Record<string, unknown> {
   if (actionType === CLASSROOM_ACTION_TYPE) {
     return bootstrapClassroomPayload(data);
@@ -498,6 +565,14 @@ function normalizeFormDataForAction(actionType: string, data: unknown): Record<s
 
   if (actionType === PRINCIPAL_INTERACTION_ACTION_TYPE) {
     return bootstrapPrincipalInteractionPayload(data);
+  }
+
+  if (actionType === GROUP_STUDENT_DISCUSSION_ACTION_TYPE) {
+    return bootstrapGroupStudentDiscussionPayload(data);
+  }
+
+  if (actionType === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE) {
+    return bootstrapIndividualStudentDiscussionPayload(data);
   }
 
   if (!isPlainObject(data)) {
@@ -522,6 +597,14 @@ function sanitizePatchData(actionType: string, data: Record<string, unknown>): R
 
   if (actionType === PRINCIPAL_INTERACTION_ACTION_TYPE) {
     return sanitizePrincipalInteractionPayload(data);
+  }
+
+  if (actionType === GROUP_STUDENT_DISCUSSION_ACTION_TYPE) {
+    return sanitizeGroupStudentDiscussionPayload(data);
+  }
+
+  if (actionType === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE) {
+    return sanitizeIndividualStudentDiscussionPayload(data);
   }
 
   return data;
@@ -828,7 +911,9 @@ export default function ActionDetailForm({
             ? "Please complete all required rubric scores before ending this observation."
             : action.action_type === INDIVIDUAL_TEACHER_ACTION_TYPE
               ? "Please complete all required fields and record all teachers before ending this interaction."
-              : "Please complete all required fields before ending this interaction.";
+              : action.action_type === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE
+                ? "Please complete all required fields and add at least one student before ending this interaction."
+                : "Please complete all required fields before ending this interaction.";
           setError({
             message: endErrorMessage,
             details: parsedError.details,
@@ -975,6 +1060,19 @@ export default function ActionDetailForm({
             data={formData}
             setData={setFormData}
             disabled={!canSave || isBusy}
+          />
+        ) : action.action_type === GROUP_STUDENT_DISCUSSION_ACTION_TYPE ? (
+          <GroupStudentDiscussionForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
+          />
+        ) : action.action_type === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE ? (
+          <IndividualStudentDiscussionForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
+            schoolCode={schoolCode}
           />
         ) : (
           config.fields.map((field) => (
