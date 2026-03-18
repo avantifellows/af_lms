@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import type { StudentDeepDiveRow } from "@/types/quiz";
+import type { StudentDeepDiveRow, StudentSubjectScore } from "@/types/quiz";
 
 interface Props {
   students: StudentDeepDiveRow[];
@@ -9,6 +9,64 @@ interface Props {
 
 type SortKey = "percentage" | "accuracy" | "attempt_rate" | "student_name" | "marks_scored";
 type SortDir = "asc" | "desc";
+
+function SubjectWithChapters({ ss }: { ss: StudentSubjectScore }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasChapters = ss.chapters && ss.chapters.length > 0;
+
+  return (
+    <>
+      <tr
+        className={hasChapters ? "cursor-pointer hover:bg-blue-100" : ""}
+        onClick={() => hasChapters && setExpanded(!expanded)}
+      >
+        <td className="px-3 py-1 text-xs text-gray-900">
+          {ss.subject}
+          {hasChapters && (
+            <span className="ml-1 text-gray-400 text-[10px]">
+              {expanded ? "▼" : "▶"}
+            </span>
+          )}
+        </td>
+        <td className="px-3 py-1 text-xs text-gray-900">
+          {ss.marks_scored}/{ss.max_marks}
+        </td>
+        <td className="px-3 py-1 text-xs text-gray-900">
+          {Math.round(ss.percentage * 10) / 10}%
+        </td>
+        <td className="px-3 py-1 text-xs text-gray-900">
+          {Math.round(ss.accuracy * 10) / 10}%
+        </td>
+        <td className="px-3 py-1 text-xs text-gray-900">
+          {Math.round(ss.attempt_rate * 10) / 10}%
+        </td>
+      </tr>
+      {expanded &&
+        ss.chapters!.map((ch) => (
+          <tr key={`${ss.subject}-${ch.chapter_name}`} className="bg-indigo-50/50">
+            <td className="px-3 py-0.5 text-[11px] text-gray-600 pl-8">
+              {ch.chapter_name}
+            </td>
+            <td className="px-3 py-0.5 text-[11px] text-gray-600">
+              {ch.marks_scored}/{ch.max_marks}
+            </td>
+            <td className="px-3 py-0.5 text-[11px] text-gray-600">
+              {ch.max_marks > 0
+                ? Math.round((ch.marks_scored / ch.max_marks) * 1000) / 10
+                : 0}
+              %
+            </td>
+            <td className="px-3 py-0.5 text-[11px] text-gray-600">
+              {Math.round(ch.accuracy * 10) / 10}%
+            </td>
+            <td className="px-3 py-0.5 text-[11px] text-gray-600">
+              {Math.round(ch.attempt_rate * 10) / 10}%
+            </td>
+          </tr>
+        ))}
+    </>
+  );
+}
 
 export default function StudentResultsTable({ students }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
@@ -124,21 +182,7 @@ export default function StudentResultsTable({ students }: Props) {
                             </thead>
                             <tbody>
                               {s.subject_scores.map((ss) => (
-                                <tr key={ss.subject}>
-                                  <td className="px-3 py-1 text-xs text-gray-900">{ss.subject}</td>
-                                  <td className="px-3 py-1 text-xs text-gray-900">
-                                    {ss.marks_scored}/{ss.max_marks}
-                                  </td>
-                                  <td className="px-3 py-1 text-xs text-gray-900">
-                                    {Math.round(ss.percentage * 10) / 10}%
-                                  </td>
-                                  <td className="px-3 py-1 text-xs text-gray-900">
-                                    {Math.round(ss.accuracy * 10) / 10}%
-                                  </td>
-                                  <td className="px-3 py-1 text-xs text-gray-900">
-                                    {Math.round(ss.attempt_rate * 10) / 10}%
-                                  </td>
-                                </tr>
+                                <SubjectWithChapters key={ss.subject} ss={ss} />
                               ))}
                             </tbody>
                           </table>

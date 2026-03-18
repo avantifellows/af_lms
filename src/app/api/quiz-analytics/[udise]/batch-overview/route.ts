@@ -24,61 +24,21 @@ export async function GET(
   try {
     const raw = await getBatchOverviewData(udise, grade);
 
-    // Compute summary
     const tests = raw.tests;
     const testsCount = tests.length;
     const avgParticipation =
       testsCount > 0
         ? Math.round(tests.reduce((s, t) => s + t.student_count, 0) / testsCount)
         : 0;
-    const overallAvg =
-      testsCount > 0
-        ? Math.round(
-            (tests.reduce((s, t) => s + t.avg_percentage, 0) / testsCount) * 10
-          ) / 10
-        : 0;
-
-    // Trend: compare last 2 tests
-    let trendDirection: BatchSummary["trend_direction"] = "flat";
-    if (testsCount >= 2) {
-      const last = tests[testsCount - 1].avg_percentage;
-      const prev = tests[testsCount - 2].avg_percentage;
-      if (last - prev > 1) trendDirection = "up";
-      else if (prev - last > 1) trendDirection = "down";
-    }
-
-    // Weakest subject: lowest avg across all subject trend data
-    let weakestSubject: string | null = null;
-    if (raw.subjectTrend.length > 0) {
-      const subjectAvgs = new Map<string, { total: number; count: number }>();
-      for (const pt of raw.subjectTrend) {
-        const entry = subjectAvgs.get(pt.subject) || { total: 0, count: 0 };
-        entry.total += pt.avg_percentage;
-        entry.count += 1;
-        subjectAvgs.set(pt.subject, entry);
-      }
-      let minAvg = Infinity;
-      for (const [subject, { total, count }] of subjectAvgs) {
-        const avg = total / count;
-        if (avg < minAvg) {
-          minAvg = avg;
-          weakestSubject = subject;
-        }
-      }
-    }
 
     const summary: BatchSummary = {
       tests_conducted: testsCount,
       avg_participation: avgParticipation,
-      overall_avg: overallAvg,
-      trend_direction: trendDirection,
-      weakest_subject: weakestSubject,
     };
 
     const response: BatchOverviewData = {
       summary,
       tests: raw.tests,
-      subjectTrend: raw.subjectTrend,
       totalEnrolled: raw.totalEnrolled,
     };
 

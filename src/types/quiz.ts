@@ -45,32 +45,17 @@ export interface TestTrendPoint {
   test_name: string;
   start_date: string;
   student_count: number;
-  avg_percentage: number;
-  male_avg_percentage: number | null;
-  female_avg_percentage: number | null;
-  test_format: string | null;
-}
-
-export interface SubjectTrendPoint {
-  session_id: string;
-  test_name: string;
-  subject: string;
-  avg_percentage: number;
   test_format: string | null;
 }
 
 export interface BatchSummary {
   tests_conducted: number;
   avg_participation: number;
-  overall_avg: number;
-  trend_direction: "up" | "down" | "flat";
-  weakest_subject: string | null;
 }
 
 export interface BatchOverviewData {
   summary: BatchSummary;
   tests: TestTrendPoint[];
-  subjectTrend: SubjectTrendPoint[];
   totalEnrolled: number | null;
 }
 
@@ -105,6 +90,16 @@ export interface ChapterAnalysisRow {
   avg_time: number | null;
 }
 
+export interface StudentChapterScore {
+  subject: string;
+  chapter_name: string;
+  marks_scored: number;
+  max_marks: number;
+  accuracy: number;
+  attempt_rate: number;
+  total_questions: number;
+}
+
 export interface StudentSubjectScore {
   subject: string;
   percentage: number;
@@ -112,6 +107,7 @@ export interface StudentSubjectScore {
   max_marks: number;
   accuracy: number;
   attempt_rate: number;
+  chapters?: StudentChapterScore[];
 }
 
 export interface StudentDeepDiveRow {
