@@ -740,9 +740,10 @@ export function buildCompleteIndividualStudentDiscussionData() {
 
 Existing E2E tests in `e2e/tests/visits.spec.ts` that test visit completion will need their seed data updated to include all 6 action types (currently seed 4). Use `seedVisitAction(pool, visitId, { actionType: "group_student_discussion", status: "completed", data: buildCompleteGroupStudentDiscussionData() })`.
 
-**E2E form fill functions** (optional, can be added in a follow-up):
-- `fillGroupStudentDiscussionForm()` — select grade, click Yes on 4 questions
-- `fillIndividualStudentDiscussionForm()` — select grade, select student, answer 2 questions
+**E2E form fill functions** (required — ensures form interactions are covered end-to-end):
+- `fillGroupStudentDiscussionForm(page)` — select grade 11, click Yes on all 4 questions, end action
+- `fillIndividualStudentDiscussionForm(page)` — select grade 11, select a student from dropdown, answer 2 questions, end action
+- Add to `e2e/tests/visits.spec.ts`: test that creates both student action types via the UI, fills forms, ends actions, and verifies they appear as completed on the visit detail page
 
 ---
 
@@ -830,8 +831,9 @@ Within each phase, run `npm run test` to verify no regressions.
 1. `npm run test` — all unit tests pass (existing ~1402 + ~60 new ≈ ~1462+)
 2. `npm run build` — TypeScript compiles cleanly
 3. `npm run lint` — no lint errors
-4. Manual: create group_student_discussion → select grade 11 → fill 4 questions → save → end
-5. Manual: create individual_student_discussion → select grade 11 → add student → fill 2 questions → save → end
-6. Manual: attempt visit completion with only 4/6 types → verify rejection with descriptive error
-7. Manual: complete visit with all 6 action types → verify success
-8. Manual: program_admin views both student forms → read-only (no edit controls)
+4. `npm run test:e2e` — all E2E tests pass (existing + updated seed data + new form fill tests)
+5. Manual: create group_student_discussion → select grade 11 → fill 4 questions → save → end
+6. Manual: create individual_student_discussion → select grade 11 → add student → fill 2 questions → save → end
+7. Manual: attempt visit completion with only 4/6 types → verify rejection with descriptive error
+8. Manual: complete visit with all 6 action types → verify success
+9. Manual: program_admin views both student forms → read-only (no edit controls)

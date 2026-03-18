@@ -1,222 +1,406 @@
 {
   "project": "af_lms",
-  "branchName": "principal-interaction",
-  "description": "Principal Interaction Action Type - Add a 7-question binary checklist as the 4th required action type for PM school visits. IMPORTANT: Before starting any story, read these two files for full context: (1) `docs/ai/project-context.md` — project architecture, patterns, and conventions; (2) `docs/ai/principal-interaction/2026-03-10-principal-interaction-implementation-plan.md` — detailed implementation plan with exact file paths, line numbers, and code-level instructions for every change.",
+  "branchName": "ralph/student-interaction",
+  "description": "Student Interaction Action Types - Add group and individual student interaction as 5th and 6th required action types for PM school visit completion. IMPORTANT: Before starting each story, read these three files for full context: (1) docs/ai/project-context.md (2) ralph/prd-student-interaction.md (3) docs/ai/student-interaction/2026-03-18-student-interaction-implementation-plan.md",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Config, validation library, and unit tests",
-      "description": "As a developer, I need a configuration and validation module for Principal Interaction so the API and form can validate question data consistently.",
+      "title": "Group Student Discussion config and validation library",
+      "description": "As a developer, I need a configuration and validation module for Student Interaction so the API and form can validate question data consistently.",
       "acceptanceCriteria": [
-        "Create `src/lib/principal-interaction.ts` following `src/lib/af-team-interaction.ts` pattern (no `teachers` array)",
-        "Export `PRINCIPAL_INTERACTION_CONFIG` with exactly 5 sections and 7 questions: oh_program_feedback (Operational Health), ip_curriculum_progress + ip_key_events (Implementation Progress), sp_student_performance (Student Performance on Monthly Tests), sn_concerns_raised (Support Needed), mp_monthly_plan + mp_permissions_obtained (Monthly Planning)",
-        "Export `PrincipalInteractionData` interface: `{ questions: Record<string, { answer: boolean | null; remark?: string }> }`",
-        "Export `validatePrincipalInteractionSave()` (lenient): returns `{ valid: true }` for partial/empty data, `{ valid: false, errors }` for unknown top-level keys. `ALLOWED_TOP_LEVEL_KEYS = new Set([\"questions\"])`",
-        "Export `validatePrincipalInteractionComplete()` (strict): returns `{ valid: false, errors }` when any of the 7 questions is unanswered or has null answer, with human-readable error messages including question labels",
-        "Create `src/lib/principal-interaction.test.ts` following `src/lib/af-team-interaction.test.ts` pattern with ~20 tests: config integrity (5 sections, 7 unique keys, allQuestionKeys), lenient validation (empty OK, partial OK, unknown question keys ignored, unknown top-level keys rejected, type checks), strict validation (all 7 required, null rejected, labels in errors, fully complete accepted)",
+        "`src/lib/group-student-discussion.ts` created with config, types, `VALID_GRADES`, and both validation functions",
+        "`GROUP_STUDENT_DISCUSSION_CONFIG` has exactly 1 section ('General Check') and 4 questions with keys: gc_interacted, gc_program_updates, gc_direction, gc_concerns",
+        "`ALLOWED_TOP_LEVEL_KEYS = new Set([\"grade\", \"questions\"])`",
+        "Lenient validation (`validateGroupStudentDiscussionSave`) accepts `{}`, partial questions, valid grade (11 or 12), null answers; rejects unknown top-level keys and invalid grade values (10, 13, \"eleven\", null, floats)",
+        "Strict validation (`validateGroupStudentDiscussionComplete`) requires grade (11 or 12) and all 4 non-null boolean answers",
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "Question text must use the typo-corrected versions from the plan (e.g. 'Were you able to...' not 'Where you able to...'). Keys sp_student_performance and mp_monthly_plan intentionally overlap with AF Team/Individual Teacher — safe because each action stores data in its own JSONB row."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Update type registry (visit-actions)",
-      "description": "As a developer, I need to replace `principal_meeting` with `principal_interaction` in the action types registry so the system recognizes the new type.",
+      "title": "Group Student Discussion unit tests",
+      "description": "As a developer, I need thorough unit tests for the group student discussion validation library to ensure correctness.",
       "acceptanceCriteria": [
-        "In `src/lib/visit-actions.ts`: remove `principal_meeting: \"Principal Meeting\"` from `ACTION_TYPES`, add `principal_interaction: \"Principal Interaction\"` in its place (total stays at 10 types)",
-        "`ActionType` union includes `\"principal_interaction\"` — verified by TypeScript (`npx tsc --noEmit`)",
-        "In `src/lib/visit-actions.test.ts`: replace `principal_meeting: true` with `principal_interaction: true` in the exhaustiveness record",
-        "Unit tests pass (`npm run test`)",
-        "TypeScript compiles (`npx tsc --noEmit`)"
+        "`src/lib/group-student-discussion.test.ts` created with ~25 tests following `src/lib/principal-interaction.test.ts` pattern",
+        "Config integrity tests: 1 section, 4 questions, unique keys, key format `gc_*`",
+        "Save validation tests: accepts `{}`, partial questions, valid grade, null answers, remarks; rejects unknown keys, invalid grade (10, 13, \"eleven\", null), non-boolean answer, non-string remark",
+        "Complete validation tests: rejects empty, missing grade, missing questions, incomplete (2/4), null answers; accepts fully complete payload",
+        "Unit tests pass (`npm run test`)"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "This MUST land atomically with US-007 (ActionDetailForm) to avoid TypeScript errors from the exhaustive switch. If running independently, expect TS errors in ActionDetailForm until US-007 is done — that's OK for unit tests but tsc --noEmit will fail."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "PATCH API route validation for principal interaction",
-      "description": "As a developer, I need the PATCH action route to validate Principal Interaction data so invalid payloads are rejected on save.",
+      "title": "Individual Student Discussion config and validation library",
+      "description": "As a developer, I need a configuration and validation module for Individual Student Interaction so the API and form can validate per-student question data consistently.",
       "acceptanceCriteria": [
-        "In `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`: import `validatePrincipalInteractionSave` and `validatePrincipalInteractionComplete` from `@/lib/principal-interaction`",
-        "Add `principal_interaction` validation block after the individual teacher block: lenient for `in_progress`, strict for `completed`. Error message: `\"Invalid principal interaction data\"` with validation errors array",
-        "PATCH with `in_progress` + partial principal interaction data returns 200",
-        "PATCH with `in_progress` + unknown top-level keys returns 422",
-        "PATCH with `completed` + incomplete data returns 422 with `\"Invalid principal interaction data\"`",
-        "PATCH with `completed` + complete data returns 200",
-        "In test file: change default `BASE_ACTION_ROW.action_type` from `principal_meeting` to `leadership_meeting`",
-        "Add `buildValidPrincipalInteractionData()` helper + ~4 new tests in `src/app/api/pm/visits/[id]/actions/[actionId]/route.test.ts`",
+        "`src/lib/individual-student-discussion.ts` created following `src/lib/individual-af-teacher-interaction.ts` pattern (simplified: no attendance gating, add grade per student)",
+        "`INDIVIDUAL_STUDENT_DISCUSSION_CONFIG` has exactly 1 section ('Operational Health') and 2 questions with keys: oh_teaching_concern, oh_additional_support",
+        "`ALLOWED_TOP_LEVEL_KEYS = new Set([\"students\"])` — no attendance logic",
+        "Lenient validation (`validateIndividualStudentDiscussionSave`) accepts `{}`, partial student entries, null answers; rejects unknown top-level keys, duplicate student IDs",
+        "Strict validation (`validateIndividualStudentDiscussionComplete`) requires >= 1 student, each with valid id (positive int, unique), name (non-empty string), grade (11 or 12), and all 2 non-null boolean answers",
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "END API route validation for principal interaction",
-      "description": "As a developer, I need the END action route to validate Principal Interaction data strictly so only fully-answered forms can be completed.",
+      "title": "Individual Student Discussion unit tests",
+      "description": "As a developer, I need thorough unit tests for the individual student discussion validation library.",
       "acceptanceCriteria": [
-        "In `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`: import `validatePrincipalInteractionComplete` from `@/lib/principal-interaction`",
-        "Add `principalInteractionValidationError()` function following the `afTeamValidationError()` pattern",
-        "Wire into both primary and concurrent-fallback validation chains. No 'all teachers recorded' check needed.",
-        "END with incomplete principal interaction data returns 422 with descriptive errors",
-        "END with all 7 questions answered (non-null boolean) returns 200",
-        "In test file: change `PENDING_ACTION.action_type` from `principal_meeting` to `leadership_meeting`",
-        "Add ~5 new tests in `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.test.ts`",
+        "`src/lib/individual-student-discussion.test.ts` created with ~25 tests following `src/lib/individual-af-teacher-interaction.test.ts` pattern",
+        "Config integrity tests: 1 section, 2 questions, unique keys",
+        "Lenient/strict validation, duplicate IDs, grade validation (11/12 only), per-student question validation all covered",
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Error message pattern: `\"Invalid principal interaction data\"` with validation errors array — same pattern as afTeamValidationError."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "COMPLETE visit API — 4th required type",
-      "description": "As a developer, I need visit completion to require at least one completed Principal Interaction so PMs always record their principal meeting.",
+      "title": "Student utility helpers",
+      "description": "As a developer, I need shared student display name utilities for use across form components.",
       "acceptanceCriteria": [
-        "In `src/app/api/pm/visits/[id]/complete/route.ts`: add 4th sequential check after individual teacher — query for >= 1 completed `principal_interaction` action",
-        "Check order: in-progress -> classroom -> AF team -> individual teacher -> principal interaction -> UPDATE",
-        "Error message: `\"At least one completed Principal Interaction is required to complete visit\"` with detail `[\"No completed principal_interaction action found\"]`",
-        "Visit completion fails with 422 when no completed `principal_interaction` exists",
-        "Visit completion succeeds when all 4 action types have completed instances",
-        "In `src/app/api/pm/visits/[id]/complete/route.test.ts`: update 3 happy-path tests with 7th `mockResolvedValueOnce` for principal_interaction check (`.mockResolvedValueOnce([{ id: 601 }])`) inserted after individual teacher mock, before UPDATE mock",
-        "IMPORTANT: After adding the 7th mock, UPDATE query moves from call index 5 to index 6. Update `mockQuery.mock.calls[5]` to `mockQuery.mock.calls[6]` in the first happy-path test",
-        "Rename test `\"completes visit when all 3 action types have completed actions\"` to `\"...all 4 action types...\"`",
-        "Add new test: `\"returns 422 when principal_interaction is missing\"` — 6 mocks (visit + in-progress + classroom + af_team + individual_teacher + empty []), expects 422",
-        "Tests that short-circuit earlier (AF team missing, individual teacher missing, invalid rubric) do NOT need changes",
+        "`src/lib/student-utils.ts` created copying `src/lib/teacher-utils.ts` pattern with `Student` interface: `{ id: number; full_name: string | null; student_id: string | null; grade: number | null }`",
+        "`getStudentDisplayName(student)` returns `full_name?.trim()` -> fallback `student_id` -> fallback `Student #${id}`",
+        "`src/lib/student-utils.test.ts` created with 3 tests covering all fallback paths",
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "The mock chain ordering is critical. Each happy-path test has sequential mockResolvedValueOnce calls. The new principal_interaction mock must be inserted at the right position."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Principal Interaction form component and tests",
-      "description": "As a PM, I want a form to answer the 7 Principal Interaction questions so I can record my observations from the principal meeting.",
+      "title": "Students API endpoint",
+      "description": "As a developer, I need an API endpoint to fetch students for a given school and optional grade, so the Individual Student Interaction form can populate its student dropdown.",
       "acceptanceCriteria": [
-        "Create `src/components/visits/PrincipalInteractionForm.tsx` following `AFTeamInteractionForm.tsx` pattern but WITHOUT teacher section",
-        "Props: `data: PrincipalInteractionData`, `setData: (data: PrincipalInteractionData) => void`, `disabled: boolean` — NO `schoolCode` prop",
-        "Sticky progress summary at `top-12 z-10`: 'Answered: X/7' (below page-level sticky header)",
-        "5 sections rendered as bordered cards with section headers, each question has Yes/No radio buttons + optional remark text input",
-        "`data-testid=\"action-renderer-principal_interaction\"` set on root element",
-        "No fetch calls, no loading state, no teacher dropdown — uses theme tokens from `src/lib/theme.ts`",
-        "Create `src/components/visits/PrincipalInteractionForm.test.tsx` with ~15 tests: rendering (5 sections, 7 questions, progress '0/7'), interactions (radio toggle, remark input, progress update), read-only mode (disabled radios + inputs), no teacher UI",
+        "`src/app/api/pm/students/route.ts` created with GET handler at `/api/pm/students?school_code=XXXXX&grade=11`",
+        "Auth via `requireVisitsAccess(session, 'view')` — returns 401 when not authenticated, 403 for passcode users",
+        "Returns 400 when `school_code` missing or `grade` is not a positive integer",
+        "Resolves `school_code` -> `school.id` + `region` via DB query, returns 404 when school not found",
+        "Checks scope access via `canAccessVisitSchoolScope()`, returns 403 when user lacks school access",
+        "Queries students via join chain: group_user -> group(type='school') -> user -> student -> enrollment_record(is_current) -> grade; filters by school.id, optional grade, excludes dropouts",
+        "Returns `{ students: StudentRow[] }` where StudentRow = `{ id, full_name, student_id, grade }`",
+        "Returns empty array when no matching students",
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "This is the simplest form in the system. No async operations, no teacher fetching, no rubric scoring — just 7 binary questions with optional remarks."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Wire form into ActionDetailForm",
-      "description": "As a developer, I need to integrate the Principal Interaction form into the action detail page so PMs can access it when viewing/editing a principal interaction action.",
+      "title": "Students API unit tests",
+      "description": "As a developer, I need unit tests for the students API endpoint.",
       "acceptanceCriteria": [
-        "In `src/components/visits/ActionDetailForm.tsx`: remove `principal_meeting` from `ACTION_FORM_CONFIGS`, add `principal_interaction` with title 'Principal Interaction Details', description 'Record observations from the interaction with the school Principal.', fields: []",
-        "Add `PRINCIPAL_INTERACTION_ACTION_TYPE` constant and add `principal_interaction` to `SAVE_BEFORE_END_TYPES` set",
-        "Add `sanitizePrincipalInteractionPayload()` following `sanitizeAFTeamPayload` pattern minus teachers: returns `{ questions: {} }` if data isn't plain object, iterates 7 known keys extracting only answer (boolean|null) and remark (string)",
-        "Add `bootstrapPrincipalInteractionPayload()` — bootstrap shape `{ questions: {} }`, returns sanitized data if input is plain object",
-        "Add `principal_interaction` case in `normalizeFormDataForAction`, `sanitizePatchData`, and JSX dispatch (renders PrincipalInteractionForm)",
-        "In `src/app/visits/[id]/actions/[actionId]/page.test.tsx`: change default `makeAction()` from `action_type: \"principal_meeting\"` to `\"leadership_meeting\"`",
-        "Rewrite renderer test to verify `PrincipalInteractionForm` renders for `principal_interaction` actions. Update testid assertions: `\"action-renderer-principal_meeting\"` -> `\"action-renderer-principal_interaction\"`",
-        "TypeScript compiles (`npx tsc --noEmit`)",
+        "`src/app/api/pm/students/route.test.ts` created with ~10 tests following `src/app/api/pm/teachers/route.test.ts` pattern",
+        "Covers auth (401/403), validation (400), access (403/404), success paths (with/without grade filter, empty results)",
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Action cards stats and picker modal",
-      "description": "As a PM, I want to see progress stats on Principal Interaction action cards and be able to create new Principal Interaction actions from the picker.",
+      "title": "Group Student Discussion form component",
+      "description": "As a PM, I want a grade-scoped checklist form for recording group student interactions so I can document my discussions with students during school visits.",
       "acceptanceCriteria": [
-        "In `src/components/visits/ActionPointList.tsx`: import `PRINCIPAL_INTERACTION_CONFIG`, add `getPrincipalInteractionStats()` returning answered/total (7), render stats on `principal_interaction` cards",
-        "In `src/components/visits/ActionTypePickerModal.tsx`: add `|| actionType === \"principal_interaction\"` to enabled check — 4 types now enabled",
-        "In `src/components/visits/ActionPointList.test.tsx`: change `makeAction()` default from `principal_meeting` to `leadership_meeting`, update 5 other `principal_meeting` refs to `leadership_meeting`, update 2 display-name assertions `\"Principal Meeting\"` -> `\"Leadership Meeting\"`, add ~3 new tests for principal_interaction stats",
-        "In `src/components/visits/ActionTypePickerModal.test.tsx`: update enabled count 3->4, disabled count 7->6, add test for `principal_interaction` selectable",
-        "Unit tests pass (`npm run test`)"
+        "`src/components/visits/GroupStudentDiscussionForm.tsx` created following `src/components/visits/PrincipalInteractionForm.tsx` pattern",
+        "Props: `{ data, setData, disabled }` — no schoolCode needed",
+        "Grade dropdown (`<select>`) renders with options 11 and 12, reads/writes `data.grade`",
+        "Questions hidden before grade selection, visible after grade selected",
+        "Section title rendered as 'General Check Grade {N}' (dynamic with selected grade)",
+        "Yes/No radio buttons update `data.questions` via `setData`; remark toggle and text input work correctly",
+        "Sticky progress summary (`top-12 z-10`): 'Answered: X/4' — only shows after grade selected",
+        "Disabled mode: dropdown disabled, radios disabled, no 'Add remark' buttons",
+        "`data-testid=\"action-renderer-group_student_discussion\"`",
+        "Unit tests pass (`npm run test`)",
+        "Lint passes (`npm run lint`)",
+        "Build passes (`npm run build`)"
       ],
       "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Rename ripple — source text and unit test fixtures",
-      "description": "As a developer, I need to rename all remaining `principal_meeting` references across source and unit test files to avoid confusion with the new `principal_interaction` type.",
+      "title": "Group Student Discussion form unit tests",
+      "description": "As a developer, I need unit tests for the Group Student Discussion form component.",
       "acceptanceCriteria": [
-        "In `src/components/visits/NewVisitForm.tsx`: change `\"Principal Meeting\"` -> `\"Principal Interaction\"` in instructional text",
-        "In `src/components/visits/NewVisitForm.tsx`: fix completion text from `\"Complete the visit after at least one Classroom Observation is completed and no action is in progress.\"` to `\"Complete the visit after all required action types are completed and no action is in progress.\"`",
-        "In `src/components/visits/NewVisitForm.test.tsx`: update regex from `/Complete the visit after at least one Classroom Observation/i` to `/Complete the visit after all required action types are completed/i`",
-        "In `src/hooks/use-auto-save.test.ts`: change sample action type to `leadership_meeting`",
-        "In `src/app/visits/[id]/page.test.tsx`: change sample action type to `leadership_meeting` + update display-name assertion `\"Principal Meeting\"` -> `\"Leadership Meeting\"`",
-        "In `src/app/api/pm/visits/[id]/route.test.ts`: change sample action type to `leadership_meeting`",
-        "In `src/app/api/pm/visits/[id]/actions/route.test.ts`: find-and-replace all `principal_meeting` -> `leadership_meeting` (7 occurrences)",
-        "Verify: no source or test file contains the string `principal_meeting`",
-        "Unit tests pass (`npm run test`)",
-        "TypeScript compiles (`npx tsc --noEmit`)"
+        "`src/components/visits/GroupStudentDiscussionForm.test.tsx` created with ~15 tests following `src/components/visits/PrincipalInteractionForm.test.tsx` pattern",
+        "Covers: grade dropdown rendering, questions visibility gating, section title with grade, answer/remark updates, progress bar counts, disabled mode",
+        "Unit tests pass (`npm run test`)"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Run `grep -r 'principal_meeting' src/ e2e/` after changes to verify zero remaining references."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "E2E tests for principal interaction",
-      "description": "As a developer, I need E2E tests updated so visit completion tests pass with the new 4th required action type and a new test verifies the principal interaction requirement.",
+      "title": "Individual Student Discussion form component",
+      "description": "As a PM, I want a per-student checklist form for recording individual student interactions so I can document my discussions with specific students during school visits.",
       "acceptanceCriteria": [
-        "Add `buildCompletePrincipalInteractionData()` to `e2e/helpers/db.ts` following existing pattern: returns `{ questions: { [key]: { answer: true } } }` for all 7 keys",
-        "Rename-only: `complete-blocked-without-rubric` test — rename `principal_meeting` to `leadership_meeting` + add `principal_interaction: completed` seed with valid data",
-        "Rename-only: `complete-blocked-when-any-action-in-progress` test — rename `principal_meeting` to `leadership_meeting`",
-        "Rename-only: `program-admin-read-only` test — rename `principal_meeting` to `leadership_meeting`",
-        "Completion fix: `moderate-gps-warning-visible` — rename existing `principal_meeting: pending` seed to `leadership_meeting: pending` (keep as GPS test action) + add new `principal_interaction: completed` seed",
-        "Completion fix: `admin-can-complete-other-pm-visit` — change `principal_meeting: completed` to `principal_interaction: completed` with `buildCompletePrincipalInteractionData()`",
-        "Completion fix: `complete-visit-success` — add `principal_interaction: completed` seed with valid data",
-        "Completion fix: `visit-completes-with-all-three-required-action-types` — add `principal_interaction: completed` seed + rename test to `...all-four-required-action-types`",
-        "New test: `visit-completion-requires-principal-interaction` — seed classroom+af_team+individual_teacher as completed, do NOT seed principal_interaction, click Complete Visit, assert error `\"At least one completed Principal Interaction is required to complete visit\"`",
-        "E2E tests pass (`npm run test:e2e`)"
+        "`src/components/visits/IndividualStudentDiscussionForm.tsx` created following `src/components/visits/IndividualAFTeacherInteractionForm.tsx` pattern (remove attendance, add grade filter, use student API)",
+        "Props: `{ data, setData, disabled, schoolCode }`",
+        "Grade filter dropdown: when grade changes -> re-fetch students from `/api/pm/students?school_code=${schoolCode}&grade=${selectedGrade}`",
+        "Loading and error states displayed during/after fetch",
+        "Student select dropdown shows `getStudentDisplayName()` for remaining (not-yet-added) students; on select adds student with `{ id, name, grade: selectedGrade, questions: {} }`",
+        "Accordion: header shows name + grade badge + progress `X/2`; click toggles expand",
+        "Per-student 2 binary Yes/No questions + remarks (same rendering as teacher form but without attendance gating)",
+        "Remove button removes student from `data.students` array",
+        "Disabled mode: no grade filter, no add/remove, radios disabled",
+        "Sticky progress summary shows student count",
+        "`data-testid` prefixes: `student-section-{id}`, `student-header-{id}`, `remove-student-{id}`, `add-student-select`",
+        "Unit tests pass (`npm run test`)",
+        "Lint passes (`npm run lint`)",
+        "Build passes (`npm run build`)"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "For moderate-gps-warning-visible: the test captures actionId from the pending seed and POSTs to /start + /end — using a completed action would cause 409. Keep leadership_meeting:pending for GPS testing, add separate principal_interaction:completed for the completion requirement."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Documentation updates (CLAUDE.md + project-context.md)",
-      "description": "As a developer, I need CLAUDE.md and project-context.md updated so future contributors and AI agents understand the new Principal Interaction type.",
+      "title": "Individual Student Discussion form unit tests",
+      "description": "As a developer, I need unit tests for the Individual Student Discussion form component.",
       "acceptanceCriteria": [
-        "In `CLAUDE.md`: add 'PM Visits: Principal Interaction (v1)' section with payload shape, 7 questions across 5 sections, validation rules (lenient/strict), no teacher selection, config/form file references",
-        "In `CLAUDE.md`: update visit completion rule from 3 to 4 required types, add `principal_interaction` to the list",
-        "In `CLAUDE.md`: add new test files to inventory (`principal-interaction.test.ts`, `PrincipalInteractionForm.test.tsx`), remove `principal_meeting` references",
-        "In `docs/ai/project-context.md`: add Principal Interaction subsection under section 3.5 (PM Visits)",
-        "In `docs/ai/project-context.md`: update action type counts (3 enabled -> 4, 7 disabled -> 6), update picker/card/completion descriptions",
-        "In `docs/ai/project-context.md`: add `PrincipalInteractionForm.tsx` and `principal-interaction.ts` to component/helper lists",
-        "No remaining `principal_meeting` references in either documentation file"
+        "`src/components/visits/IndividualStudentDiscussionForm.test.tsx` created with ~18 tests following `src/components/visits/IndividualAFTeacherInteractionForm.test.tsx` pattern",
+        "Covers: grade filter, student fetch, loading/error states, add/remove students, accordion, per-student questions/remarks, progress bar, grade badge, disabled mode",
+        "Uses `vi.stubGlobal('fetch', ...)` for API mocking",
+        "Unit tests pass (`npm run test`)"
       ],
       "priority": 11,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-012",
+      "title": "Wire into ActionDetailForm (form rendering, sanitize, bootstrap)",
+      "description": "As a developer, I need to integrate both student interaction forms into the existing ActionDetailForm dispatcher so they render for the correct action types with proper data sanitization.",
+      "acceptanceCriteria": [
+        "Add imports for both form components and config modules to `src/components/visits/ActionDetailForm.tsx`",
+        "Add `GROUP_STUDENT_DISCUSSION_ACTION_TYPE` and `INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE` constants + add both to `SAVE_BEFORE_END_TYPES` set",
+        "Replace generic text-field configs (lines 103-144) in `ACTION_FORM_CONFIGS` with custom form configs (empty `fields`, title/description only)",
+        "`sanitizeGroupStudentDiscussionPayload()` strips unknown keys, normalizes grade + questions (copy principal interaction pattern + grade handling)",
+        "`sanitizeIndividualStudentDiscussionPayload()` strips unknown keys, normalizes students array with per-student grade + questions (copy individual teacher pattern, remove attendance)",
+        "Bootstrap functions return safe defaults for null/non-object data: `{ grade: null, questions: {} }` and `{ students: [] }`",
+        "`normalizeFormDataForAction` dispatches to correct bootstrap function for both types before generic fallback",
+        "`sanitizePatchData` dispatches to correct sanitize function for both types before generic fallback",
+        "Form renderer JSX: group form gets `data/setData/disabled`, individual form also gets `schoolCode`",
+        "Individual student end error message is specific and helpful",
+        "Unit tests pass (`npm run test`)",
+        "Build passes (`npm run build`)",
+        "Verify in browser using agent-browser"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Wire into ActionPointList (card stats)",
+      "description": "As a PM, I want to see summary stats on action cards for student interactions so I can quickly see progress without opening each action.",
+      "acceptanceCriteria": [
+        "Import `GROUP_STUDENT_DISCUSSION_CONFIG` in `src/components/visits/ActionPointList.tsx`",
+        "`getGroupStudentDiscussionStats(data)` returns `{ grade, answeredCount, totalQuestions }` or null for empty/missing data",
+        "`getIndividualStudentDiscussionStats(data)` returns `{ studentCount }` or null for empty/missing data",
+        "Card rendering shows grade + answered progress (e.g. '2/4 (50%)') for group_student_discussion type",
+        "Card rendering shows student count (e.g. 'Students: 2') for individual_student_discussion type",
+        "Unit tests pass (`npm run test`)",
+        "Build passes (`npm run build`)"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Enable in ActionTypePickerModal",
+      "description": "As a PM, I want to see Student Interaction and Individual Student Interaction as selectable options when adding a new action to a visit.",
+      "acceptanceCriteria": [
+        "Add `group_student_discussion` and `individual_student_discussion` to the `enabled` condition in `src/components/visits/ActionTypePickerModal.tsx` (line 47)",
+        "6 total enabled types, 4 disabled types in the picker modal",
+        "Unit tests pass (`npm run test`)",
+        "Build passes (`npm run build`)"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Update display labels in visit-actions",
+      "description": "As a developer, I need to update the display labels for the student action types to match the product naming convention.",
+      "acceptanceCriteria": [
+        "In `src/lib/visit-actions.ts`: change `group_student_discussion` label from 'Group Student Discussion' to 'Student Interaction'",
+        "In `src/lib/visit-actions.ts`: change `individual_student_discussion` label from 'Individual Student Discussion' to 'Individual Student Interaction'",
+        "Update label assertions in `src/lib/visit-actions.test.ts` for new labels",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "PATCH route validation for both student types",
+      "description": "As a developer, I need the PATCH action route to validate student interaction data using the correct validation functions based on action status.",
+      "acceptanceCriteria": [
+        "Import validation functions from `@/lib/group-student-discussion` and `@/lib/individual-student-discussion` in `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`",
+        "Add validation blocks after existing principal_interaction block: `in_progress` actions use lenient validation (save), `completed` actions use strict validation",
+        "Returns 422 with descriptive errors when validation fails for either type",
+        "Existing action types still work correctly (no regression)",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "END route validation for both student types",
+      "description": "As a developer, I need the END action route to validate student interaction data using strict validation before allowing an action to be completed.",
+      "acceptanceCriteria": [
+        "Import strict validation functions in `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`",
+        "Add `groupStudentDiscussionValidationError()` and `individualStudentDiscussionValidationError()` functions (copy `principalInteractionValidationError` pattern)",
+        "Invocations added in both main path and concurrent fallback path",
+        "END validates `group_student_discussion` strictly (all 4 questions + valid grade)",
+        "END validates `individual_student_discussion` strictly (>= 1 student, all questions answered)",
+        "No 'all students recorded' DB check (unlike teacher END)",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Visit completion requires 6 action types",
+      "description": "As a developer, I need the visit completion route to require all 6 action types before allowing a visit to be marked as completed.",
+      "acceptanceCriteria": [
+        "Add two new sequential checks in `src/app/api/pm/visits/[id]/complete/route.ts` after principal_interaction check, before UPDATE query",
+        "Check 1: At least one completed `group_student_discussion` action exists — 422 if missing with error 'At least one completed Student Interaction is required to complete visit'",
+        "Check 2: At least one completed `individual_student_discussion` action exists — 422 if missing with error 'At least one completed Individual Student Interaction is required to complete visit'",
+        "Short-circuit order: classroom -> AF team -> individual teacher -> principal -> group student -> individual student",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Unit tests for PATCH, END, and COMPLETE route changes",
+      "description": "As a developer, I need to update existing route tests and add new tests covering validation of both student interaction types across PATCH, END, and COMPLETE routes.",
+      "acceptanceCriteria": [
+        "PATCH route tests (`src/app/api/pm/visits/[id]/actions/[actionId]/route.test.ts`): +7 new tests for both student types (lenient accepts, strict rejects, valid complete)",
+        "END route tests (`src/app/api/pm/visits/[id]/actions/[actionId]/end/route.test.ts`): +6 new tests for both types (incomplete rejected, complete succeeds, concurrent path)",
+        "COMPLETE route tests (`src/app/api/pm/visits/[id]/complete/route.test.ts`): +3 new tests (missing group_student rejects, missing individual_student rejects, all 6 types pass)",
+        "CRITICAL: Existing 'all pass' and short-circuit tests in complete route have mock chains extended with 2 extra `.mockResolvedValueOnce()` calls (7->9 total queries)",
+        "No regressions in existing tests",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Unit tests for ActionTypePickerModal and ActionPointList changes",
+      "description": "As a developer, I need to update existing component tests to cover the new enabled action types and card stats.",
+      "acceptanceCriteria": [
+        "ActionTypePickerModal tests (`src/components/visits/ActionTypePickerModal.test.tsx`): +2 tests for both student types enabled/selectable; update existing 'other types disabled' test to expect 4 disabled (was 6)",
+        "ActionPointList tests (`src/components/visits/ActionPointList.test.tsx`): +8 tests for stats functions (partial/complete/null data) and card rendering for both types",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Unit tests for ActionDetailForm changes",
+      "description": "As a developer, I need to update the action detail page tests to cover form renderer dispatch, sanitize, and bootstrap for both student interaction types.",
+      "acceptanceCriteria": [
+        "Action detail page tests (`src/app/visits/[id]/actions/[actionId]/page.test.tsx`): +4 tests for form dispatch, bootstrap null->safe default, save-before-end flow for both types",
+        "Form renderer dispatches correct component for `group_student_discussion` and `individual_student_discussion`",
+        "Unit tests pass (`npm run test`)"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "E2E test seed data and builder functions",
+      "description": "As a developer, I need to update E2E test helpers with seed data builders for both student interaction types so existing visit completion tests continue to pass with 6 required types.",
+      "acceptanceCriteria": [
+        "`buildCompleteGroupStudentDiscussionData(grade?: number)` added to `e2e/helpers/db.ts` — returns `{ grade: 11, questions: { gc_interacted: { answer: true }, gc_program_updates: { answer: true }, gc_direction: { answer: true }, gc_concerns: { answer: true } } }`",
+        "`buildCompleteIndividualStudentDiscussionData()` added to `e2e/helpers/db.ts` — returns `{ students: [{ id: 1, name: 'Test Student', grade: 11, questions: { oh_teaching_concern: { answer: true }, oh_additional_support: { answer: false } } }] }`",
+        "Existing visit completion E2E tests in `e2e/tests/visits.spec.ts` updated to seed all 6 action types (was 4)",
+        "E2E tests pass (`npm run test:e2e`)"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "E2E form fill tests",
+      "description": "As a developer, I need E2E tests that exercise the student interaction forms end-to-end through the browser to ensure the full flow works.",
+      "acceptanceCriteria": [
+        "`fillGroupStudentDiscussionForm(page)` helper added: select grade 11, click Yes on all 4 questions, end action",
+        "`fillIndividualStudentDiscussionForm(page)` helper added: select grade 11, select a student from dropdown, answer 2 questions, end action",
+        "New E2E test: creates both student action types via UI, fills forms, ends actions, verifies they appear as completed on visit detail page",
+        "E2E tests pass (`npm run test:e2e`)"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Documentation updates",
+      "description": "As a developer, I need to update project documentation to reflect the new student interaction action types.",
+      "acceptanceCriteria": [
+        "`CLAUDE.md` updated with 'PM Visits: Student Interaction (v1)' section with config, validation, and form details",
+        "`CLAUDE.md` updated with 'PM Visits: Individual Student Interaction (v1)' section",
+        "`CLAUDE.md` 'PM Visits: Visit Completion Rule' updated to mention 6 required types (was 4)",
+        "`CLAUDE.md` test file list and test counts updated",
+        "`docs/ai/project-context.md` updated with new subsections under section 3.5, students API in section 6, new files in key components/helpers",
+        "No stale references to '4 required types' remain in either file"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
       "title": "Review changes and document findings",
       "description": "As a developer, I want to review all changes made during this feature implementation to ensure nothing was missed and document the results.",
       "acceptanceCriteria": [
-        "Use explore agents to understand the current state of all modified and new files",
-        "Review git diff to see all changes made across the branch",
-        "Verify TypeScript compiles cleanly (`npx tsc --noEmit`)",
-        "Verify all unit tests pass (`npm run test`)",
-        "Verify no remaining `principal_meeting` references in source or test files (`grep -r 'principal_meeting' src/ e2e/` returns empty)",
-        "Create `ralph/principal-interaction-review.txt` with concise findings (under 50 lines): what was done, files changed, test counts, any concerns or recommendations"
+        "Use explore agents to understand the current state of modified files",
+        "Review git diff to see all changes made",
+        "Verify no unintended side effects or missing pieces",
+        "Run `npm run test` — all unit tests pass",
+        "Run `npm run build` — TypeScript compiles cleanly",
+        "Run `npm run lint` — no new lint errors",
+        "Create `ralph/student-interaction-review.txt` with concise findings (under 50 lines)",
+        "Review file summarizes: what was done, files changed, any concerns or recommendations"
       ],
-      "priority": 12,
-      "passes": true,
-      "notes": "E2E tests (`npm run test:e2e`) require a local Postgres DB with dump loaded — skip if not available, note in review file."
+      "priority": 25,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
