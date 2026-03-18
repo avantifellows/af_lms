@@ -115,3 +115,16 @@ Session: 30b369dc-8852-466d-8417-789bf52edf2d
   - Grade filter uses `($2::INT IS NULL OR gr.number = $2)` pattern for optional filtering in a single query
   - Dropout exclusion: `(s.status IS NULL OR s.status != 'dropout')` handles both null status (no student record) and non-dropout students
 ---
+
+## 2026-03-18 14:10 - US-007
+Session: 39183ffa-7cdc-4274-91be-cc95864ea972
+- Created `src/app/api/pm/students/route.test.ts` with 10 tests following teachers route test pattern
+- Files changed: `src/app/api/pm/students/route.test.ts` (new, 166 lines)
+- All 1488 tests pass across 87 files (no regressions)
+- **Learnings for future iterations:**
+  - Followed `src/app/api/pm/teachers/route.test.ts` pattern closely, adapted for students route differences
+  - Key difference from teachers: school lookup returns `{id, region}` (teachers only `{region}`), and students route returns 404 for missing school (teachers pass null region)
+  - Students route uses `school.id` (not `school_code`) in the final query, so mock chain asserts `[10, null]` or `[10, 11]` for the students query params
+  - Grade validation has two error paths: NaN (e.g. "abc") and non-positive integer (e.g. "0") — both return same error message
+  - Used `URL` + `searchParams.set()` for building request URLs (cleaner than string interpolation for optional params)
+---
