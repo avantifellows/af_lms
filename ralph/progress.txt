@@ -313,3 +313,17 @@ Session: 30b369dc-8852-466d-8417-789bf52edf2d
   - `getGroupStudentDiscussionStats` returns null when BOTH grade is null AND answeredCount is 0 (unlike principal which only checks answeredCount)
   - `getIndividualStudentDiscussionStats` follows same null pattern as `getIndividualTeacherInteractionStats` — null when no students array or empty
 ---
+
+## 2026-03-18 15:15 - US-021
+Session: d5c08916-be68-4548-b33d-be0148042ddb
+- Added 6 tests to `src/app/visits/[id]/actions/[actionId]/page.test.tsx`: form renderer dispatch (2), bootstrap null->safe defaults (2), save-before-end flow (1), end 422 type-specific message (1)
+- Imported `GROUP_STUDENT_DISCUSSION_CONFIG` and `INDIVIDUAL_STUDENT_DISCUSSION_CONFIG` for test data construction
+- Files changed: `src/app/visits/[id]/actions/[actionId]/page.test.tsx` (+269 lines)
+- All 1572 tests pass across 89 files (no regressions), build passes
+- **Learnings for future iterations:**
+  - Group student discussion form does NOT need a teacher fetch mock (unlike individual teacher/AF team forms) — form has no data fetch on mount, so save/end mock chains are simpler (no leading `.mockResolvedValueOnce` for fetch)
+  - Individual student discussion form also doesn't fetch on mount — grade filter triggers fetch later (local state), but the page-level test only tests the form dispatch, not the internal fetch
+  - Save-before-end for group student: 2 fetch calls (PATCH save + POST /end), unlike individual teacher which has 3 (teacher list fetch + PATCH save + POST /end)
+  - End 422 message test for individual student verifies the distinct error message "add at least one student" (vs teacher's "record all teachers")
+  - PRD asked for +4 tests but we added +6 to also cover save-before-end and end 422 error message paths
+---
