@@ -12,7 +12,9 @@ import {
   seedVisitAction,
 } from "../helpers/db";
 import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individual-af-teacher-interaction";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
 import type { Page } from "@playwright/test";
 import type { Pool } from "pg";
 
@@ -119,6 +121,47 @@ async function fillAllIndividualTeachers(page: Page) {
   }
 
   await expect(page.getByTestId("all-teachers-recorded")).toBeVisible();
+}
+
+async function fillGroupStudentDiscussionForm(page: Page) {
+  // Select grade 11
+  const gradeSelect = page.getByTestId("group-student-grade-select");
+  await expect(gradeSelect).toBeVisible();
+  await gradeSelect.selectOption("11");
+
+  // Answer all 4 questions with Yes
+  for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    await page.getByTestId(`group-student-${key}-yes`).check();
+  }
+
+  await expect(page.getByTestId("group-student-discussion-progress")).toContainText("Answered: 4/4");
+}
+
+async function fillIndividualStudentDiscussionForm(page: Page) {
+  // Select grade 11 from the grade filter
+  const gradeFilter = page.getByTestId("student-grade-filter");
+  await expect(gradeFilter).toBeVisible();
+  await gradeFilter.selectOption("11");
+
+  // Wait for students to load and select the first available student
+  const addSelect = page.getByTestId("add-student-select");
+  await expect(addSelect).toBeVisible({ timeout: 10_000 });
+  const options = addSelect.locator("option:not([disabled])");
+  await expect(options.first()).toBeAttached({ timeout: 10_000 });
+  await addSelect.selectOption({ index: 1 });
+
+  // The new student section should auto-expand
+  const studentSections = page.locator('[data-testid^="student-section-"]');
+  await expect(studentSections).toHaveCount(1);
+
+  // Get the student ID from the section's data-testid
+  const sectionTestId = await studentSections.first().getAttribute("data-testid");
+  const studentId = sectionTestId!.replace("student-section-", "");
+
+  // Answer all 2 questions with Yes
+  for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    await page.getByTestId(`student-${studentId}-${key}-yes`).check();
+  }
 }
 
 test.beforeAll(async () => {
@@ -1156,5 +1199,135 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(
       section.locator('input[type="radio"]')
     ).toHaveCount(0);
+  });
+
+  test("pm-creates-fills-and-ends-both-student-interaction-types", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+
+    // ─── Group Student Discussion (Student Interaction) ───
+
+    // Add via picker
+    await pmPage.getByRole("button", { name: "Add Action Point" }).click();
+    const dialog1 = pmPage.getByRole("dialog");
+    await dialog1.getByLabel("Student Interaction").click();
+    await dialog1.getByRole("button", { name: "Add" }).click();
+
+    // Start the action
+    const groupCard = pmPage.locator('[data-action-type="group_student_discussion"]').first();
+    await expect(groupCard).toBeVisible();
+    await groupCard.getByRole("button", { name: "Start" }).click();
+    await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
+    const groupActionId = pmPage.url().split("/actions/")[1]!;
+
+    // Fill the form
+    await fillGroupStudentDiscussionForm(pmPage);
+
+    // Track save-before-end request order
+    const groupRequestOrder: string[] = [];
+    pmPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PATCH" && url.pathname.includes(`/actions/${groupActionId}`)) {
+        groupRequestOrder.push("patch");
+      }
+      if (request.method() === "POST" && url.pathname.includes(`/actions/${groupActionId}/end`)) {
+        groupRequestOrder.push("end");
+      }
+    });
+
+    // End the action
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+    expect(groupRequestOrder).toEqual(["patch", "end"]);
+
+    // DB assertion
+    const groupRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
+      [groupActionId]
+    );
+    const groupRow = groupRows.rows[0];
+    expect(groupRow?.status).toBe("completed");
+    expect(groupRow?.data?.grade).toBe(11);
+    const groupQuestions = groupRow?.data?.questions as Record<string, unknown>;
+    expect(Object.keys(groupQuestions)).toHaveLength(4);
+    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+      expect((groupQuestions[key] as Record<string, unknown>)?.answer).toBe(true);
+    }
+
+    // Navigate back to visit detail
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
+
+    // Verify group action card shows completed stats
+    const refreshedGroupCard = pmPage.getByTestId(`action-card-${groupActionId}`);
+    await expect(
+      refreshedGroupCard.getByTestId(`group-student-stats-${groupActionId}`)
+    ).toContainText("4/4 (100%)");
+
+    // ─── Individual Student Discussion (Individual Student Interaction) ───
+
+    // Add via picker
+    await pmPage.getByRole("button", { name: "Add Action Point" }).click();
+    const dialog2 = pmPage.getByRole("dialog");
+    await dialog2.getByLabel("Individual Student Interaction").click();
+    await dialog2.getByRole("button", { name: "Add" }).click();
+
+    // Start the action
+    const individualCard = pmPage.locator('[data-action-type="individual_student_discussion"]').first();
+    await expect(individualCard).toBeVisible();
+    await individualCard.getByRole("button", { name: "Start" }).click();
+    await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
+    const individualActionId = pmPage.url().split("/actions/")[1]!;
+
+    // Fill the form
+    await fillIndividualStudentDiscussionForm(pmPage);
+
+    // Track save-before-end request order
+    const individualRequestOrder: string[] = [];
+    pmPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PATCH" && url.pathname.includes(`/actions/${individualActionId}`)) {
+        individualRequestOrder.push("patch");
+      }
+      if (request.method() === "POST" && url.pathname.includes(`/actions/${individualActionId}/end`)) {
+        individualRequestOrder.push("end");
+      }
+    });
+
+    // End the action
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+    expect(individualRequestOrder).toEqual(["patch", "end"]);
+
+    // DB assertion
+    const individualRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
+      [individualActionId]
+    );
+    const individualRow = individualRows.rows[0];
+    expect(individualRow?.status).toBe("completed");
+    const students = individualRow?.data?.students as Array<Record<string, unknown>>;
+    expect(Array.isArray(students)).toBe(true);
+    expect(students.length).toBeGreaterThanOrEqual(1);
+    expect(students[0]?.grade).toBe(11);
+
+    // Navigate back and verify both completed action cards visible
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
+
+    const refreshedIndividualCard = pmPage.getByTestId(`action-card-${individualActionId}`);
+    await expect(
+      refreshedIndividualCard.getByTestId(`individual-student-stats-${individualActionId}`)
+    ).toBeVisible();
+
+    // Both action types show as completed on the visit detail page
+    await expect(refreshedGroupCard.getByRole("link", { name: "View Details" })).toBeVisible();
+    await expect(refreshedIndividualCard.getByRole("link", { name: "View Details" })).toBeVisible();
   });
 });
