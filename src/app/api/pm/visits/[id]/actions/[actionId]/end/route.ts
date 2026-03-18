@@ -5,8 +5,10 @@ import { validateAFTeamInteractionComplete } from "@/lib/af-team-interaction";
 import { authOptions } from "@/lib/auth";
 import { validateClassroomObservationComplete } from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
-import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-interaction";
 import { validateGpsReading } from "@/lib/geo-validation";
+import { validateGroupStudentDiscussionComplete } from "@/lib/group-student-discussion";
+import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-interaction";
+import { validateIndividualStudentDiscussionComplete } from "@/lib/individual-student-discussion";
 import { validatePrincipalInteractionComplete } from "@/lib/principal-interaction";
 import {
   apiError,
@@ -128,6 +130,32 @@ function principalInteractionValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid principal interaction data", validation.errors);
 }
 
+function groupStudentDiscussionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "group_student_discussion") {
+    return null;
+  }
+
+  const validation = validateGroupStudentDiscussionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid group student discussion data", validation.errors);
+}
+
+function individualStudentDiscussionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "individual_student_discussion") {
+    return null;
+  }
+
+  const validation = validateIndividualStudentDiscussionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid individual student discussion data", validation.errors);
+}
+
 async function allTeachersRecordedError(
   action: VisitActionRow,
   schoolCode: string,
@@ -238,6 +266,16 @@ export async function POST(
     return invalidPrincipalInteractionData;
   }
 
+  const invalidGroupStudentData = groupStudentDiscussionValidationError(existingAction);
+  if (invalidGroupStudentData) {
+    return invalidGroupStudentData;
+  }
+
+  const invalidIndividualStudentData = individualStudentDiscussionValidationError(existingAction);
+  if (invalidIndividualStudentData) {
+    return invalidIndividualStudentData;
+  }
+
   const missingTeachersError = await allTeachersRecordedError(
     existingAction,
     visit.school_code,
@@ -301,6 +339,16 @@ export async function POST(
   const invalidCurrentPrincipalInteractionData = principalInteractionValidationError(current);
   if (invalidCurrentPrincipalInteractionData) {
     return invalidCurrentPrincipalInteractionData;
+  }
+
+  const invalidCurrentGroupStudentData = groupStudentDiscussionValidationError(current);
+  if (invalidCurrentGroupStudentData) {
+    return invalidCurrentGroupStudentData;
+  }
+
+  const invalidCurrentIndividualStudentData = individualStudentDiscussionValidationError(current);
+  if (invalidCurrentIndividualStudentData) {
+    return invalidCurrentIndividualStudentData;
   }
 
   const currentMissingTeachersError = await allTeachersRecordedError(
