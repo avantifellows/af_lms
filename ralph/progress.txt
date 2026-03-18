@@ -327,3 +327,20 @@ Session: d5c08916-be68-4548-b33d-be0148042ddb
   - End 422 message test for individual student verifies the distinct error message "add at least one student" (vs teacher's "record all teachers")
   - PRD asked for +4 tests but we added +6 to also cover save-before-end and end 422 error message paths
 ---
+
+## 2026-03-18 15:20 - US-022
+Session: 3263b5ad-b8e2-4a50-bada-6dabd592429b
+- Added `buildCompleteGroupStudentDiscussionData(grade?)` and `buildCompleteIndividualStudentDiscussionData()` to `e2e/helpers/db.ts`
+- Updated 4 E2E tests in `e2e/tests/visits.spec.ts` to seed all 6 required action types (was 4):
+  - `complete-visit-success`: +2 student action seeds
+  - `moderate-gps-warning-visible`: +2 student action seeds
+  - `visit-completes-with-all-four-required-action-types` → renamed to `visit-completes-with-all-six-required-action-types` + 2 new seeds + 2 new card assertions
+  - `admin-can-complete-other-pm-visit-with-same-rules`: +2 student action seeds
+- Files changed: `e2e/helpers/db.ts` (+34 lines), `e2e/tests/visits.spec.ts` (+47 lines, -2 lines)
+- All 1572 unit tests pass, build passes
+- **Learnings for future iterations:**
+  - Builder functions follow exact same pattern as existing builders (iterate config's `allQuestionKeys`, set all answers to `true`)
+  - 4 E2E tests need updating when adding new required action types: any test that seeds completed actions and expects `Complete Visit` to succeed
+  - Tests that short-circuit before the new checks (e.g., missing classroom observation) don't need updating
+  - Renamed test from "four" to "six" to match new action type count
+---
