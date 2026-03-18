@@ -511,7 +511,7 @@ Key details:
 - Auth is injected via NextAuth JWT cookies — no real Google login needed
 - Uses `.next-test/` build dir so it coexists with a running dev server
 - Single worker, sequential execution (shared test DB)
-- 39 tests across 5 spec files (as of 2026-03-09)
+- 40 tests across 5 spec files (as of 2026-03-10)
 - V8 coverage is collected automatically; `coverage/coverage-summary.json` is generated
 - Commit `coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
