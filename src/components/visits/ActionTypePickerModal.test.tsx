@@ -169,7 +169,7 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    const radio = screen.getByLabelText("Group Student Discussion");
+    const radio = screen.getByLabelText("Student Interaction");
     expect(radio).not.toBeDisabled();
   });
 
@@ -185,7 +185,7 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    await user.click(screen.getByLabelText("Group Student Discussion"));
+    await user.click(screen.getByLabelText("Student Interaction"));
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(onSubmit).toHaveBeenCalledWith("group_student_discussion");
@@ -200,7 +200,7 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    const radio = screen.getByLabelText("Individual Student Discussion");
+    const radio = screen.getByLabelText("Individual Student Interaction");
     expect(radio).not.toBeDisabled();
   });
 
@@ -216,7 +216,7 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    await user.click(screen.getByLabelText("Individual Student Discussion"));
+    await user.click(screen.getByLabelText("Individual Student Interaction"));
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(onSubmit).toHaveBeenCalledWith("individual_student_discussion");
