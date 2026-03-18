@@ -344,3 +344,20 @@ Session: 3263b5ad-b8e2-4a50-bada-6dabd592429b
   - Tests that short-circuit before the new checks (e.g., missing classroom observation) don't need updating
   - Renamed test from "four" to "six" to match new action type count
 ---
+
+## 2026-03-18 15:25 - US-023
+Session: e05f1d44-07c1-4dc8-8ad5-38ba2d652a2f
+- Added `fillGroupStudentDiscussionForm(page)` helper to `e2e/tests/visits.spec.ts`: selects grade 11, clicks Yes on all 4 questions, asserts progress 4/4
+- Added `fillIndividualStudentDiscussionForm(page)` helper: selects grade 11, waits for student list to load, selects first student, answers all 2 questions
+- Added new E2E test `pm-creates-fills-and-ends-both-student-interaction-types`: creates both action types via UI picker, fills and ends each, verifies DB data and card stats on visit detail
+- Imported `GROUP_STUDENT_DISCUSSION_CONFIG` and `INDIVIDUAL_STUDENT_DISCUSSION_CONFIG` for question key iteration in helpers
+- Files changed: `e2e/tests/visits.spec.ts` (+173 lines)
+- All 1572 unit tests pass, build passes
+- **Learnings for future iterations:**
+  - E2E form fill helpers follow exact same pattern as existing `fillAFTeamInteractionForm` and `fillIndividualTeacherInteractionForm` helpers
+  - Individual student form needs `timeout: 10_000` on student list assertions because it fetches from API on grade selection (async)
+  - Test uses `{ index: 1 }` to select first non-disabled option from student select (same pattern as teacher form)
+  - DB assertions verify: group action has `grade: 11` + 4 questions, individual action has `students` array with grade 11
+  - Card stats assertions: group shows `4/4 (100%)` via `group-student-stats-{id}`, individual shows via `individual-student-stats-{id}`
+  - Both forms use save-before-end pattern (PATCH then POST /end), verified via request tracking
+---
