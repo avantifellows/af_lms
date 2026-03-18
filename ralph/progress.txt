@@ -128,3 +128,17 @@ Session: 39183ffa-7cdc-4274-91be-cc95864ea972
   - Grade validation has two error paths: NaN (e.g. "abc") and non-positive integer (e.g. "0") — both return same error message
   - Used `URL` + `searchParams.set()` for building request URLs (cleaner than string interpolation for optional params)
 ---
+
+## 2026-03-18 14:12 - US-008
+Session: 8ec359a7-b81a-48db-ab39-3e8e350aa3bb
+- Created `src/components/visits/GroupStudentDiscussionForm.tsx` following PrincipalInteractionForm pattern with grade dropdown
+- Files changed: `src/components/visits/GroupStudentDiscussionForm.tsx` (new, 268 lines)
+- All 1488 tests pass across 87 files (no regressions), build passes
+- **Learnings for future iterations:**
+  - Copied PrincipalInteractionForm pattern exactly, added grade dropdown and grade-gated visibility
+  - Grade selection uses `VALID_GRADES.includes(data.grade as 11 | 12)` to type-check against the const tuple
+  - Questions/progress hidden until grade is selected OR existing question answers detected (handles pre-filled data from API)
+  - Section title is dynamic: `"General Check Grade {grade}"` — grade number appended to section title from config
+  - Radio names use `group-student-` prefix (not `principal-interaction-`) for unique form grouping
+  - `data-testid` uses `group-student-` prefix for all interactive elements
+---
