@@ -216,3 +216,15 @@ Session: 7cdd8c7a-7c65-4715-af8a-7419d53bcc07
   - Card rendering: group shows `Grade: N` + `X/4 (Y%)` progress; individual shows `Students: N`
   - `data-testid` patterns: `group-student-stats-{id}`, `individual-student-stats-{id}`
 ---
+
+## 2026-03-18 14:40 - US-014
+Session: 5deefbbb-97a3-4575-8877-c2f6a4245762
+- Enabled `group_student_discussion` and `individual_student_discussion` in ActionTypePickerModal enabled condition
+- Added 4 new tests (selectable + submit for each type), updated disabled count test from 6 to 4
+- Files changed: `src/components/visits/ActionTypePickerModal.tsx` (1 line), `src/components/visits/ActionTypePickerModal.test.tsx` (+62 lines)
+- All 1534 tests pass across 89 files (no regressions), build passes
+- **Learnings for future iterations:**
+  - Simple one-line change: just add `|| actionType === "group_student_discussion" || actionType === "individual_student_discussion"` to the enabled condition on line 47
+  - Test pattern for new enabled types: 2 tests per type (radio not disabled + submit flow), plus update disabled count test
+  - Now 6 enabled types, 4 disabled types in the picker modal
+---
