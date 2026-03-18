@@ -253,3 +253,18 @@ Session: e25e7b0e-cf7d-4fbb-a6f6-b31ed0c0ea8b
   - Error messages use descriptive type name: "Invalid group student discussion data" / "Invalid individual student discussion data"
   - Imports added alphabetically between existing imports
 ---
+
+## 2026-03-18 14:55 - US-017
+Session: d10334b9-858a-4119-a4bd-43cee06822c0
+- Added END route validation for `group_student_discussion` and `individual_student_discussion` action types
+- Added `groupStudentDiscussionValidationError()` and `individualStudentDiscussionValidationError()` functions
+- Invocations added in both main path and concurrent fallback path
+- Imported strict validation functions from both student libs
+- Files changed: `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts` (modified, +49 lines)
+- All 1534 tests pass across 89 files (no regressions)
+- **Learnings for future iterations:**
+  - Exact same pattern as `principalInteractionValidationError()` — type check → validate strict → return apiError 422 if invalid
+  - Both invocations placed after principal interaction check, before `allTeachersRecordedError` (consistent ordering)
+  - No 'all students recorded' DB check needed (unlike teacher END which checks `user_permission` table)
+  - Concurrent fallback path mirrors main path exactly — same validation functions, same ordering
+---
