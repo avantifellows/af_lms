@@ -268,3 +268,20 @@ Session: d10334b9-858a-4119-a4bd-43cee06822c0
   - No 'all students recorded' DB check needed (unlike teacher END which checks `user_permission` table)
   - Concurrent fallback path mirrors main path exactly — same validation functions, same ordering
 ---
+
+## 2026-03-18 15:00 - US-018
+Session: 33b0c373-b18b-4905-9cc4-f434a5ca2908
+- Added two new sequential checks in visit completion route after principal_interaction check
+- Check 1: At least one completed `group_student_discussion` action required
+- Check 2: At least one completed `individual_student_discussion` action required
+- Updated 3 existing tests to extend mock chains with 2 extra `.mockResolvedValueOnce()` calls (7→9 total queries)
+- Renamed "all 4 action types" test to "all 6 action types"
+- Updated mock call index for UPDATE query assertion (calls[6] → calls[8])
+- Files changed: `src/app/api/pm/visits/[id]/complete/route.ts` (+34 lines), `src/app/api/pm/visits/[id]/complete/route.test.ts` (+10 lines)
+- All 1534 tests pass across 89 files (no regressions)
+- **Learnings for future iterations:**
+  - Exact same pattern as AF team/individual teacher/principal checks — query for completed action with LIMIT 1, 422 if empty
+  - Short-circuit order is now: classroom → AF team → individual teacher → principal → group student → individual student
+  - When adding new action type checks to complete route, ALL tests that reach the UPDATE query need their mock chains extended (3 tests in this case)
+  - Mock call index for the UPDATE query shifts by the number of new checks added (6→8 with 2 new checks)
+---
