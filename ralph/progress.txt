@@ -142,3 +142,17 @@ Session: 8ec359a7-b81a-48db-ab39-3e8e350aa3bb
   - Radio names use `group-student-` prefix (not `principal-interaction-`) for unique form grouping
   - `data-testid` uses `group-student-` prefix for all interactive elements
 ---
+
+## 2026-03-18 14:15 - US-009
+Session: a4e0338e-72ff-44a4-ba88-2b16004a3fb4
+- Created `src/components/visits/GroupStudentDiscussionForm.test.tsx` with 19 tests following PrincipalInteractionForm.test.tsx pattern
+- Files changed: `src/components/visits/GroupStudentDiscussionForm.test.tsx` (new, 329 lines)
+- All 1507 tests pass across 88 files (no regressions)
+- **Learnings for future iterations:**
+  - Followed PrincipalInteractionForm.test.tsx pattern with added grade-specific tests
+  - Key difference: grade dropdown gating — questions/progress hidden until grade selected, so most tests need `initialData: { grade: 11 }` or a `selectOptions` call first
+  - Test for "shows questions when initialData has existing answers (no grade selected)" covers the `hasQuestionAnswers` fallback path (questions visible even without grade if answers exist)
+  - Section title assertion: `"General Check Grade 12"` — dynamic with selected grade
+  - Test IDs use `group-student-` prefix throughout (e.g., `group-student-gc_interacted-yes`)
+  - `buildCompleteData(grade, answer)` helper takes optional grade param (default 11) — used in disabled mode tests
+---
