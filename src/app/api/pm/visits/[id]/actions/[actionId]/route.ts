@@ -15,6 +15,14 @@ import {
   validateIndividualTeacherSave,
 } from "@/lib/individual-af-teacher-interaction";
 import {
+  validateGroupStudentDiscussionComplete,
+  validateGroupStudentDiscussionSave,
+} from "@/lib/group-student-discussion";
+import {
+  validateIndividualStudentDiscussionComplete,
+  validateIndividualStudentDiscussionSave,
+} from "@/lib/individual-student-discussion";
+import {
   validatePrincipalInteractionComplete,
   validatePrincipalInteractionSave,
 } from "@/lib/principal-interaction";
@@ -225,6 +233,28 @@ export async function PATCH(
 
     if (!validation.valid) {
       return apiError(422, "Invalid principal interaction data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "group_student_discussion") {
+    const validation =
+      action.status === "completed"
+        ? validateGroupStudentDiscussionComplete(data)
+        : validateGroupStudentDiscussionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid group student discussion data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "individual_student_discussion") {
+    const validation =
+      action.status === "completed"
+        ? validateIndividualStudentDiscussionComplete(data)
+        : validateIndividualStudentDiscussionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid individual student discussion data", validation.errors);
     }
   }
 
