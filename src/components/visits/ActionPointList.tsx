@@ -7,6 +7,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import Toast from "@/components/Toast";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import { getAccurateLocation } from "@/lib/geolocation";
@@ -279,6 +280,64 @@ export function getPrincipalInteractionStats(
   }
 
   return { answeredCount, totalQuestions };
+}
+
+export interface GroupStudentDiscussionStats {
+  grade: number | null;
+  answeredCount: number;
+  totalQuestions: number;
+}
+
+export function getGroupStudentDiscussionStats(
+  data: Record<string, unknown> | undefined
+): GroupStudentDiscussionStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const grade = typeof data.grade === "number" ? data.grade : null;
+
+  const questions = data.questions;
+  let answeredCount = 0;
+  if (questions && typeof questions === "object" && !Array.isArray(questions)) {
+    const questionsRecord = questions as Record<string, unknown>;
+    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+      const value = questionsRecord[key];
+      if (value && typeof value === "object" && "answer" in value) {
+        const answer = (value as { answer: unknown }).answer;
+        if (typeof answer === "boolean") {
+          answeredCount += 1;
+        }
+      }
+    }
+  }
+
+  const totalQuestions = GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length;
+
+  if (grade === null && answeredCount === 0) {
+    return null;
+  }
+
+  return { grade, answeredCount, totalQuestions };
+}
+
+export interface IndividualStudentDiscussionStats {
+  studentCount: number;
+}
+
+export function getIndividualStudentDiscussionStats(
+  data: Record<string, unknown> | undefined
+): IndividualStudentDiscussionStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const students = data.students;
+  if (!Array.isArray(students) || students.length === 0) {
+    return null;
+  }
+
+  return { studentCount: students.length };
 }
 
 export default function ActionPointList({
@@ -587,6 +646,43 @@ export default function ActionPointList({
                   <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`principal-interaction-stats-${action.id}`}>
                     <span className="font-mono text-text-secondary">
                       {stats.answeredCount}/{stats.totalQuestions} ({progressPercent}%)
+                    </span>
+                  </div>
+                );
+              })()}
+              {action.action_type === "group_student_discussion" && (() => {
+                const stats = getGroupStudentDiscussionStats(action.data);
+                if (!stats) {
+                  return null;
+                }
+
+                const progressPercent = stats.totalQuestions === 0
+                  ? 0
+                  : Math.round((stats.answeredCount / stats.totalQuestions) * 100);
+
+                return (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`group-student-stats-${action.id}`}>
+                    {stats.grade !== null && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Grade:</span> {stats.grade}
+                      </span>
+                    )}
+                    <span className="font-mono text-text-secondary">
+                      {stats.answeredCount}/{stats.totalQuestions} ({progressPercent}%)
+                    </span>
+                  </div>
+                );
+              })()}
+              {action.action_type === "individual_student_discussion" && (() => {
+                const stats = getIndividualStudentDiscussionStats(action.data);
+                if (!stats) {
+                  return null;
+                }
+
+                return (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`individual-student-stats-${action.id}`}>
+                    <span className="text-text-secondary">
+                      <span className="text-text-muted">Students:</span> {stats.studentCount}
                     </span>
                   </div>
                 );
