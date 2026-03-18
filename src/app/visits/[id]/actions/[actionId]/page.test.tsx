@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CURRENT_RUBRIC_VERSION } from "@/lib/classroom-observation-rubric";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
 
 const {
   mockGetServerSession,
@@ -1163,6 +1165,273 @@ describe("VisitActionDetailPage", () => {
 
     expect(screen.getByText("Missing teacher: Bob Smith")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
+  });
+
+  it("loads the Group Student Discussion renderer for group_student_discussion actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "group_student_discussion",
+          data: { grade: null, questions: {} },
+        }),
+      ]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Student Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-group_student_discussion")).toHaveLength(2);
+  });
+
+  it("bootstraps null group student discussion data to { grade: null, questions: {} }", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "group_student_discussion",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "group_student_discussion",
+              data: { grade: null, questions: {} },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ grade: null, questions: {} });
+  });
+
+  it("loads the Individual Student Discussion renderer for individual_student_discussion actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: { students: [] },
+        }),
+      ]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Individual Student Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-individual_student_discussion")).toHaveLength(2);
+  });
+
+  it("bootstraps null individual student discussion data to { students: [] }", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "individual_student_discussion",
+              data: { students: [] },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ students: [] });
+  });
+
+  it("auto-saves group student discussion data before calling /end", async () => {
+    setupPmAuth();
+    const groupStudentData = {
+      grade: 11,
+      questions: Object.fromEntries(
+        GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+      ),
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "group_student_discussion",
+          data: groupStudentData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "group_student_discussion",
+                data: groupStudentData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "group_student_discussion",
+                status: "completed",
+                ended_at: "2026-02-19T10:00:00.000Z",
+                data: groupStudentData,
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
+    });
+
+    const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+  });
+
+  it("shows individual student /end 422 guidance with type-specific message mentioning add at least one student", async () => {
+    setupPmAuth();
+    const individualStudentData = {
+      students: [
+        {
+          id: 1,
+          name: "Test Student",
+          grade: 11,
+          questions: Object.fromEntries(
+            INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+          ),
+        },
+      ],
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: individualStudentData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "individual_student_discussion",
+                data: individualStudentData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Validation failed",
+              details: ["Missing required answers"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Please complete all required fields and add at least one student before ending this interaction.")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Missing required answers")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
 
