@@ -101,3 +101,17 @@ Session: 63504e9a-e1e8-446d-b09d-837d3a5ce2fc
   - Student interface: `{ id, full_name, student_id, grade }` (teacher has `{ id, email, full_name }`)
   - Fallback chain: `full_name?.trim()` -> `student_id` -> `Student #${id}` (teacher uses `full_name || email`)
 ---
+
+## 2026-03-18 14:05 - US-006
+Session: 30b369dc-8852-466d-8417-789bf52edf2d
+- Created `src/app/api/pm/students/route.ts` with GET handler for `/api/pm/students?school_code=XXXXX&grade=11`
+- Files changed: `src/app/api/pm/students/route.ts` (new, 70 lines)
+- All 1478 tests pass across 86 files (no regressions)
+- **Learnings for future iterations:**
+  - Copied `src/app/api/pm/teachers/route.ts` auth pattern exactly (session → requireVisitsAccess → school_code parse → school lookup → canAccessVisitSchoolScope)
+  - Key difference from teachers: students need `school.id` (not just school_code) for the join chain, and the school query returns `id + region` (teachers only return `region`)
+  - Teachers route doesn't 404 on missing school (passes null region); students route returns 404 because `school.id` is required for the query
+  - Student query adapted from school page `getStudents()` — simplified to return only `id, full_name, student_id, grade` (no batch/program/status/dates)
+  - Grade filter uses `($2::INT IS NULL OR gr.number = $2)` pattern for optional filtering in a single query
+  - Dropout exclusion: `(s.status IS NULL OR s.status != 'dropout')` handles both null status (no student record) and non-dropout students
+---
