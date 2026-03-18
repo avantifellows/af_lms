@@ -381,7 +381,7 @@
         "No stale references to '4 required types' remain in either file"
       ],
       "priority": 24,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

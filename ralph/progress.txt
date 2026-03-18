@@ -361,3 +361,20 @@ Session: e05f1d44-07c1-4dc8-8ad5-38ba2d652a2f
   - Card stats assertions: group shows `4/4 (100%)` via `group-student-stats-{id}`, individual shows via `individual-student-stats-{id}`
   - Both forms use save-before-end pattern (PATCH then POST /end), verified via request tracking
 ---
+
+## 2026-03-18 15:30 - US-024
+Session: 0eda7240-4d49-4ba5-b423-895294bd730f
+- Updated `CLAUDE.md` with 'PM Visits: Student Interaction (v1)' and 'PM Visits: Individual Student Interaction (v1)' sections
+- Updated `CLAUDE.md` 'PM Visits: Visit Completion Rule' from 4 to 6 required action types
+- Updated `CLAUDE.md` test file counts from 83 files/1402 tests to 89 files/1572 tests, added 6 new test file entries
+- Updated `docs/ai/project-context.md` with Student Interaction and Individual Student Interaction subsections under §3.5
+- Updated `docs/ai/project-context.md` with students API in §6, new form components/helpers in key components section
+- Updated `docs/ai/project-context.md` completion rule from 4 to 6 types, action types enabled from 4 to 6, test counts updated
+- Verified no stale "4 required types" references remain in either file
+- Files changed: `CLAUDE.md`, `docs/ai/project-context.md`
+- All 1572 unit tests pass, build passes
+- **Learnings for future iterations:**
+  - When adding new action types, documentation updates touch both CLAUDE.md and docs/ai/project-context.md in parallel locations
+  - Stale references to check: completion rule count, enabled/disabled type counts, test file counts, action type picker description, action card stats description
+  - Grep for patterns like "all N action", "N required types", "N action types are enabled" to find all stale references
+---
