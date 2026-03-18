@@ -172,3 +172,19 @@ Session: 1a2cd1c1-0912-4b13-ac42-d76fbe04d78c
   - `data-testid` prefixes: `student-section-{id}`, `student-header-{id}`, `remove-student-{id}`, `add-student-select`, `student-grade-filter`
   - Student select dropdown only visible when grade is selected AND students loaded AND remaining students exist
 ---
+
+## 2026-03-18 14:25 - US-011
+Session: 4420fc11-2072-4565-8121-0eaf4356cb4f
+- Created `src/components/visits/IndividualStudentDiscussionForm.test.tsx` with 23 tests following IndividualAFTeacherInteractionForm.test.tsx pattern
+- Files changed: `src/components/visits/IndividualStudentDiscussionForm.test.tsx` (new, 493 lines)
+- All 1530 tests pass across 89 files (no regressions)
+- **Learnings for future iterations:**
+  - Adapted IndividualAFTeacherInteractionForm.test.tsx pattern: removed attendance tests, added grade filter tests
+  - Key difference from teacher test: student fetch happens on grade selection (not mount), so tests need `selectGrade(user, "11")` helper before asserting dropdown
+  - Grade filter is local state — no fetch until grade selected, so `mockFetch` should not be called before grade selection
+  - Loading state tested via never-resolving Promise (`mockFetch = vi.fn().mockReturnValue(new Promise(() => {}))`)
+  - No "all students recorded" message to test (unlike teacher form)
+  - Student entries use `grade` field (number) instead of `attendance` field (string enum)
+  - Progress is `X/2` (2 questions) not `X/13` (13 questions)
+  - Grade badge test: `student-grade-badge-{id}` testid with "Grade 11" text
+---
