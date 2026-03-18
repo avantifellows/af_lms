@@ -228,3 +228,15 @@ Session: 5deefbbb-97a3-4575-8877-c2f6a4245762
   - Test pattern for new enabled types: 2 tests per type (radio not disabled + submit flow), plus update disabled count test
   - Now 6 enabled types, 4 disabled types in the picker modal
 ---
+
+## 2026-03-18 14:45 - US-015
+Session: 5bcccb17-53cf-4756-b20b-ee061fc8f38b
+- Changed `group_student_discussion` label from "Group Student Discussion" to "Student Interaction" in `src/lib/visit-actions.ts`
+- Changed `individual_student_discussion` label from "Individual Student Discussion" to "Individual Student Interaction" in `src/lib/visit-actions.ts`
+- Updated label assertions in `src/components/visits/ActionTypePickerModal.test.tsx` (4 getByLabelText calls)
+- Files changed: `src/lib/visit-actions.ts`, `src/components/visits/ActionTypePickerModal.test.tsx`
+- All 1534 tests pass across 89 files (no regressions)
+- **Learnings for future iterations:**
+  - Labels in `ACTION_TYPES` map are used as radio button labels in ActionTypePickerModal — test assertions use `getByLabelText()` with these exact strings
+  - No other test files referenced the old labels — only ActionTypePickerModal.test.tsx needed updating
+---
