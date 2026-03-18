@@ -156,3 +156,19 @@ Session: a4e0338e-72ff-44a4-ba88-2b16004a3fb4
   - Test IDs use `group-student-` prefix throughout (e.g., `group-student-gc_interacted-yes`)
   - `buildCompleteData(grade, answer)` helper takes optional grade param (default 11) — used in disabled mode tests
 ---
+
+## 2026-03-18 14:20 - US-010
+Session: 1a2cd1c1-0912-4b13-ac42-d76fbe04d78c
+- Created `src/components/visits/IndividualStudentDiscussionForm.tsx` following IndividualAFTeacherInteractionForm pattern
+- Files changed: `src/components/visits/IndividualStudentDiscussionForm.tsx` (new, 432 lines)
+- All 1507 tests pass across 88 files (no regressions), build passes
+- **Learnings for future iterations:**
+  - Adapted IndividualAFTeacherInteractionForm: removed attendance field/radios/badges/gating, added grade filter dropdown + re-fetch on grade change
+  - Grade filter is local state (`selectedGrade`), not part of `data` — triggers re-fetch of students from `/api/pm/students?school_code=X&grade=N`
+  - `studentsLoading` starts as `false` (not `true` like teacher form) because no fetch happens until grade is selected
+  - Student entries have `grade` field (from selectedGrade at time of add) instead of `attendance` field
+  - Grade badge uses hardcoded blue colors (`bg-blue-100 text-blue-800`) instead of attendance-specific badge classes
+  - No `allStudentsRecorded` check — student count varies by PM discretion
+  - `data-testid` prefixes: `student-section-{id}`, `student-header-{id}`, `remove-student-{id}`, `add-student-select`, `student-grade-filter`
+  - Student select dropdown only visible when grade is selected AND students loaded AND remaining students exist
+---
