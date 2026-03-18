@@ -2,6 +2,8 @@ import { test, expect } from "../fixtures/auth";
 import {
   buildCompleteAFTeamInteractionData,
   buildCompleteClassroomObservationData,
+  buildCompleteGroupStudentDiscussionData,
+  buildCompleteIndividualStudentDiscussionData,
   buildCompleteIndividualTeacherInteractionData,
   buildCompletePrincipalInteractionData,
   getTestPool,
@@ -377,6 +379,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "completed",
       data: buildCompletePrincipalInteractionData(),
     });
+    await seedVisitAction(pool, visitId, {
+      actionType: "group_student_discussion",
+      status: "completed",
+      data: buildCompleteGroupStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: buildCompleteIndividualStudentDiscussionData(),
+    });
 
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
@@ -412,6 +424,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       actionType: "principal_interaction",
       status: "completed",
       data: buildCompletePrincipalInteractionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "group_student_discussion",
+      status: "completed",
+      data: buildCompleteGroupStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: buildCompleteIndividualStudentDiscussionData(),
     });
 
     const startResponse = await pmPage.request.post(
@@ -540,6 +562,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       actionType: "individual_af_teacher_interaction",
       status: "completed",
       data: buildCompleteIndividualTeacherInteractionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "group_student_discussion",
+      status: "completed",
+      data: buildCompleteGroupStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: buildCompleteIndividualStudentDiscussionData(),
     });
 
     await adminPage.reload();
@@ -771,7 +803,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     }
   });
 
-  test("visit-completes-with-all-four-required-action-types", async ({ pmPage }) => {
+  test("visit-completes-with-all-six-required-action-types", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
@@ -793,15 +825,27 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "completed",
       data: buildCompletePrincipalInteractionData(),
     });
+    await seedVisitAction(pool, visitId, {
+      actionType: "group_student_discussion",
+      status: "completed",
+      data: buildCompleteGroupStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: buildCompleteIndividualStudentDiscussionData(),
+    });
 
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
 
-    // Assert all 4 action cards visible
+    // Assert all 6 action cards visible
     await expect(pmPage.locator('[data-action-type="classroom_observation"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="af_team_interaction"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="individual_af_teacher_interaction"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="principal_interaction"]').first()).toBeVisible();
+    await expect(pmPage.locator('[data-action-type="group_student_discussion"]').first()).toBeVisible();
+    await expect(pmPage.locator('[data-action-type="individual_student_discussion"]').first()).toBeVisible();
 
     await pmPage.getByRole("button", { name: "Complete Visit" }).click();
     await expect(pmPage.getByText("This visit is completed and read-only.")).toBeVisible();

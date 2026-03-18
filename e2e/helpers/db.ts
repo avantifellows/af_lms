@@ -10,6 +10,8 @@ import {
 } from "../../src/lib/classroom-observation-rubric";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individual-af-teacher-interaction";
 import { PRINCIPAL_INTERACTION_CONFIG } from "../../src/lib/principal-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -266,6 +268,39 @@ export function buildCompletePrincipalInteractionData(): Record<string, unknown>
     questions[key] = { answer: true };
   }
   return { questions };
+}
+
+/**
+ * Canonical strict-valid group student discussion payload for completed action fixtures.
+ */
+export function buildCompleteGroupStudentDiscussionData(
+  grade: number = 11
+): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return { grade, questions };
+}
+
+/**
+ * Canonical strict-valid individual student discussion payload for completed action fixtures.
+ */
+export function buildCompleteIndividualStudentDiscussionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return {
+    students: [
+      {
+        id: 1,
+        name: "Test Student",
+        grade: 11,
+        questions,
+      },
+    ],
+  };
 }
 
 /**
