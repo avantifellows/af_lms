@@ -61,3 +61,17 @@ Session: 30b369dc-8852-466d-8417-789bf52edf2d
   - Complete validation tests must include grade in payload (unlike principal interaction which has no grade)
   - buildCompletePayload() helper takes optional grade param for testing both grade 11 and 12 paths
 ---
+
+## 2026-03-18 13:56 - US-003
+Session: 30b369dc-8852-466d-8417-789bf52edf2d
+- Created `src/lib/individual-student-discussion.ts` with config, types, VALID_GRADES, and both validation functions
+- Files changed: `src/lib/individual-student-discussion.ts` (new, 237 lines)
+- All 1438 existing tests pass (no regressions)
+- **Learnings for future iterations:**
+  - Followed `src/lib/individual-af-teacher-interaction.ts` pattern closely — removed attendance gating, added grade per student
+  - Key structural difference from teacher interaction: no `attendance` field, no attendance-gated question validation
+  - `validateStudentEntries()` validates id (positive int, unique), name (non-empty string), grade (11/12 via isValidGrade), and questions leniently or strictly
+  - In lenient mode, name validation only triggers if name is present (not undefined); in strict mode name is always required
+  - Grade validation in lenient mode only triggers if grade key is present; strict mode always requires it
+  - ALLOWED_TOP_LEVEL_KEYS is just `["students"]` (no grade at top level — grade is per-student)
+---
