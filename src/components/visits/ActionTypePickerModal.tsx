@@ -7,6 +7,7 @@ import { ACTION_TYPE_VALUES, getActionTypeLabel, type ActionType } from "@/lib/v
 interface ActionTypePickerModalProps {
   isOpen: boolean;
   submitting?: boolean;
+  submittingLabel?: string;
   onClose: () => void;
   onSubmit: (actionType: ActionType) => void;
 }
@@ -14,6 +15,7 @@ interface ActionTypePickerModalProps {
 export default function ActionTypePickerModal({
   isOpen,
   submitting = false,
+  submittingLabel,
   onClose,
   onSubmit,
 }: ActionTypePickerModalProps) {
@@ -39,7 +41,7 @@ export default function ActionTypePickerModal({
           <h3 id="action-type-picker-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
             Add Action Point
           </h3>
-          <p className="mt-1 text-sm text-text-muted">Pick one action type to create a pending card.</p>
+          <p className="mt-1 text-sm text-text-muted">Pick one action type to add.</p>
         </div>
 
         <div className="space-y-2 px-5 py-4 overflow-y-auto">
@@ -94,7 +96,7 @@ export default function ActionTypePickerModal({
             disabled={!canSubmit}
             className="inline-flex items-center bg-accent px-3 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? "Adding..." : "Add"}
+            {submitting ? (submittingLabel ?? "Adding...") : "Add"}
           </button>
         </div>
       </div>

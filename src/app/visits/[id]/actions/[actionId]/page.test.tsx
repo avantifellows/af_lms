@@ -1532,7 +1532,7 @@ describe("VisitActionDetailPage", () => {
         vi.advanceTimersByTime(3000);
       });
 
-      expect(screen.queryByTestId("auto-save-status")).not.toBeInTheDocument();
+      expect(screen.getByTestId("auto-save-status")).toHaveClass("invisible");
 
       vi.useRealTimers();
     });

@@ -351,10 +351,13 @@ export default function ActionPointList({
   const [warning, setWarning] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [addState, setAddState] = useState<"idle" | "acquiring" | "creating" | "starting">("idle");
   const [deletingActionId, setDeletingActionId] = useState<number | null>(null);
+  const [confirmDeleteActionId, setConfirmDeleteActionId] = useState<number | null>(null);
   const [startingActionId, setStartingActionId] = useState<number | null>(null);
   const [startState, setStartState] = useState<"idle" | "acquiring" | "submitting">("idle");
   const cancelStartRef = useRef<(() => void) | null>(null);
+  const cancelAddRef = useRef<(() => void) | null>(null);
 
   const isBusy = useMemo(() => {
     return isAdding || deletingActionId !== null || startingActionId !== null;
@@ -367,36 +370,94 @@ export default function ActionPointList({
     setError(null);
     setWarning(null);
     setIsAdding(true);
+    setAddState("acquiring");
+
+    let createdAction: VisitActionListItem | null = null;
 
     try {
-      const response = await fetch(`/api/pm/visits/${visitId}/actions`, {
+      // Step 1: Acquire GPS
+      const locationHandle = getAccurateLocation();
+      cancelAddRef.current = locationHandle.cancel;
+      const location = await locationHandle.promise;
+
+      // Step 2: Create action
+      setAddState("creating");
+      const createResponse = await fetch(`/api/pm/visits/${visitId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action_type: actionType }),
       });
-      const payload: unknown = await response.json();
+      const createPayload: unknown = await createResponse.json();
 
-      if (!response.ok) {
-        throw new Error(parseApiError(payload, "Failed to add action point"));
+      if (!createResponse.ok) {
+        throw new Error(parseApiError(createPayload, "Failed to add action point"));
       }
 
       if (
-        !payload ||
-        typeof payload !== "object" ||
-        !("action" in payload) ||
-        typeof payload.action !== "object" ||
-        payload.action === null
+        !createPayload ||
+        typeof createPayload !== "object" ||
+        !("action" in createPayload) ||
+        typeof createPayload.action !== "object" ||
+        createPayload.action === null
       ) {
         throw new Error("Failed to add action point");
       }
 
-      const createdAction = payload.action as VisitActionListItem;
-      setItems((current) => [...current, createdAction]);
+      createdAction = createPayload.action as VisitActionListItem;
+
+      // Step 3: Start action with GPS
+      setAddState("starting");
+      const startResponse = await fetch(`/api/pm/visits/${visitId}/actions/${createdAction.id}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_lat: location.lat,
+          start_lng: location.lng,
+          start_accuracy: location.accuracy,
+        }),
+      });
+      const startPayload: unknown = await startResponse.json();
+
+      if (!startResponse.ok) {
+        // Create succeeded but start failed — add as pending, show error, don't redirect
+        setItems((current) => [...current, createdAction!]);
+        setIsAddModalOpen(false);
+        throw new Error(parseApiError(startPayload, "Action created but failed to start"));
+      }
+
+      if (
+        startPayload &&
+        typeof startPayload === "object" &&
+        "warning" in startPayload &&
+        typeof startPayload.warning === "string"
+      ) {
+        setWarning(startPayload.warning);
+      }
+
+      if (
+        !startPayload ||
+        typeof startPayload !== "object" ||
+        !("action" in startPayload) ||
+        typeof startPayload.action !== "object" ||
+        startPayload.action === null
+      ) {
+        setItems((current) => [...current, createdAction!]);
+        setIsAddModalOpen(false);
+        throw new Error("Action created but failed to start");
+      }
+
+      const startedAction = startPayload.action as VisitActionListItem;
+      setItems((current) => [...current, startedAction]);
       setIsAddModalOpen(false);
+      router.push(`/visits/${visitId}/actions/${startedAction.id}`);
     } catch (err) {
-      setError(extractErrorMessage(err, "Failed to add action point"));
+      if (!isLocationCancelled(err)) {
+        setError(extractErrorMessage(err, "Failed to add action point"));
+      }
     } finally {
+      cancelAddRef.current = null;
       setIsAdding(false);
+      setAddState("idle");
     }
   }
 
@@ -416,6 +477,7 @@ export default function ActionPointList({
       }
 
       setItems((current) => current.filter((action) => action.id !== actionId));
+      setConfirmDeleteActionId(null);
     } catch (err) {
       setError(extractErrorMessage(err, "Failed to delete action point"));
     } finally {
@@ -525,6 +587,21 @@ export default function ActionPointList({
             type="button"
             onClick={() => {
               cancelStartRef.current?.();
+            }}
+            className="text-xs font-medium text-accent underline hover:text-accent-hover"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {addState === "acquiring" && isAdding && (
+        <div className="mx-4 sm:mx-6 mt-4 flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-2">
+          <span className="text-sm text-text-primary">Getting location to add action...</span>
+          <button
+            type="button"
+            onClick={() => {
+              cancelAddRef.current?.();
             }}
             className="text-xs font-medium text-accent underline hover:text-accent-hover"
           >
@@ -717,12 +794,26 @@ export default function ActionPointList({
                   </>
                 )}
                 {action.status === "in_progress" && (
-                  <Link
-                    href={`/visits/${visitId}/actions/${action.id}`}
-                    className="inline-flex items-center border border-border-accent bg-success-bg px-3 py-1.5 text-xs font-bold text-accent uppercase tracking-wide hover:bg-hover-bg"
-                  >
-                    Open
-                  </Link>
+                  <>
+                    <Link
+                      href={`/visits/${visitId}/actions/${action.id}`}
+                      className="inline-flex items-center border border-border-accent bg-success-bg px-3 py-1.5 text-xs font-bold text-accent uppercase tracking-wide hover:bg-hover-bg"
+                    >
+                      Open
+                    </Link>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDeleteActionId(action.id);
+                        }}
+                        disabled={isBusy}
+                        className="inline-flex items-center border border-danger/20 bg-danger-bg px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger-bg/80 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </>
                 )}
                 {action.status === "completed" && (
                   <Link
@@ -741,6 +832,15 @@ export default function ActionPointList({
       <ActionTypePickerModal
         isOpen={isAddModalOpen}
         submitting={isAdding}
+        submittingLabel={
+          addState === "acquiring"
+            ? "Getting location..."
+            : addState === "creating"
+              ? "Creating..."
+              : addState === "starting"
+                ? "Starting..."
+                : undefined
+        }
         onClose={() => {
           if (!isAdding) {
             setIsAddModalOpen(false);
@@ -750,6 +850,50 @@ export default function ActionPointList({
           void handleAddAction(actionType);
         }}
       />
+
+      {confirmDeleteActionId !== null && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirm-title"
+            className="w-full max-w-md rounded-lg bg-bg-card shadow-xl"
+          >
+            <div className="border-b-4 border-danger/30 px-5 py-4">
+              <h3 id="delete-confirm-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
+                Delete Action Point
+              </h3>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-sm text-text-secondary">
+                This action point and all its data will be permanently removed. This cannot be undone.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmDeleteActionId(null);
+                }}
+                disabled={deletingActionId !== null}
+                className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDeleteAction(confirmDeleteActionId);
+                }}
+                disabled={deletingActionId !== null}
+                className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deletingActionId === confirmDeleteActionId ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -222,6 +222,33 @@ describe("ActionTypePickerModal", () => {
     expect(onSubmit).toHaveBeenCalledWith("individual_student_discussion");
   });
 
+  it("shows custom submittingLabel when submitting", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        submitting
+        submittingLabel="Getting location..."
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Getting location..." })).toBeDisabled();
+  });
+
+  it("shows default 'Adding...' when submitting without submittingLabel", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        submitting
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Adding..." })).toBeDisabled();
+  });
+
   it("other 4 action types remain disabled", () => {
     render(
       <ActionTypePickerModal

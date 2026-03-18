@@ -59,7 +59,7 @@ describe("ActionPointList", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders status-specific controls and only pending delete", () => {
+  it("renders status-specific controls — pending + in_progress have delete", () => {
     render(
       <ActionPointList
         visitId={10}
@@ -72,13 +72,12 @@ describe("ActionPointList", () => {
     );
 
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/visits/10/actions/2");
     expect(screen.getByRole("link", { name: "View Details" })).toHaveAttribute(
       "href",
       "/visits/10/actions/3"
     );
-    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(2);
   });
 
   it("shows Start + Delete only on pending cards", () => {
@@ -96,7 +95,7 @@ describe("ActionPointList", () => {
     expect(within(card).queryByRole("link", { name: "View Details" })).not.toBeInTheDocument();
   });
 
-  it("shows Open only on in_progress cards", () => {
+  it("shows Open + Delete on in_progress cards", () => {
     render(
       <ActionPointList
         visitId={10}
@@ -116,8 +115,8 @@ describe("ActionPointList", () => {
       "href",
       "/visits/10/actions/12"
     );
+    expect(within(card).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-    expect(within(card).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
     expect(within(card).queryByRole("link", { name: "View Details" })).not.toBeInTheDocument();
   });
 
@@ -147,21 +146,33 @@ describe("ActionPointList", () => {
     expect(within(card).queryByRole("link", { name: "Open" })).not.toBeInTheDocument();
   });
 
-  it("adds a new action via picker modal", async () => {
+  it("adds a new action via picker modal — GPS → Create → Start → Redirect", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    const createdAction = makeAction({
+      id: 200,
+      action_type: "classroom_observation",
+      status: "pending",
+    });
+    const startedAction = makeAction({
+      id: 200,
+      action_type: "classroom_observation",
+      status: "in_progress",
+      started_at: "2026-02-19T09:00:00.000Z",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({
-            action: makeAction({
-              id: 200,
-              action_type: "classroom_observation",
-              status: "pending",
-            }),
-          }),
+        json: () => Promise.resolve({ action: createdAction }),
       })
-    ) as unknown as typeof fetch;
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ action: startedAction }),
+      }) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ActionPointList visitId={10} actions={[]} />);
@@ -171,34 +182,39 @@ describe("ActionPointList", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action_type: "classroom_observation" }),
       });
+      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions/200/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_lat: 23.02,
+          start_lng: 72.57,
+          start_accuracy: 50,
+        }),
+      });
     });
 
     await waitFor(() => {
       expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
+      expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/200");
     });
   });
 
-  it("creates a second classroom observation action card from picker", async () => {
+  it("add action — GPS failure shows error and creates no action", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            action: makeAction({
-              id: 201,
-              action_type: "classroom_observation",
-              status: "pending",
-            }),
-          }),
-      })
-    ) as unknown as typeof fetch;
+    const rejectedPromise = Promise.reject(new Error("Location denied"));
+    rejectedPromise.catch(() => {}); // prevent unhandled rejection
+    mockGetAccurateLocation.mockReturnValue({
+      promise: rejectedPromise,
+      cancel: vi.fn(),
+    });
+    const fetchMock = vi.fn() as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ActionPointList visitId={10} actions={[]} />);
@@ -208,17 +224,48 @@ describe("ActionPointList", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action_type: "classroom_observation" }),
-      });
+      expect(screen.getByText("Location denied")).toBeInTheDocument();
     });
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("add action — create succeeds but start fails → pending action in list, error shown", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    const createdAction = makeAction({
+      id: 201,
+      action_type: "classroom_observation",
+      status: "pending",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ action: createdAction }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: "GPS too far from school" }),
+      }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ActionPointList visitId={10} actions={[]} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Action Point" }));
+    await user.click(screen.getByLabelText("Classroom Observation"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
     await waitFor(() => {
+      expect(screen.getByText("GPS too far from school")).toBeInTheDocument();
       expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     });
+
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("deletes a pending action card", async () => {
@@ -251,6 +298,150 @@ describe("ActionPointList", () => {
       expect(screen.queryByText("Leadership Meeting")).not.toBeInTheDocument();
       expect(screen.getByText("No action points added yet.")).toBeInTheDocument();
     });
+  });
+
+  it("clicking delete on in_progress action shows confirmation modal", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByText("This action point and all its data will be permanently removed. This cannot be undone.")
+    ).toBeInTheDocument();
+  });
+
+  it("confirming delete on in_progress action calls API and removes card", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions/101", {
+        method: "DELETE",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Classroom Observation")).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  it("canceling delete confirmation modal closes it without deleting", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn() as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("pending action delete has no confirmation modal — deletes immediately", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    // No dialog should appear — delete happens immediately
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions/101", {
+        method: "DELETE",
+      });
+    });
+  });
+
+  it("in_progress delete button is hidden in readOnly mode", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        readOnly
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
   });
 
   it("starts a pending action with GPS and moves it to in_progress", async () => {
@@ -299,7 +490,7 @@ describe("ActionPointList", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
       expect(screen.getByText("In Progress")).toBeInTheDocument();
       expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/101");

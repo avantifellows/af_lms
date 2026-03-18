@@ -714,13 +714,14 @@ const AUTO_SAVE_STATUS_CONFIG: Record<
 };
 
 function SaveStatusIndicator({ status }: { status: AutoSaveStatus }) {
-  if (status === "idle") return null;
-  const config = AUTO_SAVE_STATUS_CONFIG[status];
+  const isIdle = status === "idle";
+  const config = isIdle ? AUTO_SAVE_STATUS_CONFIG.saved : AUTO_SAVE_STATUS_CONFIG[status];
   return (
     <span
       role="status"
       data-testid="auto-save-status"
-      className={`text-sm font-medium ${config.className}`}
+      className={`text-sm font-medium ${config.className} ${isIdle ? "invisible" : ""}`}
+      aria-hidden={isIdle}
     >
       {config.label}
     </span>

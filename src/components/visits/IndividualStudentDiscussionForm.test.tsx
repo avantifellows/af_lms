@@ -71,6 +71,17 @@ async function selectGrade(user: ReturnType<typeof userEvent.setup>, grade: stri
   await user.selectOptions(screen.getByTestId("student-grade-filter"), grade);
 }
 
+/** Focus the search input to open the dropdown listbox */
+async function openStudentSearch(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("add-student-select"));
+}
+
+/** Select a student by clicking their option in the searchable dropdown */
+async function selectStudentOption(user: ReturnType<typeof userEvent.setup>, studentId: number) {
+  const option = screen.getByTestId(`student-option-${studentId}`);
+  await user.click(option);
+}
+
 describe("IndividualStudentDiscussionForm", () => {
   beforeEach(() => {
     mockFetchStudents();
@@ -160,7 +171,7 @@ describe("IndividualStudentDiscussionForm", () => {
       });
     });
 
-    it("renders student select dropdown after successful fetch", async () => {
+    it("renders searchable student input after successful fetch", async () => {
       const user = userEvent.setup();
       render(<Harness />);
 
@@ -170,10 +181,127 @@ describe("IndividualStudentDiscussionForm", () => {
         expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
       });
 
-      const select = screen.getByTestId("add-student-select") as HTMLSelectElement;
-      expect(within(select).getByText("Alice Student")).toBeInTheDocument();
-      expect(within(select).getByText("Bob Learner")).toBeInTheDocument();
-      expect(within(select).getByText("Carol Pupil")).toBeInTheDocument();
+      // Focus to open dropdown
+      await openStudentSearch(user);
+
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).getByText("Alice Student")).toBeInTheDocument();
+      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
+      expect(within(listbox).getByText("Carol Pupil")).toBeInTheDocument();
+    });
+  });
+
+  describe("searchable dropdown", () => {
+    it("filters students by name as user types", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByTestId("add-student-select"), "alice");
+
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).getByText("Alice Student")).toBeInTheDocument();
+      expect(within(listbox).queryByText("Bob Learner")).not.toBeInTheDocument();
+      expect(within(listbox).queryByText("Carol Pupil")).not.toBeInTheDocument();
+    });
+
+    it("filters students by student_id", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByTestId("add-student-select"), "STU002");
+
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
+      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
+    });
+
+    it("shows 'No matches' when filter returns empty", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByTestId("add-student-select"), "zzzzz");
+
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).getByText("No matches")).toBeInTheDocument();
+    });
+
+    it("supports multi-token fuzzy matching", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      // "bob learn" should match "Bob Learner"
+      await user.type(screen.getByTestId("add-student-select"), "bob learn");
+
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
+      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
+    });
+
+    it("selects student via keyboard (arrow down + enter)", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      const input = screen.getByTestId("add-student-select");
+      await user.click(input);
+      await user.keyboard("{ArrowDown}{Enter}");
+
+      expect(screen.getByTestId("student-section-1")).toBeInTheDocument();
+    });
+
+    it("closes dropdown on Escape", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      await openStudentSearch(user);
+      expect(screen.getByTestId("student-search-listbox")).toBeInTheDocument();
+
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("student-search-listbox")).not.toBeInTheDocument();
+    });
+
+    it("clears input after selecting a student", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await selectGrade(user, "11");
+      await waitFor(() => {
+        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByTestId("add-student-select"), "alice");
+      await user.click(screen.getByTestId("student-option-1"));
+
+      expect(screen.getByTestId("add-student-select")).toHaveValue("");
     });
   });
 
@@ -187,7 +315,8 @@ describe("IndividualStudentDiscussionForm", () => {
         expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
       });
 
-      await user.selectOptions(screen.getByTestId("add-student-select"), "1");
+      await openStudentSearch(user);
+      await selectStudentOption(user, 1);
 
       expect(screen.getByTestId("student-section-1")).toBeInTheDocument();
       // Section should be expanded — question radios visible
@@ -204,11 +333,18 @@ describe("IndividualStudentDiscussionForm", () => {
         expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
       });
 
-      await user.selectOptions(screen.getByTestId("add-student-select"), "1");
+      await openStudentSearch(user);
+      await selectStudentOption(user, 1);
 
-      const select = screen.getByTestId("add-student-select") as HTMLSelectElement;
-      expect(within(select).queryByText("Alice Student")).not.toBeInTheDocument();
-      expect(within(select).getByText("Bob Learner")).toBeInTheDocument();
+      // Type a space to re-open the dropdown and show all remaining
+      const input = screen.getByTestId("add-student-select");
+      await user.click(input);
+      await waitFor(() => {
+        expect(screen.getByTestId("student-search-listbox")).toBeInTheDocument();
+      });
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
+      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
     });
 
     it("section header shows name, grade badge, and question progress", async () => {
@@ -342,23 +478,26 @@ describe("IndividualStudentDiscussionForm", () => {
         />
       );
 
-      // Select grade to trigger fetch and show dropdown
+      // Select grade to trigger fetch and show search input
       await selectGrade(user, "11");
       await waitFor(() => {
         expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
       });
 
-      // Alice should NOT be in dropdown (she's recorded)
-      const select = screen.getByTestId("add-student-select") as HTMLSelectElement;
-      expect(within(select).queryByText("Alice Student")).not.toBeInTheDocument();
+      // Open dropdown — Alice should NOT be listed (she's recorded)
+      await openStudentSearch(user);
+      const listbox = screen.getByTestId("student-search-listbox");
+      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
 
-      // Remove Alice
+      // Close dropdown, remove Alice
+      await user.keyboard("{Escape}");
       await user.click(screen.getByTestId("student-header-1"));
       await user.click(screen.getByTestId("remove-student-1"));
 
-      // Alice should now be back in dropdown
-      const selectAfter = screen.getByTestId("add-student-select") as HTMLSelectElement;
-      expect(within(selectAfter).getByText("Alice Student")).toBeInTheDocument();
+      // Re-open dropdown — Alice should be back
+      await openStudentSearch(user);
+      const listboxAfter = screen.getByTestId("student-search-listbox");
+      expect(within(listboxAfter).getByText("Alice Student")).toBeInTheDocument();
     });
   });
 

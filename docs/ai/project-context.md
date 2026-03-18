@@ -226,7 +226,7 @@ Admin sections:
 - Form component: `src/components/visits/GroupStudentDiscussionForm.tsx`
 
 #### Individual Student Interaction (v1)
-- A per-student 2-question binary checklist with grade filter and student dropdown — no attendance gating (simpler than individual teacher interaction)
+- A per-student 2-question binary checklist with grade filter and **searchable student combobox** (fuzzy token-based matching via `src/lib/fuzzy-match.ts`) — no attendance gating (simpler than individual teacher interaction)
 - Top-level payload keys: `students` (array of `{ id, name, grade, questions: { [key]: { answer: boolean|null, remark?: string } } }`)
 - Grade filter fetches students from `GET /api/pm/students?school_code=X&grade=N` (queries group_user → group → user → student → enrollment_record)
 - 1 section: Operational Health (2 questions) — 2 total
@@ -244,16 +244,17 @@ Admin sections:
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
 - **Start** captures GPS + timestamp; **End** captures GPS + timestamp
-- Starting an action auto-redirects the PM to the action detail page
+- **Starting** an action auto-redirects the PM to the action detail page
+- **Adding** an action auto-starts it: acquires GPS → creates action → starts action → redirects to in_progress action detail page. If GPS fails, no action is created. If create succeeds but start fails, the action remains pending in the list.
 - Multiple actions can be `in_progress` simultaneously
-- **Pending-only deletion** (soft delete: `deleted_at` set, row retained)
+- **Deletion** (soft delete: `deleted_at` set, row retained): `pending` actions delete immediately; `in_progress` actions show a confirmation modal warning about data loss before deleting. `completed` actions cannot be deleted. The DB CHECK constraint requires `status = 'pending'` when `deleted_at` is set, so the DELETE route resets status and nulls timestamps/GPS fields.
 - 10 action types defined in code: Principal Interaction, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction, Individual AF Teacher Interaction
 - **Six action types are enabled** in the picker UI: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, and `individual_student_discussion`; other 4 types are visible but disabled
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
 #### Auto-save
 - Action detail forms auto-save via `useAutoSave` hook (`src/hooks/use-auto-save.ts`) — debounces PATCH calls 2s after last change
-- Status indicator shows at top of page: "Unsaved changes" → "Saving..." → "Saved" (auto-dismisses after 3s) / "Save failed"
+- Status indicator shows at top of page: "Unsaved changes" → "Saving..." → "Saved" (auto-dismisses after 3s) / "Save failed"; uses `visibility: hidden` (not unmount) to reserve space and prevent layout shift
 - Manual "Save Now" button cancels any pending auto-save timer; "End Action" flushes/cancels auto-save before its force-save sequence
 - `beforeunload` browser warning fires when unsaved changes exist
 - Auto-save updates action metadata (e.g. `updated_at`) via `onSuccess` but does NOT overwrite `formData` — avoids clobbering edits made during the network round-trip
@@ -267,14 +268,14 @@ Admin sections:
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
-- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), individual teacher interaction stats (recorded teachers, attendance breakdown), principal interaction stats (answered questions), group student discussion stats (grade, answered questions), and individual student discussion stats (student count)
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; adding an action auto-navigates to its detail page; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), individual teacher interaction stats (recorded teachers, attendance breakdown), principal interaction stats (answered questions), group student discussion stats (grade, answered questions), and individual student discussion stats (student count)
 - `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, and `individual_student_discussion` enabled)
 - `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields; sticky progress summary (`top-12 z-10`, below page-level sticky header)
 - `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/PrincipalInteractionForm.tsx` — 7-question binary checklist with optional remarks, no teacher section; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/GroupStudentDiscussionForm.tsx` — 4-question binary checklist with grade dropdown (11/12), questions hidden until grade selected; sticky progress summary (`top-12 z-10`)
-- `src/components/visits/IndividualStudentDiscussionForm.tsx` — per-student accordion form with grade filter dropdown, student API fetch, 2 binary questions per student, add/remove students; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/IndividualStudentDiscussionForm.tsx` — per-student accordion form with grade filter dropdown, **searchable student combobox** (fuzzy token matching, keyboard nav, click-outside-to-close), student API fetch, 2 binary questions per student, add/remove students; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type, integrates auto-save hook, inline `SaveStatusIndicator`)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
@@ -291,6 +292,7 @@ Admin sections:
 - `src/lib/individual-student-discussion.ts` — individual student discussion config (1 section, 2 questions), per-student grade validation, lenient/strict validation
 - `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by ClassroomObservationForm, AFTeamInteractionForm, and IndividualAFTeacherInteractionForm)
 - `src/lib/student-utils.ts` — shared `Student` interface and `getStudentDisplayName()` (used by IndividualStudentDiscussionForm)
+- `src/lib/fuzzy-match.ts` — token-based fuzzy matching helper (`fuzzyMatch(query, candidate)`) — splits query into whitespace tokens, all must be case-insensitive substrings of candidate (used by IndividualStudentDiscussionForm searchable combobox)
 - `src/lib/geo-validation.ts` — GPS validation (accept ≤100m, warn 100–500m, reject >500m)
 - `src/lib/geolocation.ts` — client `watchPosition` helper (60s timeout, cancel, secure-origin check)
 - `src/lib/theme.ts` — Ledger UI theme token object for dynamic inline styles (17 color/style properties)
@@ -453,7 +455,7 @@ PM visits:
 - `src/app/api/pm/visits/route.ts` (GET list, POST create with GPS)
 - `src/app/api/pm/visits/[id]/route.ts` (GET visit + actions)
 - `src/app/api/pm/visits/[id]/actions/route.ts` (GET list actions, POST create action)
-- `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` (GET single action, PATCH data, DELETE pending-only soft delete)
+- `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` (GET single action, PATCH data, DELETE soft delete for pending/in_progress actions)
 - `src/app/api/pm/visits/[id]/actions/[actionId]/start/route.ts` (POST start action with GPS)
 - `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts` (POST end action with GPS)
 - `src/app/api/pm/visits/[id]/complete/route.ts` (POST complete visit with GPS + validation rules)
@@ -523,7 +525,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 Key details:
 - Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
 - No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
-- 1572 tests across 89 files (as of 2026-03-18)
+- 1589 tests across 90 files (as of 2026-03-18)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 

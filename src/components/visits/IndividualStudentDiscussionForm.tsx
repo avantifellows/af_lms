@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
+import { fuzzyMatch } from "@/lib/fuzzy-match";
 import {
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG,
   VALID_GRADES,
@@ -39,6 +40,149 @@ function getQuestionProgress(entry: IndividualStudentEntry): string {
     if (q && typeof q.answer === "boolean") answered++;
   }
   return `${answered}/${total}`;
+}
+
+/* ── Searchable student combobox ──────────────────────────────────── */
+
+interface SearchableStudentSelectProps {
+  students: Student[];
+  onSelect: (id: number) => void;
+}
+
+function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelectProps) {
+  const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const filtered = useMemo(() => {
+    if (query.trim() === "") return students;
+    return students.filter(
+      (s) =>
+        fuzzyMatch(query, getStudentDisplayName(s)) ||
+        fuzzyMatch(query, s.student_id)
+    );
+  }, [students, query]);
+
+  // Close on outside click
+  useEffect(() => {
+    function handleMouseDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, []);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightIndex >= 0 && listRef.current) {
+      const items = listRef.current.children;
+      if (items[highlightIndex]) {
+        (items[highlightIndex] as HTMLElement).scrollIntoView?.({ block: "nearest" });
+      }
+    }
+  }, [highlightIndex]);
+
+  function selectStudent(id: number) {
+    onSelect(id);
+    setQuery("");
+    setIsOpen(false);
+    setHighlightIndex(-1);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (!isOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        setIsOpen(true);
+        setHighlightIndex(0);
+        e.preventDefault();
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setHighlightIndex((prev) => (prev < filtered.length - 1 ? prev + 1 : prev));
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        break;
+      case "Enter":
+        e.preventDefault();
+        if (highlightIndex >= 0 && highlightIndex < filtered.length) {
+          selectStudent(Number(filtered[highlightIndex].id));
+        }
+        break;
+      case "Escape":
+        setIsOpen(false);
+        setHighlightIndex(-1);
+        break;
+    }
+  }
+
+  return (
+    <div ref={containerRef} className="relative" data-testid="student-search-container">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setIsOpen(true);
+          setHighlightIndex(-1);
+        }}
+        onFocus={() => setIsOpen(true)}
+        onClick={() => setIsOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder="Search students..."
+        className="border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none w-56"
+        data-testid="add-student-select"
+        role="combobox"
+        aria-expanded={isOpen}
+        aria-autocomplete="list"
+        aria-controls="student-search-listbox"
+        autoComplete="off"
+      />
+      {isOpen && (
+        <ul
+          ref={listRef}
+          id="student-search-listbox"
+          role="listbox"
+          data-testid="student-search-listbox"
+          className="absolute z-20 mt-1 max-h-48 w-full overflow-auto border-2 border-border bg-bg-card shadow-md"
+        >
+          {filtered.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-text-muted" role="option" aria-selected={false}>
+              No matches
+            </li>
+          ) : (
+            filtered.map((s, idx) => (
+              <li
+                key={s.id}
+                role="option"
+                aria-selected={highlightIndex === idx}
+                data-testid={`student-option-${s.id}`}
+                className={`cursor-pointer px-3 py-2 text-sm ${
+                  highlightIndex === idx ? "bg-accent/10 text-accent" : "text-text-primary hover:bg-bg-card-alt"
+                }`}
+                onMouseEnter={() => setHighlightIndex(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // prevent input blur before click registers
+                  selectStudent(Number(s.id));
+                }}
+              >
+                {getStudentDisplayName(s)}
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export default function IndividualStudentDiscussionForm({
@@ -221,27 +365,10 @@ export default function IndividualStudentDiscussionForm({
           </div>
 
           {selectedGrade !== null && !studentsLoading && !studentsError && remainingStudents.length > 0 && (
-            <div>
-              <select
-                className="border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                data-testid="add-student-select"
-                defaultValue=""
-                onChange={(e) => {
-                  const id = Number(e.target.value);
-                  if (id) handleAddStudent(id);
-                  e.target.value = "";
-                }}
-              >
-                <option value="" disabled>
-                  Add Student...
-                </option>
-                {remainingStudents.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {getStudentDisplayName(s)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SearchableStudentSelect
+              students={remainingStudents}
+              onSelect={handleAddStudent}
+            />
           )}
         </div>
       )}
