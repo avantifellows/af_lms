@@ -300,3 +300,16 @@ Session: fa559082-2bad-4bec-9383-a6d9e4fc9a74
   - All existing tests from US-018 already had mock chains extended with 2 extra calls (7→9 total) — no further modifications needed to existing tests
   - Builder functions `buildValidGroupStudentDiscussionData()` and `buildValidIndividualStudentDiscussionData()` follow same pattern as existing builders using config's `allQuestionKeys`
 ---
+
+## 2026-03-18 15:10 - US-020
+Session: 30b369dc-8852-466d-8417-789bf52edf2d
+- ActionTypePickerModal tests already complete from US-014 (4 tests for student types + disabled count updated to 4)
+- Added 17 ActionPointList tests: 3 card rendering tests per type (stats visible, empty data, no answers/empty students) + 7 getGroupStudentDiscussionStats function tests + 4 getIndividualStudentDiscussionStats function tests
+- Files changed: `src/components/visits/ActionPointList.test.tsx` (+224 lines)
+- All 1566 tests pass across 89 files (no regressions)
+- **Learnings for future iterations:**
+  - ActionTypePickerModal tests were already done in US-014 — the PRD acceptance criteria for US-020 overlapped with US-014 work
+  - Group student stats card tests use `data-testid="group-student-stats-{id}"`, individual uses `individual-student-stats-{id}`
+  - `getGroupStudentDiscussionStats` returns null when BOTH grade is null AND answeredCount is 0 (unlike principal which only checks answeredCount)
+  - `getIndividualStudentDiscussionStats` follows same null pattern as `getIndividualTeacherInteractionStats` — null when no students array or empty
+---
