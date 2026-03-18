@@ -311,7 +311,7 @@
         "Unit tests pass (`npm run test`)"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

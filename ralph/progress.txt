@@ -285,3 +285,18 @@ Session: 33b0c373-b18b-4905-9cc4-f434a5ca2908
   - When adding new action type checks to complete route, ALL tests that reach the UPDATE query need their mock chains extended (3 tests in this case)
   - Mock call index for the UPDATE query shifts by the number of new checks added (6→8 with 2 new checks)
 ---
+
+## 2026-03-18 15:05 - US-019
+Session: fa559082-2bad-4bec-9383-a6d9e4fc9a74
+- Added 7 PATCH route tests for both student types (lenient accepts empty/{}, unknown keys reject, strict incomplete/complete)
+- Added 6 END route tests for both student types (incomplete rejected, complete succeeds, concurrent fallback validates)
+- Added 2 COMPLETE route tests (missing group_student_discussion rejects, missing individual_student_discussion rejects)
+- Files changed: `src/app/api/pm/visits/[id]/actions/[actionId]/route.test.ts` (+150 lines), `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.test.ts` (+190 lines), `src/app/api/pm/visits/[id]/complete/route.test.ts` (+46 lines)
+- All 1549 tests pass across 89 files (no regressions)
+- **Learnings for future iterations:**
+  - PATCH test pattern: 4 tests per type (empty lenient, unknown keys lenient, strict incomplete, strict complete) — group student has extra unknown-keys test, individual student has "At least one student" strict assertion
+  - END test pattern: 3 tests per type (incomplete data rejected, complete data succeeds, concurrent fallback validates) — follows exact same pattern as AF team/individual teacher/principal tests
+  - COMPLETE test pattern: 1 test per missing type — mock chain stops at the missing type's query returning [] (7 queries for group_student missing, 8 for individual_student missing)
+  - All existing tests from US-018 already had mock chains extended with 2 extra calls (7→9 total) — no further modifications needed to existing tests
+  - Builder functions `buildValidGroupStudentDiscussionData()` and `buildValidIndividualStudentDiscussionData()` follow same pattern as existing builders using config's `allQuestionKeys`
+---
