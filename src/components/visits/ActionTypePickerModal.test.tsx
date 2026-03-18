@@ -160,7 +160,7 @@ describe("ActionTypePickerModal", () => {
     expect(onSubmit).toHaveBeenCalledWith("principal_interaction");
   });
 
-  it("other 6 action types remain disabled", () => {
+  it("group_student_discussion radio is selectable (not disabled)", () => {
     render(
       <ActionTypePickerModal
         isOpen
@@ -169,10 +169,72 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    const enabledTypes = new Set(["classroom_observation", "af_team_interaction", "individual_af_teacher_interaction", "principal_interaction"]);
+    const radio = screen.getByLabelText("Group Student Discussion");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits group_student_discussion when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("Group Student Discussion"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("group_student_discussion");
+  });
+
+  it("individual_student_discussion radio is selectable (not disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const radio = screen.getByLabelText("Individual Student Discussion");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits individual_student_discussion when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("Individual Student Discussion"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("individual_student_discussion");
+  });
+
+  it("other 4 action types remain disabled", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const enabledTypes = new Set(["classroom_observation", "af_team_interaction", "individual_af_teacher_interaction", "principal_interaction", "group_student_discussion", "individual_student_discussion"]);
     const disabledTypes = ACTION_TYPE_VALUES.filter((t) => !enabledTypes.has(t));
 
-    expect(disabledTypes).toHaveLength(6);
+    expect(disabledTypes).toHaveLength(4);
     for (const actionType of disabledTypes) {
       const radio = screen.getByLabelText(getActionTypeLabel(actionType));
       expect(radio).toBeDisabled();
