@@ -188,3 +188,17 @@ Session: 4420fc11-2072-4565-8121-0eaf4356cb4f
   - Progress is `X/2` (2 questions) not `X/13` (13 questions)
   - Grade badge test: `student-grade-badge-{id}` testid with "Grade 11" text
 ---
+
+## 2026-03-18 14:30 - US-012
+Session: d43cd703-56ac-4e5a-b480-65bd4ca1e283
+- Wired both student interaction forms into ActionDetailForm.tsx (8 insertion points)
+- Files changed: `src/components/visits/ActionDetailForm.tsx` (modified, +138 -40 lines)
+- All 1530 tests pass across 89 files (no regressions), build passes
+- **Learnings for future iterations:**
+  - Followed exact same pattern as principal/teacher sanitize+bootstrap functions — grade handling modeled on classroom observation's grade but stored as number (not string)
+  - `sanitizeGroupStudentDiscussionPayload` returns `{ grade, questions }` with `grade: null` as default (not undefined) — consistent with how bootstrap returns safe defaults
+  - `sanitizeIndividualStudentDiscussionPayload` is a copy of `sanitizeIndividualTeacherPayload` with `attendance` replaced by `grade` and using `INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys`
+  - End error message for individual student is distinct from individual teacher: "add at least one student" vs "record all teachers"
+  - Both types added to `SAVE_BEFORE_END_TYPES` — triggers save-before-end flow (flush auto-save, save sanitized data, then acquire GPS and end)
+  - ACTION_FORM_CONFIGS entries have `fields: []` (empty array) because custom form components handle all rendering — no generic text fields needed
+---
