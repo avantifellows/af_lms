@@ -15,6 +15,8 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 import { getServerSession } from "next-auth";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
@@ -118,6 +120,22 @@ function buildValidPrincipalInteractionData() {
     PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
   );
   return { questions };
+}
+
+function buildValidGroupStudentDiscussionData() {
+  const questions = Object.fromEntries(
+    GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return { grade: 11, questions };
+}
+
+function buildValidIndividualStudentDiscussionData() {
+  const questions = Object.fromEntries(
+    INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    students: [{ id: 1, name: "Student A", grade: 11, questions }],
+  };
 }
 
 function buildValidClassroomData() {
@@ -1063,6 +1081,176 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts empty group student discussion data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "group_student_discussion" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for group student discussion with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "group_student_discussion" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid group student discussion data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for incomplete group student discussion on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "group_student_discussion", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { questions: {} } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid group student discussion data");
+    expect(json.details.length).toBeGreaterThan(0);
+  });
+
+  it("accepts complete group student discussion data on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = buildValidGroupStudentDiscussionData();
+    const action = { ...BASE_ACTION_ROW, action_type: "group_student_discussion", status: "completed" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts empty individual student discussion data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_student_discussion" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for individual student discussion with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "individual_student_discussion" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual student discussion data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for incomplete individual student discussion on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "individual_student_discussion", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { students: [] } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual student discussion data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("At least one student")])
+    );
   });
 
   it("updates only data and bumps updated_at with UTC timestamp semantics", async () => {
