@@ -89,3 +89,15 @@ Session: 69528713-e943-4dd4-95c9-9be982c88137
   - Lenient mode allows missing name, missing grade, and partial questions — same pattern as teacher interaction
   - `buildCompleteStudent()` helper takes id, name, grade params for flexible test data construction
 ---
+
+## 2026-03-18 14:02 - US-005
+Session: 63504e9a-e1e8-446d-b09d-837d3a5ce2fc
+- Created `src/lib/student-utils.ts` with `Student` interface and `getStudentDisplayName()` function
+- Created `src/lib/student-utils.test.ts` with 3 tests covering all fallback paths
+- Files changed: `src/lib/student-utils.ts` (new), `src/lib/student-utils.test.ts` (new)
+- All 1478 tests pass across 86 files (no regressions)
+- **Learnings for future iterations:**
+  - Copied `teacher-utils.ts` pattern exactly — same structure with adapted fields
+  - Student interface: `{ id, full_name, student_id, grade }` (teacher has `{ id, email, full_name }`)
+  - Fallback chain: `full_name?.trim()` -> `student_id` -> `Student #${id}` (teacher uses `full_name || email`)
+---
