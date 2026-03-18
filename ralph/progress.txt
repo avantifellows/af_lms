@@ -38,3 +38,26 @@ Started: Wed Mar 18 2026
 
 ---
 
+## 2026-03-18 13:51 - US-001
+Session: b88214e0-09ee-4471-8e9c-7a8482d300d1
+- Created `src/lib/group-student-discussion.ts` with config, types, VALID_GRADES, and both validation functions
+- Files changed: `src/lib/group-student-discussion.ts` (new, 186 lines)
+- All 1402 existing tests pass (no regressions)
+- **Learnings for future iterations:**
+  - Followed `src/lib/principal-interaction.ts` pattern exactly — same interfaces, validateQuestions helper, isPlainObject, lenient/strict split
+  - Added `isValidGrade()` helper for grade validation (checks typeof number, isInteger, and inclusion in VALID_GRADES)
+  - Grade validation in lenient mode only triggers if `grade` key is present; strict mode always requires it
+  - ALLOWED_TOP_LEVEL_KEYS includes both "grade" and "questions" (principal interaction only has "questions")
+---
+
+## 2026-03-18 13:54 - US-002
+Session: 30b369dc-8852-466d-8417-789bf52edf2d
+- Created `src/lib/group-student-discussion.test.ts` with 36 tests following principal-interaction.test.ts pattern
+- Files changed: `src/lib/group-student-discussion.test.ts` (new, 290 lines)
+- All 1438 tests pass across 84 files (no regressions)
+- **Learnings for future iterations:**
+  - Followed `principal-interaction.test.ts` pattern closely, added grade-specific tests (valid 11/12, invalid 10/13/"eleven"/null/11.5)
+  - Config integrity tests verify: section count/titles, question count/uniqueness, key ordering, gc_* prefix format
+  - Complete validation tests must include grade in payload (unlike principal interaction which has no grade)
+  - buildCompletePayload() helper takes optional grade param for testing both grade 11 and 12 paths
+---
