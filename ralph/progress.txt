@@ -202,3 +202,17 @@ Session: d43cd703-56ac-4e5a-b480-65bd4ca1e283
   - Both types added to `SAVE_BEFORE_END_TYPES` — triggers save-before-end flow (flush auto-save, save sanitized data, then acquire GPS and end)
   - ACTION_FORM_CONFIGS entries have `fields: []` (empty array) because custom form components handle all rendering — no generic text fields needed
 ---
+
+## 2026-03-18 14:35 - US-013
+Session: 7cdd8c7a-7c65-4715-af8a-7419d53bcc07
+- Added `getGroupStudentDiscussionStats()` and `getIndividualStudentDiscussionStats()` to ActionPointList.tsx
+- Added card rendering JSX for both student interaction types with data-testid attributes
+- Imported `GROUP_STUDENT_DISCUSSION_CONFIG` for question key iteration
+- Files changed: `src/components/visits/ActionPointList.tsx` (modified, +96 lines)
+- All 1530 tests pass across 89 files (no regressions), build passes
+- **Learnings for future iterations:**
+  - `getGroupStudentDiscussionStats` follows exact same pattern as `getPrincipalInteractionStats` — iterates `allQuestionKeys`, counts boolean answers, returns null when both grade is null and answeredCount is 0
+  - `getIndividualStudentDiscussionStats` follows `getIndividualTeacherInteractionStats` pattern (simpler — just returns `studentCount`, no attendance breakdown)
+  - Card rendering: group shows `Grade: N` + `X/4 (Y%)` progress; individual shows `Students: N`
+  - `data-testid` patterns: `group-student-stats-{id}`, `individual-student-stats-{id}`
+---

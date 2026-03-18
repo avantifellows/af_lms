@@ -220,7 +220,7 @@
         "Build passes (`npm run build`)"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
