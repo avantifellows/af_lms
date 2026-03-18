@@ -2,9 +2,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 
 import ActionPointList, {
   getAFTeamInteractionStats,
+  getGroupStudentDiscussionStats,
+  getIndividualStudentDiscussionStats,
   getIndividualTeacherInteractionStats,
   getPrincipalInteractionStats,
   type VisitActionListItem,
@@ -719,5 +722,226 @@ describe("getPrincipalInteractionStats", () => {
       },
     });
     expect(result).toEqual({ answeredCount: 1, totalQuestions: 7 });
+  });
+});
+
+describe("Group Student Discussion stats on action cards", () => {
+  it("renders stats with grade and answered questions for group_student_discussion card", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 80,
+            action_type: "group_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              grade: 11,
+              questions: {
+                gc_interacted: { answer: true },
+                gc_program_updates: { answer: false },
+              },
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("group-student-stats-80");
+    expect(statsEl).toHaveTextContent("Grade:");
+    expect(statsEl).toHaveTextContent("11");
+    expect(statsEl).toHaveTextContent("2/4 (50%)");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 81,
+            action_type: "group_student_discussion",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("group-student-stats-81")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when no questions are answered and grade is null", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 82,
+            action_type: "group_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              questions: {},
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("group-student-stats-82")).not.toBeInTheDocument();
+  });
+});
+
+describe("getGroupStudentDiscussionStats", () => {
+  it("returns correct counts for partial payload — grade 11, 2 of 4 answered", () => {
+    const result = getGroupStudentDiscussionStats({
+      grade: 11,
+      questions: {
+        gc_interacted: { answer: true },
+        gc_program_updates: { answer: false },
+      },
+    });
+    expect(result).toEqual({ grade: 11, answeredCount: 2, totalQuestions: 4 });
+  });
+
+  it("returns correct counts for complete payload — all 4 answered", () => {
+    const questions: Record<string, { answer: boolean }> = {};
+    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+      questions[key] = { answer: true };
+    }
+    const result = getGroupStudentDiscussionStats({
+      grade: 12,
+      questions,
+    });
+    expect(result).toEqual({ grade: 12, answeredCount: 4, totalQuestions: 4 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getGroupStudentDiscussionStats(undefined)).toBeNull();
+  });
+
+  it("returns null when grade is null and no questions answered (both zero)", () => {
+    expect(getGroupStudentDiscussionStats({ questions: {} })).toBeNull();
+  });
+
+  it("returns stats when grade is set but no questions answered", () => {
+    const result = getGroupStudentDiscussionStats({ grade: 11, questions: {} });
+    expect(result).toEqual({ grade: 11, answeredCount: 0, totalQuestions: 4 });
+  });
+
+  it("does NOT count null answers — only true or false count as answered", () => {
+    const result = getGroupStudentDiscussionStats({
+      grade: 11,
+      questions: {
+        gc_interacted: { answer: null },
+        gc_program_updates: { answer: true },
+      },
+    });
+    expect(result).toEqual({ grade: 11, answeredCount: 1, totalQuestions: 4 });
+  });
+
+  it("ignores unknown question keys — only counts known keys", () => {
+    const result = getGroupStudentDiscussionStats({
+      grade: 12,
+      questions: {
+        unknown_key: { answer: true },
+        gc_interacted: { answer: true },
+      },
+    });
+    expect(result).toEqual({ grade: 12, answeredCount: 1, totalQuestions: 4 });
+  });
+});
+
+describe("Individual Student Discussion stats on action cards", () => {
+  it("renders stats with student count for individual_student_discussion card", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 90,
+            action_type: "individual_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              students: [
+                { id: 1, name: "Alice", grade: 11, questions: {} },
+                { id: 2, name: "Bob", grade: 12, questions: {} },
+              ],
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("individual-student-stats-90");
+    expect(statsEl).toHaveTextContent("Students:");
+    expect(statsEl).toHaveTextContent("2");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 91,
+            action_type: "individual_student_discussion",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("individual-student-stats-91")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when students array is empty", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 92,
+            action_type: "individual_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              students: [],
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("individual-student-stats-92")).not.toBeInTheDocument();
+  });
+});
+
+describe("getIndividualStudentDiscussionStats", () => {
+  it("returns correct student count", () => {
+    const result = getIndividualStudentDiscussionStats({
+      students: [
+        { id: 1, name: "Alice", grade: 11, questions: {} },
+        { id: 2, name: "Bob", grade: 12, questions: {} },
+        { id: 3, name: "Charlie", grade: 11, questions: {} },
+      ],
+    });
+    expect(result).toEqual({ studentCount: 3 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getIndividualStudentDiscussionStats(undefined)).toBeNull();
+  });
+
+  it("returns null for empty students array", () => {
+    expect(getIndividualStudentDiscussionStats({ students: [] })).toBeNull();
+  });
+
+  it("returns null for data without students key", () => {
+    expect(getIndividualStudentDiscussionStats({})).toBeNull();
   });
 });
