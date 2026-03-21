@@ -66,3 +66,6 @@ ralph/*
 .claude/commands
 .env.dont.touch
 plan-refine-agent-loop/*
+# Discord bot scripts
+start-discord-bot.sh
+stop-discord-bot.sh

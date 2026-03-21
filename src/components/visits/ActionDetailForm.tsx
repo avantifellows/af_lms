@@ -83,24 +83,6 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
     description: "Record observations from the interaction with the school Principal.",
     fields: [],
   },
-  leadership_meeting: {
-    title: "Leadership Meeting Details",
-    description: "Summarize agenda, decisions, and follow-up ownership.",
-    fields: [
-      { key: "agenda", label: "Agenda", placeholder: "What was the agenda?", multiline: true },
-      {
-        key: "decisions",
-        label: "Decisions",
-        placeholder: "What decisions were made?",
-        multiline: true,
-      },
-      {
-        key: "owners",
-        label: "Owners",
-        placeholder: "Who owns the next steps?",
-      },
-    ],
-  },
   classroom_observation: {
     title: "Classroom Observation Details",
     description: "Complete the classroom observation rubric and summaries.",
@@ -115,63 +97,6 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
     title: "Individual Student Interaction Details",
     description: "Record individual interactions with students.",
     fields: [],
-  },
-  individual_staff_meeting: {
-    title: "Individual Staff Meeting Details",
-    description: "Capture notes from one-on-one staff interaction.",
-    fields: [
-      { key: "staff_member", label: "Staff Member", placeholder: "Who did you meet?" },
-      {
-        key: "discussion_summary",
-        label: "Discussion Summary",
-        placeholder: "Summarize the meeting",
-        multiline: true,
-      },
-      {
-        key: "follow_ups",
-        label: "Follow-ups",
-        placeholder: "Any follow-up commitments?",
-        multiline: true,
-      },
-    ],
-  },
-  team_staff_meeting: {
-    title: "Team Staff Meeting Details",
-    description: "Track team-level discussion and commitments.",
-    fields: [
-      { key: "participants", label: "Participants", placeholder: "Who attended?" },
-      {
-        key: "discussion_summary",
-        label: "Discussion Summary",
-        placeholder: "What was discussed?",
-        multiline: true,
-      },
-      {
-        key: "commitments",
-        label: "Commitments",
-        placeholder: "What commitments were made?",
-        multiline: true,
-      },
-    ],
-  },
-  teacher_feedback: {
-    title: "Teacher Feedback Details",
-    description: "Capture teacher feedback details and planned support.",
-    fields: [
-      { key: "teacher_name", label: "Teacher Name", placeholder: "Which teacher?" },
-      {
-        key: "feedback_summary",
-        label: "Feedback Summary",
-        placeholder: "What feedback was shared?",
-        multiline: true,
-      },
-      {
-        key: "agreed_actions",
-        label: "Agreed Actions",
-        placeholder: "What actions were agreed?",
-        multiline: true,
-      },
-    ],
   },
   af_team_interaction: {
     title: "AF Team Interaction Details",

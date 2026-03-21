@@ -45,17 +45,13 @@ export default function ActionTypePickerModal({
         </div>
 
         <div className="space-y-2 px-5 py-4 overflow-y-auto">
-          {ACTION_TYPE_VALUES.map((actionType) => {
-            const enabled = actionType === "classroom_observation" || actionType === "af_team_interaction" || actionType === "individual_af_teacher_interaction" || actionType === "principal_interaction" || actionType === "group_student_discussion" || actionType === "individual_student_discussion";
-            return (
+          {ACTION_TYPE_VALUES.map((actionType) => (
               <label
                 key={actionType}
                 className={`flex items-center gap-4 border-2 px-4 py-3 transition-colors ${
-                  !enabled
-                    ? "cursor-not-allowed border-border opacity-40"
-                    : selectedType === actionType
-                      ? "cursor-pointer border-accent bg-success-bg"
-                      : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
+                  selectedType === actionType
+                    ? "cursor-pointer border-accent bg-success-bg"
+                    : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
                 }`}
               >
                 <input
@@ -63,18 +59,16 @@ export default function ActionTypePickerModal({
                   name="action-type"
                   value={actionType}
                   checked={selectedType === actionType}
-                  disabled={!enabled}
                   onChange={() => {
                     setSelectedType(actionType);
                   }}
                   className="h-5 w-5 accent-accent"
                 />
-                <span className={`text-base font-medium ${enabled ? "text-text-primary" : "text-text-muted"}`}>
+                <span className="text-base font-medium text-text-primary">
                   {getActionTypeLabel(actionType)}
                 </span>
               </label>
-            );
-          })}
+            ))}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4 shrink-0">

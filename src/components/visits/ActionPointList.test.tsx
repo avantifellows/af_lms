@@ -43,7 +43,7 @@ vi.mock("@/lib/geolocation", () => ({
 function makeAction(overrides: Partial<VisitActionListItem>): VisitActionListItem {
   return {
     id: 101,
-    action_type: "leadership_meeting",
+    action_type: "principal_interaction",
     status: "pending",
     started_at: null,
     ended_at: null,
@@ -66,7 +66,7 @@ describe("ActionPointList", () => {
         actions={[
           makeAction({ id: 1, status: "pending" }),
           makeAction({ id: 2, status: "in_progress", action_type: "classroom_observation" }),
-          makeAction({ id: 3, status: "completed", action_type: "teacher_feedback" }),
+          makeAction({ id: 3, status: "completed", action_type: "classroom_observation" }),
         ]}
       />
     );
@@ -84,7 +84,7 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 11, status: "pending", action_type: "leadership_meeting" })]}
+        actions={[makeAction({ id: 11, status: "pending", action_type: "principal_interaction" })]}
       />
     );
 
@@ -128,7 +128,7 @@ describe("ActionPointList", () => {
           makeAction({
             id: 13,
             status: "completed",
-            action_type: "teacher_feedback",
+            action_type: "classroom_observation",
             started_at: "2026-02-19T09:00:00.000Z",
             ended_at: "2026-02-19T10:00:00.000Z",
           }),
@@ -281,11 +281,11 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "principal_interaction", status: "pending" })]}
       />
     );
 
-    expect(screen.getByText("Leadership Meeting")).toBeInTheDocument();
+    expect(screen.getByText("Principal Interaction")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
@@ -295,7 +295,7 @@ describe("ActionPointList", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("Leadership Meeting")).not.toBeInTheDocument();
+      expect(screen.queryByText("Principal Interaction")).not.toBeInTheDocument();
       expect(screen.getByText("No action points added yet.")).toBeInTheDocument();
     });
   });
@@ -408,7 +408,7 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "principal_interaction", status: "pending" })]}
       />
     );
 
@@ -469,7 +469,7 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "principal_interaction", status: "pending" })]}
       />
     );
 
@@ -571,7 +571,7 @@ describe("ActionPointList", () => {
           actions={[
             makeAction({
               id: 53,
-              action_type: "leadership_meeting",
+              action_type: "principal_interaction",
               status: "in_progress",
               started_at: "2026-03-05T09:00:00.000Z",
               data: {
@@ -746,7 +746,7 @@ describe("Individual Teacher Interaction stats on action cards", () => {
         actions={[
           makeAction({
             id: 63,
-            action_type: "leadership_meeting",
+            action_type: "principal_interaction",
             status: "in_progress",
             started_at: "2026-03-09T09:00:00.000Z",
             data: {

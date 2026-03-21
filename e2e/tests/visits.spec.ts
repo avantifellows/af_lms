@@ -344,7 +344,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       },
     });
     await seedVisitAction(pool, visitId, {
-      actionType: "leadership_meeting",
+      actionType: "principal_interaction",
       status: "completed",
     });
     await seedVisitAction(pool, visitId, {
@@ -380,7 +380,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       data: buildCompleteClassroomObservationData(),
     });
     await seedVisitAction(pool, visitId, {
-      actionType: "leadership_meeting",
+      actionType: "principal_interaction",
       status: "in_progress",
     });
 
@@ -404,7 +404,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       data: buildCompleteClassroomObservationData(),
     });
     await seedVisitAction(pool, visitId, {
-      actionType: "teacher_feedback",
+      actionType: "principal_interaction",
       status: "pending",
     });
     await seedVisitAction(pool, visitId, {
@@ -445,7 +445,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
   test("moderate-gps-warning-visible", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
-      actionType: "leadership_meeting",
+      actionType: "principal_interaction",
       status: "pending",
     });
     await seedVisitAction(pool, visitId, {
@@ -625,7 +625,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
   test("program-admin-read-only", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
-      actionType: "leadership_meeting",
+      actionType: "principal_interaction",
       status: "pending",
     });
 

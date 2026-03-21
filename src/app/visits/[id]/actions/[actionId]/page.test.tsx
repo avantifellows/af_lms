@@ -103,12 +103,10 @@ function makeAction(overrides: Record<string, unknown> = {}) {
   return {
     id: 101,
     visit_id: 1,
-    action_type: "leadership_meeting",
+    action_type: "principal_interaction",
     status: "in_progress",
     data: {
-      agenda: "Meeting agenda",
-      decisions: "Old decisions",
-      preserved_key: "keep-me",
+      questions: { oh_program_feedback: { answer: true } },
     },
     started_at: "2026-02-19T09:00:00.000Z",
     ended_at: null,
@@ -494,7 +492,7 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getAllByTestId("action-renderer-principal_interaction")).toHaveLength(2);
   });
 
-  it("saves via PATCH and preserves unrelated fields in action data", async () => {
+  it("saves via PATCH and sends sanitized principal interaction data", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
@@ -507,9 +505,10 @@ describe("VisitActionDetailPage", () => {
           Promise.resolve({
             action: makeAction({
               data: {
-                agenda: "Meeting agenda",
-                decisions: "Updated decisions",
-                preserved_key: "keep-me",
+                questions: {
+                  oh_program_feedback: { answer: true },
+                  ip_curriculum_progress: { answer: false },
+                },
               },
             }),
           }),
@@ -521,9 +520,8 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    const decisionsField = screen.getByLabelText("Decisions");
-    await user.clear(decisionsField);
-    await user.type(decisionsField, "Updated decisions");
+    // Click a radio button to change form data
+    await user.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-no"));
     await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
@@ -534,12 +532,11 @@ describe("VisitActionDetailPage", () => {
     expect(url).toBe("/api/pm/visits/1/actions/101");
     expect(init.method).toBe("PATCH");
 
-    const parsedBody = JSON.parse(String(init.body)) as { data: Record<string, string> };
-    expect(parsedBody.data.decisions).toBe("Updated decisions");
-    expect(parsedBody.data.preserved_key).toBe("keep-me");
+    const parsedBody = JSON.parse(String(init.body)) as { data: { questions: Record<string, unknown> } };
+    expect(parsedBody.data.questions).toBeDefined();
   });
 
-  it("ends an action via /end using GPS and updates UI to completed", async () => {
+  it("ends an action via save-before-end + /end using GPS and updates UI to completed", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
@@ -550,8 +547,14 @@ describe("VisitActionDetailPage", () => {
       cancel: vi.fn(),
     });
 
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
+    const fetchMock = vi.fn()
+      // First call: save-before-end (PATCH)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ action: makeAction() }),
+      })
+      // Second call: end (POST)
+      .mockResolvedValueOnce({
         ok: true,
         json: () =>
           Promise.resolve({
@@ -564,8 +567,7 @@ describe("VisitActionDetailPage", () => {
               visit_id: "1",
             },
           }),
-      })
-    ) as unknown as typeof fetch;
+      }) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
@@ -576,13 +578,19 @@ describe("VisitActionDetailPage", () => {
 
     await waitFor(() => {
       expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/pm/visits/1/actions/101/end");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(
+    // First call: save-before-end PATCH
+    const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    // Second call: end POST
+    const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+    expect(endInit.body).toBe(
       JSON.stringify({ end_lat: 23.02, end_lng: 72.57, end_accuracy: 45 })
     );
 
@@ -1447,8 +1455,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const decisionsField = screen.getByLabelText("Decisions");
-      fireEvent.change(decisionsField, { target: { value: "New note" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
 
@@ -1467,7 +1474,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { agenda: "Meeting agenda", decisions: "New note", preserved_key: "keep-me" },
+                data: { questions: { oh_program_feedback: { answer: true }, ip_curriculum_progress: { answer: true } } },
               }),
             }),
         })
@@ -1479,8 +1486,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const decisionsField = screen.getByLabelText("Decisions");
-      fireEvent.change(decisionsField, { target: { value: "New note" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1507,7 +1513,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { agenda: "Meeting agenda", decisions: "New", preserved_key: "keep-me" },
+                data: { questions: { oh_program_feedback: { answer: true }, ip_curriculum_progress: { answer: false } } },
               }),
             }),
         })
@@ -1519,8 +1525,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const decisionsField = screen.getByLabelText("Decisions");
-      fireEvent.change(decisionsField, { target: { value: "New" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-no"));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1557,8 +1562,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const decisionsField = screen.getByLabelText("Decisions");
-      fireEvent.change(decisionsField, { target: { value: "Fail" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1593,7 +1597,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { agenda: "Meeting agenda", decisions: "Manual", preserved_key: "keep-me" },
+                data: { questions: { oh_program_feedback: { answer: true }, ip_curriculum_progress: { answer: true } } },
               }),
             }),
         })
@@ -1605,14 +1609,14 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const decisionsField = screen.getByLabelText("Decisions");
-      fireEvent.change(decisionsField, { target: { value: "Manual" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
 
       // Submit form (triggers handleSave which cancels auto-save timer)
       await act(async () => {
-        fireEvent.submit(screen.getByTestId("action-renderer-leadership_meeting"));
+        const form = document.querySelector("form[data-testid='action-renderer-principal_interaction']");
+        fireEvent.submit(form!);
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1636,8 +1640,7 @@ describe("VisitActionDetailPage", () => {
       const jsx = await VisitActionDetailPage(pageProps());
       render(jsx);
 
-      const decisionsField = screen.getByLabelText("Decisions");
-      fireEvent.change(decisionsField, { target: { value: "Unsaved" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       const event = new Event("beforeunload", { cancelable: true });
       const spy = vi.spyOn(event, "preventDefault");

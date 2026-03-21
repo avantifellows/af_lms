@@ -79,9 +79,9 @@ const VISIT_ROW = {
 const BASE_ACTION_ROW = {
   id: 101,
   visit_id: 10,
-  action_type: "leadership_meeting",
+  action_type: "principal_interaction",
   status: "in_progress",
-  data: { notes: "current" },
+  data: { questions: {} },
   started_at: "2026-02-18T10:05:00.000Z",
   ended_at: null,
   start_accuracy: "10.00",
@@ -532,7 +532,18 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
       school_codes: null,
     } as never);
     mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
-    const updated = { ...BASE_ACTION_ROW, status: "completed", data: { notes: "admin edit" } };
+    const completePiData = {
+      questions: {
+        oh_program_feedback: { answer: true },
+        ip_curriculum_progress: { answer: true },
+        ip_key_events: { answer: false },
+        sp_student_performance: { answer: true },
+        sn_concerns_raised: { answer: false },
+        mp_monthly_plan: { answer: true },
+        mp_permissions_obtained: { answer: true },
+      },
+    };
+    const updated = { ...BASE_ACTION_ROW, status: "completed", data: completePiData };
     mockQuery
       .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
       .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }])
@@ -540,7 +551,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "PATCH",
-      body: JSON.stringify({ data: { notes: "admin edit" } }),
+      body: JSON.stringify({ data: completePiData }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await PATCH(req as never, params);
@@ -1255,7 +1266,8 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
   it("updates only data and bumps updated_at with UTC timestamp semantics", async () => {
     setupPmView();
-    const updated = { ...BASE_ACTION_ROW, data: { notes: "updated" } };
+    const piData = { questions: { oh_program_feedback: { answer: true } } };
+    const updated = { ...BASE_ACTION_ROW, data: piData };
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
       .mockResolvedValueOnce([BASE_ACTION_ROW])
@@ -1263,7 +1275,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "PATCH",
-      body: JSON.stringify({ data: { notes: "updated" }, status: "completed" }),
+      body: JSON.stringify({ data: piData, status: "completed" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await PATCH(req as never, params);
@@ -1278,7 +1290,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(updateQueryText).not.toContain("status =");
     expect(updateQueryText).not.toContain("started_at =");
     expect(updateQueryText).not.toContain("ended_at =");
-    expect(updateParams).toEqual(["10", "101", JSON.stringify({ notes: "updated" })]);
+    expect(updateParams).toEqual(["10", "101", JSON.stringify(piData)]);
   });
 });
 

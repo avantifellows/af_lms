@@ -73,12 +73,24 @@ const VISIT_ROW = {
   school_region: "North",
 };
 
+const COMPLETE_PI_DATA = {
+  questions: {
+    oh_program_feedback: { answer: true },
+    ip_curriculum_progress: { answer: true },
+    ip_key_events: { answer: false },
+    sp_student_performance: { answer: true },
+    sn_concerns_raised: { answer: false },
+    mp_monthly_plan: { answer: true },
+    mp_permissions_obtained: { answer: true },
+  },
+};
+
 const PENDING_ACTION = {
   id: 101,
   visit_id: 10,
-  action_type: "leadership_meeting",
+  action_type: "principal_interaction",
   status: "pending",
-  data: {},
+  data: COMPLETE_PI_DATA,
   started_at: null,
   ended_at: null,
   start_accuracy: null,

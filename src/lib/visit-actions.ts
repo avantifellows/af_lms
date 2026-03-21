@@ -1,12 +1,8 @@
 export const ACTION_TYPES = {
   principal_interaction: "Principal Interaction",
-  leadership_meeting: "Leadership Meeting",
   classroom_observation: "Classroom Observation",
   group_student_discussion: "Student Interaction",
   individual_student_discussion: "Individual Student Interaction",
-  individual_staff_meeting: "Individual Staff Meeting",
-  team_staff_meeting: "Team Staff Meeting",
-  teacher_feedback: "Teacher Feedback",
   af_team_interaction: "AF Team Interaction",
   individual_af_teacher_interaction: "Individual AF Teacher Interaction",
 } as const;

@@ -249,7 +249,7 @@ describe("ActionTypePickerModal", () => {
     expect(screen.getByRole("button", { name: "Adding..." })).toBeDisabled();
   });
 
-  it("other 4 action types remain disabled", () => {
+  it("all action types are selectable (none disabled)", () => {
     render(
       <ActionTypePickerModal
         isOpen
@@ -258,13 +258,9 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    const enabledTypes = new Set(["classroom_observation", "af_team_interaction", "individual_af_teacher_interaction", "principal_interaction", "group_student_discussion", "individual_student_discussion"]);
-    const disabledTypes = ACTION_TYPE_VALUES.filter((t) => !enabledTypes.has(t));
-
-    expect(disabledTypes).toHaveLength(4);
-    for (const actionType of disabledTypes) {
+    for (const actionType of ACTION_TYPE_VALUES) {
       const radio = screen.getByLabelText(getActionTypeLabel(actionType));
-      expect(radio).toBeDisabled();
+      expect(radio).not.toBeDisabled();
     }
   });
 });
