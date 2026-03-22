@@ -5,6 +5,7 @@ export const ACTION_TYPES = {
   individual_student_discussion: "Individual Student Interaction",
   af_team_interaction: "AF Team Interaction",
   individual_af_teacher_interaction: "Individual AF Teacher Interaction",
+  school_staff_interaction: "School Staff Interaction",
 } as const;
 
 export type ActionType = keyof typeof ACTION_TYPES;
