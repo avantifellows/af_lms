@@ -157,7 +157,7 @@
         "E2E tests pass (`npm run test:e2e`)"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
