@@ -11,11 +11,13 @@ import IndividualAFTeacherInteractionForm from "@/components/visits/IndividualAF
 import GroupStudentDiscussionForm from "@/components/visits/GroupStudentDiscussionForm";
 import IndividualStudentDiscussionForm from "@/components/visits/IndividualStudentDiscussionForm";
 import PrincipalInteractionForm from "@/components/visits/PrincipalInteractionForm";
+import SchoolStaffInteractionForm from "@/components/visits/SchoolStaffInteractionForm";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 import {
   CURRENT_RUBRIC_VERSION,
   getRubricConfig,
@@ -75,7 +77,8 @@ const INDIVIDUAL_TEACHER_ACTION_TYPE = "individual_af_teacher_interaction" as co
 const PRINCIPAL_INTERACTION_ACTION_TYPE = "principal_interaction" as const;
 const GROUP_STUDENT_DISCUSSION_ACTION_TYPE = "group_student_discussion" as const;
 const INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE = "individual_student_discussion" as const;
-const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE, PRINCIPAL_INTERACTION_ACTION_TYPE, GROUP_STUDENT_DISCUSSION_ACTION_TYPE, INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE]);
+const SCHOOL_STAFF_INTERACTION_ACTION_TYPE = "school_staff_interaction" as const;
+const SAVE_BEFORE_END_TYPES = new Set([CLASSROOM_ACTION_TYPE, AF_TEAM_ACTION_TYPE, INDIVIDUAL_TEACHER_ACTION_TYPE, PRINCIPAL_INTERACTION_ACTION_TYPE, GROUP_STUDENT_DISCUSSION_ACTION_TYPE, INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE, SCHOOL_STAFF_INTERACTION_ACTION_TYPE]);
 
 const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   principal_interaction: {
@@ -106,6 +109,11 @@ const ACTION_FORM_CONFIGS: Record<ActionType, ActionFormConfig> = {
   individual_af_teacher_interaction: {
     title: "Individual AF Teacher Interaction Details",
     description: "Record individual interactions with each teacher at the school.",
+    fields: [],
+  },
+  school_staff_interaction: {
+    title: "School Staff Interaction Details",
+    description: "Record interactions with school staff regarding the program.",
     fields: [],
   },
 };
@@ -475,6 +483,40 @@ function bootstrapIndividualStudentDiscussionPayload(data: unknown): Record<stri
   return sanitizeIndividualStudentDiscussionPayload(data);
 }
 
+function sanitizeSchoolStaffInteractionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { questions: {} };
+  }
+
+  const questions: Record<string, unknown> = {};
+  if (isPlainObject(data.questions)) {
+    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+      const value = (data.questions as Record<string, unknown>)[key];
+      if (isPlainObject(value)) {
+        const entry: Record<string, unknown> = {};
+        if (value.answer === null || typeof value.answer === "boolean") {
+          entry.answer = value.answer;
+        }
+        if (typeof value.remark === "string") {
+          entry.remark = value.remark;
+        }
+        if (Object.keys(entry).length > 0) {
+          questions[key] = entry;
+        }
+      }
+    }
+  }
+
+  return { questions };
+}
+
+function bootstrapSchoolStaffInteractionPayload(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { questions: {} };
+  }
+  return sanitizeSchoolStaffInteractionPayload(data);
+}
+
 function normalizeFormDataForAction(actionType: string, data: unknown): Record<string, unknown> {
   if (actionType === CLASSROOM_ACTION_TYPE) {
     return bootstrapClassroomPayload(data);
@@ -498,6 +540,10 @@ function normalizeFormDataForAction(actionType: string, data: unknown): Record<s
 
   if (actionType === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE) {
     return bootstrapIndividualStudentDiscussionPayload(data);
+  }
+
+  if (actionType === SCHOOL_STAFF_INTERACTION_ACTION_TYPE) {
+    return bootstrapSchoolStaffInteractionPayload(data);
   }
 
   if (!isPlainObject(data)) {
@@ -530,6 +576,10 @@ function sanitizePatchData(actionType: string, data: Record<string, unknown>): R
 
   if (actionType === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE) {
     return sanitizeIndividualStudentDiscussionPayload(data);
+  }
+
+  if (actionType === SCHOOL_STAFF_INTERACTION_ACTION_TYPE) {
+    return sanitizeSchoolStaffInteractionPayload(data);
   }
 
   return data;
@@ -999,6 +1049,12 @@ export default function ActionDetailForm({
             setData={setFormData}
             disabled={!canSave || isBusy}
             schoolCode={schoolCode}
+          />
+        ) : action.action_type === SCHOOL_STAFF_INTERACTION_ACTION_TYPE ? (
+          <SchoolStaffInteractionForm
+            data={formData}
+            setData={setFormData}
+            disabled={!canSave || isBusy}
           />
         ) : (
           config.fields.map((field) => (
