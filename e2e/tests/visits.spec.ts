@@ -242,7 +242,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     expect(inProgressVisit.visitId).not.toBe(completedVisit.visitId);
   });
 
-  test("pm-can-add-and-delete-pending-action", async ({ pmPage }) => {
+  test("pm-can-add-and-delete-in-progress-action", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
 
     await setGoodGps(pmPage);
@@ -253,12 +253,17 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await dialog.getByLabel("AF Team Interaction").click();
     await dialog.getByRole("button", { name: "Add" }).click();
 
-    const pendingCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
-    await expect(pendingCard).toBeVisible();
-    await expect(pendingCard.getByRole("button", { name: "Start" })).toBeVisible();
-    await expect(pendingCard.getByRole("button", { name: "Delete" })).toBeVisible();
+    // After auto-start, navigate back to the visit detail page
+    await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
 
-    await pendingCard.getByRole("button", { name: "Delete" }).click();
+    const inProgressCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
+    await expect(inProgressCard).toBeVisible();
+    await expect(inProgressCard.getByRole("link", { name: "Open" })).toBeVisible();
+    await expect(inProgressCard.getByRole("button", { name: "Delete" })).toBeVisible();
+
+    await inProgressCard.getByRole("button", { name: "Delete" }).click();
     await expect(pmPage.locator('[data-action-type="af_team_interaction"]')).toHaveCount(0);
   });
 
@@ -462,6 +467,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "principal_interaction",
       status: "pending",
+      data: buildCompletePrincipalInteractionData(),
     });
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
@@ -738,16 +744,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
 
-    // Add AF Team Interaction via picker
+    // Add AF Team Interaction via picker (auto-starts and navigates to detail)
     await pmPage.getByRole("button", { name: "Add Action Point" }).click();
     const dialog = pmPage.getByRole("dialog");
     await dialog.getByLabel("AF Team Interaction").click();
     await dialog.getByRole("button", { name: "Add" }).click();
 
-    // Start the action (auto-navigates to action detail)
-    const actionCard = pmPage.locator('[data-action-type="af_team_interaction"]').first();
-    await expect(actionCard).toBeVisible();
-    await actionCard.getByRole("button", { name: "Start" }).click();
     await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
     const actionId = pmPage.url().split("/actions/")[1]!;
 
@@ -932,18 +934,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
 
-    // Add individual teacher interaction via picker
+    // Add individual teacher interaction via picker (auto-starts and navigates to detail)
     await pmPage.getByRole("button", { name: "Add Action Point" }).click();
     const dialog = pmPage.getByRole("dialog");
     await dialog.getByLabel("Individual AF Teacher Interaction").click();
     await dialog.getByRole("button", { name: "Add" }).click();
 
-    // Start the action
-    const actionCard = pmPage
-      .locator('[data-action-type="individual_af_teacher_interaction"]')
-      .first();
-    await expect(actionCard).toBeVisible();
-    await actionCard.getByRole("button", { name: "Start" }).click();
     await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
     const actionId = pmPage.url().split("/actions/")[1]!;
 
@@ -1240,16 +1236,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     // ─── Group Student Discussion (Student Interaction) ───
 
-    // Add via picker
+    // Add via picker (auto-starts and navigates to detail)
     await pmPage.getByRole("button", { name: "Add Action Point" }).click();
     const dialog1 = pmPage.getByRole("dialog");
-    await dialog1.getByLabel("Student Interaction").click();
+    await dialog1.getByLabel("Student Interaction", { exact: true }).click();
     await dialog1.getByRole("button", { name: "Add" }).click();
 
-    // Start the action
-    const groupCard = pmPage.locator('[data-action-type="group_student_discussion"]').first();
-    await expect(groupCard).toBeVisible();
-    await groupCard.getByRole("button", { name: "Start" }).click();
     await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
     const groupActionId = pmPage.url().split("/actions/")[1]!;
 
@@ -1301,16 +1293,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     // ─── Individual Student Discussion (Individual Student Interaction) ───
 
-    // Add via picker
+    // Add via picker (auto-starts and navigates to detail)
     await pmPage.getByRole("button", { name: "Add Action Point" }).click();
     const dialog2 = pmPage.getByRole("dialog");
     await dialog2.getByLabel("Individual Student Interaction").click();
     await dialog2.getByRole("button", { name: "Add" }).click();
 
-    // Start the action
-    const individualCard = pmPage.locator('[data-action-type="individual_student_discussion"]').first();
-    await expect(individualCard).toBeVisible();
-    await individualCard.getByRole("button", { name: "Start" }).click();
     await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
     const individualActionId = pmPage.url().split("/actions/")[1]!;
 
