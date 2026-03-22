@@ -6,6 +6,7 @@ import {
   buildCompleteIndividualStudentDiscussionData,
   buildCompleteIndividualTeacherInteractionData,
   buildCompletePrincipalInteractionData,
+  buildCompleteSchoolStaffInteractionData,
   getTestPool,
   seedIndividualTeacherTestTeachers,
   seedTestVisit,
@@ -15,6 +16,7 @@ import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individual-af-teacher-interaction";
 import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "../../src/lib/school-staff-interaction";
 import type { Page } from "@playwright/test";
 import type { Pool } from "pg";
 
@@ -162,6 +164,14 @@ async function fillIndividualStudentDiscussionForm(page: Page) {
   for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
     await page.getByTestId(`student-${studentId}-${key}-yes`).check();
   }
+}
+
+async function fillSchoolStaffInteractionForm(page: Page) {
+  for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+    await page.getByTestId(`school-staff-interaction-${key}-yes`).check();
+  }
+
+  await expect(page.getByTestId("school-staff-interaction-progress")).toContainText("Answered: 2/2");
 }
 
 test.beforeAll(async () => {
@@ -432,6 +442,11 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "completed",
       data: buildCompleteIndividualStudentDiscussionData(),
     });
+    await seedVisitAction(pool, visitId, {
+      actionType: "school_staff_interaction",
+      status: "completed",
+      data: buildCompleteSchoolStaffInteractionData(),
+    });
 
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
@@ -477,6 +492,11 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       actionType: "individual_student_discussion",
       status: "completed",
       data: buildCompleteIndividualStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "school_staff_interaction",
+      status: "completed",
+      data: buildCompleteSchoolStaffInteractionData(),
     });
 
     const startResponse = await pmPage.request.post(
@@ -615,6 +635,11 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       actionType: "individual_student_discussion",
       status: "completed",
       data: buildCompleteIndividualStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "school_staff_interaction",
+      status: "completed",
+      data: buildCompleteSchoolStaffInteractionData(),
     });
 
     await adminPage.reload();
@@ -846,7 +871,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     }
   });
 
-  test("visit-completes-with-all-six-required-action-types", async ({ pmPage }) => {
+  test("visit-completes-with-all-seven-required-action-types", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
@@ -878,17 +903,23 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "completed",
       data: buildCompleteIndividualStudentDiscussionData(),
     });
+    await seedVisitAction(pool, visitId, {
+      actionType: "school_staff_interaction",
+      status: "completed",
+      data: buildCompleteSchoolStaffInteractionData(),
+    });
 
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
 
-    // Assert all 6 action cards visible
+    // Assert all 7 action cards visible
     await expect(pmPage.locator('[data-action-type="classroom_observation"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="af_team_interaction"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="individual_af_teacher_interaction"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="principal_interaction"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="group_student_discussion"]').first()).toBeVisible();
     await expect(pmPage.locator('[data-action-type="individual_student_discussion"]').first()).toBeVisible();
+    await expect(pmPage.locator('[data-action-type="school_staff_interaction"]').first()).toBeVisible();
 
     await pmPage.getByRole("button", { name: "Complete Visit" }).click();
     await expect(pmPage.getByText("This visit is completed and read-only.")).toBeVisible();
@@ -1329,5 +1360,109 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     // Both action types show as completed on the visit detail page
     await expect(refreshedGroupCard.getByRole("link", { name: "View Details" })).toBeVisible();
     await expect(refreshedIndividualCard.getByRole("link", { name: "View Details" })).toBeVisible();
+  });
+
+  test("visit-completion-requires-school-staff-interaction", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await seedVisitAction(pool, visitId, {
+      actionType: "classroom_observation",
+      status: "completed",
+      data: buildCompleteClassroomObservationData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "af_team_interaction",
+      status: "completed",
+      data: buildCompleteAFTeamInteractionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "individual_af_teacher_interaction",
+      status: "completed",
+      data: buildCompleteIndividualTeacherInteractionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "principal_interaction",
+      status: "completed",
+      data: buildCompletePrincipalInteractionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "group_student_discussion",
+      status: "completed",
+      data: buildCompleteGroupStudentDiscussionData(),
+    });
+    await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: buildCompleteIndividualStudentDiscussionData(),
+    });
+    // No school_staff_interaction seeded
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(
+      pmPage.getByText(
+        "At least one completed School Staff Interaction is required to complete visit"
+      )
+    ).toBeVisible();
+  });
+
+  test("pm-creates-starts-fills-and-ends-school-staff-interaction", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+
+    // Add School Staff Interaction via picker (dialog auto-starts + navigates)
+    await pmPage.getByRole("button", { name: "Add Action Point" }).click();
+    const dialog = pmPage.getByRole("dialog");
+    await dialog.getByLabel("School Staff Interaction").click();
+    await dialog.getByRole("button", { name: "Add" }).click();
+
+    // Dialog acquires GPS, creates action, starts it, then navigates to action detail
+    await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/, { timeout: 15_000 });
+    const actionId = pmPage.url().split("/actions/")[1]!;
+
+    // Fill the form
+    await fillSchoolStaffInteractionForm(pmPage);
+
+    // Track save-before-end request order
+    const requestOrder: string[] = [];
+    pmPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PATCH" && url.pathname.includes(`/actions/${actionId}`)) {
+        requestOrder.push("patch");
+      }
+      if (request.method() === "POST" && url.pathname.includes(`/actions/${actionId}/end`)) {
+        requestOrder.push("end");
+      }
+    });
+
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+    expect(requestOrder).toEqual(["patch", "end"]);
+
+    // DB assertion
+    const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
+      [actionId]
+    );
+    const actionRow = actionRows.rows[0];
+    expect(actionRow?.status).toBe("completed");
+
+    const questions = actionRow?.data?.questions as Record<string, unknown>;
+    expect(Object.keys(questions)).toHaveLength(2);
+    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+      expect((questions[key] as Record<string, unknown>)?.answer).toBe(true);
+    }
+
+    // Navigate back and check card stats
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
+    const refreshedCard = pmPage.getByTestId(`action-card-${actionId}`);
+    await expect(refreshedCard.getByTestId(`school-staff-interaction-stats-${actionId}`)).toContainText("2/2 (100%)");
   });
 });
