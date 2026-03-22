@@ -140,3 +140,35 @@ Session: cee6bab8-4363-41dd-ab33-b0554b9ecdc3
   - Stats test ID for school_staff_interaction in ActionPointList.tsx is `school-staff-interaction-stats-{id}` (not `school-staff-stats-{id}`)
   - `fillSchoolStaffInteractionForm` helper is identical to principal interaction pattern — just iterate `allQuestionKeys` and click yes radios
 ---
+
+## 2026-03-22 - US-010
+Session: f20ed385-ba0a-4b88-b456-956a7a2ae5c1
+- Updated CLAUDE.md Project Overview paragraph to include school staff interaction
+- Added "PM Visits: School Staff Interaction (v1)" section to CLAUDE.md (after Individual Student Interaction)
+- Updated visit completion rule from 6 to 7 required types in CLAUDE.md
+- Updated test file inventory: 89 files/1572 tests → 92 files/1661 tests (as of 2026-03-22)
+- Added `school-staff-interaction.test.ts` and `SchoolStaffInteractionForm.test.tsx` to test file listings
+- Added School Staff Interaction subsection in `docs/ai/project-context.md` (section 3.5, after Individual Student Interaction)
+- Fixed stale references in project-context.md: "10 types" → "7 types", "Six enabled" → "All 7 enabled", added school_staff_interaction to completion chain, stats list, picker list, and shared helpers
+- Files changed: `CLAUDE.md`, `docs/ai/project-context.md`
+- **Learnings for future iterations:**
+  - Documentation stories are straightforward but require careful line-by-line auditing of stale references — the implementation plan's line-number table was invaluable for identifying all spots
+  - Test counts should always come from a fresh `npx vitest run` output, never from projecting from old baselines
+  - The "10 action types" reference in project-context.md was from a very old codebase state — legacy types were already cleaned up in code but docs lagged behind
+---
+
+## 2026-03-22 - US-011
+Session: 1880151a-421d-4fa2-b26d-459c9b9b3c9c
+- Reviewed all changes via git diff (75 files, ~19,400 lines changed across the full branch)
+- Ran unit tests: 1661 passed, 92 files, 0 failures
+- Ran E2E tests: 36 passed, 0 failures
+- Ran unit coverage: Lines 94.23%, Branches 87.90%, Functions 96.39%, Statements 93.80%
+- E2E coverage: Lines 100%, Branches 52.77%, Functions 100%, Statements 100%
+- Verified no unintended side effects — all changes are focused on school_staff_interaction feature
+- Created `ralph/school-staff-interaction-review.txt` with concise findings
+- Files changed: `ralph/school-staff-interaction-review.txt`, `ralph/prd.json`, `ralph/progress.txt`, `unit-coverage/coverage-summary.json`
+- **Learnings for future iterations:**
+  - Review stories are quick when all prior stories were implemented cleanly — just run tests, check coverage, verify diff
+  - The moderate-gps E2E test is pre-existing broken (not caused by this feature) — tracked in progress codebase patterns
+  - ALL 11 user stories now pass — feature is complete
+---

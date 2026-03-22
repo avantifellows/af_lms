@@ -173,7 +173,7 @@
         "Fix stale action type references in project-context.md (lines 154, 251-252, 271, 272, 285)"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -190,7 +190,7 @@
         "Review file summarizes: what was done, files changed, test counts, coverage numbers, any concerns or recommendations"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
