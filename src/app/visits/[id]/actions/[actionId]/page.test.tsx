@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CURRENT_RUBRIC_VERSION } from "@/lib/classroom-observation-rubric";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 
 const {
   mockGetServerSession,
@@ -101,12 +104,10 @@ function makeAction(overrides: Record<string, unknown> = {}) {
   return {
     id: 101,
     visit_id: 1,
-    action_type: "principal_meeting",
+    action_type: "principal_interaction",
     status: "in_progress",
     data: {
-      attendees: "Principal, PM",
-      key_discussion: "Old note",
-      preserved_key: "keep-me",
+      questions: { oh_program_feedback: { answer: true } },
     },
     started_at: "2026-02-19T09:00:00.000Z",
     ended_at: null,
@@ -479,20 +480,20 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
 
-  it("loads the principal meeting renderer for principal_meeting actions", async () => {
+  it("loads the principal interaction renderer for principal_interaction actions", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
-      .mockResolvedValueOnce([makeAction({ action_type: "principal_meeting" })]);
+      .mockResolvedValueOnce([makeAction({ action_type: "principal_interaction", data: {} })]);
 
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    expect(screen.getByText("Principal Meeting Details")).toBeInTheDocument();
-    expect(screen.getByTestId("action-renderer-principal_meeting")).toBeInTheDocument();
+    expect(screen.getByText("Principal Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-principal_interaction")).toHaveLength(2);
   });
 
-  it("saves via PATCH and preserves unrelated fields in action data", async () => {
+  it("saves via PATCH and sends sanitized principal interaction data", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
@@ -505,9 +506,10 @@ describe("VisitActionDetailPage", () => {
           Promise.resolve({
             action: makeAction({
               data: {
-                attendees: "Principal, PM",
-                key_discussion: "Updated note",
-                preserved_key: "keep-me",
+                questions: {
+                  oh_program_feedback: { answer: true },
+                  ip_curriculum_progress: { answer: false },
+                },
               },
             }),
           }),
@@ -519,9 +521,8 @@ describe("VisitActionDetailPage", () => {
     const jsx = await VisitActionDetailPage(pageProps());
     render(jsx);
 
-    const keyDiscussion = screen.getByLabelText("Key Discussion");
-    await user.clear(keyDiscussion);
-    await user.type(keyDiscussion, "Updated note");
+    // Click a radio button to change form data
+    await user.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-no"));
     await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
@@ -532,12 +533,11 @@ describe("VisitActionDetailPage", () => {
     expect(url).toBe("/api/pm/visits/1/actions/101");
     expect(init.method).toBe("PATCH");
 
-    const parsedBody = JSON.parse(String(init.body)) as { data: Record<string, string> };
-    expect(parsedBody.data.key_discussion).toBe("Updated note");
-    expect(parsedBody.data.preserved_key).toBe("keep-me");
+    const parsedBody = JSON.parse(String(init.body)) as { data: { questions: Record<string, unknown> } };
+    expect(parsedBody.data.questions).toBeDefined();
   });
 
-  it("ends an action via /end using GPS and updates UI to completed", async () => {
+  it("ends an action via save-before-end + /end using GPS and updates UI to completed", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
@@ -548,8 +548,14 @@ describe("VisitActionDetailPage", () => {
       cancel: vi.fn(),
     });
 
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
+    const fetchMock = vi.fn()
+      // First call: save-before-end (PATCH)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ action: makeAction() }),
+      })
+      // Second call: end (POST)
+      .mockResolvedValueOnce({
         ok: true,
         json: () =>
           Promise.resolve({
@@ -562,8 +568,7 @@ describe("VisitActionDetailPage", () => {
               visit_id: "1",
             },
           }),
-      })
-    ) as unknown as typeof fetch;
+      }) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
@@ -574,13 +579,19 @@ describe("VisitActionDetailPage", () => {
 
     await waitFor(() => {
       expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/pm/visits/1/actions/101/end");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(
+    // First call: save-before-end PATCH
+    const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    // Second call: end POST
+    const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+    expect(endInit.body).toBe(
       JSON.stringify({ end_lat: 23.02, end_lng: 72.57, end_accuracy: 45 })
     );
 
@@ -1166,6 +1177,408 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
   });
 
+  it("loads the Group Student Discussion renderer for group_student_discussion actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "group_student_discussion",
+          data: { grade: null, questions: {} },
+        }),
+      ]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Student Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-group_student_discussion")).toHaveLength(2);
+  });
+
+  it("bootstraps null group student discussion data to { grade: null, questions: {} }", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "group_student_discussion",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "group_student_discussion",
+              data: { grade: null, questions: {} },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ grade: null, questions: {} });
+  });
+
+  it("loads the Individual Student Discussion renderer for individual_student_discussion actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: { students: [] },
+        }),
+      ]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Individual Student Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-individual_student_discussion")).toHaveLength(2);
+  });
+
+  it("bootstraps null individual student discussion data to { students: [] }", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "individual_student_discussion",
+              data: { students: [] },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ students: [] });
+  });
+
+  it("auto-saves group student discussion data before calling /end", async () => {
+    setupPmAuth();
+    const groupStudentData = {
+      grade: 11,
+      questions: Object.fromEntries(
+        GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+      ),
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "group_student_discussion",
+          data: groupStudentData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "group_student_discussion",
+                data: groupStudentData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "group_student_discussion",
+                status: "completed",
+                ended_at: "2026-02-19T10:00:00.000Z",
+                data: groupStudentData,
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
+    });
+
+    const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+  });
+
+  it("shows individual student /end 422 guidance with type-specific message mentioning add at least one student", async () => {
+    setupPmAuth();
+    const individualStudentData = {
+      students: [
+        {
+          id: 1,
+          name: "Test Student",
+          grade: 11,
+          questions: Object.fromEntries(
+            INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+          ),
+        },
+      ],
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: individualStudentData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "individual_student_discussion",
+                data: individualStudentData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: false,
+          status: 422,
+          json: () =>
+            Promise.resolve({
+              error: "Validation failed",
+              details: ["Missing required answers"],
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Please complete all required fields and add at least one student before ending this interaction.")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Missing required answers")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "End Action" })).toBeInTheDocument();
+  });
+
+  it("loads the School Staff Interaction renderer for school_staff_interaction actions", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([makeAction({ action_type: "school_staff_interaction", data: {} })]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("School Staff Interaction Details")).toBeInTheDocument();
+    expect(screen.getAllByTestId("action-renderer-school_staff_interaction")).toHaveLength(2);
+  });
+
+  it("saves via PATCH and sends sanitized school staff interaction data", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "school_staff_interaction",
+          data: {
+            questions: { gc_staff_concern: { answer: true } },
+          },
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "school_staff_interaction",
+              data: {
+                questions: {
+                  gc_staff_concern: { answer: true },
+                  gc_pertaining_issue: { answer: false },
+                },
+              },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByTestId("school-staff-interaction-gc_pertaining_issue-no"));
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/pm/visits/1/actions/101");
+    expect(init.method).toBe("PATCH");
+
+    const parsedBody = JSON.parse(String(init.body)) as { data: { questions: Record<string, unknown> } };
+    expect(parsedBody.data.questions).toBeDefined();
+  });
+
+  it("auto-saves school staff interaction data before calling /end", async () => {
+    setupPmAuth();
+    const schoolStaffData = {
+      questions: Object.fromEntries(
+        SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+      ),
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "school_staff_interaction",
+          data: schoolStaffData,
+        }),
+      ]);
+
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 45 }),
+      cancel: vi.fn(),
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "school_staff_interaction",
+                data: schoolStaffData,
+              }),
+            }),
+        })
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              action: makeAction({
+                action_type: "school_staff_interaction",
+                status: "completed",
+                ended_at: "2026-02-19T10:00:00.000Z",
+                data: schoolStaffData,
+              }),
+            }),
+        })
+      ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "End Action" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
+    });
+
+    const [saveUrl, saveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(saveUrl).toBe("/api/pm/visits/1/actions/101");
+    expect(saveInit.method).toBe("PATCH");
+
+    const [endUrl, endInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(endUrl).toBe("/api/pm/visits/1/actions/101/end");
+    expect(endInit.method).toBe("POST");
+  });
+
   describe("auto-save", () => {
     it("shows 'Unsaved changes' after form data change", async () => {
       setupPmAuth();
@@ -1178,8 +1591,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "New note" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
 
@@ -1198,7 +1610,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { attendees: "Principal, PM", key_discussion: "New note", preserved_key: "keep-me" },
+                data: { questions: { oh_program_feedback: { answer: true }, ip_curriculum_progress: { answer: true } } },
               }),
             }),
         })
@@ -1210,8 +1622,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "New note" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1238,7 +1649,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { attendees: "Principal, PM", key_discussion: "New", preserved_key: "keep-me" },
+                data: { questions: { oh_program_feedback: { answer: true }, ip_curriculum_progress: { answer: false } } },
               }),
             }),
         })
@@ -1250,8 +1661,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "New" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-no"));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1263,7 +1673,7 @@ describe("VisitActionDetailPage", () => {
         vi.advanceTimersByTime(3000);
       });
 
-      expect(screen.queryByTestId("auto-save-status")).not.toBeInTheDocument();
+      expect(screen.getByTestId("auto-save-status")).toHaveClass("invisible");
 
       vi.useRealTimers();
     });
@@ -1288,8 +1698,7 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "Fail" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -1324,7 +1733,7 @@ describe("VisitActionDetailPage", () => {
           json: () =>
             Promise.resolve({
               action: makeAction({
-                data: { attendees: "Principal, PM", key_discussion: "Manual", preserved_key: "keep-me" },
+                data: { questions: { oh_program_feedback: { answer: true }, ip_curriculum_progress: { answer: true } } },
               }),
             }),
         })
@@ -1336,14 +1745,14 @@ describe("VisitActionDetailPage", () => {
 
       vi.useFakeTimers();
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "Manual" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       expect(screen.getByTestId("auto-save-status")).toHaveTextContent("Unsaved changes");
 
       // Submit form (triggers handleSave which cancels auto-save timer)
       await act(async () => {
-        fireEvent.submit(screen.getByTestId("action-renderer-principal_meeting"));
+        const form = document.querySelector("form[data-testid='action-renderer-principal_interaction']");
+        fireEvent.submit(form!);
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1367,8 +1776,7 @@ describe("VisitActionDetailPage", () => {
       const jsx = await VisitActionDetailPage(pageProps());
       render(jsx);
 
-      const keyDiscussion = screen.getByLabelText("Key Discussion");
-      fireEvent.change(keyDiscussion, { target: { value: "Unsaved" } });
+      fireEvent.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-yes"));
 
       const event = new Event("beforeunload", { cancelable: true });
       const spy = vi.spyOn(event, "preventDefault");
