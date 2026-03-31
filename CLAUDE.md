@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that allows school administrators to view and manage student enrollments. Features dual authentication (Google OAuth + school passcodes) with permission-based access control.
 
-PM school-visit flows include per-action tracking with GPS and a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45).
+PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), an individual student interaction per-student checklist (2 binary questions with grade filter and student dropdown), and a school staff interaction checklist (2 binary questions, no teacher/student/grade selection).
 
 ## Development Commands
 
@@ -111,6 +111,66 @@ Visit tables:
   - `docs/ai/classroom-observation/phase-5-manual-frontend-test-cases.md`
   - `docs/ai/agent-browser-testing.md`
 
+### PM Visits: AF Team Interaction (v1)
+- 9-question binary checklist with multiselect teacher dropdown across 4 sections
+- Payload: `{ teachers: [{ id, name }], questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all 9 answered + ≥1 teacher)
+- Config/validation: `src/lib/af-team-interaction.ts`; shared teacher utils: `src/lib/teacher-utils.ts`
+- Form component: `src/components/visits/AFTeamInteractionForm.tsx`
+
+### PM Visits: Individual AF Teacher Interaction (v1)
+- Per-teacher 13-question binary checklist with attendance gating across 5 sections
+- Payload: `{ teachers: [{ id, name, attendance, questions: { [key]: { answer: boolean|null, remark?: string } } }] }`
+- Attendance options: `present`, `on_leave`, `absent` — only `present` teachers require question answers
+- 5 sections: Operational Health (1 question), Syllabus Track (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all present teachers need all 13 answered + ≥1 teacher)
+- END route additionally checks all school teachers are recorded (queries `user_permission` table)
+- Config/validation: `src/lib/individual-af-teacher-interaction.ts`
+- Form component: `src/components/visits/IndividualAFTeacherInteractionForm.tsx`
+
+### PM Visits: Principal Interaction (v1)
+- 7-question binary checklist across 5 sections — no teacher selection (simplest form in the system)
+- Payload: `{ questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- 5 sections: Operational Health (1 question), Implementation Progress (2), Student Performance on Monthly Tests (1), Support Needed (1), Monthly Planning (2) — 7 total
+- Question keys: `oh_program_feedback`, `ip_curriculum_progress`, `ip_key_events`, `sp_student_performance`, `sn_concerns_raised`, `mp_monthly_plan`, `mp_permissions_obtained`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all 7 questions answered with non-null boolean)
+- Config/validation: `src/lib/principal-interaction.ts`
+- Form component: `src/components/visits/PrincipalInteractionForm.tsx`
+
+### PM Visits: Student Interaction (v1)
+- 4-question binary checklist with grade selection (11 or 12) across 1 section — grade-scoped group discussion
+- Payload: `{ grade: number, questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- 1 section: General Check (4 questions) — 4 total
+- Question keys: `gc_interacted`, `gc_program_updates`, `gc_direction`, `gc_concerns`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (valid grade + all 4 questions answered with non-null boolean)
+- Config/validation: `src/lib/group-student-discussion.ts`
+- Form component: `src/components/visits/GroupStudentDiscussionForm.tsx`
+
+### PM Visits: Individual Student Interaction (v1)
+- Per-student 2-question binary checklist with grade filter and student dropdown across 1 section — no attendance gating
+- Payload: `{ students: [{ id, name, grade, questions: { [key]: { answer: boolean|null, remark?: string } } }] }`
+- Grade filter fetches students from `/api/pm/students?school_code=X&grade=N`
+- 1 section: Operational Health (2 questions) — 2 total
+- Question keys: `oh_teaching_concern`, `oh_additional_support`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (≥1 student, each with valid id/name/grade + all 2 questions answered)
+- No 'all students recorded' DB check (unlike individual teacher END)
+- Config/validation: `src/lib/individual-student-discussion.ts`; shared student utils: `src/lib/student-utils.ts`
+- Form component: `src/components/visits/IndividualStudentDiscussionForm.tsx`
+
+### PM Visits: School Staff Interaction (v1)
+- 2-question binary checklist across 1 section — no teacher/student/grade selection (simplest checklist alongside principal interaction)
+- Payload: `{ questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- 1 section: General Check (2 questions) — 2 total
+- Question keys: `gc_staff_concern`, `gc_pertaining_issue`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all 2 questions answered with non-null boolean)
+- Config/validation: `src/lib/school-staff-interaction.ts`
+- Form component: `src/components/visits/SchoolStaffInteractionForm.tsx`
+
+### PM Visits: Visit Completion Rule
+- Visit completion requires all 7 action types: at least one completed `classroom_observation` (with strict-valid rubric), at least one completed `af_team_interaction`, at least one completed `individual_af_teacher_interaction`, at least one completed `principal_interaction`, at least one completed `group_student_discussion`, at least one completed `individual_student_discussion`, and at least one completed `school_staff_interaction`
+- Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student → school staff)
+
+
 ### Key Patterns
 - Server components for data fetching (`getServerSession` + direct DB queries)
 - Client components for interactivity (`"use client"` directive)
@@ -142,7 +202,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (75 files, 1142 tests as of 2026-03-01)
+### Test files (92 files, 1661 tests as of 2026-03-22)
 
 **Library tests** (high-signal):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
@@ -157,7 +217,18 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/lib/visit-actions.test.ts` — ACTION_TYPES map + ActionType exhaustiveness
 - `src/lib/visits-policy.test.ts` — shared visit auth/scope/locking policy helpers
 - `src/lib/classroom-observation-rubric.test.ts` — rubric config integrity, score computation, lenient/strict validation rules
+- `src/lib/af-team-interaction.test.ts` — AF team interaction config integrity, lenient/strict validation rules
+- `src/lib/individual-af-teacher-interaction.test.ts` — individual teacher interaction config integrity, attendance-gated lenient/strict validation rules
+- `src/lib/principal-interaction.test.ts` — principal interaction config integrity, lenient/strict validation rules
+- `src/lib/group-student-discussion.test.ts` — group student discussion config integrity, grade validation, lenient/strict validation rules
+- `src/lib/individual-student-discussion.test.ts` — individual student discussion config integrity, per-student grade validation, lenient/strict validation rules
+- `src/lib/school-staff-interaction.test.ts` — school staff interaction config integrity, lenient/strict validation rules
+- `src/lib/teacher-utils.test.ts` — shared teacher display name helper
+- `src/lib/student-utils.test.ts` — shared student display name helper
 - `src/proxy.test.ts` — middleware redirect logic
+
+**Hook tests** (high-signal):
+- `src/hooks/use-auto-save.test.ts` — auto-save hook: debounce, status transitions, flush/cancel, beforeunload, sanitizeFn integration
 
 **API route tests** (high-signal):
 - `src/app/api/admin/schools/route.test.ts` — GET list/search schools
@@ -166,6 +237,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/app/api/admin/users/[id]/route.test.ts` — DELETE/PATCH user management
 - `src/app/api/curriculum/chapters/route.test.ts` — GET chapters with topics (uses NextRequest)
 - `src/app/api/students/search/route.test.ts` — GET student search with school access control
+- `src/app/api/pm/students/route.test.ts` — GET students for a school with optional grade filter
 - `src/app/api/pm/teachers/route.test.ts` — GET teachers for a school (role/access filtering)
 - `src/app/api/pm/visits/route.test.ts` — GET/POST visits list + create with GPS
 - `src/app/api/pm/visits/[id]/route.test.ts` — GET visit + actions (no PATCH/PUT)
@@ -197,6 +269,12 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/components/visits/ActionPointList.test.tsx` — action card interactions (add/start/delete/open)
 - `src/components/visits/ActionTypePickerModal.test.tsx` — action type picker
 - `src/components/visits/ClassroomObservationForm.test.tsx` — rubric form rendering, scoring summary behavior, data updates
+- `src/components/visits/AFTeamInteractionForm.test.tsx` — AF team interaction form rendering, teacher multiselect, binary questions, validation
+- `src/components/visits/IndividualAFTeacherInteractionForm.test.tsx` — individual teacher interaction form rendering, per-teacher accordion, attendance gating, add/remove
+- `src/components/visits/PrincipalInteractionForm.test.tsx` — principal interaction form rendering, binary questions, read-only mode
+- `src/components/visits/GroupStudentDiscussionForm.test.tsx` — group student discussion form rendering, grade dropdown gating, binary questions, progress bar
+- `src/components/visits/IndividualStudentDiscussionForm.test.tsx` — individual student discussion form rendering, grade filter, student fetch/add/remove, per-student questions
+- `src/components/visits/SchoolStaffInteractionForm.test.tsx` — school staff interaction form rendering, binary questions, read-only mode
 - `src/components/visits/CompleteVisitButton.test.tsx` — GPS capture + completion rules
 - `src/components/visits/NewVisitForm.test.tsx` — start visit GPS flow
 - `src/components/SchoolTabs.test.tsx`, `src/components/VisitsTab.test.tsx` — visit tab rendering

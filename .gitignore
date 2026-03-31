@@ -63,5 +63,9 @@ next-env.d.ts
 
 .planning
 ralph/*
+pral/
 .claude/commands
 .env.dont.touch
+# Discord bot scripts
+start-discord-bot.sh
+stop-discord-bot.sh
