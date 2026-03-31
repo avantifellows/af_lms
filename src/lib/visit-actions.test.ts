@@ -19,16 +19,21 @@ describe("visit-actions", () => {
       individual_student_discussion: true,
       af_team_interaction: true,
       individual_af_teacher_interaction: true,
+      school_staff_interaction: true,
     };
 
-    expect(Object.keys(exhaustiveByType)).toHaveLength(6);
+    expect(Object.keys(exhaustiveByType)).toHaveLength(7);
     expect(ACTION_TYPE_VALUES).toEqual(Object.keys(ACTION_TYPES));
   });
 
   it("validates action types at runtime", () => {
     expect(isActionType("classroom_observation")).toBe(true);
+    expect(isActionType("school_staff_interaction")).toBe(true);
     expect(isActionType("unknown_action")).toBe(false);
     expect(getActionTypeLabel("principal_interaction")).toBe("Principal Interaction");
+    expect(getActionTypeLabel("school_staff_interaction")).toBe(
+      "School Staff Interaction"
+    );
   });
 
   it("defines allowed action statuses", () => {

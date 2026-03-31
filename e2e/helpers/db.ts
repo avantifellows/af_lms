@@ -12,6 +12,7 @@ import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individu
 import { PRINCIPAL_INTERACTION_CONFIG } from "../../src/lib/principal-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
 import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "../../src/lib/school-staff-interaction";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -301,6 +302,17 @@ export function buildCompleteIndividualStudentDiscussionData(): Record<string, u
       },
     ],
   };
+}
+
+/**
+ * Canonical strict-valid school staff interaction payload for completed action fixtures.
+ */
+export function buildCompleteSchoolStaffInteractionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return { questions };
 }
 
 /**

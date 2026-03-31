@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 
 import ActionPointList, {
   getAFTeamInteractionStats,
@@ -10,6 +11,7 @@ import ActionPointList, {
   getIndividualStudentDiscussionStats,
   getIndividualTeacherInteractionStats,
   getPrincipalInteractionStats,
+  getSchoolStaffInteractionStats,
   type VisitActionListItem,
 } from "./ActionPointList";
 
@@ -1134,5 +1136,118 @@ describe("getIndividualStudentDiscussionStats", () => {
 
   it("returns null for data without students key", () => {
     expect(getIndividualStudentDiscussionStats({})).toBeNull();
+  });
+});
+
+describe("School Staff Interaction stats on action cards", () => {
+  it("renders stats for school_staff_interaction card with answered questions", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 100,
+            action_type: "school_staff_interaction",
+            status: "in_progress",
+            started_at: "2026-03-22T09:00:00.000Z",
+            data: {
+              questions: {
+                gc_staff_concern: { answer: true },
+              },
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("school-staff-interaction-stats-100");
+    expect(statsEl).toHaveTextContent("1/2 (50%)");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            action_type: "school_staff_interaction",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("school-staff-interaction-stats-101")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when no questions are answered", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 102,
+            action_type: "school_staff_interaction",
+            status: "in_progress",
+            started_at: "2026-03-22T09:00:00.000Z",
+            data: {
+              questions: {},
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("school-staff-interaction-stats-102")).not.toBeInTheDocument();
+  });
+});
+
+describe("getSchoolStaffInteractionStats", () => {
+  it("returns correct counts for partial payload — 1 of 2 answered", () => {
+    const result = getSchoolStaffInteractionStats({
+      questions: {
+        gc_staff_concern: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 2 });
+  });
+
+  it("returns correct counts for complete payload — all 2 answered", () => {
+    const questions: Record<string, { answer: boolean }> = {};
+    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+      questions[key] = { answer: false };
+    }
+    const result = getSchoolStaffInteractionStats({ questions });
+    expect(result).toEqual({ answeredCount: 2, totalQuestions: 2 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getSchoolStaffInteractionStats(undefined)).toBeNull();
+  });
+
+  it("returns null when no questions are answered (answeredCount is 0)", () => {
+    expect(getSchoolStaffInteractionStats({ questions: {} })).toBeNull();
+  });
+
+  it("does NOT count null answers — only true or false count as answered", () => {
+    const result = getSchoolStaffInteractionStats({
+      questions: {
+        gc_staff_concern: { answer: null },
+        gc_pertaining_issue: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 2 });
+  });
+
+  it("ignores unknown question keys — only counts known keys", () => {
+    const result = getSchoolStaffInteractionStats({
+      questions: {
+        unknown_key: { answer: true },
+        gc_staff_concern: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 2 });
   });
 });

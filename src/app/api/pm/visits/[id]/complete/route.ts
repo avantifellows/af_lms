@@ -261,6 +261,25 @@ export async function POST(
     );
   }
 
+  const completedSchoolStaffActions = await query<{ id: number }>(
+    `SELECT a.id
+     FROM lms_pm_school_visit_actions a
+     WHERE a.visit_id = $1
+       AND a.deleted_at IS NULL
+       AND a.action_type = 'school_staff_interaction'
+       AND a.status = 'completed'
+     LIMIT 1`,
+    [id]
+  );
+
+  if (completedSchoolStaffActions.length === 0) {
+    return apiError(
+      422,
+      "At least one completed School Staff Interaction is required to complete visit",
+      ["No completed school_staff_interaction action found for this visit"]
+    );
+  }
+
   const updatedVisit = await query<Pick<VisitAccessRow, "id" | "status" | "completed_at">>(
     `UPDATE lms_pm_school_visits v
      SET status = 'completed',

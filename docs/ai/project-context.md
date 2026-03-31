@@ -151,7 +151,7 @@ Admin sections:
 #### Visit lifecycle
 - Visits have exactly **2 states**: `in_progress` → `completed` (no separate "ended" concept)
 - Visits start with **zero actions**; PM adds action points on-demand
-- **Completion requires**: all 6 action types — ≥1 completed `classroom_observation` (strict rubric validation) + ≥1 completed `af_team_interaction` + ≥1 completed `individual_af_teacher_interaction` + ≥1 completed `principal_interaction` + ≥1 completed `group_student_discussion` + ≥1 completed `individual_student_discussion` + no actions left `in_progress` + valid GPS. Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student).
+- **Completion requires**: all 7 action types — ≥1 completed `classroom_observation` (strict rubric validation) + ≥1 completed `af_team_interaction` + ≥1 completed `individual_af_teacher_interaction` + ≥1 completed `principal_interaction` + ≥1 completed `group_student_discussion` + ≥1 completed `individual_student_discussion` + ≥1 completed `school_staff_interaction` + no actions left `in_progress` + valid GPS. Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student → school staff).
 
 #### Classroom observation rubric contract (v1)
 - Top-level payload keys: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`, `teacher_id`, `teacher_name`, `grade`
@@ -241,6 +241,19 @@ Admin sections:
 - Shared student utilities: `src/lib/student-utils.ts` (`Student` interface, `getStudentDisplayName()`)
 - Form component: `src/components/visits/IndividualStudentDiscussionForm.tsx`
 
+#### School Staff Interaction (v1)
+- A 2-question binary checklist about the PM's interaction with school staff — no teacher/student/grade selection (simplest checklist alongside principal interaction)
+- Top-level payload keys: `questions` (record of question key → `{ answer: boolean|null, remark?: string }`)
+- 1 section: General Check (2 questions) — 2 total
+- Question keys: `gc_staff_concern`, `gc_pertaining_issue`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data, ignores unknown question keys)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (all 2 questions answered with non-null boolean)
+  - COMPLETE visit: requires at least one completed school staff interaction (alongside all other 6 action types)
+- Config and validation: `src/lib/school-staff-interaction.ts`
+- Form component: `src/components/visits/SchoolStaffInteractionForm.tsx`
+
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
 - **Start** captures GPS + timestamp; **End** captures GPS + timestamp
@@ -248,8 +261,8 @@ Admin sections:
 - **Adding** an action auto-starts it: acquires GPS → creates action → starts action → redirects to in_progress action detail page. If GPS fails, no action is created. If create succeeds but start fails, the action remains pending in the list.
 - Multiple actions can be `in_progress` simultaneously
 - **Deletion** (soft delete: `deleted_at` set, row retained): `pending` actions delete immediately; `in_progress` actions show a confirmation modal warning about data loss before deleting. `completed` actions cannot be deleted. The DB CHECK constraint requires `status = 'pending'` when `deleted_at` is set, so the DELETE route resets status and nulls timestamps/GPS fields.
-- 10 action types defined in code: Principal Interaction, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction, Individual AF Teacher Interaction
-- **Six action types are enabled** in the picker UI: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, and `individual_student_discussion`; other 4 types are visible but disabled
+- 7 action types defined in code: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, `individual_student_discussion`, `school_staff_interaction`
+- All 7 action types are enabled in the picker UI
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
 
 #### Auto-save
@@ -268,21 +281,22 @@ Admin sections:
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
-- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; adding an action auto-navigates to its detail page; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), individual teacher interaction stats (recorded teachers, attendance breakdown), principal interaction stats (answered questions), group student discussion stats (grade, answered questions), and individual student discussion stats (student count)
-- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, and `individual_student_discussion` enabled)
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; adding an action auto-navigates to its detail page; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), individual teacher interaction stats (recorded teachers, attendance breakdown), principal interaction stats (answered questions), group student discussion stats (grade, answered questions), individual student discussion stats (student count), and school staff interaction stats (answered questions)
+- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (all 7 action types enabled: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, `individual_student_discussion`, `school_staff_interaction`)
 - `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields; sticky progress summary (`top-12 z-10`, below page-level sticky header)
 - `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/PrincipalInteractionForm.tsx` — 7-question binary checklist with optional remarks, no teacher section; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/GroupStudentDiscussionForm.tsx` — 4-question binary checklist with grade dropdown (11/12), questions hidden until grade selected; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/IndividualStudentDiscussionForm.tsx` — per-student accordion form with grade filter dropdown, **searchable student combobox** (fuzzy token matching, keyboard nav, click-outside-to-close), student API fetch, 2 binary questions per student, add/remove students; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/SchoolStaffInteractionForm.tsx` — 2-question binary checklist with optional remarks, no teacher/student/grade selection; sticky progress summary (`top-12 z-10`)
 - `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type, integrates auto-save hook, inline `SaveStatusIndicator`)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
 
 #### Shared helpers
 - `src/hooks/use-auto-save.ts` — custom React hook for debounced auto-save with status tracking, flush/cancel controls, and `beforeunload` guard
-- `src/lib/visit-actions.ts` — `ACTION_TYPES` map (10 types), `ActionType` union, status constants, `statusBadgeClass()` helper
+- `src/lib/visit-actions.ts` — `ACTION_TYPES` map (7 types), `ActionType` union, status constants, `statusBadgeClass()` helper
 - `src/lib/visits-policy.ts` — shared auth/scope/locking helpers used across all visit routes
 - `src/lib/classroom-observation-rubric.ts` — rubric config, score computation, lenient/strict validation, `VALID_GRADES`, `ClassroomObservationData` type
 - `src/lib/af-team-interaction.ts` — AF team interaction config (4 sections, 9 questions), `AFTeamInteractionData` type, lenient/strict validation
@@ -290,6 +304,7 @@ Admin sections:
 - `src/lib/principal-interaction.ts` — principal interaction config (5 sections, 7 questions), lenient/strict validation (no teacher array)
 - `src/lib/group-student-discussion.ts` — group student discussion config (1 section, 4 questions), grade validation (11/12), lenient/strict validation
 - `src/lib/individual-student-discussion.ts` — individual student discussion config (1 section, 2 questions), per-student grade validation, lenient/strict validation
+- `src/lib/school-staff-interaction.ts` — school staff interaction config (1 section, 2 questions), lenient/strict validation (no teacher/student/grade)
 - `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by ClassroomObservationForm, AFTeamInteractionForm, and IndividualAFTeacherInteractionForm)
 - `src/lib/student-utils.ts` — shared `Student` interface and `getStudentDisplayName()` (used by IndividualStudentDiscussionForm)
 - `src/lib/fuzzy-match.ts` — token-based fuzzy matching helper (`fuzzyMatch(query, candidate)`) — splits query into whitespace tokens, all must be case-insensitive substrings of candidate (used by IndividualStudentDiscussionForm searchable combobox)

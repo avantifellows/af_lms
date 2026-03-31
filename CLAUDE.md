@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that allows school administrators to view and manage student enrollments. Features dual authentication (Google OAuth + school passcodes) with permission-based access control.
 
-PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), and an individual student interaction per-student checklist (2 binary questions with grade filter and student dropdown).
+PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), an individual student interaction per-student checklist (2 binary questions with grade filter and student dropdown), and a school staff interaction checklist (2 binary questions, no teacher/student/grade selection).
 
 ## Development Commands
 
@@ -157,9 +157,18 @@ Visit tables:
 - Config/validation: `src/lib/individual-student-discussion.ts`; shared student utils: `src/lib/student-utils.ts`
 - Form component: `src/components/visits/IndividualStudentDiscussionForm.tsx`
 
+### PM Visits: School Staff Interaction (v1)
+- 2-question binary checklist across 1 section — no teacher/student/grade selection (simplest checklist alongside principal interaction)
+- Payload: `{ questions: { [key]: { answer: boolean|null, remark?: string } } }`
+- 1 section: General Check (2 questions) — 2 total
+- Question keys: `gc_staff_concern`, `gc_pertaining_issue`
+- Validation: lenient for in_progress (partial OK), strict for completed/end (all 2 questions answered with non-null boolean)
+- Config/validation: `src/lib/school-staff-interaction.ts`
+- Form component: `src/components/visits/SchoolStaffInteractionForm.tsx`
+
 ### PM Visits: Visit Completion Rule
-- Visit completion requires all 6 action types: at least one completed `classroom_observation` (with strict-valid rubric), at least one completed `af_team_interaction`, at least one completed `individual_af_teacher_interaction`, at least one completed `principal_interaction`, at least one completed `group_student_discussion`, and at least one completed `individual_student_discussion`
-- Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student)
+- Visit completion requires all 7 action types: at least one completed `classroom_observation` (with strict-valid rubric), at least one completed `af_team_interaction`, at least one completed `individual_af_teacher_interaction`, at least one completed `principal_interaction`, at least one completed `group_student_discussion`, at least one completed `individual_student_discussion`, and at least one completed `school_staff_interaction`
+- Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student → school staff)
 
 
 ### Key Patterns
@@ -193,7 +202,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
 - Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
 
-### Test files (89 files, 1572 tests as of 2026-03-18)
+### Test files (92 files, 1661 tests as of 2026-03-22)
 
 **Library tests** (high-signal):
 - `src/lib/permissions.test.ts` — sync helpers + async DB-dependent functions (getUserPermission, canAccessSchool, isAdmin, etc.)
@@ -213,6 +222,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/lib/principal-interaction.test.ts` — principal interaction config integrity, lenient/strict validation rules
 - `src/lib/group-student-discussion.test.ts` — group student discussion config integrity, grade validation, lenient/strict validation rules
 - `src/lib/individual-student-discussion.test.ts` — individual student discussion config integrity, per-student grade validation, lenient/strict validation rules
+- `src/lib/school-staff-interaction.test.ts` — school staff interaction config integrity, lenient/strict validation rules
 - `src/lib/teacher-utils.test.ts` — shared teacher display name helper
 - `src/lib/student-utils.test.ts` — shared student display name helper
 - `src/proxy.test.ts` — middleware redirect logic
@@ -264,6 +274,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 - `src/components/visits/PrincipalInteractionForm.test.tsx` — principal interaction form rendering, binary questions, read-only mode
 - `src/components/visits/GroupStudentDiscussionForm.test.tsx` — group student discussion form rendering, grade dropdown gating, binary questions, progress bar
 - `src/components/visits/IndividualStudentDiscussionForm.test.tsx` — individual student discussion form rendering, grade filter, student fetch/add/remove, per-student questions
+- `src/components/visits/SchoolStaffInteractionForm.test.tsx` — school staff interaction form rendering, binary questions, read-only mode
 - `src/components/visits/CompleteVisitButton.test.tsx` — GPS capture + completion rules
 - `src/components/visits/NewVisitForm.test.tsx` — start visit GPS flow
 - `src/components/SchoolTabs.test.tsx`, `src/components/VisitsTab.test.tsx` — visit tab rendering

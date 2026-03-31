@@ -26,6 +26,10 @@ import {
   validatePrincipalInteractionComplete,
   validatePrincipalInteractionSave,
 } from "@/lib/principal-interaction";
+import {
+  validateSchoolStaffInteractionComplete,
+  validateSchoolStaffInteractionSave,
+} from "@/lib/school-staff-interaction";
 import { query } from "@/lib/db";
 import {
   apiError,
@@ -255,6 +259,17 @@ export async function PATCH(
 
     if (!validation.valid) {
       return apiError(422, "Invalid individual student discussion data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "school_staff_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validateSchoolStaffInteractionComplete(data)
+        : validateSchoolStaffInteractionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid school staff interaction data", validation.errors);
     }
   }
 

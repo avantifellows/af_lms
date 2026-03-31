@@ -249,6 +249,37 @@ describe("ActionTypePickerModal", () => {
     expect(screen.getByRole("button", { name: "Adding..." })).toBeDisabled();
   });
 
+  it("school_staff_interaction radio is selectable (not disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const radio = screen.getByLabelText("School Staff Interaction");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits school_staff_interaction when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("School Staff Interaction"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("school_staff_interaction");
+  });
+
   it("all action types are selectable (none disabled)", () => {
     render(
       <ActionTypePickerModal

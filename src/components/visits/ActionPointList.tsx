@@ -10,6 +10,7 @@ import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 import { getAccurateLocation } from "@/lib/geolocation";
 import {
   ACTION_STATUS_VALUES,
@@ -338,6 +339,42 @@ export function getIndividualStudentDiscussionStats(
   }
 
   return { studentCount: students.length };
+}
+
+export interface SchoolStaffInteractionStats {
+  answeredCount: number;
+  totalQuestions: number;
+}
+
+export function getSchoolStaffInteractionStats(
+  data: Record<string, unknown> | undefined
+): SchoolStaffInteractionStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const questions = data.questions;
+  let answeredCount = 0;
+  if (questions && typeof questions === "object" && !Array.isArray(questions)) {
+    const questionsRecord = questions as Record<string, unknown>;
+    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+      const value = questionsRecord[key];
+      if (value && typeof value === "object" && "answer" in value) {
+        const answer = (value as { answer: unknown }).answer;
+        if (typeof answer === "boolean") {
+          answeredCount += 1;
+        }
+      }
+    }
+  }
+
+  const totalQuestions = SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys.length;
+
+  if (answeredCount === 0) {
+    return null;
+  }
+
+  return { answeredCount, totalQuestions };
 }
 
 export default function ActionPointList({
@@ -760,6 +797,24 @@ export default function ActionPointList({
                   <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`individual-student-stats-${action.id}`}>
                     <span className="text-text-secondary">
                       <span className="text-text-muted">Students:</span> {stats.studentCount}
+                    </span>
+                  </div>
+                );
+              })()}
+              {action.action_type === "school_staff_interaction" && (() => {
+                const stats = getSchoolStaffInteractionStats(action.data);
+                if (!stats) {
+                  return null;
+                }
+
+                const progressPercent = stats.totalQuestions === 0
+                  ? 0
+                  : Math.round((stats.answeredCount / stats.totalQuestions) * 100);
+
+                return (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`school-staff-interaction-stats-${action.id}`}>
+                    <span className="font-mono text-text-secondary">
+                      {stats.answeredCount}/{stats.totalQuestions} ({progressPercent}%)
                     </span>
                   </div>
                 );

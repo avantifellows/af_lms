@@ -10,6 +10,7 @@ import { validateGroupStudentDiscussionComplete } from "@/lib/group-student-disc
 import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-interaction";
 import { validateIndividualStudentDiscussionComplete } from "@/lib/individual-student-discussion";
 import { validatePrincipalInteractionComplete } from "@/lib/principal-interaction";
+import { validateSchoolStaffInteractionComplete } from "@/lib/school-staff-interaction";
 import {
   apiError,
   enforceVisitWriteAccess,
@@ -156,6 +157,19 @@ function individualStudentDiscussionValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid individual student discussion data", validation.errors);
 }
 
+function schoolStaffInteractionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "school_staff_interaction") {
+    return null;
+  }
+
+  const validation = validateSchoolStaffInteractionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid school staff interaction data", validation.errors);
+}
+
 async function allTeachersRecordedError(
   action: VisitActionRow,
   schoolCode: string,
@@ -276,6 +290,11 @@ export async function POST(
     return invalidIndividualStudentData;
   }
 
+  const invalidSchoolStaffData = schoolStaffInteractionValidationError(existingAction);
+  if (invalidSchoolStaffData) {
+    return invalidSchoolStaffData;
+  }
+
   const missingTeachersError = await allTeachersRecordedError(
     existingAction,
     visit.school_code,
@@ -349,6 +368,11 @@ export async function POST(
   const invalidCurrentIndividualStudentData = individualStudentDiscussionValidationError(current);
   if (invalidCurrentIndividualStudentData) {
     return invalidCurrentIndividualStudentData;
+  }
+
+  const invalidCurrentSchoolStaffData = schoolStaffInteractionValidationError(current);
+  if (invalidCurrentSchoolStaffData) {
+    return invalidCurrentSchoolStaffData;
   }
 
   const currentMissingTeachersError = await allTeachersRecordedError(
