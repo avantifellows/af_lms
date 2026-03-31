@@ -10,6 +10,26 @@ import {
   validateClassroomObservationComplete,
   validateClassroomObservationSave,
 } from "@/lib/classroom-observation-rubric";
+import {
+  validateIndividualTeacherComplete,
+  validateIndividualTeacherSave,
+} from "@/lib/individual-af-teacher-interaction";
+import {
+  validateGroupStudentDiscussionComplete,
+  validateGroupStudentDiscussionSave,
+} from "@/lib/group-student-discussion";
+import {
+  validateIndividualStudentDiscussionComplete,
+  validateIndividualStudentDiscussionSave,
+} from "@/lib/individual-student-discussion";
+import {
+  validatePrincipalInteractionComplete,
+  validatePrincipalInteractionSave,
+} from "@/lib/principal-interaction";
+import {
+  validateSchoolStaffInteractionComplete,
+  validateSchoolStaffInteractionSave,
+} from "@/lib/school-staff-interaction";
 import { query } from "@/lib/db";
 import {
   apiError,
@@ -198,6 +218,60 @@ export async function PATCH(
     }
   }
 
+  if (action.action_type === "individual_af_teacher_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validateIndividualTeacherComplete(data)
+        : validateIndividualTeacherSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid individual teacher interaction data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "principal_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validatePrincipalInteractionComplete(data)
+        : validatePrincipalInteractionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid principal interaction data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "group_student_discussion") {
+    const validation =
+      action.status === "completed"
+        ? validateGroupStudentDiscussionComplete(data)
+        : validateGroupStudentDiscussionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid group student discussion data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "individual_student_discussion") {
+    const validation =
+      action.status === "completed"
+        ? validateIndividualStudentDiscussionComplete(data)
+        : validateIndividualStudentDiscussionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid individual student discussion data", validation.errors);
+    }
+  }
+
+  if (action.action_type === "school_staff_interaction") {
+    const validation =
+      action.status === "completed"
+        ? validateSchoolStaffInteractionComplete(data)
+        : validateSchoolStaffInteractionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid school staff interaction data", validation.errors);
+    }
+  }
 
   const updated = await query<VisitActionRow>(
     `UPDATE lms_pm_school_visit_actions
@@ -258,17 +332,23 @@ export async function DELETE(
     return apiError(404, "Action not found");
   }
 
-  if (action.status !== "pending") {
-    return apiError(409, "Only pending actions can be deleted");
+  if (action.status !== "pending" && action.status !== "in_progress") {
+    return apiError(409, "Only pending or in-progress actions can be deleted");
   }
 
   const deleted = await query<{ id: number }>(
     `UPDATE lms_pm_school_visit_actions
-     SET deleted_at = (NOW() AT TIME ZONE 'UTC'),
+     SET status = 'pending',
+         started_at = NULL,
+         ended_at = NULL,
+         start_lat = NULL,
+         start_lng = NULL,
+         start_accuracy = NULL,
+         deleted_at = (NOW() AT TIME ZONE 'UTC'),
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE visit_id = $1
        AND id = $2
-       AND status = 'pending'
+       AND status IN ('pending', 'in_progress')
        AND deleted_at IS NULL
      RETURNING id`,
     [id, actionId]

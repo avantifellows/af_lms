@@ -6,6 +6,11 @@ import { authOptions } from "@/lib/auth";
 import { validateClassroomObservationComplete } from "@/lib/classroom-observation-rubric";
 import { query } from "@/lib/db";
 import { validateGpsReading } from "@/lib/geo-validation";
+import { validateGroupStudentDiscussionComplete } from "@/lib/group-student-discussion";
+import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-interaction";
+import { validateIndividualStudentDiscussionComplete } from "@/lib/individual-student-discussion";
+import { validatePrincipalInteractionComplete } from "@/lib/principal-interaction";
+import { validateSchoolStaffInteractionComplete } from "@/lib/school-staff-interaction";
 import {
   apiError,
   enforceVisitWriteAccess,
@@ -100,6 +105,104 @@ function afTeamValidationError(action: VisitActionRow) {
   return apiError(422, "Invalid AF team interaction data", validation.errors);
 }
 
+function individualTeacherValidationError(action: VisitActionRow) {
+  if (action.action_type !== "individual_af_teacher_interaction") {
+    return null;
+  }
+
+  const validation = validateIndividualTeacherComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid individual teacher interaction data", validation.errors);
+}
+
+function principalInteractionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "principal_interaction") {
+    return null;
+  }
+
+  const validation = validatePrincipalInteractionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid principal interaction data", validation.errors);
+}
+
+function groupStudentDiscussionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "group_student_discussion") {
+    return null;
+  }
+
+  const validation = validateGroupStudentDiscussionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid group student discussion data", validation.errors);
+}
+
+function individualStudentDiscussionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "individual_student_discussion") {
+    return null;
+  }
+
+  const validation = validateIndividualStudentDiscussionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid individual student discussion data", validation.errors);
+}
+
+function schoolStaffInteractionValidationError(action: VisitActionRow) {
+  if (action.action_type !== "school_staff_interaction") {
+    return null;
+  }
+
+  const validation = validateSchoolStaffInteractionComplete(action.data);
+  if (validation.valid) {
+    return null;
+  }
+
+  return apiError(422, "Invalid school staff interaction data", validation.errors);
+}
+
+async function allTeachersRecordedError(
+  action: VisitActionRow,
+  schoolCode: string,
+  schoolRegion: string | null
+) {
+  if (action.action_type !== "individual_af_teacher_interaction") {
+    return null;
+  }
+
+  const allTeachers = await query<{ id: number; full_name: string | null; email: string }>(
+    `SELECT id, full_name, email FROM user_permission
+     WHERE role = 'teacher'
+       AND (
+         school_codes @> ARRAY[$1]::TEXT[]
+         OR ($2::TEXT IS NOT NULL AND regions @> ARRAY[$2]::TEXT[])
+         OR level = 3
+       )`,
+    [schoolCode, schoolRegion]
+  );
+
+  const data = action.data as { teachers?: Array<{ id: number }> };
+  const recordedIds = new Set((data.teachers ?? []).map((t) => Number(t.id)));
+  const missing = allTeachers.filter((t) => !recordedIds.has(Number(t.id)));
+
+  if (missing.length === 0) {
+    return null;
+  }
+
+  const missingNames = missing.map((t) => t.full_name || t.email);
+  return apiError(422, "Not all teachers at this school have been recorded", [
+    `Missing: ${missingNames.join(", ")}`,
+  ]);
+}
 
 // POST /api/pm/visits/[id]/actions/[actionId]/end - end action with end GPS
 export async function POST(
@@ -167,6 +270,40 @@ export async function POST(
     return invalidAFTeamData;
   }
 
+  const invalidIndividualTeacherData = individualTeacherValidationError(existingAction);
+  if (invalidIndividualTeacherData) {
+    return invalidIndividualTeacherData;
+  }
+
+  const invalidPrincipalInteractionData = principalInteractionValidationError(existingAction);
+  if (invalidPrincipalInteractionData) {
+    return invalidPrincipalInteractionData;
+  }
+
+  const invalidGroupStudentData = groupStudentDiscussionValidationError(existingAction);
+  if (invalidGroupStudentData) {
+    return invalidGroupStudentData;
+  }
+
+  const invalidIndividualStudentData = individualStudentDiscussionValidationError(existingAction);
+  if (invalidIndividualStudentData) {
+    return invalidIndividualStudentData;
+  }
+
+  const invalidSchoolStaffData = schoolStaffInteractionValidationError(existingAction);
+  if (invalidSchoolStaffData) {
+    return invalidSchoolStaffData;
+  }
+
+  const missingTeachersError = await allTeachersRecordedError(
+    existingAction,
+    visit.school_code,
+    visit.school_region
+  );
+  if (missingTeachersError) {
+    return missingTeachersError;
+  }
+
   const ended = await query<VisitActionRow>(
     `UPDATE lms_pm_school_visit_actions
      SET status = 'completed',
@@ -213,6 +350,39 @@ export async function POST(
     return invalidCurrentAFTeamData;
   }
 
+  const invalidCurrentIndividualTeacherData = individualTeacherValidationError(current);
+  if (invalidCurrentIndividualTeacherData) {
+    return invalidCurrentIndividualTeacherData;
+  }
+
+  const invalidCurrentPrincipalInteractionData = principalInteractionValidationError(current);
+  if (invalidCurrentPrincipalInteractionData) {
+    return invalidCurrentPrincipalInteractionData;
+  }
+
+  const invalidCurrentGroupStudentData = groupStudentDiscussionValidationError(current);
+  if (invalidCurrentGroupStudentData) {
+    return invalidCurrentGroupStudentData;
+  }
+
+  const invalidCurrentIndividualStudentData = individualStudentDiscussionValidationError(current);
+  if (invalidCurrentIndividualStudentData) {
+    return invalidCurrentIndividualStudentData;
+  }
+
+  const invalidCurrentSchoolStaffData = schoolStaffInteractionValidationError(current);
+  if (invalidCurrentSchoolStaffData) {
+    return invalidCurrentSchoolStaffData;
+  }
+
+  const currentMissingTeachersError = await allTeachersRecordedError(
+    current,
+    visit.school_code,
+    visit.school_region
+  );
+  if (currentMissingTeachersError) {
+    return currentMissingTeachersError;
+  }
 
   return apiError(409, "Action cannot be ended from current state");
 }

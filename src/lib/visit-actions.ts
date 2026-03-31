@@ -1,13 +1,11 @@
 export const ACTION_TYPES = {
-  principal_meeting: "Principal Meeting",
-  leadership_meeting: "Leadership Meeting",
+  principal_interaction: "Principal Interaction",
   classroom_observation: "Classroom Observation",
-  group_student_discussion: "Group Student Discussion",
-  individual_student_discussion: "Individual Student Discussion",
-  individual_staff_meeting: "Individual Staff Meeting",
-  team_staff_meeting: "Team Staff Meeting",
-  teacher_feedback: "Teacher Feedback",
+  group_student_discussion: "Student Interaction",
+  individual_student_discussion: "Individual Student Interaction",
   af_team_interaction: "AF Team Interaction",
+  individual_af_teacher_interaction: "Individual AF Teacher Interaction",
+  school_staff_interaction: "School Staff Interaction",
 } as const;
 
 export type ActionType = keyof typeof ACTION_TYPES;

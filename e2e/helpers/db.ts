@@ -8,6 +8,11 @@ import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
 } from "../../src/lib/classroom-observation-rubric";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "../../src/lib/individual-af-teacher-interaction";
+import { PRINCIPAL_INTERACTION_CONFIG } from "../../src/lib/principal-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "../../src/lib/school-staff-interaction";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -224,6 +229,139 @@ export function buildCompleteAFTeamInteractionData(): Record<string, unknown> {
     teachers: [{ id: 1, name: "Test Teacher" }],
     questions,
   };
+}
+
+/**
+ * Canonical strict-valid individual teacher interaction payload for completed action fixtures.
+ * Each teacher is marked 'present' with all 13 questions answered true.
+ */
+export function buildCompleteIndividualTeacherInteractionData(
+  teacherIds?: { id: number; name: string }[]
+): Record<string, unknown> {
+  const teachers = (
+    teacherIds ?? [
+      { id: 1, name: "Test Teacher 1" },
+      { id: 2, name: "Test Teacher 2" },
+      { id: 3, name: "Test Teacher 3" },
+    ]
+  ).map((t) => {
+    const questions: Record<string, { answer: boolean }> = {};
+    for (const key of INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys) {
+      questions[key] = { answer: true };
+    }
+    return {
+      id: t.id,
+      name: t.name,
+      attendance: "present",
+      questions,
+    };
+  });
+
+  return { teachers };
+}
+
+/**
+ * Canonical strict-valid principal interaction payload for completed action fixtures.
+ */
+export function buildCompletePrincipalInteractionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return { questions };
+}
+
+/**
+ * Canonical strict-valid group student discussion payload for completed action fixtures.
+ */
+export function buildCompleteGroupStudentDiscussionData(
+  grade: number = 11
+): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return { grade, questions };
+}
+
+/**
+ * Canonical strict-valid individual student discussion payload for completed action fixtures.
+ */
+export function buildCompleteIndividualStudentDiscussionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return {
+    students: [
+      {
+        id: 1,
+        name: "Test Student",
+        grade: 11,
+        questions,
+      },
+    ],
+  };
+}
+
+/**
+ * Canonical strict-valid school staff interaction payload for completed action fixtures.
+ */
+export function buildCompleteSchoolStaffInteractionData(): Record<string, unknown> {
+  const questions: Record<string, { answer: boolean }> = {};
+  for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+    questions[key] = { answer: true };
+  }
+  return { questions };
+}
+
+/**
+ * Seed 3 deterministic teacher user_permission rows for a school.
+ * Returns the seeded teacher details for use in test assertions.
+ */
+export async function seedIndividualTeacherTestTeachers(
+  pool: Pool,
+  schoolCode: string
+): Promise<{ id: number; name: string }[]> {
+  const teachers = [
+    { email: "e2e-indiv-teacher-1@test.local", name: "Indiv Teacher One" },
+    { email: "e2e-indiv-teacher-2@test.local", name: "Indiv Teacher Two" },
+    { email: "e2e-indiv-teacher-3@test.local", name: "Indiv Teacher Three" },
+  ];
+
+  const results: { id: number; name: string }[] = [];
+
+  for (const t of teachers) {
+    const rows = await pool.query<{ id: number }>(
+      `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
+       VALUES ($1, 1, 'teacher', ARRAY[$2::TEXT], $3, false)
+       ON CONFLICT (email) DO UPDATE SET
+         school_codes = ARRAY[$2::TEXT],
+         full_name = $3,
+         role = 'teacher',
+         level = 1
+       RETURNING id`,
+      [t.email, schoolCode, t.name]
+    );
+    results.push({ id: rows.rows[0].id, name: t.name });
+  }
+
+  // Clean up any other teacher rows for this school that aren't our seeded teachers
+  // or the AF team test teachers (to keep those tests working)
+  const keepEmails = [
+    ...teachers.map((t) => t.email),
+    "e2e-af-teacher-1@test.local",
+    "e2e-af-teacher-2@test.local",
+  ];
+  await pool.query(
+    `DELETE FROM user_permission
+     WHERE role = 'teacher'
+       AND school_codes @> ARRAY[$1::TEXT]
+       AND email != ALL($2::TEXT[])`,
+    [schoolCode, keepEmails]
+  );
+
+  return results;
 }
 
 /**

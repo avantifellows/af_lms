@@ -7,6 +7,7 @@ import { ACTION_TYPE_VALUES, getActionTypeLabel, type ActionType } from "@/lib/v
 interface ActionTypePickerModalProps {
   isOpen: boolean;
   submitting?: boolean;
+  submittingLabel?: string;
   onClose: () => void;
   onSubmit: (actionType: ActionType) => void;
 }
@@ -14,6 +15,7 @@ interface ActionTypePickerModalProps {
 export default function ActionTypePickerModal({
   isOpen,
   submitting = false,
+  submittingLabel,
   onClose,
   onSubmit,
 }: ActionTypePickerModalProps) {
@@ -33,27 +35,23 @@ export default function ActionTypePickerModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="action-type-picker-title"
-        className="w-full max-w-lg bg-bg-card shadow-xl"
+        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-bg-card shadow-xl"
       >
-        <div className="border-b-4 border-border-accent px-5 py-4">
+        <div className="border-b-4 border-border-accent px-5 py-4 shrink-0">
           <h3 id="action-type-picker-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
             Add Action Point
           </h3>
-          <p className="mt-1 text-sm text-text-muted">Pick one action type to create a pending card.</p>
+          <p className="mt-1 text-sm text-text-muted">Pick one action type to add.</p>
         </div>
 
-        <div className="space-y-2 px-5 py-4">
-          {ACTION_TYPE_VALUES.map((actionType) => {
-            const enabled = actionType === "classroom_observation" || actionType === "af_team_interaction";
-            return (
+        <div className="space-y-2 px-5 py-4 overflow-y-auto">
+          {ACTION_TYPE_VALUES.map((actionType) => (
               <label
                 key={actionType}
                 className={`flex items-center gap-4 border-2 px-4 py-3 transition-colors ${
-                  !enabled
-                    ? "cursor-not-allowed border-border opacity-40"
-                    : selectedType === actionType
-                      ? "cursor-pointer border-accent bg-success-bg"
-                      : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
+                  selectedType === actionType
+                    ? "cursor-pointer border-accent bg-success-bg"
+                    : "cursor-pointer border-border hover:bg-hover-bg hover:border-accent/50"
                 }`}
               >
                 <input
@@ -61,21 +59,19 @@ export default function ActionTypePickerModal({
                   name="action-type"
                   value={actionType}
                   checked={selectedType === actionType}
-                  disabled={!enabled}
                   onChange={() => {
                     setSelectedType(actionType);
                   }}
                   className="h-5 w-5 accent-accent"
                 />
-                <span className={`text-base font-medium ${enabled ? "text-text-primary" : "text-text-muted"}`}>
+                <span className="text-base font-medium text-text-primary">
                   {getActionTypeLabel(actionType)}
                 </span>
               </label>
-            );
-          })}
+            ))}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4 shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -94,7 +90,7 @@ export default function ActionTypePickerModal({
             disabled={!canSubmit}
             className="inline-flex items-center bg-accent px-3 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? "Adding..." : "Add"}
+            {submitting ? (submittingLabel ?? "Adding...") : "Add"}
           </button>
         </div>
       </div>

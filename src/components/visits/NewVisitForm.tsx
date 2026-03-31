@@ -241,11 +241,11 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
           action through its lifecycle:
         </p>
         <ol className="text-sm text-text-secondary list-decimal list-inside space-y-1">
-          <li>Add an action point (for example, Classroom Observation or Principal Meeting).</li>
+          <li>Add an action point (for example, Classroom Observation or Principal Interaction).</li>
           <li>Start an action to capture start GPS and timestamp.</li>
           <li>Open in-progress actions to fill details and save updates.</li>
           <li>End each action to capture end GPS and mark it completed.</li>
-          <li>Complete the visit after at least one Classroom Observation is completed and no action is in progress.</li>
+          <li>Complete the visit after all required action types are completed and no action is in progress.</li>
         </ol>
       </div>
     </main>

@@ -1,6 +1,6 @@
 # Project Context: `af_lms` (Avanti Fellows LMS / JNV Ops UI)
 
-Last updated: 2026-03-05
+Last updated: 2026-03-18
 Audience: engineers + AI coding agents onboarding to this repo
 
 ---
@@ -151,7 +151,7 @@ Admin sections:
 #### Visit lifecycle
 - Visits have exactly **2 states**: `in_progress` → `completed` (no separate "ended" concept)
 - Visits start with **zero actions**; PM adds action points on-demand
-- **Completion requires**: ≥1 completed `classroom_observation` whose `data` passes strict rubric validation + no actions left `in_progress` + valid GPS (AF team interaction is supplementary — not required for visit completion)
+- **Completion requires**: all 7 action types — ≥1 completed `classroom_observation` (strict rubric validation) + ≥1 completed `af_team_interaction` + ≥1 completed `individual_af_teacher_interaction` + ≥1 completed `principal_interaction` + ≥1 completed `group_student_discussion` + ≥1 completed `individual_student_discussion` + ≥1 completed `school_staff_interaction` + no actions left `in_progress` + valid GPS. Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student → school staff).
 
 #### Classroom observation rubric contract (v1)
 - Top-level payload keys: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`, `teacher_id`, `teacher_name`, `grade`
@@ -181,43 +181,133 @@ Admin sections:
   - PATCH while `in_progress`: lenient (accepts partial data, ignores unknown question keys)
   - PATCH while `completed`: strict validation
   - END action: strict validation (requires ≥1 teacher + all 9 questions answered with boolean)
-  - COMPLETE visit: does NOT require AF team interaction — only classroom observation is required
+  - COMPLETE visit: requires at least one completed AF team interaction (alongside classroom observation and individual teacher interaction)
 - Config and validation: `src/lib/af-team-interaction.ts`
 - Shared teacher utilities: `src/lib/teacher-utils.ts` (`Teacher` interface, `getTeacherDisplayName()`)
 
+#### Individual AF Teacher Interaction (v1)
+- A per-teacher 13-question binary checklist with attendance gating
+- Top-level payload keys: `teachers` (array of `{ id, name, attendance, questions: { [key]: { answer: boolean|null, remark?: string } } }`)
+- Attendance options: `present`, `on_leave`, `absent` — only `present` teachers require question answers
+- 5 sections: Operational Health (1 question), Syllabus Track (4), Student Performance (2), Support Needed (3), Monthly Planning (3) — 13 total
+- Question keys: `oh_class_duration`, `st_grade11_syllabus`, `st_grade11_testing`, `st_grade12_syllabus`, `st_grade12_testing`, `sp_student_performance`, `sp_girls_performance`, `sn_academics`, `sn_school_operations`, `sn_co_curriculars`, `mp_monthly_plan`, `mp_classroom_observations`, `mp_student_feedback`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (all present teachers need all 13 questions answered + ≥1 teacher) + all school teachers must be recorded (DB check against `user_permission`)
+  - COMPLETE visit: requires at least one completed individual AF teacher interaction (alongside classroom observation, AF team interaction, and principal interaction)
+- Config and validation: `src/lib/individual-af-teacher-interaction.ts`
+- Form component: `src/components/visits/IndividualAFTeacherInteractionForm.tsx`
+
+#### Principal Interaction (v1)
+- A 7-question binary checklist about the PM's interaction with the school Principal — no teacher selection (simplest form in the system)
+- Top-level payload keys: `questions` (record of question key → `{ answer: boolean|null, remark?: string }`)
+- 5 sections: Operational Health (1 question), Implementation Progress (2), Student Performance on Monthly Tests (1), Support Needed (1), Monthly Planning (2) — 7 total
+- Question keys: `oh_program_feedback`, `ip_curriculum_progress`, `ip_key_events`, `sp_student_performance`, `sn_concerns_raised`, `mp_monthly_plan`, `mp_permissions_obtained`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data, ignores unknown question keys)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (all 7 questions answered with non-null boolean)
+  - COMPLETE visit: requires at least one completed principal interaction (alongside classroom observation, AF team interaction, and individual teacher interaction)
+- Config and validation: `src/lib/principal-interaction.ts`
+- Form component: `src/components/visits/PrincipalInteractionForm.tsx`
+
+#### Student Interaction (v1)
+- A 4-question binary checklist with grade selection (11 or 12) — grade-scoped group discussion with students
+- Top-level payload keys: `grade` (number), `questions` (record of question key → `{ answer: boolean|null, remark?: string }`)
+- 1 section: General Check (4 questions) — 4 total
+- Question keys: `gc_interacted`, `gc_program_updates`, `gc_direction`, `gc_concerns`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data, valid grade if present)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (valid grade 11/12 + all 4 questions answered with boolean)
+  - COMPLETE visit: requires at least one completed group student discussion
+- Config and validation: `src/lib/group-student-discussion.ts`
+- Form component: `src/components/visits/GroupStudentDiscussionForm.tsx`
+
+#### Individual Student Interaction (v1)
+- A per-student 2-question binary checklist with grade filter and **searchable student combobox** (fuzzy token-based matching via `src/lib/fuzzy-match.ts`) — no attendance gating (simpler than individual teacher interaction)
+- Top-level payload keys: `students` (array of `{ id, name, grade, questions: { [key]: { answer: boolean|null, remark?: string } } }`)
+- Grade filter fetches students from `GET /api/pm/students?school_code=X&grade=N` (queries group_user → group → user → student → enrollment_record)
+- 1 section: Operational Health (2 questions) — 2 total
+- Question keys: `oh_teaching_concern`, `oh_additional_support`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (≥1 student, each with valid id/name/grade + all 2 questions answered with boolean)
+  - No 'all students recorded' DB check (unlike individual teacher END)
+  - COMPLETE visit: requires at least one completed individual student discussion
+- Config and validation: `src/lib/individual-student-discussion.ts`
+- Shared student utilities: `src/lib/student-utils.ts` (`Student` interface, `getStudentDisplayName()`)
+- Form component: `src/components/visits/IndividualStudentDiscussionForm.tsx`
+
+#### School Staff Interaction (v1)
+- A 2-question binary checklist about the PM's interaction with school staff — no teacher/student/grade selection (simplest checklist alongside principal interaction)
+- Top-level payload keys: `questions` (record of question key → `{ answer: boolean|null, remark?: string }`)
+- 1 section: General Check (2 questions) — 2 total
+- Question keys: `gc_staff_concern`, `gc_pertaining_issue`
+- Validation:
+  - PATCH while `in_progress`: lenient (accepts partial data, ignores unknown question keys)
+  - PATCH while `completed`: strict validation
+  - END action: strict validation (all 2 questions answered with non-null boolean)
+  - COMPLETE visit: requires at least one completed school staff interaction (alongside all other 6 action types)
+- Config and validation: `src/lib/school-staff-interaction.ts`
+- Form component: `src/components/visits/SchoolStaffInteractionForm.tsx`
 
 #### Action lifecycle
 - Actions follow `pending → in_progress → completed`
 - **Start** captures GPS + timestamp; **End** captures GPS + timestamp
-- Starting an action auto-redirects the PM to the action detail page
+- **Starting** an action auto-redirects the PM to the action detail page
+- **Adding** an action auto-starts it: acquires GPS → creates action → starts action → redirects to in_progress action detail page. If GPS fails, no action is created. If create succeeds but start fails, the action remains pending in the list.
 - Multiple actions can be `in_progress` simultaneously
-- **Pending-only deletion** (soft delete: `deleted_at` set, row retained)
-- 9 action types defined in code: Principal Meeting, Leadership Meeting, Classroom Observation, Group/Individual Student Discussion, Individual/Team Staff Meeting, Teacher Feedback, AF Team Interaction
-- **Two action types are enabled** in the picker UI: `classroom_observation` and `af_team_interaction`; other types are visible but disabled
+- **Deletion** (soft delete: `deleted_at` set, row retained): `pending` actions delete immediately; `in_progress` actions show a confirmation modal warning about data loss before deleting. `completed` actions cannot be deleted. The DB CHECK constraint requires `status = 'pending'` when `deleted_at` is set, so the DELETE route resets status and nulls timestamps/GPS fields.
+- 7 action types defined in code: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, `individual_student_discussion`, `school_staff_interaction`
+- All 7 action types are enabled in the picker UI
 - Action types enforced in app code only (`ACTION_TYPES` in `src/lib/visit-actions.ts`), not in DB
+
+#### Auto-save
+- Action detail forms auto-save via `useAutoSave` hook (`src/hooks/use-auto-save.ts`) — debounces PATCH calls 2s after last change
+- Status indicator shows at top of page: "Unsaved changes" → "Saving..." → "Saved" (auto-dismisses after 3s) / "Save failed"; uses `visibility: hidden` (not unmount) to reserve space and prevent layout shift
+- Manual "Save Now" button cancels any pending auto-save timer; "End Action" flushes/cancels auto-save before its force-save sequence
+- `beforeunload` browser warning fires when unsaved changes exist
+- Auto-save updates action metadata (e.g. `updated_at`) via `onSuccess` but does NOT overwrite `formData` — avoids clobbering edits made during the network round-trip
+- No changes to child form components or PATCH API route — reuses existing `persistActionData()` and `sanitizePatchData()`
 
 #### Implemented pages
 - List: `src/app/visits/page.tsx` (2-state list, admin/program_admin filters)
 - Visit detail: `src/app/visits/[id]/page.tsx` (action card list, complete button, read-only on completed)
-- Action detail: `src/app/visits/[id]/actions/[actionId]/page.tsx` (dynamic form by action type, save/end)
+- Action detail: `src/app/visits/[id]/actions/[actionId]/page.tsx` (dynamic form by action type, save/end, sticky "Back to Visit" header)
 - Start new visit: `src/app/school/[udise]/visit/new/page.tsx` (server) + `src/components/visits/NewVisitForm.tsx` (client, GPS)
 - Legacy route `/visits/[id]/principal` redirects to `/visits/[id]`
 
 #### Key components
-- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; shows classroom observation stats (teacher, grade, score, progress) and AF team interaction stats (teacher count, answered questions)
-- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (`classroom_observation` and `af_team_interaction` enabled)
-- `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields
-- `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks
-- `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type)
+- `src/components/visits/ActionPointList.tsx` — action card list with add/start/open/delete interactions; adding an action auto-navigates to its detail page; shows classroom observation stats (teacher, grade, score, progress), AF team interaction stats (teacher count, answered questions), individual teacher interaction stats (recorded teachers, attendance breakdown), principal interaction stats (answered questions), group student discussion stats (grade, answered questions), individual student discussion stats (student count), and school staff interaction stats (answered questions)
+- `src/components/visits/ActionTypePickerModal.tsx` — picker modal for creating new actions (all 7 action types enabled: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, `individual_student_discussion`, `school_staff_interaction`)
+- `src/components/visits/ClassroomObservationForm.tsx` — rubric form with teacher/grade selection, parameter scoring, and summary fields; sticky progress summary (`top-12 z-10`, below page-level sticky header)
+- `src/components/visits/AFTeamInteractionForm.tsx` — binary checklist form with multiselect teacher dropdown, 9 Yes/No questions with optional remarks; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/IndividualAFTeacherInteractionForm.tsx` — per-teacher accordion form with attendance gating, 13 binary questions, add/remove teachers; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/PrincipalInteractionForm.tsx` — 7-question binary checklist with optional remarks, no teacher section; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/GroupStudentDiscussionForm.tsx` — 4-question binary checklist with grade dropdown (11/12), questions hidden until grade selected; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/IndividualStudentDiscussionForm.tsx` — per-student accordion form with grade filter dropdown, **searchable student combobox** (fuzzy token matching, keyboard nav, click-outside-to-close), student API fetch, 2 binary questions per student, add/remove students; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/SchoolStaffInteractionForm.tsx` — 2-question binary checklist with optional remarks, no teacher/student/grade selection; sticky progress summary (`top-12 z-10`)
+- `src/components/visits/ActionDetailForm.tsx` — per-action form shell (dispatches renderer by action type, integrates auto-save hook, inline `SaveStatusIndicator`)
 - `src/components/visits/CompleteVisitButton.tsx` — GPS capture + completion rules enforcement
 - `src/components/Toast.tsx` — reusable error/warning toast notification (auto-dismiss, used by visit components)
 
 #### Shared helpers
-- `src/lib/visit-actions.ts` — `ACTION_TYPES` map (9 types), `ActionType` union, status constants, `statusBadgeClass()` helper
+- `src/hooks/use-auto-save.ts` — custom React hook for debounced auto-save with status tracking, flush/cancel controls, and `beforeunload` guard
+- `src/lib/visit-actions.ts` — `ACTION_TYPES` map (7 types), `ActionType` union, status constants, `statusBadgeClass()` helper
 - `src/lib/visits-policy.ts` — shared auth/scope/locking helpers used across all visit routes
 - `src/lib/classroom-observation-rubric.ts` — rubric config, score computation, lenient/strict validation, `VALID_GRADES`, `ClassroomObservationData` type
 - `src/lib/af-team-interaction.ts` — AF team interaction config (4 sections, 9 questions), `AFTeamInteractionData` type, lenient/strict validation
-- `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by both ClassroomObservationForm and AFTeamInteractionForm)
+- `src/lib/individual-af-teacher-interaction.ts` — individual teacher interaction config (5 sections, 13 questions), per-teacher attendance-gated validation
+- `src/lib/principal-interaction.ts` — principal interaction config (5 sections, 7 questions), lenient/strict validation (no teacher array)
+- `src/lib/group-student-discussion.ts` — group student discussion config (1 section, 4 questions), grade validation (11/12), lenient/strict validation
+- `src/lib/individual-student-discussion.ts` — individual student discussion config (1 section, 2 questions), per-student grade validation, lenient/strict validation
+- `src/lib/school-staff-interaction.ts` — school staff interaction config (1 section, 2 questions), lenient/strict validation (no teacher/student/grade)
+- `src/lib/teacher-utils.ts` — shared `Teacher` interface and `getTeacherDisplayName()` (used by ClassroomObservationForm, AFTeamInteractionForm, and IndividualAFTeacherInteractionForm)
+- `src/lib/student-utils.ts` — shared `Student` interface and `getStudentDisplayName()` (used by IndividualStudentDiscussionForm)
+- `src/lib/fuzzy-match.ts` — token-based fuzzy matching helper (`fuzzyMatch(query, candidate)`) — splits query into whitespace tokens, all must be case-insensitive substrings of candidate (used by IndividualStudentDiscussionForm searchable combobox)
 - `src/lib/geo-validation.ts` — GPS validation (accept ≤100m, warn 100–500m, reject >500m)
 - `src/lib/geolocation.ts` — client `watchPosition` helper (60s timeout, cancel, secure-origin check)
 - `src/lib/theme.ts` — Ledger UI theme token object for dynamic inline styles (17 color/style properties)
@@ -375,11 +465,12 @@ Students:
 - `src/app/api/student/dropout/route.ts` (POST → PATCH to DB Service dropout)
 
 PM visits:
+- `src/app/api/pm/students/route.ts` (GET students for a school by code and optional grade — queries group_user → group → user → student → enrollment_record; used by Individual Student Interaction form)
 - `src/app/api/pm/teachers/route.ts` (GET teachers for a school by code — queries `user_permission` for `role='teacher'` with matching school/region/level access)
 - `src/app/api/pm/visits/route.ts` (GET list, POST create with GPS)
 - `src/app/api/pm/visits/[id]/route.ts` (GET visit + actions)
 - `src/app/api/pm/visits/[id]/actions/route.ts` (GET list actions, POST create action)
-- `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` (GET single action, PATCH data, DELETE pending-only soft delete)
+- `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` (GET single action, PATCH data, DELETE soft delete for pending/in_progress actions)
 - `src/app/api/pm/visits/[id]/actions/[actionId]/start/route.ts` (POST start action with GPS)
 - `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts` (POST end action with GPS)
 - `src/app/api/pm/visits/[id]/complete/route.ts` (POST complete visit with GPS + validation rules)
@@ -449,7 +540,7 @@ npm run test:unit:coverage # Run with V8 coverage report
 Key details:
 - Test files live alongside source: `src/**/*.test.ts` and `src/**/*.test.tsx`
 - No DB or server needed — tests mock DB/fetch/auth and cover lib helpers, API routes, and React components
-- 1228 tests across 78 files (as of 2026-03-05)
+- 1589 tests across 90 files (as of 2026-03-18)
 - V8 coverage is collected; `unit-coverage/coverage-summary.json` is generated
 - Commit `unit-coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
@@ -472,7 +563,7 @@ Key details:
 - Auth is injected via NextAuth JWT cookies — no real Google login needed
 - Uses `.next-test/` build dir so it coexists with a running dev server
 - Single worker, sequential execution (shared test DB)
-- 34 tests across 5 spec files (as of 2026-03-05)
+- 41 tests across 5 spec files (as of 2026-03-18)
 - V8 coverage is collected automatically; `coverage/coverage-summary.json` is generated
 - Commit `coverage/coverage-summary.json` with your changes; a GH Actions workflow posts it as a PR comment
 
@@ -550,6 +641,7 @@ If you need to change DB schema, prefer the canonical migrations from the DB Ser
 - PM teachers API: `src/app/api/pm/teachers/route.ts`
 - PM visits UI: `src/app/visits/**`, `src/components/visits/**`
 - Classroom observation rubric: `src/lib/classroom-observation-rubric.ts`, `src/components/visits/ClassroomObservationForm.tsx`
+- Auto-save hook: `src/hooks/use-auto-save.ts` (debounce, status, flush/cancel); integrated in `ActionDetailForm.tsx`
 - Visit shared helpers: `src/lib/visit-actions.ts` (action types), `src/lib/visits-policy.ts` (auth/scope/locking)
 - Visit geo: `src/lib/geo-validation.ts` (server validation), `src/lib/geolocation.ts` (client watchPosition), `src/components/visits/CompleteVisitButton.tsx`, `src/components/visits/NewVisitForm.tsx`
 - Toast notifications: `src/components/Toast.tsx`
