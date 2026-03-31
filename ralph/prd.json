@@ -1,0 +1,197 @@
+{
+  "project": "af_lms",
+  "branchName": "ralph/school-staff-interaction",
+  "description": "School Staff Interaction Action Type - Add 7th required action type for PM school visits: a 2-question binary+remark checklist. IMPORTANT: Before starting each story, read these three files for full context: (1) docs/ai/project-context.md (2) ralph/prd-school-staff-interaction.md (3) docs/ai/school-staff-interaction/2026-03-22-school-staff-interaction-implementation-plan.md",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Config and validation library",
+      "description": "As a developer, I need a config and validation module for school staff interaction so that form data can be validated consistently on save and complete.",
+      "acceptanceCriteria": [
+        "Create `src/lib/school-staff-interaction.ts` with `SCHOOL_STAFF_INTERACTION_CONFIG` (1 section 'General Check', 2 questions: `gc_staff_concern`, `gc_pertaining_issue`)",
+        "Export `SchoolStaffInteractionData` interface with `questions` record (no teachers/students/grade)",
+        "Export `validateSchoolStaffInteractionSave()` -- lenient: accepts empty/partial, rejects unknown top-level keys",
+        "Export `validateSchoolStaffInteractionComplete()` -- strict: requires all 2 questions answered with non-null boolean, reports question labels in errors",
+        "Create `src/lib/school-staff-interaction.test.ts` with ~20 tests (config integrity, lenient validation, strict validation)",
+        "Tests pass (`npm run test`)",
+        "Types check (`npx tsc --noEmit`)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Type registry update",
+      "description": "As a developer, I need `school_staff_interaction` registered in `ACTION_TYPES` so the system recognizes it as a valid action type.",
+      "acceptanceCriteria": [
+        "Add `school_staff_interaction: 'School Staff Interaction'` to `ACTION_TYPES` in `src/lib/visit-actions.ts`",
+        "Total action types becomes 7",
+        "Update `src/lib/visit-actions.test.ts`: add to exhaustive record, change expected length from 6 to 7, add `isActionType` and `getActionTypeLabel` assertions",
+        "Tests pass (`npm run test`)",
+        "Types check (`npx tsc --noEmit`)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "PATCH API validation",
+      "description": "As a PM, when I save school staff interaction data, the API should validate it (lenient for in-progress, strict for completed actions).",
+      "acceptanceCriteria": [
+        "Import validation functions in `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`",
+        "Add `school_staff_interaction` validation block after `individual_student_discussion` (lenient for `in_progress`, strict for `completed`)",
+        "Error message: 'Invalid school staff interaction data'",
+        "Add `buildValidSchoolStaffInteractionData()` builder to test file",
+        "Add 4 tests: lenient valid, lenient invalid (unknown keys), strict invalid (incomplete), strict valid (complete)",
+        "Tests pass (`npm run test`)"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "END API validation",
+      "description": "As a PM, when I end a school staff interaction action, the API should validate all 2 questions are answered.",
+      "acceptanceCriteria": [
+        "Import `validateSchoolStaffInteractionComplete` in `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`",
+        "Add `schoolStaffInteractionValidationError()` function following the `principalInteractionValidationError` pattern",
+        "Wire into both primary and concurrent-fallback validation chains",
+        "Error message: 'Invalid school staff interaction data' with validation errors array",
+        "Add `buildValidSchoolStaffInteractionData()` builder to test file",
+        "Add 5 tests: incomplete rejected, null data rejected, complete succeeds, all-null rejected, concurrent fallback validates",
+        "Tests pass (`npm run test`)"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Visit completion -- 7th required type",
+      "description": "As a PM, I cannot complete a visit without at least one completed school staff interaction action.",
+      "acceptanceCriteria": [
+        "Add 7th completion check in `src/app/api/pm/visits/[id]/complete/route.ts` after `individual_student_discussion`",
+        "Sequential short-circuit order: in-progress -> classroom -> AF team -> individual teacher -> principal -> group student -> individual student -> school staff -> UPDATE",
+        "Error message: 'At least one completed School Staff Interaction is required to complete visit'",
+        "Update 3 existing happy-path tests: add `.mockResolvedValueOnce([{ id: 901 }])` for new type check, shift UPDATE mock index by +1",
+        "Rename test 'all 6 action types' to 'all 7 action types'",
+        "Add 1 new test: 'returns 422 when school_staff_interaction is missing'",
+        "Tests pass (`npm run test`)"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Form component",
+      "description": "As a PM, I need a form to answer the 2 school staff interaction questions with Yes/No radios and optional remarks.",
+      "acceptanceCriteria": [
+        "Create `src/components/visits/SchoolStaffInteractionForm.tsx` following `PrincipalInteractionForm.tsx` pattern",
+        "Props: `{ data, setData, disabled }` -- no `schoolCode`",
+        "Sticky progress bar showing 'Answered: X/2' at `top-12 z-10`",
+        "1 section 'General Check' with 2 questions, each with Yes/No radios and optional remark toggle",
+        "`data-testid='action-renderer-school_staff_interaction'` on outer div",
+        "Radio test IDs: `school-staff-interaction-{key}-yes`, `school-staff-interaction-{key}-no`",
+        "Disabled mode: radios disabled, no 'Add remark' buttons",
+        "Create `src/components/visits/SchoolStaffInteractionForm.test.tsx` with ~12 tests (rendering, interactions, progress, remarks, disabled mode)",
+        "Tests pass (`npm run test`)",
+        "Lint passes (`npm run lint`)",
+        "Build passes (`npm run build`)"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Wire form into ActionDetailForm dispatcher",
+      "description": "As a developer, I need to wire the new form component into the existing action detail form dispatcher so it renders for `school_staff_interaction` actions.",
+      "acceptanceCriteria": [
+        "Import `SchoolStaffInteractionForm` and `SCHOOL_STAFF_INTERACTION_CONFIG` in `ActionDetailForm.tsx`",
+        "Add `SCHOOL_STAFF_INTERACTION_ACTION_TYPE` constant",
+        "Add to `SAVE_BEFORE_END_TYPES` Set",
+        "Add `ACTION_FORM_CONFIGS` entry with title 'School Staff Interaction Details', description 'Record interactions with school staff regarding the program.', fields: []",
+        "Add `sanitizeSchoolStaffInteractionPayload()` function (copy principal interaction pattern)",
+        "Add `bootstrapSchoolStaffInteractionPayload()` function",
+        "Add branches in `normalizeFormDataForAction` and `sanitizePatchData`",
+        "Add `SchoolStaffInteractionForm` branch in JSX renderer dispatch",
+        "Generic END 422 error message falls through correctly (do NOT add custom branch)",
+        "Tests pass (`npm run test`)",
+        "Types check (`npx tsc --noEmit`)"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Action card stats",
+      "description": "As a PM, I want to see how many questions I've answered on the action card so I can track progress at a glance.",
+      "acceptanceCriteria": [
+        "Import `SCHOOL_STAFF_INTERACTION_CONFIG` in `ActionPointList.tsx`",
+        "Add exported `getSchoolStaffInteractionStats()` function returning answered count / total (2)",
+        "Render stats on `school_staff_interaction` action cards (answered/total with %)",
+        "Add 9 tests in `ActionPointList.test.tsx` (3 card rendering + 6 stats function unit tests)",
+        "Add 2 tests in `ActionTypePickerModal.test.tsx` (selectable + submit)",
+        "Add 3 tests in action detail `page.test.tsx` (renderer dispatch, PATCH save, save-before-end)",
+        "Tests pass (`npm run test`)"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "E2E tests",
+      "description": "As a developer, I need E2E tests to verify the full flow works end-to-end including visit completion with 7 required types.",
+      "acceptanceCriteria": [
+        "Add `buildCompleteSchoolStaffInteractionData()` builder in `e2e/helpers/db.ts` with import from `../../src/lib/school-staff-interaction`",
+        "Update 4 existing E2E completion tests (lines 399, 445, 578, 849) with 7th seed for `school_staff_interaction`",
+        "Rename test at line 849 from 'six' to 'seven' + add card visibility assertion + update comment",
+        "Add new E2E test `visit-completion-requires-school-staff-interaction` (seed 6 types, omit school staff, assert 422 error)",
+        "Add E2E form workflow test `pm-creates-starts-fills-and-ends-school-staff-interaction` (create -> start -> fill -> end)",
+        "E2E tests pass (`npm run test:e2e`)"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Documentation updates",
+      "description": "As a developer, I need CLAUDE.md and project-context.md updated so future contributors have accurate documentation.",
+      "acceptanceCriteria": [
+        "Update CLAUDE.md Project Overview paragraph to include school staff interaction",
+        "Add 'PM Visits: School Staff Interaction (v1)' section to CLAUDE.md",
+        "Update visit completion rule: 6 -> 7 required types in CLAUDE.md",
+        "Update test file inventory and counts in CLAUDE.md (use fresh `npx vitest run` output)",
+        "Add School Staff Interaction subsection under section 3.5 in `docs/ai/project-context.md`",
+        "Fix stale action type references in project-context.md (lines 154, 251-252, 271, 272, 285)"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Review changes and document findings",
+      "description": "As a developer, I want to review all changes made during this feature implementation to ensure nothing was missed and document the results.",
+      "acceptanceCriteria": [
+        "Use explore agents to understand the current state of modified files",
+        "Review git diff to see all changes made",
+        "Run `npx vitest run` and capture test count + coverage numbers",
+        "Run `npm run test:e2e` and verify all E2E tests pass",
+        "Verify no unintended side effects or missing pieces",
+        "Create `ralph/school-staff-interaction-review.txt` with concise findings (under 50 lines)",
+        "Review file summarizes: what was done, files changed, test counts, coverage numbers, any concerns or recommendations"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

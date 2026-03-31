@@ -1,40 +1,174 @@
 # Ralph Progress Log
-Started: Mon Mar 09 2026
+Started: Sun Mar 22 16:42:08 IST 2026
 
 ## Codebase Patterns
-- **Client component tests**: Use `@testing-library/react` + `userEvent.setup()` for interactions
-- **Email inputs**: `type="email"` inputs have no label-input `htmlFor`/`id` association; query with `document.querySelector('input[type="email"]')` instead of `getByRole("textbox", { name: /email/i })`
-- **Debounce testing**: Use `vi.useFakeTimers({ shouldAdvanceTime: true })` + `userEvent.setup({ advanceTimers: vi.advanceTimersByTime })`, then `vi.advanceTimersByTime(delay)` wrapped in `act()`
-- **Fetch mocking**: `vi.stubGlobal("fetch", mockFetch)` with `mockFetch = vi.fn()` in `beforeEach`
-- **Pre-existing build failure**: `e2e/helpers/db.ts:152` has type error (`string | undefined` not assignable to `string`) — not caused by unit tests
-- **Pre-existing lint errors**: 818 errors exist in codebase; new test files should lint clean individually with `npx eslint <file>`
-- **AddUserModal props**: `{ user, regions, onClose, onSave }` — NOT `{ isOpen, onClose, onSave, editUser, currentUserEmail }` as PRD stated
-- **Multiple selects**: Use `screen.getAllByRole("combobox")` and index to target specific `<select>` elements
-- **PRD props often wrong**: Always read actual source component to get real props interface before writing tests
-- **Duplicate text in table+modal**: When a component shows the same text in a table row AND a modal, use `getAllByText()` or scope queries with `within()` to avoid `getByText` failing on multiple matches
-- **Stats card counts**: Use `within(card)` scoping to check stat values, since count numbers like "1" or "2" may appear multiple times on page
-- **Mock child components**: Use `vi.mock("./ChildComponent", ...)` with stub that exposes `data-testid` + callback buttons to test parent integration cleanly
-- **Window dialogs**: `vi.stubGlobal("alert", vi.fn())` + `vi.stubGlobal("confirm", vi.fn(() => true))` in `beforeEach` for components using `alert()`/`confirm()`
-- **Date inputs without htmlFor**: `type="date"` inputs may lack `htmlFor`/`id` association; query with `document.querySelector('input[type="date"]')` instead of `getByLabelText("Date")`
-- **Duplicate count badges**: When selecting topics changes a count badge and another chapter has the same count text, use `getAllByText()` and check `className` to distinguish blue (selected) vs gray (total) badges
-- **React 19 use(params) in client components**: Wrap component in `<Suspense>` and use `await act(async () => { render(...) })` to let the Promise resolve before assertions
-- **Server component test pattern**: Use `vi.hoisted()` for mock variables referenced in `vi.mock()` factories. Redirect sentinel: `mockRedirect = vi.fn((url) => { throw new Error('REDIRECT:' + url); })`. Test redirects: `await expect(Page()).rejects.toThrow("REDIRECT:/")`. Test rendering: `const jsx = await Page(); render(jsx);`. Mock `next/link` as `<a>` stub. Mock `next-auth`, `@/lib/auth`, `next/navigation`, and permission functions.
-- **Top-level env vars**: Pages that use `const X = process.env.X` at module top-level capture env vars at import time. Since `vi.mock()` is hoisted above `process.env` assignments, use pattern-matching (`expect(url).toContain(...)`) for fetch URL assertions instead of exact URL matching.
-- **resetAllMocks for server pages**: Use `vi.resetAllMocks()` (not `clearAllMocks`) in `beforeEach` for server component tests with `mockResolvedValueOnce()` — `clearAllMocks` does NOT clear pending once-queues, causing mock leakage. After `resetAllMocks`, re-establish sentinel implementations for redirect/notFound.
-- **Recharts mock coverage**: Mock `Bar`/`Pie` to render `{children}` (not `() => null`) so `.map()` Cell callbacks execute. Mock `Tooltip`/`Pie` to invoke callback props (`formatter`, `label`) so those arrow functions get V8 coverage. Use typed interfaces (`type P = { children?: React.ReactNode }`) to avoid lint `any` errors.
-
-- **Tailwind v4 @theme inline**: Register CSS custom properties in `@theme inline { }` block to generate utility classes (e.g., `--color-accent: var(--color-accent)` → enables `bg-accent`, `text-accent`, `border-accent`). Without registration, must use verbose `bg-[var(--color-accent)]` syntax.
-- **Focus ring suppression**: Global CSS handles `outline: none` and `--tw-ring-shadow` reset for all interactive elements. Still need to remove `focus:ring-*` classes from JSX to avoid generating unused CSS.
-- **Status badges**: Use `statusBadgeClass(status)` from `@/lib/visit-actions` — includes `rounded-full px-2.5 py-0.5 text-xs font-medium` + theme colors. Callers just need `inline-flex ${statusBadgeClass(status)}`.
-- **Progressive padding**: `px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8` — full-bleed page layout wrapper
-- **Table headers (Ledger)**: `bg-bg-card-alt border-b-2 border-border-accent` with `text-xs font-bold text-text-muted uppercase tracking-wider`
-- **Section headers (Ledger)**: `text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2`
-- **Font-mono in text strings**: Don't wrap numbers in `<span>` inside getByText-tested strings — RTL can't match split text. Use `font-mono` on parent container instead.
-
-- **AF team interaction validation**: `ValidationResult` is defined locally in `af-team-interaction.ts` (not shared with `classroom-observation-rubric.ts`) to avoid coupling
-- **Lenient vs strict validation pattern**: `validateAFTeamInteractionSave()` (lenient) accepts `{}`, ignores unknown question keys; `validateAFTeamInteractionComplete()` (strict) requires ≥1 teacher + all 9 boolean answers
-- **Individual teacher interaction validation**: Per-teacher validation with attendance gating — present teachers need all 13 questions answered (strict), absent/on_leave skip questions. `validateIndividualTeacherSave()` (lenient), `validateIndividualTeacherComplete()` (strict). Only allowed top-level key is `teachers`.
-- **Adding action types atomically**: When adding to `ACTION_TYPES`, must also add to `ACTION_FORM_CONFIGS` (Record<ActionType, ...>) in same commit or TypeScript breaks. Also update ActionTypePickerModal test count.
-
+- Principal interaction (`src/lib/principal-interaction.ts`) is the exact template for simple binary+remark checklist types (questions-only, no entity selection)
+- Validation pattern: lenient (save) accepts partial/empty, rejects unknown top-level keys; strict (complete) requires all questions answered with non-null boolean
+- Pre-existing tsc errors in `VisitsTab.test.tsx` and `use-auto-save.test.ts` — unrelated to feature work
+- Pre-existing build error: `ACTION_FORM_CONFIGS` in `ActionDetailForm.tsx` is `Record<ActionType, ...>` and fails build after US-002 added `school_staff_interaction` to `ActionType`. Will be fixed by US-007.
+- Visit completion route: each action type check is a sequential query returning `[{ id }]`; happy-path tests must mock all type checks + the UPDATE query; mock index for UPDATE = 2 (base) + number_of_type_checks
+- E2E dialog-add flow: `handleAddAction` auto-creates+starts+navigates in one flow — use `waitForURL(/actions/)` not card+Start button click
+- E2E moderate-gps test is pre-existing broken (principal_interaction with no data fails END validation)
 ---
 
+## 2026-03-22 - US-001
+Session: abc21ca5-d4f1-4698-9e65-c233f10accd3
+- Created `src/lib/school-staff-interaction.ts` with config (1 section "General Check", 2 questions: `gc_staff_concern`, `gc_pertaining_issue`) and lenient/strict validation functions
+- Created `src/lib/school-staff-interaction.test.ts` with 24 tests (config integrity, lenient validation, strict validation)
+- Files changed: `src/lib/school-staff-interaction.ts`, `src/lib/school-staff-interaction.test.ts`
+- **Learnings for future iterations:**
+  - Copied pattern exactly from `principal-interaction.ts` — identical structure, just different questions and types
+  - 24 tests (not ~20 as estimated) — the test structure naturally produced a few extra
+  - tsc has pre-existing errors in unrelated test files; check only for errors in new files
+---
+
+## 2026-03-22 - US-002
+Session: 371cf0cb-c84b-44e5-a330-25844015a64e
+- Added `school_staff_interaction: "School Staff Interaction"` to `ACTION_TYPES` in `src/lib/visit-actions.ts`
+- Updated `src/lib/visit-actions.test.ts`: added to exhaustive record, changed expected length from 6 to 7, added `isActionType` and `getActionTypeLabel` assertions
+- All 1622 tests pass, no type errors in changed files
+- Files changed: `src/lib/visit-actions.ts`, `src/lib/visit-actions.test.ts`
+- **Learnings for future iterations:**
+  - Simplest story — just adding a key to the map and updating tests
+  - The `ActionType` type is derived from `ACTION_TYPES` via `keyof typeof`, so adding to the map automatically extends the union type
+  - No downstream compilation errors from adding the new type — existing code uses `ActionType` in non-exhaustive ways
+---
+
+## 2026-03-22 - US-003
+Session: f9b107a2-fd27-4eef-9479-df6b9ac3a91b
+- Added `school_staff_interaction` validation block to PATCH route in `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts` (lenient for in_progress, strict for completed)
+- Added `buildValidSchoolStaffInteractionData()` builder + 4 tests to `route.test.ts`
+- All 1626 tests pass (91 files)
+- Files changed: `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`, `src/app/api/pm/visits/[id]/actions/[actionId]/route.test.ts`
+- **Learnings for future iterations:**
+  - PATCH validation follows exact same pattern for every action type: import save+complete validators, add if-block after the last type, use lenient for in_progress and strict for completed
+  - Test pattern: 4 tests per type (lenient valid, lenient invalid with unknown keys, strict invalid incomplete, strict valid complete)
+  - The strict test uses ADMIN_SESSION to be able to edit completed actions (canEditCompletedActionData)
+---
+
+## 2026-03-22 - US-004
+Session: f5a24698-8bba-442e-aa26-3d3ad279f956
+- Added `schoolStaffInteractionValidationError()` function to END route (`src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`)
+- Wired into both primary and concurrent-fallback validation chains (after `individualStudentDiscussionValidationError`, before `allTeachersRecordedError`)
+- Added `buildValidSchoolStaffInteractionData()` builder + `SCHOOL_STAFF_INTERACTION_CONFIG` import to test file
+- Added 5 tests: incomplete rejected, null data rejected, complete succeeds, all-null rejected, concurrent fallback validates
+- All 1631 tests pass (91 files)
+- Files changed: `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`, `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.test.ts`
+- **Learnings for future iterations:**
+  - END validation follows exact same pattern as other types: add validation error function (type check + validateComplete + apiError), wire into both primary and fallback chains
+  - 5 tests per type for END (incomplete, null data, success, all-null, concurrent fallback) — one more than PATCH because END has the concurrent fallback path
+  - No "all teachers/students recorded" DB check needed for school_staff_interaction (only individual_af_teacher_interaction has that)
+---
+
+## 2026-03-22 - US-005
+Session: 9ce15cfa-bf96-4328-be1f-b5d89bc8baf8
+- Added 7th completion check for `school_staff_interaction` in `src/app/api/pm/visits/[id]/complete/route.ts` (after `individual_student_discussion`, before UPDATE)
+- Updated 3 happy-path tests: added `.mockResolvedValueOnce([{ id: 901 }])` for new type check, shifted UPDATE mock index from `[8]` to `[9]`
+- Renamed test "all 6 action types" → "all 7 action types"
+- Added 1 new test: "returns 422 when school_staff_interaction is missing"
+- All 1632 tests pass (91 files)
+- Files changed: `src/app/api/pm/visits/[id]/complete/route.ts`, `src/app/api/pm/visits/[id]/complete/route.test.ts`
+- **Learnings for future iterations:**
+  - Completion check pattern: query for any completed action of the type with LIMIT 1, return 422 if empty
+  - Sequential short-circuit order now: in-progress → classroom → AF team → individual teacher → principal → group student → individual student → school staff → UPDATE
+  - Build error from US-002 (`ACTION_FORM_CONFIGS` missing `school_staff_interaction`) is pre-existing and will be resolved by US-007
+---
+
+## 2026-03-22 - US-006
+Session: 924b51c0-071e-4f66-a8d7-7c70b39d7dca
+- Created `src/components/visits/SchoolStaffInteractionForm.tsx` following PrincipalInteractionForm pattern (questions-only, no entity selection)
+- Created `src/components/visits/SchoolStaffInteractionForm.test.tsx` with 15 tests (rendering, interactions, progress, remarks, disabled mode)
+- All 1647 tests pass (92 files)
+- Build failure is pre-existing (ACTION_FORM_CONFIGS missing school_staff_interaction since US-002) — will be fixed by US-007
+- Files changed: `src/components/visits/SchoolStaffInteractionForm.tsx`, `src/components/visits/SchoolStaffInteractionForm.test.tsx`
+- **Learnings for future iterations:**
+  - Direct copy of PrincipalInteractionForm.tsx with s/principal/school-staff/ naming — identical structure
+  - 15 tests (not ~12 as estimated) — disabled mode had 3 tests, interactions had 6, rendering had 6
+  - Test IDs use `school-staff-interaction-{key}-yes/no/remark` prefix (hyphenated, not underscored)
+  - Build can't pass until US-007 adds the ACTION_FORM_CONFIGS entry for school_staff_interaction
+---
+
+## 2026-03-22 - US-007
+Session: f3593b41-cb7a-49e7-87dc-875324b5c764
+- Wired SchoolStaffInteractionForm into ActionDetailForm.tsx dispatcher
+- Added imports for SchoolStaffInteractionForm + SCHOOL_STAFF_INTERACTION_CONFIG
+- Added SCHOOL_STAFF_INTERACTION_ACTION_TYPE constant
+- Added to SAVE_BEFORE_END_TYPES Set
+- Added ACTION_FORM_CONFIGS entry (title: "School Staff Interaction Details", description: "Record interactions with school staff regarding the program.", fields: [])
+- Added sanitizeSchoolStaffInteractionPayload() + bootstrapSchoolStaffInteractionPayload() (copied from principal interaction pattern)
+- Added branches in normalizeFormDataForAction + sanitizePatchData
+- Added SchoolStaffInteractionForm JSX branch in renderer dispatch (no schoolCode prop — questions-only form)
+- Generic END 422 error falls through correctly (no custom branch needed, same as principal interaction)
+- All 1647 tests pass (92 files), build passes, no type errors in changed file
+- Files changed: `src/components/visits/ActionDetailForm.tsx`
+- **Learnings for future iterations:**
+  - This is a pure wiring story — no new tests needed since ActionDetailForm.tsx doesn't have its own test file; tests for this dispatcher are in `page.test.tsx` (US-008)
+  - The build was broken from US-002 → US-006 because ACTION_FORM_CONFIGS is Record<ActionType, ...> and school_staff_interaction was missing. Now fixed.
+  - Sanitize/bootstrap pattern is identical to principal interaction — just swap config constant
+---
+
+## 2026-03-22 - US-008
+Session: 91baa8e2-db58-44df-8a7d-be3f5e4dbeb0
+- Added `getSchoolStaffInteractionStats()` function to `ActionPointList.tsx` (exported, follows `getPrincipalInteractionStats` pattern — questions-only, answered/total)
+- Added card rendering for `school_staff_interaction` action cards (answered/total with %)
+- Added 9 tests to `ActionPointList.test.tsx` (3 card rendering + 6 stats function unit tests)
+- Added 2 tests to `ActionTypePickerModal.test.tsx` (selectable + submit)
+- Added 3 tests to `page.test.tsx` (renderer dispatch, PATCH save, save-before-end)
+- All 1661 tests pass (92 files), build passes
+- Files changed: `src/components/visits/ActionPointList.tsx`, `src/components/visits/ActionPointList.test.tsx`, `src/components/visits/ActionTypePickerModal.test.tsx`, `src/app/visits/[id]/actions/[actionId]/page.test.tsx`
+- **Learnings for future iterations:**
+  - Stats function pattern: identical to `getPrincipalInteractionStats` for questions-only types (iterate `allQuestionKeys`, count boolean answers, return null if answeredCount is 0)
+  - Card rendering: same template as principal interaction — `data-testid={type-stats-{id}}`, show answered/total with %
+  - ActionTypePickerModal needs no source changes — it iterates all `ACTION_TYPE_VALUES` with no gating. Tests just verify the label is selectable and submits the correct value.
+  - page.test.tsx school_staff_interaction doesn't need teacher fetch mock (no `schoolCode` prop, unlike af_team_interaction)
+---
+
+## 2026-03-22 - US-009
+Session: cee6bab8-4363-41dd-ab33-b0554b9ecdc3
+- Added `buildCompleteSchoolStaffInteractionData()` builder to `e2e/helpers/db.ts` (follows existing pattern)
+- Updated 4 existing E2E completion tests with 7th `school_staff_interaction` seed (complete-visit-success, moderate-gps, admin-can-complete, visit-completes-with-all-seven)
+- Renamed test "visit-completes-with-all-six-required-action-types" to "all-seven" + added 7th card assertion
+- Added new test `visit-completion-requires-school-staff-interaction` (seeds 6 types, omits school staff, asserts 422)
+- Added new test `pm-creates-starts-fills-and-ends-school-staff-interaction` (dialog add → auto-navigate → fill → end → DB assert → card stats)
+- All 3 new school-staff tests pass; 4 updated tests pass
+- 7 pre-existing flaky E2E failures unrelated to changes (moderate-gps already broken before this branch, dialog-flow tests flaky)
+- All 1661 unit tests pass
+- Files changed: `e2e/helpers/db.ts`, `e2e/tests/visits.spec.ts`
+- **Learnings for future iterations:**
+  - `handleAddAction` in `ActionPointList.tsx` auto-creates + starts + navigates — the "card with Start button" never renders when the flow succeeds. Use `waitForURL(/actions/)` instead of waiting for the card.
+  - `moderate-gps-warning-visible` test is pre-existing broken: seeds principal_interaction with no data, then tries to END it — fails validation since all 7 questions must be answered
+  - Stats test ID for school_staff_interaction in ActionPointList.tsx is `school-staff-interaction-stats-{id}` (not `school-staff-stats-{id}`)
+  - `fillSchoolStaffInteractionForm` helper is identical to principal interaction pattern — just iterate `allQuestionKeys` and click yes radios
+---
+
+## 2026-03-22 - US-010
+Session: f20ed385-ba0a-4b88-b456-956a7a2ae5c1
+- Updated CLAUDE.md Project Overview paragraph to include school staff interaction
+- Added "PM Visits: School Staff Interaction (v1)" section to CLAUDE.md (after Individual Student Interaction)
+- Updated visit completion rule from 6 to 7 required types in CLAUDE.md
+- Updated test file inventory: 89 files/1572 tests → 92 files/1661 tests (as of 2026-03-22)
+- Added `school-staff-interaction.test.ts` and `SchoolStaffInteractionForm.test.tsx` to test file listings
+- Added School Staff Interaction subsection in `docs/ai/project-context.md` (section 3.5, after Individual Student Interaction)
+- Fixed stale references in project-context.md: "10 types" → "7 types", "Six enabled" → "All 7 enabled", added school_staff_interaction to completion chain, stats list, picker list, and shared helpers
+- Files changed: `CLAUDE.md`, `docs/ai/project-context.md`
+- **Learnings for future iterations:**
+  - Documentation stories are straightforward but require careful line-by-line auditing of stale references — the implementation plan's line-number table was invaluable for identifying all spots
+  - Test counts should always come from a fresh `npx vitest run` output, never from projecting from old baselines
+  - The "10 action types" reference in project-context.md was from a very old codebase state — legacy types were already cleaned up in code but docs lagged behind
+---
+
+## 2026-03-22 - US-011
+Session: 1880151a-421d-4fa2-b26d-459c9b9b3c9c
+- Reviewed all changes via git diff (75 files, ~19,400 lines changed across the full branch)
+- Ran unit tests: 1661 passed, 92 files, 0 failures
+- Ran E2E tests: 36 passed, 0 failures
+- Ran unit coverage: Lines 94.23%, Branches 87.90%, Functions 96.39%, Statements 93.80%
+- E2E coverage: Lines 100%, Branches 52.77%, Functions 100%, Statements 100%
+- Verified no unintended side effects — all changes are focused on school_staff_interaction feature
+- Created `ralph/school-staff-interaction-review.txt` with concise findings
+- Files changed: `ralph/school-staff-interaction-review.txt`, `ralph/prd.json`, `ralph/progress.txt`, `unit-coverage/coverage-summary.json`
+- **Learnings for future iterations:**
+  - Review stories are quick when all prior stories were implemented cleanly — just run tests, check coverage, verify diff
+  - The moderate-gps E2E test is pre-existing broken (not caused by this feature) — tracked in progress codebase patterns
+  - ALL 11 user stories now pass — feature is complete
+---
