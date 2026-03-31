@@ -1,54 +1,51 @@
 {
   "project": "af_lms",
-  "branchName": "principal-interaction",
-  "description": "Principal Interaction Action Type - Add a 7-question binary checklist as the 4th required action type for PM school visits. IMPORTANT: Before starting any story, read these two files for full context: (1) `docs/ai/project-context.md` — project architecture, patterns, and conventions; (2) `docs/ai/principal-interaction/2026-03-10-principal-interaction-implementation-plan.md` — detailed implementation plan with exact file paths, line numbers, and code-level instructions for every change.",
+  "branchName": "ralph/school-staff-interaction",
+  "description": "School Staff Interaction Action Type - Add 7th required action type for PM school visits: a 2-question binary+remark checklist. IMPORTANT: Before starting each story, read these three files for full context: (1) docs/ai/project-context.md (2) ralph/prd-school-staff-interaction.md (3) docs/ai/school-staff-interaction/2026-03-22-school-staff-interaction-implementation-plan.md",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Config, validation library, and unit tests",
-      "description": "As a developer, I need a configuration and validation module for Principal Interaction so the API and form can validate question data consistently.",
+      "title": "Config and validation library",
+      "description": "As a developer, I need a config and validation module for school staff interaction so that form data can be validated consistently on save and complete.",
       "acceptanceCriteria": [
-        "Create `src/lib/principal-interaction.ts` following `src/lib/af-team-interaction.ts` pattern (no `teachers` array)",
-        "Export `PRINCIPAL_INTERACTION_CONFIG` with exactly 5 sections and 7 questions: oh_program_feedback (Operational Health), ip_curriculum_progress + ip_key_events (Implementation Progress), sp_student_performance (Student Performance on Monthly Tests), sn_concerns_raised (Support Needed), mp_monthly_plan + mp_permissions_obtained (Monthly Planning)",
-        "Export `PrincipalInteractionData` interface: `{ questions: Record<string, { answer: boolean | null; remark?: string }> }`",
-        "Export `validatePrincipalInteractionSave()` (lenient): returns `{ valid: true }` for partial/empty data, `{ valid: false, errors }` for unknown top-level keys. `ALLOWED_TOP_LEVEL_KEYS = new Set([\"questions\"])`",
-        "Export `validatePrincipalInteractionComplete()` (strict): returns `{ valid: false, errors }` when any of the 7 questions is unanswered or has null answer, with human-readable error messages including question labels",
-        "Create `src/lib/principal-interaction.test.ts` following `src/lib/af-team-interaction.test.ts` pattern with ~20 tests: config integrity (5 sections, 7 unique keys, allQuestionKeys), lenient validation (empty OK, partial OK, unknown question keys ignored, unknown top-level keys rejected, type checks), strict validation (all 7 required, null rejected, labels in errors, fully complete accepted)",
-        "Unit tests pass (`npm run test`)"
+        "Create `src/lib/school-staff-interaction.ts` with `SCHOOL_STAFF_INTERACTION_CONFIG` (1 section 'General Check', 2 questions: `gc_staff_concern`, `gc_pertaining_issue`)",
+        "Export `SchoolStaffInteractionData` interface with `questions` record (no teachers/students/grade)",
+        "Export `validateSchoolStaffInteractionSave()` -- lenient: accepts empty/partial, rejects unknown top-level keys",
+        "Export `validateSchoolStaffInteractionComplete()` -- strict: requires all 2 questions answered with non-null boolean, reports question labels in errors",
+        "Create `src/lib/school-staff-interaction.test.ts` with ~20 tests (config integrity, lenient validation, strict validation)",
+        "Tests pass (`npm run test`)",
+        "Types check (`npx tsc --noEmit`)"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Question text must use the typo-corrected versions from the plan (e.g. 'Were you able to...' not 'Where you able to...'). Keys sp_student_performance and mp_monthly_plan intentionally overlap with AF Team/Individual Teacher — safe because each action stores data in its own JSONB row."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Update type registry (visit-actions)",
-      "description": "As a developer, I need to replace `principal_meeting` with `principal_interaction` in the action types registry so the system recognizes the new type.",
+      "title": "Type registry update",
+      "description": "As a developer, I need `school_staff_interaction` registered in `ACTION_TYPES` so the system recognizes it as a valid action type.",
       "acceptanceCriteria": [
-        "In `src/lib/visit-actions.ts`: remove `principal_meeting: \"Principal Meeting\"` from `ACTION_TYPES`, add `principal_interaction: \"Principal Interaction\"` in its place (total stays at 10 types)",
-        "`ActionType` union includes `\"principal_interaction\"` — verified by TypeScript (`npx tsc --noEmit`)",
-        "In `src/lib/visit-actions.test.ts`: replace `principal_meeting: true` with `principal_interaction: true` in the exhaustiveness record",
-        "Unit tests pass (`npm run test`)",
-        "TypeScript compiles (`npx tsc --noEmit`)"
+        "Add `school_staff_interaction: 'School Staff Interaction'` to `ACTION_TYPES` in `src/lib/visit-actions.ts`",
+        "Total action types becomes 7",
+        "Update `src/lib/visit-actions.test.ts`: add to exhaustive record, change expected length from 6 to 7, add `isActionType` and `getActionTypeLabel` assertions",
+        "Tests pass (`npm run test`)",
+        "Types check (`npx tsc --noEmit`)"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "This MUST land atomically with US-007 (ActionDetailForm) to avoid TypeScript errors from the exhaustive switch. If running independently, expect TS errors in ActionDetailForm until US-007 is done — that's OK for unit tests but tsc --noEmit will fail."
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "PATCH API route validation for principal interaction",
-      "description": "As a developer, I need the PATCH action route to validate Principal Interaction data so invalid payloads are rejected on save.",
+      "title": "PATCH API validation",
+      "description": "As a PM, when I save school staff interaction data, the API should validate it (lenient for in-progress, strict for completed actions).",
       "acceptanceCriteria": [
-        "In `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`: import `validatePrincipalInteractionSave` and `validatePrincipalInteractionComplete` from `@/lib/principal-interaction`",
-        "Add `principal_interaction` validation block after the individual teacher block: lenient for `in_progress`, strict for `completed`. Error message: `\"Invalid principal interaction data\"` with validation errors array",
-        "PATCH with `in_progress` + partial principal interaction data returns 200",
-        "PATCH with `in_progress` + unknown top-level keys returns 422",
-        "PATCH with `completed` + incomplete data returns 422 with `\"Invalid principal interaction data\"`",
-        "PATCH with `completed` + complete data returns 200",
-        "In test file: change default `BASE_ACTION_ROW.action_type` from `principal_meeting` to `leadership_meeting`",
-        "Add `buildValidPrincipalInteractionData()` helper + ~4 new tests in `src/app/api/pm/visits/[id]/actions/[actionId]/route.test.ts`",
-        "Unit tests pass (`npm run test`)"
+        "Import validation functions in `src/app/api/pm/visits/[id]/actions/[actionId]/route.ts`",
+        "Add `school_staff_interaction` validation block after `individual_student_discussion` (lenient for `in_progress`, strict for `completed`)",
+        "Error message: 'Invalid school staff interaction data'",
+        "Add `buildValidSchoolStaffInteractionData()` builder to test file",
+        "Add 4 tests: lenient valid, lenient invalid (unknown keys), strict invalid (incomplete), strict valid (complete)",
+        "Tests pass (`npm run test`)"
       ],
       "priority": 3,
       "passes": true,
@@ -56,75 +53,75 @@
     },
     {
       "id": "US-004",
-      "title": "END API route validation for principal interaction",
-      "description": "As a developer, I need the END action route to validate Principal Interaction data strictly so only fully-answered forms can be completed.",
+      "title": "END API validation",
+      "description": "As a PM, when I end a school staff interaction action, the API should validate all 2 questions are answered.",
       "acceptanceCriteria": [
-        "In `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`: import `validatePrincipalInteractionComplete` from `@/lib/principal-interaction`",
-        "Add `principalInteractionValidationError()` function following the `afTeamValidationError()` pattern",
-        "Wire into both primary and concurrent-fallback validation chains. No 'all teachers recorded' check needed.",
-        "END with incomplete principal interaction data returns 422 with descriptive errors",
-        "END with all 7 questions answered (non-null boolean) returns 200",
-        "In test file: change `PENDING_ACTION.action_type` from `principal_meeting` to `leadership_meeting`",
-        "Add ~5 new tests in `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.test.ts`",
-        "Unit tests pass (`npm run test`)"
+        "Import `validateSchoolStaffInteractionComplete` in `src/app/api/pm/visits/[id]/actions/[actionId]/end/route.ts`",
+        "Add `schoolStaffInteractionValidationError()` function following the `principalInteractionValidationError` pattern",
+        "Wire into both primary and concurrent-fallback validation chains",
+        "Error message: 'Invalid school staff interaction data' with validation errors array",
+        "Add `buildValidSchoolStaffInteractionData()` builder to test file",
+        "Add 5 tests: incomplete rejected, null data rejected, complete succeeds, all-null rejected, concurrent fallback validates",
+        "Tests pass (`npm run test`)"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Error message pattern: `\"Invalid principal interaction data\"` with validation errors array — same pattern as afTeamValidationError."
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "COMPLETE visit API — 4th required type",
-      "description": "As a developer, I need visit completion to require at least one completed Principal Interaction so PMs always record their principal meeting.",
+      "title": "Visit completion -- 7th required type",
+      "description": "As a PM, I cannot complete a visit without at least one completed school staff interaction action.",
       "acceptanceCriteria": [
-        "In `src/app/api/pm/visits/[id]/complete/route.ts`: add 4th sequential check after individual teacher — query for >= 1 completed `principal_interaction` action",
-        "Check order: in-progress -> classroom -> AF team -> individual teacher -> principal interaction -> UPDATE",
-        "Error message: `\"At least one completed Principal Interaction is required to complete visit\"` with detail `[\"No completed principal_interaction action found\"]`",
-        "Visit completion fails with 422 when no completed `principal_interaction` exists",
-        "Visit completion succeeds when all 4 action types have completed instances",
-        "In `src/app/api/pm/visits/[id]/complete/route.test.ts`: update 3 happy-path tests with 7th `mockResolvedValueOnce` for principal_interaction check (`.mockResolvedValueOnce([{ id: 601 }])`) inserted after individual teacher mock, before UPDATE mock",
-        "IMPORTANT: After adding the 7th mock, UPDATE query moves from call index 5 to index 6. Update `mockQuery.mock.calls[5]` to `mockQuery.mock.calls[6]` in the first happy-path test",
-        "Rename test `\"completes visit when all 3 action types have completed actions\"` to `\"...all 4 action types...\"`",
-        "Add new test: `\"returns 422 when principal_interaction is missing\"` — 6 mocks (visit + in-progress + classroom + af_team + individual_teacher + empty []), expects 422",
-        "Tests that short-circuit earlier (AF team missing, individual teacher missing, invalid rubric) do NOT need changes",
-        "Unit tests pass (`npm run test`)"
+        "Add 7th completion check in `src/app/api/pm/visits/[id]/complete/route.ts` after `individual_student_discussion`",
+        "Sequential short-circuit order: in-progress -> classroom -> AF team -> individual teacher -> principal -> group student -> individual student -> school staff -> UPDATE",
+        "Error message: 'At least one completed School Staff Interaction is required to complete visit'",
+        "Update 3 existing happy-path tests: add `.mockResolvedValueOnce([{ id: 901 }])` for new type check, shift UPDATE mock index by +1",
+        "Rename test 'all 6 action types' to 'all 7 action types'",
+        "Add 1 new test: 'returns 422 when school_staff_interaction is missing'",
+        "Tests pass (`npm run test`)"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "The mock chain ordering is critical. Each happy-path test has sequential mockResolvedValueOnce calls. The new principal_interaction mock must be inserted at the right position."
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Principal Interaction form component and tests",
-      "description": "As a PM, I want a form to answer the 7 Principal Interaction questions so I can record my observations from the principal meeting.",
+      "title": "Form component",
+      "description": "As a PM, I need a form to answer the 2 school staff interaction questions with Yes/No radios and optional remarks.",
       "acceptanceCriteria": [
-        "Create `src/components/visits/PrincipalInteractionForm.tsx` following `AFTeamInteractionForm.tsx` pattern but WITHOUT teacher section",
-        "Props: `data: PrincipalInteractionData`, `setData: (data: PrincipalInteractionData) => void`, `disabled: boolean` — NO `schoolCode` prop",
-        "Sticky progress summary at `top-12 z-10`: 'Answered: X/7' (below page-level sticky header)",
-        "5 sections rendered as bordered cards with section headers, each question has Yes/No radio buttons + optional remark text input",
-        "`data-testid=\"action-renderer-principal_interaction\"` set on root element",
-        "No fetch calls, no loading state, no teacher dropdown — uses theme tokens from `src/lib/theme.ts`",
-        "Create `src/components/visits/PrincipalInteractionForm.test.tsx` with ~15 tests: rendering (5 sections, 7 questions, progress '0/7'), interactions (radio toggle, remark input, progress update), read-only mode (disabled radios + inputs), no teacher UI",
-        "Unit tests pass (`npm run test`)"
+        "Create `src/components/visits/SchoolStaffInteractionForm.tsx` following `PrincipalInteractionForm.tsx` pattern",
+        "Props: `{ data, setData, disabled }` -- no `schoolCode`",
+        "Sticky progress bar showing 'Answered: X/2' at `top-12 z-10`",
+        "1 section 'General Check' with 2 questions, each with Yes/No radios and optional remark toggle",
+        "`data-testid='action-renderer-school_staff_interaction'` on outer div",
+        "Radio test IDs: `school-staff-interaction-{key}-yes`, `school-staff-interaction-{key}-no`",
+        "Disabled mode: radios disabled, no 'Add remark' buttons",
+        "Create `src/components/visits/SchoolStaffInteractionForm.test.tsx` with ~12 tests (rendering, interactions, progress, remarks, disabled mode)",
+        "Tests pass (`npm run test`)",
+        "Lint passes (`npm run lint`)",
+        "Build passes (`npm run build`)"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "This is the simplest form in the system. No async operations, no teacher fetching, no rubric scoring — just 7 binary questions with optional remarks."
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Wire form into ActionDetailForm",
-      "description": "As a developer, I need to integrate the Principal Interaction form into the action detail page so PMs can access it when viewing/editing a principal interaction action.",
+      "title": "Wire form into ActionDetailForm dispatcher",
+      "description": "As a developer, I need to wire the new form component into the existing action detail form dispatcher so it renders for `school_staff_interaction` actions.",
       "acceptanceCriteria": [
-        "In `src/components/visits/ActionDetailForm.tsx`: remove `principal_meeting` from `ACTION_FORM_CONFIGS`, add `principal_interaction` with title 'Principal Interaction Details', description 'Record observations from the interaction with the school Principal.', fields: []",
-        "Add `PRINCIPAL_INTERACTION_ACTION_TYPE` constant and add `principal_interaction` to `SAVE_BEFORE_END_TYPES` set",
-        "Add `sanitizePrincipalInteractionPayload()` following `sanitizeAFTeamPayload` pattern minus teachers: returns `{ questions: {} }` if data isn't plain object, iterates 7 known keys extracting only answer (boolean|null) and remark (string)",
-        "Add `bootstrapPrincipalInteractionPayload()` — bootstrap shape `{ questions: {} }`, returns sanitized data if input is plain object",
-        "Add `principal_interaction` case in `normalizeFormDataForAction`, `sanitizePatchData`, and JSX dispatch (renders PrincipalInteractionForm)",
-        "In `src/app/visits/[id]/actions/[actionId]/page.test.tsx`: change default `makeAction()` from `action_type: \"principal_meeting\"` to `\"leadership_meeting\"`",
-        "Rewrite renderer test to verify `PrincipalInteractionForm` renders for `principal_interaction` actions. Update testid assertions: `\"action-renderer-principal_meeting\"` -> `\"action-renderer-principal_interaction\"`",
-        "TypeScript compiles (`npx tsc --noEmit`)",
-        "Unit tests pass (`npm run test`)"
+        "Import `SchoolStaffInteractionForm` and `SCHOOL_STAFF_INTERACTION_CONFIG` in `ActionDetailForm.tsx`",
+        "Add `SCHOOL_STAFF_INTERACTION_ACTION_TYPE` constant",
+        "Add to `SAVE_BEFORE_END_TYPES` Set",
+        "Add `ACTION_FORM_CONFIGS` entry with title 'School Staff Interaction Details', description 'Record interactions with school staff regarding the program.', fields: []",
+        "Add `sanitizeSchoolStaffInteractionPayload()` function (copy principal interaction pattern)",
+        "Add `bootstrapSchoolStaffInteractionPayload()` function",
+        "Add branches in `normalizeFormDataForAction` and `sanitizePatchData`",
+        "Add `SchoolStaffInteractionForm` branch in JSX renderer dispatch",
+        "Generic END 422 error message falls through correctly (do NOT add custom branch)",
+        "Tests pass (`npm run test`)",
+        "Types check (`npx tsc --noEmit`)"
       ],
       "priority": 7,
       "passes": true,
@@ -132,14 +129,16 @@
     },
     {
       "id": "US-008",
-      "title": "Action cards stats and picker modal",
-      "description": "As a PM, I want to see progress stats on Principal Interaction action cards and be able to create new Principal Interaction actions from the picker.",
+      "title": "Action card stats",
+      "description": "As a PM, I want to see how many questions I've answered on the action card so I can track progress at a glance.",
       "acceptanceCriteria": [
-        "In `src/components/visits/ActionPointList.tsx`: import `PRINCIPAL_INTERACTION_CONFIG`, add `getPrincipalInteractionStats()` returning answered/total (7), render stats on `principal_interaction` cards",
-        "In `src/components/visits/ActionTypePickerModal.tsx`: add `|| actionType === \"principal_interaction\"` to enabled check — 4 types now enabled",
-        "In `src/components/visits/ActionPointList.test.tsx`: change `makeAction()` default from `principal_meeting` to `leadership_meeting`, update 5 other `principal_meeting` refs to `leadership_meeting`, update 2 display-name assertions `\"Principal Meeting\"` -> `\"Leadership Meeting\"`, add ~3 new tests for principal_interaction stats",
-        "In `src/components/visits/ActionTypePickerModal.test.tsx`: update enabled count 3->4, disabled count 7->6, add test for `principal_interaction` selectable",
-        "Unit tests pass (`npm run test`)"
+        "Import `SCHOOL_STAFF_INTERACTION_CONFIG` in `ActionPointList.tsx`",
+        "Add exported `getSchoolStaffInteractionStats()` function returning answered count / total (2)",
+        "Render stats on `school_staff_interaction` action cards (answered/total with %)",
+        "Add 9 tests in `ActionPointList.test.tsx` (3 card rendering + 6 stats function unit tests)",
+        "Add 2 tests in `ActionTypePickerModal.test.tsx` (selectable + submit)",
+        "Add 3 tests in action detail `page.test.tsx` (renderer dispatch, PATCH save, save-before-end)",
+        "Tests pass (`npm run test`)"
       ],
       "priority": 8,
       "passes": true,
@@ -147,76 +146,52 @@
     },
     {
       "id": "US-009",
-      "title": "Rename ripple — source text and unit test fixtures",
-      "description": "As a developer, I need to rename all remaining `principal_meeting` references across source and unit test files to avoid confusion with the new `principal_interaction` type.",
+      "title": "E2E tests",
+      "description": "As a developer, I need E2E tests to verify the full flow works end-to-end including visit completion with 7 required types.",
       "acceptanceCriteria": [
-        "In `src/components/visits/NewVisitForm.tsx`: change `\"Principal Meeting\"` -> `\"Principal Interaction\"` in instructional text",
-        "In `src/components/visits/NewVisitForm.tsx`: fix completion text from `\"Complete the visit after at least one Classroom Observation is completed and no action is in progress.\"` to `\"Complete the visit after all required action types are completed and no action is in progress.\"`",
-        "In `src/components/visits/NewVisitForm.test.tsx`: update regex from `/Complete the visit after at least one Classroom Observation/i` to `/Complete the visit after all required action types are completed/i`",
-        "In `src/hooks/use-auto-save.test.ts`: change sample action type to `leadership_meeting`",
-        "In `src/app/visits/[id]/page.test.tsx`: change sample action type to `leadership_meeting` + update display-name assertion `\"Principal Meeting\"` -> `\"Leadership Meeting\"`",
-        "In `src/app/api/pm/visits/[id]/route.test.ts`: change sample action type to `leadership_meeting`",
-        "In `src/app/api/pm/visits/[id]/actions/route.test.ts`: find-and-replace all `principal_meeting` -> `leadership_meeting` (7 occurrences)",
-        "Verify: no source or test file contains the string `principal_meeting`",
-        "Unit tests pass (`npm run test`)",
-        "TypeScript compiles (`npx tsc --noEmit`)"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "Run `grep -r 'principal_meeting' src/ e2e/` after changes to verify zero remaining references."
-    },
-    {
-      "id": "US-010",
-      "title": "E2E tests for principal interaction",
-      "description": "As a developer, I need E2E tests updated so visit completion tests pass with the new 4th required action type and a new test verifies the principal interaction requirement.",
-      "acceptanceCriteria": [
-        "Add `buildCompletePrincipalInteractionData()` to `e2e/helpers/db.ts` following existing pattern: returns `{ questions: { [key]: { answer: true } } }` for all 7 keys",
-        "Rename-only: `complete-blocked-without-rubric` test — rename `principal_meeting` to `leadership_meeting` + add `principal_interaction: completed` seed with valid data",
-        "Rename-only: `complete-blocked-when-any-action-in-progress` test — rename `principal_meeting` to `leadership_meeting`",
-        "Rename-only: `program-admin-read-only` test — rename `principal_meeting` to `leadership_meeting`",
-        "Completion fix: `moderate-gps-warning-visible` — rename existing `principal_meeting: pending` seed to `leadership_meeting: pending` (keep as GPS test action) + add new `principal_interaction: completed` seed",
-        "Completion fix: `admin-can-complete-other-pm-visit` — change `principal_meeting: completed` to `principal_interaction: completed` with `buildCompletePrincipalInteractionData()`",
-        "Completion fix: `complete-visit-success` — add `principal_interaction: completed` seed with valid data",
-        "Completion fix: `visit-completes-with-all-three-required-action-types` — add `principal_interaction: completed` seed + rename test to `...all-four-required-action-types`",
-        "New test: `visit-completion-requires-principal-interaction` — seed classroom+af_team+individual_teacher as completed, do NOT seed principal_interaction, click Complete Visit, assert error `\"At least one completed Principal Interaction is required to complete visit\"`",
+        "Add `buildCompleteSchoolStaffInteractionData()` builder in `e2e/helpers/db.ts` with import from `../../src/lib/school-staff-interaction`",
+        "Update 4 existing E2E completion tests (lines 399, 445, 578, 849) with 7th seed for `school_staff_interaction`",
+        "Rename test at line 849 from 'six' to 'seven' + add card visibility assertion + update comment",
+        "Add new E2E test `visit-completion-requires-school-staff-interaction` (seed 6 types, omit school staff, assert 422 error)",
+        "Add E2E form workflow test `pm-creates-starts-fills-and-ends-school-staff-interaction` (create -> start -> fill -> end)",
         "E2E tests pass (`npm run test:e2e`)"
       ],
-      "priority": 10,
-      "passes": true,
-      "notes": "For moderate-gps-warning-visible: the test captures actionId from the pending seed and POSTs to /start + /end — using a completed action would cause 409. Keep leadership_meeting:pending for GPS testing, add separate principal_interaction:completed for the completion requirement."
-    },
-    {
-      "id": "US-011",
-      "title": "Documentation updates (CLAUDE.md + project-context.md)",
-      "description": "As a developer, I need CLAUDE.md and project-context.md updated so future contributors and AI agents understand the new Principal Interaction type.",
-      "acceptanceCriteria": [
-        "In `CLAUDE.md`: add 'PM Visits: Principal Interaction (v1)' section with payload shape, 7 questions across 5 sections, validation rules (lenient/strict), no teacher selection, config/form file references",
-        "In `CLAUDE.md`: update visit completion rule from 3 to 4 required types, add `principal_interaction` to the list",
-        "In `CLAUDE.md`: add new test files to inventory (`principal-interaction.test.ts`, `PrincipalInteractionForm.test.tsx`), remove `principal_meeting` references",
-        "In `docs/ai/project-context.md`: add Principal Interaction subsection under section 3.5 (PM Visits)",
-        "In `docs/ai/project-context.md`: update action type counts (3 enabled -> 4, 7 disabled -> 6), update picker/card/completion descriptions",
-        "In `docs/ai/project-context.md`: add `PrincipalInteractionForm.tsx` and `principal-interaction.ts` to component/helper lists",
-        "No remaining `principal_meeting` references in either documentation file"
-      ],
-      "priority": 11,
+      "priority": 9,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-012",
+      "id": "US-010",
+      "title": "Documentation updates",
+      "description": "As a developer, I need CLAUDE.md and project-context.md updated so future contributors have accurate documentation.",
+      "acceptanceCriteria": [
+        "Update CLAUDE.md Project Overview paragraph to include school staff interaction",
+        "Add 'PM Visits: School Staff Interaction (v1)' section to CLAUDE.md",
+        "Update visit completion rule: 6 -> 7 required types in CLAUDE.md",
+        "Update test file inventory and counts in CLAUDE.md (use fresh `npx vitest run` output)",
+        "Add School Staff Interaction subsection under section 3.5 in `docs/ai/project-context.md`",
+        "Fix stale action type references in project-context.md (lines 154, 251-252, 271, 272, 285)"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
       "title": "Review changes and document findings",
       "description": "As a developer, I want to review all changes made during this feature implementation to ensure nothing was missed and document the results.",
       "acceptanceCriteria": [
-        "Use explore agents to understand the current state of all modified and new files",
-        "Review git diff to see all changes made across the branch",
-        "Verify TypeScript compiles cleanly (`npx tsc --noEmit`)",
-        "Verify all unit tests pass (`npm run test`)",
-        "Verify no remaining `principal_meeting` references in source or test files (`grep -r 'principal_meeting' src/ e2e/` returns empty)",
-        "Create `ralph/principal-interaction-review.txt` with concise findings (under 50 lines): what was done, files changed, test counts, any concerns or recommendations"
+        "Use explore agents to understand the current state of modified files",
+        "Review git diff to see all changes made",
+        "Run `npx vitest run` and capture test count + coverage numbers",
+        "Run `npm run test:e2e` and verify all E2E tests pass",
+        "Verify no unintended side effects or missing pieces",
+        "Create `ralph/school-staff-interaction-review.txt` with concise findings (under 50 lines)",
+        "Review file summarizes: what was done, files changed, test counts, coverage numbers, any concerns or recommendations"
       ],
-      "priority": 12,
+      "priority": 11,
       "passes": true,
-      "notes": "E2E tests (`npm run test:e2e`) require a local Postgres DB with dump loaded — skip if not available, note in review file."
+      "notes": ""
     }
   ]
 }

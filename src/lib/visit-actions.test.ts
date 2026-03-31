@@ -14,25 +14,26 @@ describe("visit-actions", () => {
   it("defines all MVP action types with exhaustive ActionType coverage", () => {
     const exhaustiveByType: Record<ActionType, true> = {
       principal_interaction: true,
-      leadership_meeting: true,
       classroom_observation: true,
       group_student_discussion: true,
       individual_student_discussion: true,
-      individual_staff_meeting: true,
-      team_staff_meeting: true,
-      teacher_feedback: true,
       af_team_interaction: true,
       individual_af_teacher_interaction: true,
+      school_staff_interaction: true,
     };
 
-    expect(Object.keys(exhaustiveByType)).toHaveLength(10);
+    expect(Object.keys(exhaustiveByType)).toHaveLength(7);
     expect(ACTION_TYPE_VALUES).toEqual(Object.keys(ACTION_TYPES));
   });
 
   it("validates action types at runtime", () => {
     expect(isActionType("classroom_observation")).toBe(true);
+    expect(isActionType("school_staff_interaction")).toBe(true);
     expect(isActionType("unknown_action")).toBe(false);
-    expect(getActionTypeLabel("teacher_feedback")).toBe("Teacher Feedback");
+    expect(getActionTypeLabel("principal_interaction")).toBe("Principal Interaction");
+    expect(getActionTypeLabel("school_staff_interaction")).toBe(
+      "School Staff Interaction"
+    );
   });
 
   it("defines allowed action statuses", () => {

@@ -160,7 +160,7 @@ describe("ActionTypePickerModal", () => {
     expect(onSubmit).toHaveBeenCalledWith("principal_interaction");
   });
 
-  it("other 6 action types remain disabled", () => {
+  it("group_student_discussion radio is selectable (not disabled)", () => {
     render(
       <ActionTypePickerModal
         isOpen
@@ -169,13 +169,129 @@ describe("ActionTypePickerModal", () => {
       />
     );
 
-    const enabledTypes = new Set(["classroom_observation", "af_team_interaction", "individual_af_teacher_interaction", "principal_interaction"]);
-    const disabledTypes = ACTION_TYPE_VALUES.filter((t) => !enabledTypes.has(t));
+    const radio = screen.getByLabelText("Student Interaction");
+    expect(radio).not.toBeDisabled();
+  });
 
-    expect(disabledTypes).toHaveLength(6);
-    for (const actionType of disabledTypes) {
+  it("submits group_student_discussion when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("Student Interaction"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("group_student_discussion");
+  });
+
+  it("individual_student_discussion radio is selectable (not disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const radio = screen.getByLabelText("Individual Student Interaction");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits individual_student_discussion when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("Individual Student Interaction"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("individual_student_discussion");
+  });
+
+  it("shows custom submittingLabel when submitting", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        submitting
+        submittingLabel="Getting location..."
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Getting location..." })).toBeDisabled();
+  });
+
+  it("shows default 'Adding...' when submitting without submittingLabel", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        submitting
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Adding..." })).toBeDisabled();
+  });
+
+  it("school_staff_interaction radio is selectable (not disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const radio = screen.getByLabelText("School Staff Interaction");
+    expect(radio).not.toBeDisabled();
+  });
+
+  it("submits school_staff_interaction when selected and Add clicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByLabelText("School Staff Interaction"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("school_staff_interaction");
+  });
+
+  it("all action types are selectable (none disabled)", () => {
+    render(
+      <ActionTypePickerModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    for (const actionType of ACTION_TYPE_VALUES) {
       const radio = screen.getByLabelText(getActionTypeLabel(actionType));
-      expect(radio).toBeDisabled();
+      expect(radio).not.toBeDisabled();
     }
   });
 });

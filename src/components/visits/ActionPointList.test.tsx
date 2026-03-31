@@ -2,11 +2,16 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 
 import ActionPointList, {
   getAFTeamInteractionStats,
+  getGroupStudentDiscussionStats,
+  getIndividualStudentDiscussionStats,
   getIndividualTeacherInteractionStats,
   getPrincipalInteractionStats,
+  getSchoolStaffInteractionStats,
   type VisitActionListItem,
 } from "./ActionPointList";
 
@@ -40,7 +45,7 @@ vi.mock("@/lib/geolocation", () => ({
 function makeAction(overrides: Partial<VisitActionListItem>): VisitActionListItem {
   return {
     id: 101,
-    action_type: "leadership_meeting",
+    action_type: "principal_interaction",
     status: "pending",
     started_at: null,
     ended_at: null,
@@ -56,33 +61,32 @@ describe("ActionPointList", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders status-specific controls and only pending delete", () => {
+  it("renders status-specific controls — pending + in_progress have delete", () => {
     render(
       <ActionPointList
         visitId={10}
         actions={[
           makeAction({ id: 1, status: "pending" }),
           makeAction({ id: 2, status: "in_progress", action_type: "classroom_observation" }),
-          makeAction({ id: 3, status: "completed", action_type: "teacher_feedback" }),
+          makeAction({ id: 3, status: "completed", action_type: "classroom_observation" }),
         ]}
       />
     );
 
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/visits/10/actions/2");
     expect(screen.getByRole("link", { name: "View Details" })).toHaveAttribute(
       "href",
       "/visits/10/actions/3"
     );
-    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(2);
   });
 
   it("shows Start + Delete only on pending cards", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 11, status: "pending", action_type: "leadership_meeting" })]}
+        actions={[makeAction({ id: 11, status: "pending", action_type: "principal_interaction" })]}
       />
     );
 
@@ -93,7 +97,7 @@ describe("ActionPointList", () => {
     expect(within(card).queryByRole("link", { name: "View Details" })).not.toBeInTheDocument();
   });
 
-  it("shows Open only on in_progress cards", () => {
+  it("shows Open + Delete on in_progress cards", () => {
     render(
       <ActionPointList
         visitId={10}
@@ -113,8 +117,8 @@ describe("ActionPointList", () => {
       "href",
       "/visits/10/actions/12"
     );
+    expect(within(card).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-    expect(within(card).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
     expect(within(card).queryByRole("link", { name: "View Details" })).not.toBeInTheDocument();
   });
 
@@ -126,7 +130,7 @@ describe("ActionPointList", () => {
           makeAction({
             id: 13,
             status: "completed",
-            action_type: "teacher_feedback",
+            action_type: "classroom_observation",
             started_at: "2026-02-19T09:00:00.000Z",
             ended_at: "2026-02-19T10:00:00.000Z",
           }),
@@ -144,21 +148,33 @@ describe("ActionPointList", () => {
     expect(within(card).queryByRole("link", { name: "Open" })).not.toBeInTheDocument();
   });
 
-  it("adds a new action via picker modal", async () => {
+  it("adds a new action via picker modal — GPS → Create → Start → Redirect", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    const createdAction = makeAction({
+      id: 200,
+      action_type: "classroom_observation",
+      status: "pending",
+    });
+    const startedAction = makeAction({
+      id: 200,
+      action_type: "classroom_observation",
+      status: "in_progress",
+      started_at: "2026-02-19T09:00:00.000Z",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({
-            action: makeAction({
-              id: 200,
-              action_type: "classroom_observation",
-              status: "pending",
-            }),
-          }),
+        json: () => Promise.resolve({ action: createdAction }),
       })
-    ) as unknown as typeof fetch;
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ action: startedAction }),
+      }) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ActionPointList visitId={10} actions={[]} />);
@@ -168,34 +184,39 @@ describe("ActionPointList", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
+      expect(mockGetAccurateLocation).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action_type: "classroom_observation" }),
       });
+      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions/200/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_lat: 23.02,
+          start_lng: 72.57,
+          start_accuracy: 50,
+        }),
+      });
     });
 
     await waitFor(() => {
       expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
+      expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/200");
     });
   });
 
-  it("creates a second classroom observation action card from picker", async () => {
+  it("add action — GPS failure shows error and creates no action", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            action: makeAction({
-              id: 201,
-              action_type: "classroom_observation",
-              status: "pending",
-            }),
-          }),
-      })
-    ) as unknown as typeof fetch;
+    const rejectedPromise = Promise.reject(new Error("Location denied"));
+    rejectedPromise.catch(() => {}); // prevent unhandled rejection
+    mockGetAccurateLocation.mockReturnValue({
+      promise: rejectedPromise,
+      cancel: vi.fn(),
+    });
+    const fetchMock = vi.fn() as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ActionPointList visitId={10} actions={[]} />);
@@ -205,17 +226,48 @@ describe("ActionPointList", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action_type: "classroom_observation" }),
-      });
+      expect(screen.getByText("Location denied")).toBeInTheDocument();
     });
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("add action — create succeeds but start fails → pending action in list, error shown", async () => {
+    const user = userEvent.setup();
+    mockGetAccurateLocation.mockReturnValue({
+      promise: Promise.resolve({ lat: 23.02, lng: 72.57, accuracy: 50 }),
+      cancel: vi.fn(),
+    });
+
+    const createdAction = makeAction({
+      id: 201,
+      action_type: "classroom_observation",
+      status: "pending",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ action: createdAction }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: "GPS too far from school" }),
+      }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ActionPointList visitId={10} actions={[]} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Action Point" }));
+    await user.click(screen.getByLabelText("Classroom Observation"));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
     await waitFor(() => {
+      expect(screen.getByText("GPS too far from school")).toBeInTheDocument();
       expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     });
+
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("deletes a pending action card", async () => {
@@ -231,11 +283,11 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "principal_interaction", status: "pending" })]}
       />
     );
 
-    expect(screen.getByText("Leadership Meeting")).toBeInTheDocument();
+    expect(screen.getByText("Principal Interaction")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
@@ -245,9 +297,153 @@ describe("ActionPointList", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("Leadership Meeting")).not.toBeInTheDocument();
+      expect(screen.queryByText("Principal Interaction")).not.toBeInTheDocument();
       expect(screen.getByText("No action points added yet.")).toBeInTheDocument();
     });
+  });
+
+  it("clicking delete on in_progress action shows confirmation modal", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByText("This action point and all its data will be permanently removed. This cannot be undone.")
+    ).toBeInTheDocument();
+  });
+
+  it("confirming delete on in_progress action calls API and removes card", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions/101", {
+        method: "DELETE",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Classroom Observation")).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  it("canceling delete confirmation modal closes it without deleting", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn() as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Classroom Observation")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("pending action delete has no confirmation modal — deletes immediately", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[makeAction({ id: 101, action_type: "principal_interaction", status: "pending" })]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    // No dialog should appear — delete happens immediately
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/pm/visits/10/actions/101", {
+        method: "DELETE",
+      });
+    });
+  });
+
+  it("in_progress delete button is hidden in readOnly mode", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        readOnly
+        actions={[
+          makeAction({
+            id: 101,
+            status: "in_progress",
+            action_type: "classroom_observation",
+            started_at: "2026-02-19T09:00:00.000Z",
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
   });
 
   it("starts a pending action with GPS and moves it to in_progress", async () => {
@@ -275,7 +471,7 @@ describe("ActionPointList", () => {
     render(
       <ActionPointList
         visitId={10}
-        actions={[makeAction({ id: 101, action_type: "leadership_meeting", status: "pending" })]}
+        actions={[makeAction({ id: 101, action_type: "principal_interaction", status: "pending" })]}
       />
     );
 
@@ -296,7 +492,7 @@ describe("ActionPointList", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Open" })).toBeInTheDocument();
       expect(screen.getByText("In Progress")).toBeInTheDocument();
       expect(mockPush).toHaveBeenCalledWith("/visits/10/actions/101");
@@ -377,7 +573,7 @@ describe("ActionPointList", () => {
           actions={[
             makeAction({
               id: 53,
-              action_type: "leadership_meeting",
+              action_type: "principal_interaction",
               status: "in_progress",
               started_at: "2026-03-05T09:00:00.000Z",
               data: {
@@ -552,7 +748,7 @@ describe("Individual Teacher Interaction stats on action cards", () => {
         actions={[
           makeAction({
             id: 63,
-            action_type: "leadership_meeting",
+            action_type: "principal_interaction",
             status: "in_progress",
             started_at: "2026-03-09T09:00:00.000Z",
             data: {
@@ -719,5 +915,339 @@ describe("getPrincipalInteractionStats", () => {
       },
     });
     expect(result).toEqual({ answeredCount: 1, totalQuestions: 7 });
+  });
+});
+
+describe("Group Student Discussion stats on action cards", () => {
+  it("renders stats with grade and answered questions for group_student_discussion card", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 80,
+            action_type: "group_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              grade: 11,
+              questions: {
+                gc_interacted: { answer: true },
+                gc_program_updates: { answer: false },
+              },
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("group-student-stats-80");
+    expect(statsEl).toHaveTextContent("Grade:");
+    expect(statsEl).toHaveTextContent("11");
+    expect(statsEl).toHaveTextContent("2/4 (50%)");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 81,
+            action_type: "group_student_discussion",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("group-student-stats-81")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when no questions are answered and grade is null", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 82,
+            action_type: "group_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              questions: {},
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("group-student-stats-82")).not.toBeInTheDocument();
+  });
+});
+
+describe("getGroupStudentDiscussionStats", () => {
+  it("returns correct counts for partial payload — grade 11, 2 of 4 answered", () => {
+    const result = getGroupStudentDiscussionStats({
+      grade: 11,
+      questions: {
+        gc_interacted: { answer: true },
+        gc_program_updates: { answer: false },
+      },
+    });
+    expect(result).toEqual({ grade: 11, answeredCount: 2, totalQuestions: 4 });
+  });
+
+  it("returns correct counts for complete payload — all 4 answered", () => {
+    const questions: Record<string, { answer: boolean }> = {};
+    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+      questions[key] = { answer: true };
+    }
+    const result = getGroupStudentDiscussionStats({
+      grade: 12,
+      questions,
+    });
+    expect(result).toEqual({ grade: 12, answeredCount: 4, totalQuestions: 4 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getGroupStudentDiscussionStats(undefined)).toBeNull();
+  });
+
+  it("returns null when grade is null and no questions answered (both zero)", () => {
+    expect(getGroupStudentDiscussionStats({ questions: {} })).toBeNull();
+  });
+
+  it("returns stats when grade is set but no questions answered", () => {
+    const result = getGroupStudentDiscussionStats({ grade: 11, questions: {} });
+    expect(result).toEqual({ grade: 11, answeredCount: 0, totalQuestions: 4 });
+  });
+
+  it("does NOT count null answers — only true or false count as answered", () => {
+    const result = getGroupStudentDiscussionStats({
+      grade: 11,
+      questions: {
+        gc_interacted: { answer: null },
+        gc_program_updates: { answer: true },
+      },
+    });
+    expect(result).toEqual({ grade: 11, answeredCount: 1, totalQuestions: 4 });
+  });
+
+  it("ignores unknown question keys — only counts known keys", () => {
+    const result = getGroupStudentDiscussionStats({
+      grade: 12,
+      questions: {
+        unknown_key: { answer: true },
+        gc_interacted: { answer: true },
+      },
+    });
+    expect(result).toEqual({ grade: 12, answeredCount: 1, totalQuestions: 4 });
+  });
+});
+
+describe("Individual Student Discussion stats on action cards", () => {
+  it("renders stats with student count for individual_student_discussion card", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 90,
+            action_type: "individual_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              students: [
+                { id: 1, name: "Alice", grade: 11, questions: {} },
+                { id: 2, name: "Bob", grade: 12, questions: {} },
+              ],
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("individual-student-stats-90");
+    expect(statsEl).toHaveTextContent("Students:");
+    expect(statsEl).toHaveTextContent("2");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 91,
+            action_type: "individual_student_discussion",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("individual-student-stats-91")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when students array is empty", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 92,
+            action_type: "individual_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              students: [],
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("individual-student-stats-92")).not.toBeInTheDocument();
+  });
+});
+
+describe("getIndividualStudentDiscussionStats", () => {
+  it("returns correct student count", () => {
+    const result = getIndividualStudentDiscussionStats({
+      students: [
+        { id: 1, name: "Alice", grade: 11, questions: {} },
+        { id: 2, name: "Bob", grade: 12, questions: {} },
+        { id: 3, name: "Charlie", grade: 11, questions: {} },
+      ],
+    });
+    expect(result).toEqual({ studentCount: 3 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getIndividualStudentDiscussionStats(undefined)).toBeNull();
+  });
+
+  it("returns null for empty students array", () => {
+    expect(getIndividualStudentDiscussionStats({ students: [] })).toBeNull();
+  });
+
+  it("returns null for data without students key", () => {
+    expect(getIndividualStudentDiscussionStats({})).toBeNull();
+  });
+});
+
+describe("School Staff Interaction stats on action cards", () => {
+  it("renders stats for school_staff_interaction card with answered questions", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 100,
+            action_type: "school_staff_interaction",
+            status: "in_progress",
+            started_at: "2026-03-22T09:00:00.000Z",
+            data: {
+              questions: {
+                gc_staff_concern: { answer: true },
+              },
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("school-staff-interaction-stats-100");
+    expect(statsEl).toHaveTextContent("1/2 (50%)");
+  });
+
+  it("shows nothing when data is empty/undefined", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 101,
+            action_type: "school_staff_interaction",
+            status: "pending",
+            data: undefined,
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("school-staff-interaction-stats-101")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when no questions are answered", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 102,
+            action_type: "school_staff_interaction",
+            status: "in_progress",
+            started_at: "2026-03-22T09:00:00.000Z",
+            data: {
+              questions: {},
+            },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId("school-staff-interaction-stats-102")).not.toBeInTheDocument();
+  });
+});
+
+describe("getSchoolStaffInteractionStats", () => {
+  it("returns correct counts for partial payload — 1 of 2 answered", () => {
+    const result = getSchoolStaffInteractionStats({
+      questions: {
+        gc_staff_concern: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 2 });
+  });
+
+  it("returns correct counts for complete payload — all 2 answered", () => {
+    const questions: Record<string, { answer: boolean }> = {};
+    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
+      questions[key] = { answer: false };
+    }
+    const result = getSchoolStaffInteractionStats({ questions });
+    expect(result).toEqual({ answeredCount: 2, totalQuestions: 2 });
+  });
+
+  it("returns null for undefined data", () => {
+    expect(getSchoolStaffInteractionStats(undefined)).toBeNull();
+  });
+
+  it("returns null when no questions are answered (answeredCount is 0)", () => {
+    expect(getSchoolStaffInteractionStats({ questions: {} })).toBeNull();
+  });
+
+  it("does NOT count null answers — only true or false count as answered", () => {
+    const result = getSchoolStaffInteractionStats({
+      questions: {
+        gc_staff_concern: { answer: null },
+        gc_pertaining_issue: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 2 });
+  });
+
+  it("ignores unknown question keys — only counts known keys", () => {
+    const result = getSchoolStaffInteractionStats({
+      questions: {
+        unknown_key: { answer: true },
+        gc_staff_concern: { answer: true },
+      },
+    });
+    expect(result).toEqual({ answeredCount: 1, totalQuestions: 2 });
   });
 });
