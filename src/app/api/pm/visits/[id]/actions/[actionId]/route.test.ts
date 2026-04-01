@@ -14,10 +14,16 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
+import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
+import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
+import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
+import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
 } from "@/lib/classroom-observation-rubric";
+import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 import {
@@ -74,9 +80,9 @@ const VISIT_ROW = {
 const BASE_ACTION_ROW = {
   id: 101,
   visit_id: 10,
-  action_type: "principal_meeting",
+  action_type: "principal_interaction",
   status: "in_progress",
-  data: { notes: "current" },
+  data: { questions: {} },
   started_at: "2026-02-18T10:05:00.000Z",
   ended_at: null,
   start_accuracy: "10.00",
@@ -84,6 +90,61 @@ const BASE_ACTION_ROW = {
   inserted_at: "2026-02-18T10:00:00.000Z",
   updated_at: "2026-02-18T10:05:00.000Z",
 };
+
+function buildValidAFTeamData() {
+  const questions = Object.fromEntries(
+    AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    teachers: [{ id: 1, name: "Teacher A" }],
+    questions,
+  };
+}
+
+
+function buildValidIndividualTeacherData() {
+  const questions = Object.fromEntries(
+    INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.map((key) => [
+      key,
+      { answer: true },
+    ])
+  );
+  return {
+    teachers: [
+      { id: 1, name: "Teacher A", attendance: "present" as const, questions },
+    ],
+  };
+}
+
+function buildValidPrincipalInteractionData() {
+  const questions = Object.fromEntries(
+    PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return { questions };
+}
+
+function buildValidGroupStudentDiscussionData() {
+  const questions = Object.fromEntries(
+    GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return { grade: 11, questions };
+}
+
+function buildValidIndividualStudentDiscussionData() {
+  const questions = Object.fromEntries(
+    INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    students: [{ id: 1, name: "Student A", grade: 11, questions }],
+  };
+}
+
+function buildValidSchoolStaffInteractionData() {
+  const questions = Object.fromEntries(
+    SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return { questions };
+}
 
 function buildValidClassroomData() {
   const params = Object.fromEntries(
@@ -479,7 +540,18 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
       school_codes: null,
     } as never);
     mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
-    const updated = { ...BASE_ACTION_ROW, status: "completed", data: { notes: "admin edit" } };
+    const completePiData = {
+      questions: {
+        oh_program_feedback: { answer: true },
+        ip_curriculum_progress: { answer: true },
+        ip_key_events: { answer: false },
+        sp_student_performance: { answer: true },
+        sn_concerns_raised: { answer: false },
+        mp_monthly_plan: { answer: true },
+        mp_permissions_obtained: { answer: true },
+      },
+    };
+    const updated = { ...BASE_ACTION_ROW, status: "completed", data: completePiData };
     mockQuery
       .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
       .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }])
@@ -487,7 +559,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "PATCH",
-      body: JSON.stringify({ data: { notes: "admin edit" } }),
+      body: JSON.stringify({ data: completePiData }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await PATCH(req as never, params);
@@ -568,9 +640,743 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ action: updated });
   });
 
+  it("accepts empty AF team interaction data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "af_team_interaction" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts partial AF team interaction data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "af_team_interaction" };
+    const payload = { questions: { op_class_duration: { answer: true } } };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for AF team interaction with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "af_team_interaction" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for AF team interaction with bad answer type (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "af_team_interaction" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: { questions: { op_class_duration: { answer: "yes" } } },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("answer must be true, false, or null"),
+      ])
+    );
+  });
+
+  it("returns 422 for incomplete AF team interaction on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "af_team_interaction", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { teachers: [], questions: {} } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("At least one teacher")])
+    );
+  });
+
+  it("returns 422 for AF team interaction with empty teachers on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = { ...buildValidAFTeamData(), teachers: [] };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "af_team_interaction", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid AF team interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("At least one teacher")])
+    );
+  });
+
+  it("accepts complete AF team interaction data on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = buildValidAFTeamData();
+    const action = { ...BASE_ACTION_ROW, action_type: "af_team_interaction", status: "completed" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts empty individual teacher interaction data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts partial individual teacher interaction data with 1 teacher and partial questions (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction" };
+    const payload = {
+      teachers: [
+        {
+          id: 1,
+          name: "Teacher A",
+          attendance: "present",
+          questions: { oh_class_duration: { answer: true } },
+        },
+      ],
+    };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts individual teacher with attendance 'absent' and no questions (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction" };
+    const payload = {
+      teachers: [{ id: 1, name: "Teacher A", attendance: "absent", questions: {} }],
+    };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for individual teacher interaction with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual teacher interaction data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for individual teacher interaction with invalid attendance (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: {
+          teachers: [{ id: 1, name: "Teacher A", attendance: "late", questions: {} }],
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual teacher interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("attendance must be present, on_leave, or absent"),
+      ])
+    );
+  });
+
+  it("returns 422 for incomplete individual teacher interaction on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { teachers: [] } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual teacher interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("At least one teacher")])
+    );
+  });
+
+  it("accepts complete individual teacher interaction data on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = buildValidIndividualTeacherData();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_af_teacher_interaction", status: "completed" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts empty principal interaction data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "principal_interaction" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for principal interaction with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "principal_interaction" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid principal interaction data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for incomplete principal interaction on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "principal_interaction", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { questions: {} } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid principal interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("answer is required")])
+    );
+  });
+
+  it("accepts complete principal interaction data on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = buildValidPrincipalInteractionData();
+    const action = { ...BASE_ACTION_ROW, action_type: "principal_interaction", status: "completed" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts empty group student discussion data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "group_student_discussion" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for group student discussion with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "group_student_discussion" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid group student discussion data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for incomplete group student discussion on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "group_student_discussion", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { questions: {} } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid group student discussion data");
+    expect(json.details.length).toBeGreaterThan(0);
+  });
+
+  it("accepts complete group student discussion data on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = buildValidGroupStudentDiscussionData();
+    const action = { ...BASE_ACTION_ROW, action_type: "group_student_discussion", status: "completed" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("accepts empty individual student discussion data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_student_discussion" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for individual student discussion with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "individual_student_discussion" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual student discussion data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for incomplete individual student discussion on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "individual_student_discussion", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { students: [] } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid individual student discussion data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("At least one student")])
+    );
+  });
+
+  it("accepts empty school_staff_interaction data for in-progress action (lenient)", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "school_staff_interaction" };
+    const updated = { ...action, data: {} };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("returns 422 for school_staff_interaction with unknown top-level keys (lenient)", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, action_type: "school_staff_interaction" }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { foo: "bar" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid school staff interaction data");
+    expect(json.details).toContain("Unknown field: foo");
+  });
+
+  it("returns 422 for incomplete school_staff_interaction on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([
+        { ...BASE_ACTION_ROW, action_type: "school_staff_interaction", status: "completed" },
+      ]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { questions: {} } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("Invalid school staff interaction data");
+    expect(json.details).toEqual(
+      expect.arrayContaining([expect.stringContaining("answer is required")])
+    );
+  });
+
+  it("accepts complete school_staff_interaction data on completed action (strict)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const payload = buildValidSchoolStaffInteractionData();
+    const action = { ...BASE_ACTION_ROW, action_type: "school_staff_interaction", status: "completed" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
   it("updates only data and bumps updated_at with UTC timestamp semantics", async () => {
     setupPmView();
-    const updated = { ...BASE_ACTION_ROW, data: { notes: "updated" } };
+    const piData = { questions: { oh_program_feedback: { answer: true } } };
+    const updated = { ...BASE_ACTION_ROW, data: piData };
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
       .mockResolvedValueOnce([BASE_ACTION_ROW])
@@ -578,7 +1384,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "PATCH",
-      body: JSON.stringify({ data: { notes: "updated" }, status: "completed" }),
+      body: JSON.stringify({ data: piData, status: "completed" }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await PATCH(req as never, params);
@@ -593,7 +1399,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(updateQueryText).not.toContain("status =");
     expect(updateQueryText).not.toContain("started_at =");
     expect(updateQueryText).not.toContain("ended_at =");
-    expect(updateParams).toEqual(["10", "101", JSON.stringify({ notes: "updated" })]);
+    expect(updateParams).toEqual(["10", "101", JSON.stringify(piData)]);
   });
 });
 
@@ -671,11 +1477,11 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(actionParams).toEqual(["10", "101"]);
   });
 
-  it("returns 409 when action status is not pending", async () => {
+  it("returns 409 when action status is completed", async () => {
     setupPmView();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
-      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "in_progress" }]);
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "DELETE",
@@ -684,11 +1490,11 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({
-      error: "Only pending actions can be deleted",
+      error: "Only pending or in-progress actions can be deleted",
     });
   });
 
-  it("soft-deletes pending action and bumps updated_at", async () => {
+  it("soft-deletes pending action — resets status to pending and bumps updated_at", async () => {
     setupPmView();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
@@ -705,9 +1511,32 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
 
     const [deleteQueryText, deleteParams] = mockQuery.mock.calls[2] as [string, unknown[]];
     expect(deleteQueryText).toContain("UPDATE lms_pm_school_visit_actions");
+    expect(deleteQueryText).toContain("status = 'pending'");
     expect(deleteQueryText).toContain("deleted_at = (NOW() AT TIME ZONE 'UTC')");
     expect(deleteQueryText).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
     expect(deleteQueryText).toContain("deleted_at IS NULL");
     expect(deleteParams).toEqual(["10", "101"]);
+  });
+
+  it("soft-deletes in_progress action — resets status/timestamps to satisfy DB constraints", async () => {
+    setupPmView();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "in_progress" }])
+      .mockResolvedValueOnce([{ id: 101 }]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "DELETE",
+    });
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+
+    const [deleteQueryText] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(deleteQueryText).toContain("status = 'pending'");
+    expect(deleteQueryText).toContain("started_at = NULL");
+    expect(deleteQueryText).toContain("ended_at = NULL");
+    expect(deleteQueryText).toContain("status IN ('pending', 'in_progress')");
   });
 });

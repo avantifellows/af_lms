@@ -14,6 +14,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
+import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
@@ -85,6 +86,17 @@ const COMPLETED_VISIT_ROW = {
   status: "completed",
   completed_at: "2026-02-19T12:00:00.000Z",
 };
+
+function buildValidAFTeamData() {
+  const questions = Object.fromEntries(
+    AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    teachers: [{ id: 1, name: "Teacher A" }],
+    questions,
+  };
+}
+
 
 function buildValidClassroomData() {
   const params = Object.fromEntries(
@@ -260,6 +272,12 @@ describe("POST /api/pm/visits/[id]/complete", () => {
           data: buildValidClassroomData(),
         },
       ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
+      .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
+      .mockResolvedValueOnce([{ id: 801 }]) // completed individual_student_discussion
+      .mockResolvedValueOnce([{ id: 901 }]) // completed school_staff_interaction
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -283,7 +301,7 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(json.visit.end_lng).toBeUndefined();
     expect(json.visit.end_accuracy).toBeUndefined();
 
-    const [completionQueryText, completionParams] = mockQuery.mock.calls[3] as [string, unknown[]];
+    const [completionQueryText, completionParams] = mockQuery.mock.calls[9] as [string, unknown[]];
     expect(completionQueryText).toContain("UPDATE lms_pm_school_visits v");
     expect(completionQueryText).toContain("status = 'completed'");
     expect(completionQueryText).toContain("completed_at = (NOW() AT TIME ZONE 'UTC')");
@@ -327,6 +345,12 @@ describe("POST /api/pm/visits/[id]/complete", () => {
           data: buildValidClassroomData(),
         },
       ])
+      .mockResolvedValueOnce([{ id: 402 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 502 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 602 }]) // completed principal_interaction
+      .mockResolvedValueOnce([{ id: 702 }]) // completed group_student_discussion
+      .mockResolvedValueOnce([{ id: 802 }]) // completed individual_student_discussion
+      .mockResolvedValueOnce([{ id: 902 }]) // completed school_staff_interaction
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -345,5 +369,206 @@ describe("POST /api/pm/visits/[id]/complete", () => {
         completed_at: "2026-02-19T12:20:00.000Z",
       },
     });
+  });
+
+  it("returns 422 when classroom observation exists but AF team interaction is missing", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([]); // no completed af_team_interaction
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed AF Team Interaction is required to complete visit",
+      details: ["No completed AF Team Interaction action found for this visit"],
+    });
+  });
+
+  it("returns 422 when classroom + AF team exist but individual teacher interaction is missing", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([]); // no completed individual_af_teacher_interaction
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed Individual AF Teacher Interaction is required to complete visit",
+      details: ["No completed Individual AF Teacher Interaction action found for this visit"],
+    });
+  });
+
+  it("returns 422 when principal_interaction is missing", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([]); // no completed principal_interaction
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed Principal Interaction is required to complete visit",
+      details: ["No completed principal_interaction action found"],
+    });
+  });
+
+  it("returns 422 when group_student_discussion is missing", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
+      .mockResolvedValueOnce([]); // no completed group_student_discussion
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed Student Interaction is required to complete visit",
+      details: ["No completed group_student_discussion action found for this visit"],
+    });
+  });
+
+  it("returns 422 when individual_student_discussion is missing", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
+      .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
+      .mockResolvedValueOnce([]); // no completed individual_student_discussion
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed Individual Student Interaction is required to complete visit",
+      details: ["No completed individual_student_discussion action found for this visit"],
+    });
+  });
+
+  it("returns 422 when school_staff_interaction is missing", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
+      .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
+      .mockResolvedValueOnce([{ id: 801 }]) // completed individual_student_discussion
+      .mockResolvedValueOnce([]); // no completed school_staff_interaction
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "At least one completed School Staff Interaction is required to complete visit",
+      details: ["No completed school_staff_interaction action found for this visit"],
+    });
+  });
+
+  it("completes visit when all 7 action types have completed actions", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
+      .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
+      .mockResolvedValueOnce([{ id: 801 }]) // completed individual_student_discussion
+      .mockResolvedValueOnce([{ id: 901 }]) // completed school_staff_interaction
+      .mockResolvedValueOnce([
+        {
+          id: 10,
+          status: "completed",
+          completed_at: "2026-02-19T12:30:00.000Z",
+        },
+      ]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      visit: {
+        id: 10,
+        status: "completed",
+        completed_at: "2026-02-19T12:30:00.000Z",
+      },
+    });
+  });
+
+  it("short-circuits on first missing action type (classroom checked first)", async () => {
+    setupPmEdit();
+    // No classroom observation → error about classroom, never checks AF team or individual teacher
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([]); // no completed classroom_observation
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toContain("classroom observation");
+    // Only 3 queries: visit, in-progress check, classroom check (short-circuited)
+    expect(mockQuery).toHaveBeenCalledTimes(3);
   });
 });

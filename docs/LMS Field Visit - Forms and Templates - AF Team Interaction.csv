@@ -1,0 +1,13 @@
+,,,,,,,
+,,,,,,,
+,,,,Teachers Present in the Interaction,Multiselect Dropdown,,
+,,,,,,,
+,,,,Q1,Q2,Q3,Q5
+,1,Operational Health,Question,Does the teachers get the required duration of classes?,Is the centre capacitated with all required resources?,Any other disruptions caused in the implementaion?,
+,,,Type,Binary and remark,Binary and remark,Binary and remark,
+,2,Student perfrormance on Monthly tests,Question,Are there concerns related over student perfomance?,Are there concerns related to girls student perfomance?,,
+,,,Type,Binary and remark,Binary and remark,,
+,3,Support Needed,Question,Does the teachers need assisstance on academics?,Does the teachers need assisstance in school operations?,Does the teachers need assisstance on co-curriculars?,
+,,,Type,Binary and remark,Binary and remark,Binary and remark,
+,4,Monthly Planning,Question,Is the plan for upcoming month discussed with teachers?,,,
+,,,Type,Binary and remark,,,

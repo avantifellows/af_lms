@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
     return apiError(403, "Forbidden");
   }
 
+
   // Match teachers who either:
   // 1. Have this school_code in their school_codes array (level 1), OR
   // 2. Have the school's region in their regions array (level 2), OR
