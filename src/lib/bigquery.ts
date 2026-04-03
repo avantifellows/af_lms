@@ -1,5 +1,6 @@
 import { BigQuery } from "@google-cloud/bigquery";
 import type { TestTrendPoint } from "@/types/quiz";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
 let bigQueryClient: BigQuery | null = null;
 
@@ -36,161 +37,54 @@ export function getBigQueryClient(): BigQuery {
   return bigQueryClient;
 }
 
-export interface QuizSessionRow {
-  session_id: string;
-  test_name: string;
-  start_date: string;
-  student_count: number;
-}
-
-/**
- * Get quiz sessions that have actual results for students at a school.
- * This queries BigQuery to find sessions where students from this UDISE took quizzes.
- */
-export async function getSchoolQuizSessions(udise: string): Promise<QuizSessionRow[]> {
-  try {
-    const client = getBigQueryClient();
-
-    const query = `
-      SELECT
-        session_id,
-        test_name,
-        MIN(start_date) as start_date,
-        COUNT(DISTINCT student_full_name) as student_count
-      FROM \`avantifellows.production_dbt_final.fact_student_test_results_overall\`
-      WHERE student_school_udise_code = @udise
-        AND academic_year = '2025-2026'
-        AND LOWER(section) = 'overall'
-        AND session_id IS NOT NULL
-      GROUP BY session_id, test_name
-      ORDER BY start_date DESC
-      LIMIT 50
-    `;
-
-    const [rows] = await client.query({
-      query,
-      params: { udise },
-    });
-
-    return rows as QuizSessionRow[];
-  } catch (error) {
-    console.error("Failed to fetch quiz sessions from BigQuery:", error);
-    return [];
-  }
-}
-
-export interface QuizResultRow {
-  quiz_id: string;
-  student_full_name: string;
-  student_school_udise_code: string;
-  attendance_status: string;
-  total_marks_obtained: number | null;
-  total_marks: number | null;
-  percentage_score: number | null;
-}
-
-export interface SubjectResultRow {
-  quiz_id: string;
-  student_full_name: string;
-  subject_name: string;
-  subject_marks_obtained: number | null;
-  subject_total_marks: number | null;
-}
-
-export async function getQuizResults(
-  quizId: string,
-  udise: string
-): Promise<QuizResultRow[]> {
-  try {
-    const client = getBigQueryClient();
-
-    // Use fact_student_test_results_overall with session_id column
-    // Note: No attendance_status column - students with results are "Present"
-    const query = `
-      SELECT DISTINCT
-        session_id AS quiz_id,
-        student_full_name,
-        student_school_udise_code,
-        'Present' AS attendance_status,
-        marks_scored AS total_marks_obtained,
-        max_marks_possible AS total_marks,
-        percentage AS percentage_score
-      FROM \`avantifellows.production_dbt_final.fact_student_test_results_overall\`
-      WHERE session_id = @quizId
-        AND student_school_udise_code = @udise
-        AND academic_year = '2025-2026'
-        AND LOWER(section) = 'overall'
-    `;
-
-    const [rows] = await client.query({
-      query,
-      params: { quizId, udise },
-    });
-
-    return rows as QuizResultRow[];
-  } catch (error) {
-    console.error("Failed to fetch quiz results from BigQuery:", error);
-    return [];
-  }
-}
-
-export async function getQuizSubjectResults(
-  quizId: string,
-  udise: string
-): Promise<SubjectResultRow[]> {
-  const client = getBigQueryClient();
-
-  // Try to get subject-wise data from fact_student_test_results_overall
-  // section = subject name, marks_scored/max_marks_possible = section scores
-  try {
-    const query = `
-      SELECT
-        session_id AS quiz_id,
-        student_full_name,
-        section AS subject_name,
-        marks_scored AS subject_marks_obtained,
-        max_marks_possible AS subject_total_marks
-      FROM \`avantifellows.production_dbt_final.fact_student_test_results_overall\`
-      WHERE session_id = @quizId
-        AND student_school_udise_code = @udise
-        AND academic_year = '2025-2026'
-        AND section IS NOT NULL
-        AND LOWER(section) != 'overall'
-    `;
-
-    const [rows] = await client.query({
-      query,
-      params: { quizId, udise },
-    });
-
-    return rows as SubjectResultRow[];
-  } catch (error) {
-    console.log("Subject results query failed, returning empty array:", error);
-    return [];
-  }
-}
-
-// --- New functions for Performance tab rebuild ---
+// --- Performance tab functions ---
 
 const FACT_TABLE = "`avantifellows.production_dbt_final.fact_student_test_results_overall`";
 const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
 
 /**
- * Get distinct grades that have quiz data for a school.
+ * Get distinct programs that have quiz data for a school.
  */
-export async function getAvailableGrades(udise: string): Promise<number[]> {
+export async function getAvailablePrograms(udise: string): Promise<string[]> {
   try {
     const client = getBigQueryClient();
+    const query = `
+      SELECT DISTINCT student_program
+      FROM ${FACT_TABLE}
+      WHERE student_school_udise_code = @udise
+        AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+        AND LOWER(section) = 'overall'
+        AND student_program IS NOT NULL
+      ORDER BY student_program
+    `;
+    const [rows] = await client.query({ query, params: { udise } });
+    return rows.map((r: { student_program: string }) => r.student_program);
+  } catch (error) {
+    console.error("Failed to fetch available programs:", error);
+    return [];
+  }
+}
+
+/**
+ * Get distinct grades that have quiz data for a school + program.
+ */
+export async function getAvailableGrades(udise: string, program?: string): Promise<number[]> {
+  try {
+    const client = getBigQueryClient();
+    const programFilter = program ? `AND student_program = @program` : "";
     const query = `
       SELECT DISTINCT student_grade
       FROM ${FACT_TABLE}
       WHERE student_school_udise_code = @udise
-        AND academic_year = '2025-2026'
+        AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
         AND LOWER(section) = 'overall'
         AND student_grade IS NOT NULL
+        ${programFilter}
       ORDER BY student_grade
     `;
-    const [rows] = await client.query({ query, params: { udise } });
+    const params: Record<string, string | number> = { udise };
+    if (program) params.program = program;
+    const [rows] = await client.query({ query, params });
     return rows.map((r: { student_grade: number }) => r.student_grade);
   } catch (error) {
     console.error("Failed to fetch available grades:", error);
@@ -201,6 +95,7 @@ export async function getAvailableGrades(udise: string): Promise<number[]> {
 interface BatchOverviewRaw {
   tests: TestTrendPoint[];
   totalEnrolled: number | null;
+  enrolledByStream: Record<string, number>;
 }
 
 /**
@@ -208,9 +103,13 @@ interface BatchOverviewRaw {
  */
 export async function getBatchOverviewData(
   udise: string,
-  grade: number
+  grade: number,
+  program?: string
 ): Promise<BatchOverviewRaw> {
   const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const params: Record<string, string | number> = { udise, grade };
+  if (program) params.program = program;
 
   const testListQuery = `
     SELECT
@@ -218,37 +117,53 @@ export async function getBatchOverviewData(
       test_name,
       MIN(start_date) AS start_date,
       COUNT(DISTINCT fk_student_id) AS student_count,
-      MAX(test_format) AS test_format
+      COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN fk_student_id END) AS stream_student_count,
+      MAX(test_format) AS test_format,
+      MAX(test_stream) AS test_stream
     FROM ${FACT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
-      AND academic_year = '2025-2026'
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND LOWER(section) = 'overall'
       AND session_id IS NOT NULL
+      ${programFilter}
     GROUP BY session_id, test_name
     ORDER BY start_date ASC
   `;
 
   const enrolledQuery = `
-    SELECT COUNT(DISTINCT pk_student_id) AS total
+    SELECT
+      COALESCE(student_stream, '') AS stream,
+      COUNT(DISTINCT pk_student_id) AS total
     FROM ${DIM_STUDENT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
-      AND academic_year = '2025-2026'
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      ${programFilter}
+    GROUP BY student_stream
   `;
 
   try {
     const [testRows, enrolledRows] = await Promise.all([
-      client.query({ query: testListQuery, params: { udise, grade } }),
-      client.query({ query: enrolledQuery, params: { udise, grade } }),
+      client.query({ query: testListQuery, params }),
+      client.query({ query: enrolledQuery, params }),
     ]);
+
+    const streamRows = enrolledRows[0] as { stream: string; total: number }[];
+    const enrolledByStream: Record<string, number> = {};
+    let totalEnrolled = 0;
+    for (const row of streamRows) {
+      enrolledByStream[row.stream] = row.total;
+      totalEnrolled += row.total;
+    }
 
     return {
       tests: testRows[0] as TestTrendPoint[],
-      totalEnrolled: enrolledRows[0]?.[0]?.total ?? null,
+      totalEnrolled: totalEnrolled || null,
+      enrolledByStream,
     };
   } catch (error) {
     console.error("Failed to fetch batch overview data:", error);
-    return { tests: [], totalEnrolled: null };
+    return { tests: [], totalEnrolled: null, enrolledByStream: {} };
   }
 }

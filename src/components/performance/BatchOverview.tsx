@@ -15,21 +15,25 @@ interface Props {
   schoolUdise: string;
   grade: number;
   testCategory: TestCategory;
+  program?: string;
   onTestClick: (sessionId: string, testName: string) => void;
 }
 
 function TestCard({
   test,
-  totalEnrolled,
+  enrolledByStream,
   onClick,
 }: {
   test: TestTrendPoint;
-  totalEnrolled: number | null;
+  enrolledByStream: Record<string, number>;
   onClick: () => void;
 }) {
+  // Use stream-matched enrolled count for attendance %
+  const streamEnrolled = test.test_stream ? enrolledByStream[test.test_stream] : null;
+  const attendanceCount = test.test_stream ? test.stream_student_count : test.student_count;
   const participationPct =
-    totalEnrolled && totalEnrolled > 0
-      ? Math.round((test.student_count / totalEnrolled) * 100)
+    streamEnrolled && streamEnrolled > 0
+      ? Math.round((attendanceCount / streamEnrolled) * 100)
       : null;
 
   return (
@@ -52,7 +56,7 @@ function TestCard({
       <div>
         <p className="text-xs uppercase tracking-wider text-text-muted">Attendance</p>
         <p className="font-bold font-mono text-lg text-text-primary">
-          {test.student_count}
+          {attendanceCount}
           {participationPct != null && (
             <span className="text-xs font-normal ml-1 font-mono text-text-secondary">
               ({participationPct}% of enrolled)
@@ -64,25 +68,33 @@ function TestCard({
   );
 }
 
-export default function BatchOverview({ schoolUdise, grade, testCategory, onTestClick }: Props) {
+export default function BatchOverview({ schoolUdise, grade, testCategory, program, onTestClick }: Props) {
   const [data, setData] = useState<BatchOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     setData(null);
 
-    fetch(`/api/quiz-analytics/${schoolUdise}/batch-overview?grade=${grade}`)
+    const programParam = program ? `&program=${encodeURIComponent(program)}` : "";
+    fetch(`/api/quiz-analytics/${schoolUdise}/batch-overview?grade=${grade}${programParam}`, {
+      signal: controller.signal,
+    })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch batch overview");
         return res.json();
       })
       .then((d: BatchOverviewData) => setData(d))
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        if (err.name !== "AbortError") setError(err.message);
+      })
       .finally(() => setLoading(false));
-  }, [schoolUdise, grade]);
+
+    return () => controller.abort();
+  }, [schoolUdise, grade, program]);
 
   if (loading) {
     return (
@@ -109,7 +121,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
     );
   }
 
-  const { totalEnrolled } = data;
+  const { totalEnrolled, enrolledByStream } = data;
 
   const tests = data.tests.filter((t) =>
     testCategory === "chapter" ? isChapterTest(t.test_format) : !isChapterTest(t.test_format)
@@ -125,14 +137,15 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
     );
   }
 
+  const avgAttendance = Math.round(
+    tests.reduce((s, t) => s + (t.test_stream ? t.stream_student_count : t.student_count), 0) / tests.length
+  );
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
         <StatCard label="Tests Conducted" value={tests.length} />
-        <StatCard
-          label="Avg Attendance"
-          value={Math.round(tests.reduce((s, t) => s + t.student_count, 0) / tests.length)}
-        />
+        <StatCard label="Avg Attendance" value={avgAttendance} />
         {totalEnrolled != null && (
           <StatCard label="Total Enrolled" value={totalEnrolled} />
         )}
@@ -143,7 +156,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, onTest
           <TestCard
             key={t.session_id}
             test={t}
-            totalEnrolled={totalEnrolled}
+            enrolledByStream={enrolledByStream}
             onClick={() => onTestClick(t.session_id, t.test_name)}
           />
         ))}

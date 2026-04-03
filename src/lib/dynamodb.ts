@@ -43,8 +43,18 @@ interface StudentIdentifiers {
 
 async function getSchoolStudentIdentifiers(
   schoolId: string,
-  grade: number
+  grade: number,
+  program?: string
 ): Promise<StudentIdentifiers[]> {
+  const programJoin = program
+    ? `JOIN group_user gu_batch ON gu_batch.user_id = u.id
+       JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
+       JOIN batch b ON g_batch.child_id = b.id
+       JOIN program p ON b.program_id = p.id`
+    : "";
+  const programWhere = program ? `AND p.name = $3` : "";
+  const params = program ? [schoolId, grade, program] : [schoolId, grade];
+
   return query<StudentIdentifiers>(
     `SELECT DISTINCT
       u.id as user_id,
@@ -61,9 +71,12 @@ async function getSchoolStudentIdentifiers(
       AND er_grade.group_type = 'grade'
       AND er_grade.is_current = true
     LEFT JOIN grade gr ON er_grade.group_id = gr.id
+    ${programJoin}
     WHERE g.type = 'school' AND g.child_id = $1
-      AND gr.number = $2`,
-    [schoolId, grade]
+      AND gr.number = $2
+      AND (s.status IS NULL OR s.status != 'dropout')
+      ${programWhere}`,
+    params
   );
 }
 
@@ -155,16 +168,23 @@ async function getStudentReports(
 export async function getTestDeepDiveFromDynamo(
   schoolId: string,
   grade: number,
-  sessionId: string
+  sessionId: string,
+  program?: string
 ): Promise<TestDeepDiveData | null> {
   // Step 1: Get student identifiers from Postgres
-  const students = await getSchoolStudentIdentifiers(schoolId, grade);
+  const students = await getSchoolStudentIdentifiers(schoolId, grade, program);
   if (students.length === 0) return null;
 
-  // Step 2: Query DynamoDB for each student in parallel
-  const reportResults = await Promise.all(
-    students.map((s) => getStudentReports(sessionId, s))
-  );
+  // Step 2: Query DynamoDB for each student with concurrency limit
+  const CONCURRENCY = 60;
+  const reportResults: (Awaited<ReturnType<typeof getStudentReports>>)[] = [];
+  for (let i = 0; i < students.length; i += CONCURRENCY) {
+    const batch = students.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map((s) => getStudentReports(sessionId, s))
+    );
+    reportResults.push(...batchResults);
+  }
 
   const matched = reportResults.filter(
     (r): r is NonNullable<typeof r> => r !== null
@@ -175,7 +195,7 @@ export async function getTestDeepDiveFromDynamo(
   const studentRows: StudentDeepDiveRow[] = [];
   const subjectAggMap = new Map<
     string,
-    { totalPct: number; totalAcc: number; totalAttempt: number; totalQ: number; count: number }
+    { displayName: string; totalPct: number; totalAcc: number; totalAttempt: number; totalQ: number; count: number }
   >();
   const chapterAggMap = new Map<
     string,
@@ -200,8 +220,9 @@ export async function getTestDeepDiveFromDynamo(
 
     const subjectScores: StudentSubjectScore[] = subjectItems.map((si) => {
       // Aggregate for subject analysis
-      const existing = subjectAggMap.get(si.section) || {
-        totalPct: 0, totalAcc: 0, totalAttempt: 0, totalQ: 0, count: 0,
+      const sectionKey = si.section.toLowerCase();
+      const existing = subjectAggMap.get(sectionKey) || {
+        displayName: si.section, totalPct: 0, totalAcc: 0, totalAttempt: 0, totalQ: 0, count: 0,
       };
       existing.totalPct += si.percentage || 0;
       existing.totalAcc += si.accuracy || 0;
@@ -213,16 +234,16 @@ export async function getTestDeepDiveFromDynamo(
       existing.totalAttempt += attemptRate;
       existing.totalQ = Math.max(existing.totalQ, si.total_questions || 0);
       existing.count += 1;
-      subjectAggMap.set(si.section, existing);
+      subjectAggMap.set(sectionKey, existing);
 
       // Build chapter scores for this subject
       const chapters: StudentChapterScore[] = (si.chapter_wise_data || [])
-        .filter((c) => c.section === si.section)
+        .filter((c) => c.section.toLowerCase() === sectionKey)
         .map((c) => {
           // Aggregate for chapter analysis
-          const chKey = `${c.section}||${c.chapter_name}`;
+          const chKey = `${sectionKey}||${c.chapter_name.toLowerCase()}`;
           const chEx = chapterAggMap.get(chKey) || {
-            subject: c.section,
+            subject: si.section,
             chapter_name: c.chapter_name,
             totalScore: 0, totalAcc: 0, totalAttempt: 0, totalQ: 0, count: 0,
           };
@@ -304,8 +325,8 @@ export async function getTestDeepDiveFromDynamo(
 
   // Build subject analysis
   const subjects: SubjectAnalysisRow[] = Array.from(subjectAggMap.entries())
-    .map(([subject, agg]) => ({
-      subject,
+    .map(([, agg]) => ({
+      subject: agg.displayName,
       avg_score: Math.round((agg.totalPct / agg.count) * 10) / 10,
       avg_accuracy: Math.round((agg.totalAcc / agg.count) * 10) / 10,
       avg_attempt_rate: Math.round((agg.totalAttempt / agg.count) * 10) / 10,

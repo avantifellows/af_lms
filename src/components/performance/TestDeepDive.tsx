@@ -12,7 +12,9 @@ interface Props {
   grade: number;
   sessionId: string;
   testName: string;
+  program?: string;
   onBack: () => void;
+  onDataLoaded?: (testName: string) => void;
 }
 
 export default function TestDeepDive({
@@ -20,28 +22,42 @@ export default function TestDeepDive({
   grade,
   sessionId,
   testName,
+  program,
   onBack,
+  onDataLoaded,
 }: Props) {
   const [data, setData] = useState<TestDeepDiveData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     setData(null);
 
+    const programParam = program ? `&program=${encodeURIComponent(program)}` : "";
     fetch(
-      `/api/quiz-analytics/${schoolUdise}/test-deep-dive?grade=${grade}&sessionId=${encodeURIComponent(sessionId)}`
+      `/api/quiz-analytics/${schoolUdise}/test-deep-dive?grade=${grade}&sessionId=${encodeURIComponent(sessionId)}${programParam}`,
+      { signal: controller.signal }
     )
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch test details");
         return res.json();
       })
-      .then((d: TestDeepDiveData) => setData(d))
-      .catch((err) => setError(err.message))
+      .then((d: TestDeepDiveData) => {
+        setData(d);
+        if (onDataLoaded && d.summary.test_name) {
+          onDataLoaded(d.summary.test_name);
+        }
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") setError(err.message);
+      })
       .finally(() => setLoading(false));
-  }, [schoolUdise, grade, sessionId]);
+
+    return () => controller.abort();
+  }, [schoolUdise, grade, sessionId, program]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">
@@ -53,7 +69,7 @@ export default function TestDeepDive({
           &larr; Back to Overview
         </button>
         <h2 className="text-lg font-bold uppercase tracking-tight text-text-primary">
-          {testName}
+          {testName || data?.summary.test_name || "Loading..."}
         </h2>
       </div>
 

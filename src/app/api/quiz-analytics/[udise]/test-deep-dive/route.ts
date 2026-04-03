@@ -20,13 +20,14 @@ export async function GET(
       { status: 400 }
     );
   }
-  const grade = parseInt(gradeParam, 10);
-  if (isNaN(grade)) {
-    return NextResponse.json({ error: "grade must be a number" }, { status: 400 });
+  const grade = Number(gradeParam);
+  if (!Number.isInteger(grade)) {
+    return NextResponse.json({ error: "grade must be an integer" }, { status: 400 });
   }
 
   try {
-    const data = await getTestDeepDiveFromDynamo(auth.school.id, grade, sessionId);
+    const program = url.searchParams.get("program") || undefined;
+    const data = await getTestDeepDiveFromDynamo(auth.school.id, grade, sessionId, program);
 
     if (!data) {
       return NextResponse.json(

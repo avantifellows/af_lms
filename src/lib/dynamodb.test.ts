@@ -116,6 +116,16 @@ describe("getTestDeepDiveFromDynamo", () => {
       expect(sql).toContain("gr.number = $2");
       expect(params).toEqual(["school-abc", 10]);
     });
+
+    it("excludes dropout students in SQL filter", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([]);
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      await getTestDeepDiveFromDynamo("school-abc", 10, "sess-1");
+
+      const [sql] = mocks.mockQuery.mock.calls[0];
+      expect(sql).toContain("s.status IS NULL OR s.status != 'dropout'");
+    });
   });
 
   describe("queryDynamoForStudent (via integration)", () => {
@@ -675,6 +685,31 @@ describe("getTestDeepDiveFromDynamo", () => {
       expect(scores[0].percentage).toBe(83.3);
       expect(scores[0].accuracy).toBe(78);
       expect(scores[0].attempt_rate).toBe(80); // (10-2)/10 * 100
+    });
+
+    it("aggregates subjects case-insensitively", async () => {
+      const student1 = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null, first_name: "Alice" });
+      const student2 = makeStudent({ user_id: "u2", student_id: "s2", apaar_id: null, first_name: "Bob" });
+      mocks.mockQuery.mockResolvedValueOnce([student1, student2]);
+
+      // Student 1 has "Physics", student 2 has "physics" (different casing)
+      mocks.mockSend
+        .mockResolvedValueOnce({
+          Items: [makeDynamoItem({ percentage: 80 }), makeSubjectItem("Physics", { percentage: 70 })],
+        })
+        .mockResolvedValueOnce({ Items: [] }) // u1
+        .mockResolvedValueOnce({
+          Items: [makeDynamoItem({ percentage: 60 }), makeSubjectItem("physics", { percentage: 50 })],
+        })
+        .mockResolvedValueOnce({ Items: [] }); // u2
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
+
+      expect(result).not.toBeNull();
+      // Should produce 1 subject entry, not 2
+      expect(result!.subjects).toHaveLength(1);
+      expect(result!.subjects[0].avg_score).toBe(60); // (70+50)/2
     });
 
     it("handles DynamoDB Items being undefined (treats as empty)", async () => {

@@ -16,13 +16,14 @@ export async function GET(
   if (!gradeParam) {
     return NextResponse.json({ error: "grade is required" }, { status: 400 });
   }
-  const grade = parseInt(gradeParam, 10);
-  if (isNaN(grade)) {
-    return NextResponse.json({ error: "grade must be a number" }, { status: 400 });
+  const grade = Number(gradeParam);
+  if (!Number.isInteger(grade)) {
+    return NextResponse.json({ error: "grade must be an integer" }, { status: 400 });
   }
 
   try {
-    const raw = await getBatchOverviewData(udise, grade);
+    const program = url.searchParams.get("program") || undefined;
+    const raw = await getBatchOverviewData(udise, grade, program);
 
     const tests = raw.tests;
     const testsCount = tests.length;
@@ -40,6 +41,7 @@ export async function GET(
       summary,
       tests: raw.tests,
       totalEnrolled: raw.totalEnrolled,
+      enrolledByStream: raw.enrolledByStream,
     };
 
     return NextResponse.json(response);

@@ -77,7 +77,7 @@ const SORTABLE_TH = `${TH} cursor-pointer hover:text-text-primary`;
 export default function StudentResultsTable({ students }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("percentage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [expandedName, setExpandedName] = useState<string | null>(null);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -137,12 +137,12 @@ export default function StudentResultsTable({ students }: Props) {
           </thead>
           <tbody>
             {sorted.map((s, idx) => {
-              const isExpanded = expandedIdx === idx;
+              const isExpanded = expandedName === s.student_name;
               return (
-                <Fragment key={idx}>
+                <Fragment key={s.student_name}>
                   <tr
                     className="border-b border-border/25 cursor-pointer transition-colors hover:bg-hover-bg"
-                    onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+                    onClick={() => setExpandedName(isExpanded ? null : s.student_name)}
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-accent">
                       {String(idx + 1).padStart(2, "0")}

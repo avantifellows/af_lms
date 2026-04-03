@@ -99,7 +99,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
       routeParams({ udise: "1234" })
     );
     expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toEqual({ error: "grade must be a number" });
+    await expect(res.json()).resolves.toEqual({ error: "grade must be an integer" });
   });
 
   it("returns 404 when no results found", async () => {
@@ -112,7 +112,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     );
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "No results found for this test" });
-    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "s1");
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "s1", undefined);
   });
 
   it("returns full TestDeepDiveData on success", async () => {
@@ -168,7 +168,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     expect(json.chapters).toHaveLength(2);
     expect(json.students).toHaveLength(1);
     expect(json.students[0].student_name).toBe("Alice");
-    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "sess-123");
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "sess-123", undefined);
   });
 
   it("returns 500 when getTestDeepDiveFromDynamo throws", async () => {

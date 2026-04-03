@@ -16,7 +16,14 @@ function scoreColorClass(score: number): string {
 const TH = "px-4 py-3 text-left text-xs uppercase tracking-wider font-bold bg-bg-card-alt text-text-muted";
 
 export default function ChapterAnalysisSection({ chapters }: Props) {
-  const [openSubjects, setOpenSubjects] = useState<Set<string>>(new Set());
+  const [openSubjects, setOpenSubjects] = useState<Set<string>>(() => {
+    // Open first subject by default
+    if (chapters.length > 0) {
+      const firstSubject = chapters[0].subject;
+      return new Set([firstSubject]);
+    }
+    return new Set();
+  });
 
   if (chapters.length === 0) {
     return (
@@ -41,11 +48,6 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
   }
 
   const subjects = Array.from(grouped.keys());
-
-  // Open first subject by default
-  if (openSubjects.size === 0 && subjects.length > 0) {
-    openSubjects.add(subjects[0]);
-  }
 
   const toggleSubject = (subject: string) => {
     setOpenSubjects((prev) => {
