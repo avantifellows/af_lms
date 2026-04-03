@@ -4,12 +4,31 @@ import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
+
+const DEV_PERSONAS = [
+  { key: "admin", label: "Admin", description: "Level 3, all schools" },
+  { key: "program_manager", label: "Program Manager", description: "Level 1, 2 schools" },
+  { key: "teacher", label: "Teacher", description: "Level 1, 1 school" },
+  { key: "read_only", label: "Read-Only", description: "Level 3, read-only flag" },
+] as const;
+
 export default function LoginPage() {
   const [showPasscode, setShowPasscode] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [devLoading, setDevLoading] = useState<string | null>(null);
   const router = useRouter();
+
+  const handleDevLogin = async (persona: string) => {
+    setDevLoading(persona);
+    const result = await signIn("dev-login", { persona, redirect: false });
+    setDevLoading(null);
+    if (result?.ok) {
+      router.push("/dashboard");
+    }
+  };
 
   const handlePasscodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +101,33 @@ export default function LoginPage() {
             >
               Enter School Passcode
             </button>
+
+            {IS_DEV && (
+              <>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="bg-white px-2 text-gray-500">dev login</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {DEV_PERSONAS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => handleDevLogin(p.key)}
+                      disabled={devLoading !== null}
+                      className="rounded-lg border border-dashed border-orange-300 bg-orange-50 px-3 py-2 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 transition-colors"
+                    >
+                      {devLoading === p.key ? "..." : p.label}
+                      <span className="block text-[10px] font-normal text-orange-500">{p.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <form onSubmit={handlePasscodeSubmit} className="mt-8 space-y-4">
