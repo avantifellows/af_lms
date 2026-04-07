@@ -157,7 +157,7 @@ export default function CompleteVisitButton({ visitId, disabled = false }: Compl
         type="button"
         onClick={handleCompleteVisit}
         disabled={disabled || isBusy}
-        className="inline-flex items-center bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {state === "acquiring"
           ? "Acquiring location..."

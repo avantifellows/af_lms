@@ -1004,7 +1004,7 @@ describe("StudentTable - helper function behaviors", () => {
     const categories = ["Gen", "OBC", "SC", "ST", null];
     const expectedClasses = [
       "bg-green-100",
-      "bg-blue-100",
+      "bg-hover-bg",
       "bg-purple-100",
       "bg-orange-100",
       "bg-gray-100",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Modal, Input, Select, Button, Card } from "@/components/ui";
 
 interface School {
   id: number;
@@ -22,7 +23,7 @@ const PROGRAM_LABELS: Record<number, string> = {
 
 const PROGRAM_COLORS: Record<number, string> = {
   1: "bg-purple-100 text-purple-800",
-  2: "bg-blue-100 text-blue-800",
+  2: "bg-hover-bg text-accent-hover",
   64: "bg-green-100 text-green-800",
 };
 
@@ -122,44 +123,43 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
     <>
       {/* Stats */}
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="bg-white rounded-lg p-4 shadow">
+        <Card elevation="sm" className="p-4">
           <div className="text-2xl font-bold text-purple-600">{programCounts.coe}</div>
           <div className="text-sm text-gray-500">CoE Schools</div>
-        </div>
-        <div className="bg-white rounded-lg p-4 shadow">
-          <div className="text-2xl font-bold text-blue-600">{programCounts.nodal}</div>
+        </Card>
+        <Card elevation="sm" className="p-4">
+          <div className="text-2xl font-bold text-accent">{programCounts.nodal}</div>
           <div className="text-sm text-gray-500">Nodal Schools</div>
-        </div>
-        <div className="bg-white rounded-lg p-4 shadow">
+        </Card>
+        <Card elevation="sm" className="p-4">
           <div className="text-2xl font-bold text-green-600">{programCounts.nvs}</div>
           <div className="text-sm text-gray-500">NVS Schools</div>
-        </div>
-        <div className="bg-white rounded-lg p-4 shadow">
+        </Card>
+        <Card elevation="sm" className="p-4">
           <div className="text-2xl font-bold text-gray-600">{programCounts.none}</div>
           <div className="text-sm text-gray-500">No Programs</div>
-        </div>
+        </Card>
       </div>
 
       {/* Filters */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-4">
-          <input
+          <Input
             type="text"
             placeholder="Search by name or code..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm w-64 text-gray-900 bg-white placeholder:text-gray-400"
+            className="w-64"
           />
-          <select
+          <Select
             value={programFilter}
             onChange={(e) => setProgramFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white"
           >
             <option value="all">All Programs</option>
             <option value="1">CoE only</option>
             <option value="2">Nodal only</option>
             <option value="64">NVS only</option>
-          </select>
+          </Select>
         </div>
         <div className="text-sm text-gray-500">
           Showing {filteredSchools.length} of {schools.length} schools
@@ -217,12 +217,13 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => openEditModal(school)}
-                    className="text-blue-600 hover:text-blue-800"
                   >
                     Edit
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -232,19 +233,16 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
 
       {/* Edit Modal */}
       {editingSchool && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black bg-opacity-30" onClick={closeModal} />
-            <div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+        <Modal open={true} onClose={closeModal} className="max-w-md p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">
                   Edit Programs
                 </h2>
-                <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
+                <Button variant="icon" onClick={closeModal}>
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                </button>
+                </Button>
               </div>
 
               <div className="mb-4">
@@ -272,7 +270,7 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
                         type="checkbox"
                         checked={selectedPrograms.includes(program.id)}
                         onChange={() => toggleProgram(program.id)}
-                        className="h-4 w-4 text-blue-600 rounded border-gray-300 mt-0.5"
+                        className="h-4 w-4 text-accent rounded border-gray-300 mt-0.5"
                       />
                       <div className="ml-3">
                         <span className="text-sm font-medium text-gray-900">
@@ -286,24 +284,23 @@ export default function SchoolList({ initialSchools }: SchoolListProps) {
               </div>
 
               <div className="flex justify-end gap-3">
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={closeModal}
-                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
+                  size="sm"
                   onClick={handleSave}
                   disabled={saving}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
                 >
                   {saving ? "Saving..." : "Save Changes"}
-                </button>
+                </Button>
               </div>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );

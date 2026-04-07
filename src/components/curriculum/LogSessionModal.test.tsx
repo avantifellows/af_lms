@@ -309,7 +309,7 @@ describe("LogSessionModal", () => {
       const badges = screen.getAllByText("1 topics");
       expect(badges.length).toBe(2);
       // One is the blue selection badge
-      const blueBadge = badges.find(el => el.className.includes("bg-blue-100"));
+      const blueBadge = badges.find(el => el.className.includes("bg-hover-bg"));
       expect(blueBadge).toBeTruthy();
     });
 

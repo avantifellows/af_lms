@@ -1,3 +1,5 @@
+import { Card } from "@/components/ui/Card";
+
 interface StatCardProps {
   label: string;
   value: string | number;
@@ -12,9 +14,9 @@ export default function StatCard({ label, value, size = "md" }: StatCardProps) {
   }[size];
 
   return (
-    <div className="bg-gray-50 rounded-lg p-4">
+    <Card elevation="sm" className="bg-gray-50 p-4">
       <div className="text-sm text-gray-500">{label}</div>
       <div className={`${valueSize} font-semibold text-gray-900`}>{value}</div>
-    </div>
+    </Card>
   );
 }

@@ -205,7 +205,7 @@ export default function CurriculumTab({
               id="grade"
               value={selectedGrade}
               onChange={(e) => setSelectedGrade(parseInt(e.target.value) as GradeNumber)}
-              className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
             >
               <option value={11}>11</option>
               <option value={12}>12</option>
@@ -224,7 +224,7 @@ export default function CurriculumTab({
               id="subject"
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value as SubjectName)}
-              className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
             >
               <option value="Physics">Physics</option>
               <option value="Chemistry">Chemistry</option>
@@ -239,7 +239,7 @@ export default function CurriculumTab({
           {canEdit && (
             <button
               onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover transition-colors"
             >
               + Log Session
             </button>
@@ -257,7 +257,7 @@ export default function CurriculumTab({
             onClick={() => setActiveTab("chapters")}
             className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
               activeTab === "chapters"
-                ? "border-blue-500 text-blue-600"
+                ? "border-accent text-accent"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
@@ -267,7 +267,7 @@ export default function CurriculumTab({
             onClick={() => setActiveTab("history")}
             className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
               activeTab === "history"
-                ? "border-blue-500 text-blue-600"
+                ? "border-accent text-accent"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
@@ -279,7 +279,7 @@ export default function CurriculumTab({
       {/* Content */}
       {isLoading ? (
         <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-600" />
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
         </div>
       ) : error ? (
         <div className="bg-red-50 text-red-700 p-4 rounded-lg">{error}</div>

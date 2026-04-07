@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 
 export interface GradeCount {
   grade: number;
@@ -34,7 +36,7 @@ export default function SchoolCard({
   actions,
 }: SchoolCardProps) {
   return (
-    <div className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow">
+    <Card className="p-6">
       <Link href={href} className="block">
         <h3 className="font-semibold text-gray-900">{school.name}</h3>
         <p className="mt-1 text-sm text-gray-500">
@@ -50,24 +52,21 @@ export default function SchoolCard({
           </p>
         )}
         {showStudentCount && school.student_count !== undefined && (
-          <p className="mt-2 text-sm font-medium text-blue-600">
+          <p className="mt-2 text-sm font-medium text-accent">
             {school.student_count} students
           </p>
         )}
         {showGradeBreakdown && school.grade_counts && school.grade_counts.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {school.grade_counts.map((gc) => (
-              <span
-                key={gc.grade}
-                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
-              >
+              <Badge key={gc.grade} className="py-0.5">
                 G{gc.grade}: {gc.count}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
       </Link>
       {actions && <div className="mt-4 flex gap-2">{actions}</div>}
-    </div>
+    </Card>
   );
 }

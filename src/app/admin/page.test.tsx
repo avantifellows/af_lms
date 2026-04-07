@@ -100,11 +100,11 @@ describe("AdminPage (server component)", () => {
     render(jsx);
 
     expect(screen.getByText("admin@avantifellows.org")).toBeInTheDocument();
-    expect(screen.getByText("Back to Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Sign out")).toBeInTheDocument();
 
     expect(
-      screen.getByText("Back to Dashboard").closest("a")
+      screen.getByText("Dashboard").closest("a")
     ).toHaveAttribute("href", "/dashboard");
     expect(screen.getByText("Sign out").closest("a")).toHaveAttribute(
       "href",

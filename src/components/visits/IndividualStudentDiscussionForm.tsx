@@ -9,16 +9,14 @@ import {
   type IndividualStudentEntry,
 } from "@/lib/individual-student-discussion";
 import { getStudentDisplayName, type Student } from "@/lib/student-utils";
+import { isPlainObject } from "@/lib/visit-form-utils";
+import { FormSection, RadioPair, RemarkField, Select, StickyProgressBar } from "@/components/ui";
 
 interface IndividualStudentDiscussionFormProps {
   data: Record<string, unknown>;
   setData: Dispatch<SetStateAction<Record<string, unknown>>>;
   disabled: boolean;
   schoolCode: string;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function getStudentEntriesFromData(data: Record<string, unknown>): IndividualStudentEntry[] {
@@ -42,7 +40,7 @@ function getQuestionProgress(entry: IndividualStudentEntry): string {
   return `${answered}/${total}`;
 }
 
-/* ── Searchable student combobox ──────────────────────────────────── */
+/* -- Searchable student combobox ----------------------------------------- */
 
 interface SearchableStudentSelectProps {
   students: Student[];
@@ -339,18 +337,17 @@ export default function IndividualStudentDiscussionForm({
     <div className="space-y-4" data-testid="action-renderer-individual_student_discussion">
       {/* Grade filter + Student select */}
       {!disabled && (
-        <div className="flex flex-wrap items-end gap-3 border border-border p-4">
+        <FormSection spacing="" className="flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-sm font-semibold text-text-primary uppercase mb-2">
               Grade
             </label>
-            <select
+            <Select
               value={selectedGrade ?? ""}
               onChange={(e) => {
                 const val = Number(e.target.value);
                 setSelectedGrade(val || null);
               }}
-              className="border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
               data-testid="student-grade-filter"
             >
               <option value="" disabled>
@@ -361,7 +358,7 @@ export default function IndividualStudentDiscussionForm({
                   {g}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {selectedGrade !== null && !studentsLoading && !studentsError && remainingStudents.length > 0 && (
@@ -370,7 +367,7 @@ export default function IndividualStudentDiscussionForm({
               onSelect={handleAddStudent}
             />
           )}
-        </div>
+        </FormSection>
       )}
 
       {/* Loading / error states */}
@@ -388,8 +385,7 @@ export default function IndividualStudentDiscussionForm({
 
       {/* Progress bar */}
       {recordedStudents.length > 0 && (
-        <div
-          className="sticky top-12 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2"
+        <StickyProgressBar
           data-testid="individual-student-progress"
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
@@ -397,7 +393,7 @@ export default function IndividualStudentDiscussionForm({
               Students: {recordedStudents.length}
             </span>
           </div>
-        </div>
+        </StickyProgressBar>
       )}
 
       {/* Student sections */}
@@ -423,7 +419,7 @@ export default function IndividualStudentDiscussionForm({
                   {entry.name || `Student #${entry.id}`}
                 </span>
                 <span
-                  className="rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800"
+                  className="rounded-full px-2 py-0.5 text-xs font-medium bg-hover-bg text-accent-hover"
                   data-testid={`student-grade-badge-${entry.id}`}
                 >
                   Grade {entry.grade}
@@ -433,7 +429,7 @@ export default function IndividualStudentDiscussionForm({
                 </span>
               </div>
               <span className="text-text-muted">
-                {isExpanded ? "▾" : "▸"}
+                {isExpanded ? "\u25BE" : "\u25B8"}
               </span>
             </button>
 
@@ -454,7 +450,7 @@ export default function IndividualStudentDiscussionForm({
                             <div key={question.key} className="text-sm text-text-primary">
                               <p>{question.label}</p>
                               <p className="text-text-muted">
-                                {answer === true ? "Yes" : answer === false ? "No" : "—"}
+                                {answer === true ? "Yes" : answer === false ? "No" : "\u2014"}
                                 {remark && ` | ${remark}`}
                               </p>
                             </div>
@@ -467,7 +463,7 @@ export default function IndividualStudentDiscussionForm({
                   /* Editable mode */
                   <>
                     {INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.sections.map((section) => (
-                      <section key={section.title} className="border border-border p-4 space-y-4">
+                      <FormSection key={section.title}>
                         <h4 className="text-sm font-semibold text-text-primary uppercase">{section.title}</h4>
                         {section.questions.map((question) => {
                           const q = entry.questions?.[question.key];
@@ -481,30 +477,13 @@ export default function IndividualStudentDiscussionForm({
                               <fieldset>
                                 <legend className="sr-only">{question.label}</legend>
                                 <p className="mb-2 text-sm text-text-primary">{question.label}</p>
-                                <div className="flex items-center gap-4">
-                                  <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                                    <input
-                                      type="radio"
-                                      name={`student-${entry.id}-${question.key}`}
-                                      checked={answer === true}
-                                      onChange={() => handleAnswerChange(entry.id, question.key, true)}
-                                      className="h-4 w-4 accent-accent"
-                                      data-testid={`student-${entry.id}-${question.key}-yes`}
-                                    />
-                                    Yes
-                                  </label>
-                                  <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                                    <input
-                                      type="radio"
-                                      name={`student-${entry.id}-${question.key}`}
-                                      checked={answer === false}
-                                      onChange={() => handleAnswerChange(entry.id, question.key, false)}
-                                      className="h-4 w-4 accent-accent"
-                                      data-testid={`student-${entry.id}-${question.key}-no`}
-                                    />
-                                    No
-                                  </label>
-                                </div>
+                                <RadioPair
+                                  name={`student-${entry.id}-${question.key}`}
+                                  value={answer}
+                                  onChange={(val) => handleAnswerChange(entry.id, question.key, val)}
+                                  yesTestId={`student-${entry.id}-${question.key}-yes`}
+                                  noTestId={`student-${entry.id}-${question.key}-no`}
+                                />
                               </fieldset>
 
                               {!remarkVisible && (
@@ -535,7 +514,7 @@ export default function IndividualStudentDiscussionForm({
                             </div>
                           );
                         })}
-                      </section>
+                      </FormSection>
                     ))}
 
                     {/* Remove button */}

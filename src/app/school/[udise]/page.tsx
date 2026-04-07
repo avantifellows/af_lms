@@ -15,6 +15,7 @@ import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import SchoolTabs from "@/components/SchoolTabs";
+import { Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
@@ -177,17 +178,17 @@ export default async function SchoolPage({ params }: PageProps) {
     if (passcodeSchoolCode !== school.code) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+          <Card elevation="xl" className="p-8 max-w-md text-center">
             <h1 className="text-xl font-bold text-red-600 mb-2">
               Access Denied
             </h1>
             <p className="text-gray-600 mb-4">
               Your passcode only grants access to a different school.
             </p>
-            <Link href="/" className="text-blue-600 hover:text-blue-800">
+            <Link href="/" className="text-accent hover:text-accent-hover">
               Return to login
             </Link>
-          </div>
+          </Card>
         </div>
       );
     }
@@ -203,7 +204,7 @@ export default async function SchoolPage({ params }: PageProps) {
     if (!permission) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+          <Card elevation="xl" className="p-8 max-w-md text-center">
             <h1 className="text-xl font-bold text-red-600 mb-2">
               Access Denied
             </h1>
@@ -212,11 +213,11 @@ export default async function SchoolPage({ params }: PageProps) {
             </p>
             <Link
               href="/dashboard"
-              className="text-blue-600 hover:text-blue-800"
+              className="text-accent hover:text-accent-hover"
             >
               Return to dashboard
             </Link>
-          </div>
+          </Card>
         </div>
       );
     }
@@ -224,7 +225,7 @@ export default async function SchoolPage({ params }: PageProps) {
     if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+          <Card elevation="xl" className="p-8 max-w-md text-center">
             <h1 className="text-xl font-bold text-red-600 mb-2">
               Access Denied
             </h1>
@@ -233,11 +234,11 @@ export default async function SchoolPage({ params }: PageProps) {
             </p>
             <Link
               href="/dashboard"
-              className="text-blue-600 hover:text-blue-800"
+              className="text-accent hover:text-accent-hover"
             >
               Return to dashboard
             </Link>
-          </div>
+          </Card>
         </div>
       );
     }
@@ -249,7 +250,7 @@ export default async function SchoolPage({ params }: PageProps) {
   if (!isPasscodeUser && !programContext.hasAccess) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
+        <Card elevation="xl" className="p-8 max-w-md text-center">
           <h1 className="text-xl font-bold text-red-600 mb-2">
             No Program Access
           </h1>
@@ -258,11 +259,11 @@ export default async function SchoolPage({ params }: PageProps) {
           </p>
           <Link
             href="/dashboard"
-            className="text-blue-600 hover:text-blue-800"
+            className="text-accent hover:text-accent-hover"
           >
             Return to dashboard
           </Link>
-        </div>
+        </Card>
       </div>
     );
   }
@@ -347,7 +348,7 @@ export default async function SchoolPage({ params }: PageProps) {
       )}
 
       {/* NVS Student Stats */}
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
+      <Card elevation="md" className="p-6 mb-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <StatCard label="Total NVS" value={totalNVSCount} />
@@ -355,7 +356,7 @@ export default async function SchoolPage({ params }: PageProps) {
             <StatCard key={gc.grade} label={`Grade ${gc.grade}`} value={gc.count} size="sm" />
           ))}
         </div>
-      </div>
+      </Card>
 
       <StudentTable
         students={activeStudents}
@@ -403,7 +404,7 @@ export default async function SchoolPage({ params }: PageProps) {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-bg">
       <PageHeader
         title={school.name}
         subtitle={subtitle}

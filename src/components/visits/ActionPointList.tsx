@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import Toast from "@/components/Toast";
+import { Modal } from "@/components/ui";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
@@ -602,7 +603,7 @@ export default function ActionPointList({
               setIsAddModalOpen(true);
             }}
             disabled={isBusy}
-            className="inline-flex items-center justify-center bg-accent px-4 py-2.5 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50 w-full sm:w-auto"
+            className="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50 w-full sm:w-auto"
           >
             Add Action Point
           </button>
@@ -828,7 +829,7 @@ export default function ActionPointList({
                         void handleStartAction(action.id);
                       }}
                       disabled={isBusy}
-                      className="inline-flex items-center bg-accent px-3 py-1.5 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-text-on-accent uppercase tracking-wide hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {startingActionId === action.id
                         ? startState === "acquiring"
@@ -906,49 +907,53 @@ export default function ActionPointList({
         }}
       />
 
-      {confirmDeleteActionId !== null && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-confirm-title"
-            className="w-full max-w-md rounded-lg bg-bg-card shadow-xl"
-          >
-            <div className="border-b-4 border-danger/30 px-5 py-4">
-              <h3 id="delete-confirm-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
-                Delete Action Point
-              </h3>
-            </div>
-            <div className="px-5 py-4">
-              <p className="text-sm text-text-secondary">
-                This action point and all its data will be permanently removed. This cannot be undone.
-              </p>
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setConfirmDeleteActionId(null);
-                }}
-                disabled={deletingActionId !== null}
-                className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
+      <Modal
+        open={confirmDeleteActionId !== null}
+        onClose={deletingActionId !== null ? undefined : () => setConfirmDeleteActionId(null)}
+        zIndex="z-40"
+        className="max-w-md"
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-confirm-title"
+        >
+          <div className="border-b-4 border-danger/30 px-5 py-4">
+            <h3 id="delete-confirm-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
+              Delete Action Point
+            </h3>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-sm text-text-secondary">
+              This action point and all its data will be permanently removed. This cannot be undone.
+            </p>
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmDeleteActionId(null);
+              }}
+              disabled={deletingActionId !== null}
+              className="inline-flex items-center border border-border bg-bg-card px-3 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmDeleteActionId !== null) {
                   void handleDeleteAction(confirmDeleteActionId);
-                }}
-                disabled={deletingActionId !== null}
-                className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deletingActionId === confirmDeleteActionId ? "Deleting..." : "Delete"}
-              </button>
-            </div>
+                }
+              }}
+              disabled={deletingActionId !== null}
+              className="inline-flex items-center bg-danger px-3 py-2 text-sm font-bold uppercase text-white hover:bg-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deletingActionId === confirmDeleteActionId ? "Deleting..." : "Delete"}
+            </button>
           </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

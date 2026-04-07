@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Select, Button, Card } from "@/components/ui";
 
 interface BatchMetadata {
   stream?: string;
@@ -137,26 +138,26 @@ export default function BatchList({
   return (
     <>
       {/* Program Selector */}
-      <div className="mb-6 bg-white shadow rounded-lg p-4">
+      <Card elevation="sm" className="mb-6 p-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Program
         </label>
-        <select
+        <Select
           value={selectedProgramId}
           onChange={(e) => handleProgramChange(Number(e.target.value))}
           disabled={loading}
-          className="block w-full max-w-md rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+          className="max-w-md w-full"
         >
           {programs.map((program) => (
             <option key={program.id} value={program.id}>
               {program.name}
             </option>
           ))}
-        </select>
+        </Select>
         <p className="mt-2 text-sm text-gray-500">
           Select a program to view and edit its batch metadata
         </p>
-      </div>
+      </Card>
 
       {error && (
         <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
@@ -211,24 +212,24 @@ export default function BatchList({
                     </td>
                     <td className="whitespace-nowrap px-3 py-4 text-sm">
                       {editingBatchId === batch.id ? (
-                        <select
+                        <Select
                           value={editValues.stream || ""}
                           onChange={(e) =>
                             setEditValues({ ...editValues, stream: e.target.value })
                           }
-                          className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="min-h-0 py-1 px-2"
                         >
                           {STREAM_OPTIONS.map((opt) => (
                             <option key={opt.value} value={opt.value}>
                               {opt.label}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       ) : (
                         <span
                           className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
                             batch.metadata?.stream
-                              ? "bg-blue-100 text-blue-800"
+                              ? "bg-hover-bg text-accent-hover"
                               : "bg-gray-100 text-gray-500"
                           }`}
                         >
@@ -242,7 +243,7 @@ export default function BatchList({
                     </td>
                     <td className="whitespace-nowrap px-3 py-4 text-sm">
                       {editingBatchId === batch.id ? (
-                        <select
+                        <Select
                           value={editValues.grade || 0}
                           onChange={(e) =>
                             setEditValues({
@@ -250,14 +251,14 @@ export default function BatchList({
                               grade: Number(e.target.value),
                             })
                           }
-                          className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="min-h-0 py-1 px-2"
                         >
                           {GRADE_OPTIONS.map((opt) => (
                             <option key={opt.value} value={opt.value}>
                               {opt.label}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       ) : (
                         <span
                           className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
@@ -275,28 +276,32 @@ export default function BatchList({
                     <td className="whitespace-nowrap px-3 py-4 text-sm">
                       {editingBatchId === batch.id ? (
                         <div className="flex gap-2">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => saveEdit(batch.id)}
                             disabled={saving}
-                            className="text-green-600 hover:text-green-800 disabled:text-gray-400"
+                            className="text-green-600"
                           >
                             {saving ? "Saving..." : "Save"}
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={cancelEdit}
                             disabled={saving}
-                            className="text-gray-600 hover:text-gray-800 disabled:text-gray-400"
                           >
                             Cancel
-                          </button>
+                          </Button>
                         </div>
                       ) : (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => startEdit(batch)}
-                          className="text-blue-600 hover:text-blue-800"
                         >
                           Edit
-                        </button>
+                        </Button>
                       )}
                     </td>
                   </tr>

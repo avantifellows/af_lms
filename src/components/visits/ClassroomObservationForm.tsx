@@ -10,16 +10,14 @@ import {
   type RubricParameter,
 } from "@/lib/classroom-observation-rubric";
 import { getTeacherDisplayName, type Teacher } from "@/lib/teacher-utils";
+import { isPlainObject } from "@/lib/visit-form-utils";
+import { FormSection, Select, StickyProgressBar } from "@/components/ui";
 
 interface ClassroomObservationFormProps {
   data: Record<string, unknown>;
   setData: Dispatch<SetStateAction<Record<string, unknown>>>;
   disabled: boolean;
   schoolCode: string;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function readString(value: unknown): string {
@@ -162,7 +160,7 @@ export default function ClassroomObservationForm({
   return (
     <div className="space-y-4" data-testid="classroom-observation-form">
       {/* Teacher selection */}
-      <section className="border border-border p-4" data-testid="teacher-selection">
+      <FormSection spacing="" data-testid="teacher-selection">
         <h3 className="mb-2 text-sm font-semibold text-text-primary uppercase">Teacher</h3>
         {disabled ? (
           <p className="text-sm text-text-primary" data-testid="teacher-display">
@@ -180,10 +178,10 @@ export default function ClassroomObservationForm({
               </p>
             )}
             {(teacherInList || selectedTeacherId === null) && (
-              <select
+              <Select
                 value={selectedTeacherId !== null ? String(selectedTeacherId) : ""}
                 onChange={handleTeacherChange}
-                className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
+                className="w-full"
                 data-testid="teacher-select"
               >
                 <option value="" disabled>
@@ -194,25 +192,25 @@ export default function ClassroomObservationForm({
                     {getTeacherDisplayName(teacher)}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
           </>
         )}
-      </section>
+      </FormSection>
 
       {/* Grade selection — visible only after teacher is selected */}
       {hasTeacher && (
-        <section className="border border-border p-4" data-testid="grade-selection">
+        <FormSection spacing="" data-testid="grade-selection">
           <h3 className="mb-2 text-sm font-semibold text-text-primary uppercase">Grade</h3>
           {disabled ? (
             <p className="text-sm text-text-primary" data-testid="grade-display">
               {selectedGrade ? `Grade ${selectedGrade}` : "No grade selected"}
             </p>
           ) : (
-            <select
+            <Select
               value={selectedGrade ?? ""}
               onChange={handleGradeChange}
-              className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
+              className="w-full"
               data-testid="grade-select"
             >
               <option value="" disabled>
@@ -223,9 +221,9 @@ export default function ClassroomObservationForm({
                   Grade {grade}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
-        </section>
+        </FormSection>
       )}
 
       {/* Gating messages */}
@@ -243,7 +241,7 @@ export default function ClassroomObservationForm({
       {/* Rubric form — visible only after both teacher and grade are selected */}
       {showRubric && (
         <>
-          <div className="sticky top-12 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2">
+          <StickyProgressBar>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
               <span className="font-mono font-bold text-accent" data-testid="rubric-score-summary">
                 Score: {totalScore}/{CLASSROOM_OBSERVATION_RUBRIC.maxScore}
@@ -252,7 +250,7 @@ export default function ClassroomObservationForm({
                 Answered: {answeredCount}/{CLASSROOM_OBSERVATION_RUBRIC.parameters.length}
               </span>
             </div>
-          </div>
+          </StickyProgressBar>
 
           {CLASSROOM_OBSERVATION_RUBRIC.parameters.map((parameter) => {
             const paramValue = params[parameter.key];
@@ -261,9 +259,9 @@ export default function ClassroomObservationForm({
             const remarksVisible = remarks.length > 0 || revealedRemarks.has(parameter.key);
 
             return (
-              <section
+              <FormSection
                 key={parameter.key}
-                className="border border-border p-4"
+                spacing=""
                 data-testid={`rubric-param-${parameter.key}`}
               >
                 <div className="mb-3">
@@ -362,11 +360,11 @@ export default function ClassroomObservationForm({
                     />
                   </label>
                 )}
-              </section>
+              </FormSection>
             );
           })}
 
-          <section className="border border-border p-4 space-y-3">
+          <FormSection>
             <h3 className="text-sm font-semibold text-text-primary uppercase">Session Summary (Optional)</h3>
             {CLASSROOM_OBSERVATION_RUBRIC.sessionFields.map((field) => (
               <label key={field.key} className="block">
@@ -384,7 +382,7 @@ export default function ClassroomObservationForm({
                 />
               </label>
             ))}
-          </section>
+          </FormSection>
         </>
       )}
     </div>

@@ -44,7 +44,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   if (sessions === null) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
         <span className="ml-3 text-gray-600">Loading quiz data...</span>
       </div>
     );

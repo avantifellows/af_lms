@@ -38,25 +38,25 @@ export default async function SchoolsPage() {
   const schools = await getSchools();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <Link href="/admin" className="text-gray-500 hover:text-gray-700">
+    <div className="min-h-screen bg-bg">
+      <header className="bg-bg-card border-b-2 border-accent shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <Link href="/admin" className="text-text-muted hover:text-text-primary p-1 -m-1">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </Link>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">School Programs</h1>
-              <p className="mt-1 text-sm text-gray-500">{schools.length} JNV schools</p>
+              <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">School Programs</h1>
+              <p className="text-xs text-text-muted font-mono">{schools.length} JNV schools</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">{session.user.email}</span>
+            <span className="text-sm text-text-muted font-mono hidden sm:inline">{session.user.email}</span>
             <Link
               href="/api/auth/signout"
-              className="text-sm text-red-600 hover:text-red-800"
+              className="text-sm font-bold text-danger hover:text-danger/80"
             >
               Sign out
             </Link>

@@ -168,7 +168,7 @@ export function getProgressColorClass(progress: ChapterProgress | undefined): st
     return "text-green-600";
   }
   if (progress.allTopicsCovered) {
-    return "text-blue-600";
+    return "text-accent";
   }
   return "text-yellow-600";
 }

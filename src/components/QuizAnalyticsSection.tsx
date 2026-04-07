@@ -113,7 +113,7 @@ export default function QuizAnalyticsSection({ sessions, schoolUdise }: Props) {
           Select Quiz
         </label>
         <select
-          className="w-full max-w-md rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          className="w-full max-w-md rounded-md border border-gray-300 px-3 py-2 focus:border-accent focus:ring-1 focus:ring-accent/20"
           onChange={handleSessionSelect}
           value={selectedSession?.session_id || ""}
         >
@@ -129,7 +129,7 @@ export default function QuizAnalyticsSection({ sessions, schoolUdise }: Props) {
       {/* Loading state */}
       {loading && (
         <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
           <span className="ml-3 text-gray-600">Loading analytics...</span>
         </div>
       )}

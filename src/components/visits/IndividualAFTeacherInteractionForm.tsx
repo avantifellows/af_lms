@@ -9,16 +9,14 @@ import {
   type IndividualTeacherEntry,
 } from "@/lib/individual-af-teacher-interaction";
 import { getTeacherDisplayName, type Teacher } from "@/lib/teacher-utils";
+import { isPlainObject } from "@/lib/visit-form-utils";
+import { FormSection, RadioPair, RemarkField, Select, StickyProgressBar } from "@/components/ui";
 
 interface IndividualAFTeacherInteractionFormProps {
   data: Record<string, unknown>;
   setData: Dispatch<SetStateAction<Record<string, unknown>>>;
   disabled: boolean;
   schoolCode: string;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function getTeacherEntriesFromData(data: Record<string, unknown>): IndividualTeacherEntry[] {
@@ -241,8 +239,7 @@ export default function IndividualAFTeacherInteractionForm({
     <div className="space-y-4" data-testid="action-renderer-individual_af_teacher_interaction">
       {/* Progress bar */}
       {!teachersLoading && !teachersError && (
-        <div
-          className="sticky top-12 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2"
+        <StickyProgressBar
           data-testid="individual-teacher-progress"
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
@@ -253,7 +250,7 @@ export default function IndividualAFTeacherInteractionForm({
               {stats.presentCount} present, {stats.onLeaveCount} on leave, {stats.absentCount} absent
             </span>
           </div>
-        </div>
+        </StickyProgressBar>
       )}
 
       {/* Teacher sections */}
@@ -315,7 +312,7 @@ export default function IndividualAFTeacherInteractionForm({
                               <div key={question.key} className="text-sm text-text-primary">
                                 <p>{question.label}</p>
                                 <p className="text-text-muted">
-                                  {answer === true ? "Yes" : answer === false ? "No" : "—"}
+                                  {answer === true ? "Yes" : answer === false ? "No" : "\u2014"}
                                   {remark && ` | ${remark}`}
                                 </p>
                               </div>
@@ -350,7 +347,7 @@ export default function IndividualAFTeacherInteractionForm({
                     {/* Questions — only for present */}
                     {entry.attendance === "present" &&
                       INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.sections.map((section) => (
-                        <section key={section.title} className="border border-border p-4 space-y-4">
+                        <FormSection key={section.title}>
                           <h4 className="text-sm font-semibold text-text-primary uppercase">{section.title}</h4>
                           {section.questions.map((question) => {
                             const q = entry.questions?.[question.key];
@@ -364,30 +361,13 @@ export default function IndividualAFTeacherInteractionForm({
                                 <fieldset>
                                   <legend className="sr-only">{question.label}</legend>
                                   <p className="mb-2 text-sm text-text-primary">{question.label}</p>
-                                  <div className="flex items-center gap-4">
-                                    <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                                      <input
-                                        type="radio"
-                                        name={`teacher-${entry.id}-${question.key}`}
-                                        checked={answer === true}
-                                        onChange={() => handleAnswerChange(entry.id, question.key, true)}
-                                        className="h-4 w-4 accent-accent"
-                                        data-testid={`teacher-${entry.id}-${question.key}-yes`}
-                                      />
-                                      Yes
-                                    </label>
-                                    <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                                      <input
-                                        type="radio"
-                                        name={`teacher-${entry.id}-${question.key}`}
-                                        checked={answer === false}
-                                        onChange={() => handleAnswerChange(entry.id, question.key, false)}
-                                        className="h-4 w-4 accent-accent"
-                                        data-testid={`teacher-${entry.id}-${question.key}-no`}
-                                      />
-                                      No
-                                    </label>
-                                  </div>
+                                  <RadioPair
+                                    name={`teacher-${entry.id}-${question.key}`}
+                                    value={answer}
+                                    onChange={(val) => handleAnswerChange(entry.id, question.key, val)}
+                                    yesTestId={`teacher-${entry.id}-${question.key}-yes`}
+                                    noTestId={`teacher-${entry.id}-${question.key}-no`}
+                                  />
                                 </fieldset>
 
                                 {!remarkVisible && (
@@ -418,7 +398,7 @@ export default function IndividualAFTeacherInteractionForm({
                               </div>
                             );
                           })}
-                        </section>
+                        </FormSection>
                       ))}
 
                     {/* Remove button */}
@@ -450,8 +430,7 @@ export default function IndividualAFTeacherInteractionForm({
             </p>
           ) : remainingTeachers.length > 0 ? (
             <div className="flex items-center gap-2">
-              <select
-                className="border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
+              <Select
                 data-testid="add-teacher-select"
                 defaultValue=""
                 onChange={(e) => {
@@ -468,7 +447,7 @@ export default function IndividualAFTeacherInteractionForm({
                     {getTeacherDisplayName(t)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           ) : null}
         </>
