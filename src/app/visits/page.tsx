@@ -263,7 +263,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
         {/* In Progress Section */}
         {inProgress.length > 0 && (
           <div className="mb-8">
-            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2">
+            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-brand-amber pb-2">
               In Progress
             </h2>
 
@@ -358,7 +358,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
         {/* Completed Section */}
         {completed.length > 0 && (
           <div>
-            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2">Completed</h2>
+            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-brand-blue pb-2">Completed</h2>
 
             {/* Mobile: card layout */}
             <div className="sm:hidden space-y-3">

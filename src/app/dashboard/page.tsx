@@ -315,14 +315,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Stats - only show for PM users */}
         {hasPMAccess && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
-            <Card className="p-6">
-              <div className="text-xs font-bold text-text-muted uppercase tracking-wide">My Schools</div>
+            <Card className="p-6 border-l-4 border-l-brand-blue">
+              <div className="text-xs font-bold text-brand-blue uppercase tracking-wide">My Schools</div>
               <div className="mt-1 text-3xl font-bold text-text-primary font-mono">
                 {totalCount}
               </div>
             </Card>
-            <Card className="p-6">
-              <div className="text-xs font-bold text-text-muted uppercase tracking-wide">Total Visits</div>
+            <Card className="p-6 border-l-4 border-l-brand-amber">
+              <div className="text-xs font-bold text-brand-amber uppercase tracking-wide">Total Visits</div>
               <div className="mt-1 text-3xl font-bold text-text-primary font-mono">
                 {recentVisits.length}
               </div>
@@ -349,7 +349,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Recent Visits - only show for PM users */}
         {hasPMAccess && recentVisits.length > 0 && (
           <div className="mb-8">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center mb-4 border-b-2 border-brand-amber pb-3">
               <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Recent Visits</h2>
               <Link
                 href="/visits"
@@ -416,7 +416,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Schools Grid */}
         <div>
           {hasPMAccess && (
-            <div className="flex justify-between items-center mb-4 border-b-4 border-border-accent pb-3">
+            <div className="flex justify-between items-center mb-4 border-b-2 border-brand-blue pb-3">
               <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">My Schools</h2>
             </div>
           )}

@@ -89,12 +89,12 @@ export default function TestDeepDive({
       {data && !loading && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
-            <StatCard label="Students Appeared" value={data.summary.students_appeared} size="sm" />
-            <StatCard label="Avg Score" value={`${data.summary.avg_score}%`} size="sm" />
-            <StatCard label="Min Score" value={`${data.summary.min_score}%`} size="sm" />
-            <StatCard label="Max Score" value={`${data.summary.max_score}%`} size="sm" />
-            <StatCard label="Avg Accuracy" value={`${data.summary.avg_accuracy}%`} size="sm" />
-            <StatCard label="Avg Attempt Rate" value={`${data.summary.avg_attempt_rate}%`} size="sm" />
+            <StatCard label="Students Appeared" value={data.summary.students_appeared} size="sm" color="brand-blue" />
+            <StatCard label="Avg Score" value={`${data.summary.avg_score}%`} size="sm" color="brand-coral" />
+            <StatCard label="Min Score" value={`${data.summary.min_score}%`} size="sm" color="brand-amber" />
+            <StatCard label="Max Score" value={`${data.summary.max_score}%`} size="sm" color="brand-gold" />
+            <StatCard label="Avg Accuracy" value={`${data.summary.avg_accuracy}%`} size="sm" color="brand-blue" />
+            <StatCard label="Avg Attempt Rate" value={`${data.summary.avg_attempt_rate}%`} size="sm" color="brand-coral" />
           </div>
 
           <SubjectAnalysisSection subjects={data.subjects} />

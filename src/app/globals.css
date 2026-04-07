@@ -30,6 +30,17 @@
   --color-warning-text: #9F5600;
   --color-info: #9AC4FA;
   --color-info-bg: rgba(154, 196, 250, 0.15);
+
+  /* Brand color range — for variety across UI */
+  --color-brand-coral: #E96D57;
+  --color-brand-gold: #FFD063;
+  --color-brand-amber: #FFB763;
+  --color-brand-salmon: #FF9683;
+  --color-brand-blue: #9AC4FA;
+  --color-brand-coral-bg: rgba(233, 109, 87, 0.1);
+  --color-brand-gold-bg: rgba(255, 208, 99, 0.15);
+  --color-brand-amber-bg: rgba(255, 183, 99, 0.12);
+  --color-brand-blue-bg: rgba(154, 196, 250, 0.15);
 }
 
 @theme inline {
@@ -61,6 +72,17 @@
   --color-warning-text: var(--color-warning-text);
   --color-info: var(--color-info);
   --color-info-bg: var(--color-info-bg);
+
+  /* Brand color range */
+  --color-brand-coral: var(--color-brand-coral);
+  --color-brand-gold: var(--color-brand-gold);
+  --color-brand-amber: var(--color-brand-amber);
+  --color-brand-salmon: var(--color-brand-salmon);
+  --color-brand-blue: var(--color-brand-blue);
+  --color-brand-coral-bg: var(--color-brand-coral-bg);
+  --color-brand-gold-bg: var(--color-brand-gold-bg);
+  --color-brand-amber-bg: var(--color-brand-amber-bg);
+  --color-brand-blue-bg: var(--color-brand-blue-bg);
 }
 
 body {
