@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import { Card } from "@/components/ui/Card";
 import type { SubjectAnalysisRow } from "@/types/quiz";
 
 interface Props {
@@ -24,7 +25,7 @@ export default function SubjectAnalysisSection({ subjects }: Props) {
   if (subjects.length === 0) return null;
 
   return (
-    <div className="bg-bg-card border border-border">
+    <Card elevation="sm" className="overflow-hidden">
       <div className="px-4 md:px-6 py-3 md:py-4 border-b-2 border-border-accent">
         <h3 className="font-bold uppercase tracking-wide text-sm md:text-base text-text-primary">
           Subject Analysis
@@ -74,6 +75,6 @@ export default function SubjectAnalysisSection({ subjects }: Props) {
           </table>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -64,7 +64,7 @@ export default function TestDeepDive({
       <div className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="text-sm font-bold uppercase tracking-wide text-accent hover:text-accent-hover transition-colors"
+          className="text-sm font-bold uppercase tracking-wide text-accent hover:text-accent-hover transition-colors rounded-lg px-3 min-h-[44px] hover:bg-hover-bg"
         >
           &larr; Back to Overview
         </button>
@@ -81,7 +81,7 @@ export default function TestDeepDive({
       )}
 
       {error && !loading && (
-        <div className="p-4 bg-danger-bg border border-danger text-danger">
+        <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
           {error}
         </div>
       )}
