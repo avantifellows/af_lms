@@ -149,7 +149,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, progra
         <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
         <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
         {totalEnrolled != null && (
-          <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-blue" />
+          <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
         )}
       </div>
 

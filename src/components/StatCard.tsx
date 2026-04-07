@@ -4,7 +4,7 @@ interface StatCardProps {
   label: string;
   value: string | number;
   size?: "sm" | "md" | "lg";
-  /** Brand color for left border accent — e.g. "brand-coral", "brand-blue", "brand-amber" */
+  /** Brand color for left border accent — e.g. "brand-coral", "brand-gold", "brand-amber" */
   color?: string;
 }
 
