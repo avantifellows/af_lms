@@ -69,7 +69,7 @@ export default async function BatchManagementPage() {
 
   return (
     <div className="min-h-screen bg-bg">
-      <header className="bg-bg-card border-b-2 border-accent shadow-sm">
+      <header className="bg-bg-card border-b border-border shadow-sm">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <Link href="/admin" className="text-text-muted hover:text-text-primary p-1 -m-1">

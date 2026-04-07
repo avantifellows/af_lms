@@ -1,33 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #3C3C3C;
+  --background: #f5efe8;
+  --foreground: #261410;
   --font-geist-sans: var(--font-inter), Arial, Helvetica, sans-serif;
   --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
 
-  /* Avanti Fellows brand palette */
-  --color-accent: #D77C11;
-  --color-accent-hover: #9F5600;
-  --color-bg: #FAFAF8;
-  --color-bg-card: #FFFFFF;
-  --color-bg-card-alt: #FFF8F0;
-  --color-bg-input: #FFFFFF;
-  --color-hover-bg: rgba(255, 183, 99, 0.12);
-  --color-border: #E5E2DC;
-  --color-border-accent: #D77C11;
-  --color-text-primary: #3C3C3C;
-  --color-text-secondary: #5C564F;
-  --color-text-muted: #757069;
+  /* Avanti Fellows brand palette — matching AF HR internal app */
+  --color-accent: #ad2f2f;
+  --color-accent-hover: #8a2525;
+  --color-bg: #f5efe8;
+  --color-bg-card: #fffaf5;
+  --color-bg-card-alt: #f3ece5;
+  --color-bg-input: #ffffff;
+  --color-hover-bg: rgba(173, 47, 47, 0.06);
+  --color-border: rgba(38, 20, 16, 0.15);
+  --color-border-accent: #ad2f2f;
+  --color-text-primary: #261410;
+  --color-text-secondary: #685851;
+  --color-text-muted: #685851;
   --color-text-on-accent: #FFFFFF;
-  --color-danger: #E96D57;
-  --color-danger-bg: rgba(233, 109, 87, 0.08);
-  --color-success: #16a34a;
-  --color-success-bg: rgba(22, 163, 74, 0.08);
-  --color-warning-bg: rgba(255, 208, 99, 0.2);
-  --color-warning-border: #FFD063;
-  --color-warning-text: #9F5600;
+  --color-danger: #ad2f2f;
+  --color-danger-bg: rgba(173, 47, 47, 0.08);
+  --color-success: #1e6b4b;
+  --color-success-bg: rgba(30, 107, 75, 0.12);
+  --color-warning-bg: rgba(140, 90, 29, 0.08);
+  --color-warning-border: #8c5a1d;
+  --color-warning-text: #8c5a1d;
   --color-info: #9AC4FA;
   --color-info-bg: rgba(154, 196, 250, 0.15);
 

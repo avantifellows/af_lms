@@ -152,10 +152,11 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
 
   return (
     <div className="min-h-screen bg-bg">
-      <header className="bg-bg-card border-b-2 border-accent shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
+      <header className="bg-bg-card border-b border-border shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex justify-between items-center">
           <div className="flex items-center gap-6">
-            <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">Visits</h1>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10" />
             <nav className="flex gap-4">
               <Link
                 href="/dashboard"

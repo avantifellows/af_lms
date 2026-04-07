@@ -19,7 +19,7 @@ export default async function AdminPage() {
 
   return (
     <div className="min-h-screen bg-bg">
-      <header className="bg-bg-card border-b-2 border-accent shadow-sm">
+      <header className="bg-bg-card border-b border-border shadow-sm">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">Admin</h1>

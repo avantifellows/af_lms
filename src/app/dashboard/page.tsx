@@ -259,18 +259,19 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   return (
     <div className="min-h-screen bg-bg">
-      <header className="bg-bg-card border-b-2 border-accent shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
+      <header className="bg-bg-card border-b border-border shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex justify-between items-center">
           <div className="flex items-center gap-6">
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">Schools</h1>
-              <p className="text-xs text-text-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10" />
+            <div className="hidden sm:block border-l border-border pl-4">
+              <p className="text-xs text-text-muted uppercase tracking-wide">
                 {permission.role === "admin"
                   ? "Admin access"
                   : permission.level === 3
-                    ? "All schools access"
+                    ? "All schools"
                     : permission.level === 2
-                      ? `Region access: ${permission.regions?.join(", ")}`
+                      ? `Region: ${permission.regions?.join(", ")}`
                       : `${totalCount} school(s)`}
               </p>
             </div>
