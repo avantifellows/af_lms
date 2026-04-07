@@ -2,7 +2,7 @@
 
 > **Purpose:** Reference document for the CRUD UI design system. Covers colors, typography, spacing, components, layout patterns, and code examples.
 
-> **Design Language:** Warm Professional — Avanti Brand Orange
+> **Design Language:** Warm Professional — Avanti Brand Maroon (matching hr-feedback.avantifellows.org)
 >
 > **Font:** Inter (loaded via `next/font/google`)
 >
@@ -38,13 +38,16 @@ The Avanti Fellows UI follows **Warm Professional** design principles:
 
 - **Rounded corners** (`rounded-lg`) on all cards, buttons, inputs, and form sections — approachable, modern.
 - **Soft shadows** (`shadow-sm`, `shadow`, `shadow-xl`) for depth and card separation.
-- **Thick accent borders** define hierarchy. 2px for page headers, 4px for section dividers.
+- **Subtle borders** define hierarchy. `border-b border-border` for headers, `border-b-2 border-brand-*` for colored section dividers.
 - **Uppercase headings** with `tracking-wide` or `tracking-tight` for structured feel.
 - **Monospace numbers.** Numeric data always uses `font-mono` — stat cards, dates, counts, emails.
 - **48px minimum touch targets** on all interactive elements (buttons, radio labels, tab items).
 - **Hover + active states** on every interactive element — things feel alive.
-- **Brand orange accent** (#D77C11) from the Avanti Fellows website palette.
-- **No blue anywhere** — all interactive colors use accent tokens, not hardcoded Tailwind blue.
+- **Maroon accent** (#ad2f2f) matching the AF HR internal app (hr-feedback.avantifellows.org).
+- **Warm beige background** (#f5efe8) and cream cards (#fffaf5) — not white.
+- **Avanti Fellows logo** in header from CDN (`cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp`).
+- **Brand color variety** — coral, gold, amber, blue used for stat cards, section dividers, badges. Not everything is the same color.
+- **No hardcoded blue** — all interactive colors use accent tokens or brand color tokens.
 
 ---
 
@@ -52,19 +55,23 @@ The Avanti Fellows UI follows **Warm Professional** design principles:
 
 All colors are defined as CSS custom properties in `src/app/globals.css` under `:root`, then mapped to Tailwind via the `@theme inline` block. Use the Tailwind class names (e.g., `bg-accent`, `text-text-primary`), never raw hex values.
 
-### Brand Palette (from avantifellows.org)
+### Brand Palette
+
+Two sources: the avantifellows.org website palette (primary/secondary colors) and the AF HR internal app palette (accent, backgrounds, text).
 
 | Color | Hex | Role |
 |-------|-----|------|
-| Primary Coral | `#E96D57` | Danger/error states |
-| Primary Gold | `#FFD063` | Warning states |
-| Primary Amber | `#FFB763` | Hover backgrounds |
-| Primary Salmon | `#FF9683` | Decorative (unused in UI) |
-| Primary Blue | `#9AC4FA` | Info states |
-| Secondary Deep Amber | `#9F5600` | Accent hover, warning text |
-| Secondary Orange | `#D77C11` | **Primary accent** — buttons, links, borders |
-| Secondary Charcoal | `#3C3C3C` | Primary text |
-| White | `#FFFFFF` | Backgrounds, text on accent |
+| AF HR Maroon | `#ad2f2f` | **Primary accent** — buttons, links, active states |
+| AF HR Dark Brown | `#261410` | Primary text |
+| AF HR Beige | `#f5efe8` | Page background |
+| AF HR Cream | `#fffaf5` | Card backgrounds |
+| AF HR Muted Brown | `#685851` | Secondary/muted text |
+| Brand Coral | `#E96D57` | Stat card accents, variety color |
+| Brand Gold | `#FFD063` | Warning states, grade badges |
+| Brand Amber | `#FFB763` | Stat card accents, section dividers |
+| Brand Blue | `#9AC4FA` | Info states, stat card accents |
+| Brand Salmon | `#FF9683` | Decorative (available, sparingly used) |
+| Secondary Orange | `#D77C11` | Brand color range (available as token) |
 
 ### Design Tokens
 
@@ -72,48 +79,63 @@ All colors are defined as CSS custom properties in `src/app/globals.css` under `
 
 | Token | Class | Value | Usage |
 |-------|-------|-------|-------|
-| `accent` | `bg-accent`, `text-accent`, `border-accent` | `#D77C11` | Primary buttons, active states, links, borders |
-| `accent-hover` | `bg-accent-hover`, `text-accent-hover` | `#9F5600` | Hover states for accent elements |
+| `accent` | `bg-accent`, `text-accent`, `border-accent` | `#ad2f2f` | Primary buttons, active states, links, borders |
+| `accent-hover` | `bg-accent-hover`, `text-accent-hover` | `#8a2525` | Hover states for accent elements |
 | `text-on-accent` | `text-text-on-accent` | `#FFFFFF` | White text on accent backgrounds |
 
 #### Backgrounds
 
 | Token | Class | Value | Usage |
 |-------|-------|-------|-------|
-| `bg` | `bg-bg` | `#FAFAF8` | Page background (warm off-white) |
-| `bg-card` | `bg-bg-card` | `#FFFFFF` | Card/panel background |
-| `bg-card-alt` | `bg-bg-card-alt` | `#FFF8F0` | Table headers, disabled inputs, alt rows |
-| `bg-input` | `bg-bg-input` | `#FFFFFF` | Input field background |
-| `hover-bg` | `bg-hover-bg` | `rgba(255, 183, 99, 0.12)` | Row/item hover background |
+| `bg` | `bg-bg` | `#f5efe8` | Page background (warm beige) |
+| `bg-card` | `bg-bg-card` | `#fffaf5` | Card/panel background (cream) |
+| `bg-card-alt` | `bg-bg-card-alt` | `#f3ece5` | Table headers, disabled inputs, alt rows |
+| `bg-input` | `bg-bg-input` | `#ffffff` | Input field background |
+| `hover-bg` | `bg-hover-bg` | `rgba(173, 47, 47, 0.06)` | Row/item hover background |
 
 #### Text
 
 | Token | Class | Value | Usage |
 |-------|-------|-------|-------|
-| `text-primary` | `text-text-primary` | `#3C3C3C` | Headings, main content |
-| `text-secondary` | `text-text-secondary` | `#5C564F` | Supporting text |
-| `text-muted` | `text-text-muted` | `#757069` | Labels, captions, metadata (WCAG AA compliant) |
+| `text-primary` | `text-text-primary` | `#261410` | Headings, main content (dark brown) |
+| `text-secondary` | `text-text-secondary` | `#685851` | Supporting text (taupe) |
+| `text-muted` | `text-text-muted` | `#685851` | Labels, captions, metadata |
 
 #### Borders
 
 | Token | Class | Value | Usage |
 |-------|-------|-------|-------|
-| `border` | `border-border` | `#E5E2DC` | Default borders (warm gray) |
-| `border-accent` | `border-border-accent` | `#D77C11` | Accent borders (headers, progress bars) |
+| `border` | `border-border` | `rgba(38, 20, 16, 0.15)` | Default borders (translucent brown) |
+| `border-accent` | `border-border-accent` | `#ad2f2f` | Accent borders (progress bars) |
 
 #### Status Colors
 
 | Token | Class | Value | Usage |
 |-------|-------|-------|-------|
-| `danger` | `bg-danger`, `text-danger` | `#E96D57` | Errors, destructive actions |
-| `danger-bg` | `bg-danger-bg` | `rgba(233, 109, 87, 0.08)` | Light danger background |
-| `success` | `text-success` | `#16a34a` | Success states |
-| `success-bg` | `bg-success-bg` | `rgba(22, 163, 74, 0.08)` | Light success background |
-| `warning-bg` | `bg-warning-bg` | `rgba(255, 208, 99, 0.2)` | Warning background |
-| `warning-border` | `border-warning-border` | `#FFD063` | Warning border |
-| `warning-text` | `text-warning-text` | `#9F5600` | Warning text |
+| `danger` | `bg-danger`, `text-danger` | `#ad2f2f` | Errors, destructive actions (same as accent) |
+| `danger-bg` | `bg-danger-bg` | `rgba(173, 47, 47, 0.08)` | Light danger background |
+| `success` | `text-success` | `#1e6b4b` | Success states (forest green) |
+| `success-bg` | `bg-success-bg` | `rgba(30, 107, 75, 0.12)` | Light success background |
+| `warning-bg` | `bg-warning-bg` | `rgba(140, 90, 29, 0.08)` | Warning background |
+| `warning-border` | `border-warning-border` | `#8c5a1d` | Warning border |
+| `warning-text` | `text-warning-text` | `#8c5a1d` | Warning text (brown-gold) |
 | `info` | `text-info` | `#9AC4FA` | Info states |
 | `info-bg` | `bg-info-bg` | `rgba(154, 196, 250, 0.15)` | Light info background |
+
+#### Brand Color Range (for variety)
+
+Use these to break the monotone — stat card borders, section dividers, badge tints.
+
+| Token | Class | Value | Usage |
+|-------|-------|-------|-------|
+| `brand-coral` | `text-brand-coral`, `border-l-brand-coral` | `#E96D57` | Stat card accents |
+| `brand-gold` | `text-brand-gold`, `border-brand-gold` | `#FFD063` | Grade badges, warnings |
+| `brand-amber` | `text-brand-amber`, `border-brand-amber` | `#FFB763` | Section dividers, stat cards |
+| `brand-blue` | `text-brand-blue`, `border-brand-blue` | `#9AC4FA` | Section dividers, stat cards |
+| `brand-coral-bg` | `bg-brand-coral-bg` | `rgba(233, 109, 87, 0.1)` | Light coral tint |
+| `brand-gold-bg` | `bg-brand-gold-bg` | `rgba(255, 208, 99, 0.15)` | Light gold tint (grade badges) |
+| `brand-amber-bg` | `bg-brand-amber-bg` | `rgba(255, 183, 99, 0.12)` | Light amber tint |
+| `brand-blue-bg` | `bg-brand-blue-bg` | `rgba(154, 196, 250, 0.15)` | Light blue tint |
 
 ### Semantic Category Colors (exceptions)
 
