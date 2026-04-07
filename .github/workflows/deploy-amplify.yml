@@ -79,6 +79,10 @@ jobs:
           DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
+          DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
+          DYNAMODB_ACCESS_KEY: ${{ secrets.DYNAMODB_ACCESS_KEY }}
+          DYNAMODB_SECRET_KEY: ${{ secrets.DYNAMODB_SECRET_KEY }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -94,6 +98,10 @@ jobs:
             --arg j "$DB_SERVICE_URL" \
             --arg k "$DB_SERVICE_TOKEN" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
+            --arg m "$DYNAMODB_URL" \
+            --arg n "$DYNAMODB_REGION" \
+            --arg o "$DYNAMODB_ACCESS_KEY" \
+            --arg p "$DYNAMODB_SECRET_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -106,7 +114,11 @@ jobs:
               NEXTAUTH_URL: $i,
               DB_SERVICE_URL: $j,
               DB_SERVICE_TOKEN: $k,
-              GOOGLE_SERVICE_ACCOUNT_JSON: $l
+              GOOGLE_SERVICE_ACCOUNT_JSON: $l,
+              DYNAMODB_URL: $m,
+              DYNAMODB_REGION: $n,
+              DYNAMODB_ACCESS_KEY: $o,
+              DYNAMODB_SECRET_KEY: $p
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -187,6 +199,10 @@ jobs:
           DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
+          DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
+          DYNAMODB_ACCESS_KEY: ${{ secrets.DYNAMODB_ACCESS_KEY }}
+          DYNAMODB_SECRET_KEY: ${{ secrets.DYNAMODB_SECRET_KEY }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -202,6 +218,10 @@ jobs:
             --arg j "$DB_SERVICE_URL" \
             --arg k "$DB_SERVICE_TOKEN" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
+            --arg m "$DYNAMODB_URL" \
+            --arg n "$DYNAMODB_REGION" \
+            --arg o "$DYNAMODB_ACCESS_KEY" \
+            --arg p "$DYNAMODB_SECRET_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -214,7 +234,11 @@ jobs:
               NEXTAUTH_URL: $i,
               DB_SERVICE_URL: $j,
               DB_SERVICE_TOKEN: $k,
-              GOOGLE_SERVICE_ACCOUNT_JSON: $l
+              GOOGLE_SERVICE_ACCOUNT_JSON: $l,
+              DYNAMODB_URL: $m,
+              DYNAMODB_REGION: $n,
+              DYNAMODB_ACCESS_KEY: $o,
+              DYNAMODB_SECRET_KEY: $p
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -306,6 +330,10 @@ jobs:
           DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
+          DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
+          DYNAMODB_ACCESS_KEY: ${{ secrets.DYNAMODB_ACCESS_KEY }}
+          DYNAMODB_SECRET_KEY: ${{ secrets.DYNAMODB_SECRET_KEY }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -320,6 +348,10 @@ jobs:
             --arg j "$DB_SERVICE_URL" \
             --arg k "$DB_SERVICE_TOKEN" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
+            --arg m "$DYNAMODB_URL" \
+            --arg n "$DYNAMODB_REGION" \
+            --arg o "$DYNAMODB_ACCESS_KEY" \
+            --arg p "$DYNAMODB_SECRET_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -332,7 +364,11 @@ jobs:
               NEXTAUTH_URL: $i,
               DB_SERVICE_URL: $j,
               DB_SERVICE_TOKEN: $k,
-              GOOGLE_SERVICE_ACCOUNT_JSON: $l
+              GOOGLE_SERVICE_ACCOUNT_JSON: $l,
+              DYNAMODB_URL: $m,
+              DYNAMODB_REGION: $n,
+              DYNAMODB_ACCESS_KEY: $o,
+              DYNAMODB_SECRET_KEY: $p
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \

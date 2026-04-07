@@ -73,17 +73,15 @@ describe("getBigQueryClient", () => {
   });
 });
 
-describe("getSchoolQuizSessions", () => {
-  it("returns rows from BigQuery", async () => {
-    const rows = [
-      { session_id: "s1", test_name: "Quiz 1", start_date: "2025-01-15", student_count: 30 },
-    ];
+describe("getAvailableGrades", () => {
+  it("returns grade numbers from BigQuery", async () => {
+    const rows = [{ student_grade: 9 }, { student_grade: 10 }];
     mocks.mockQueryFn.mockResolvedValueOnce([rows]);
 
-    const { getSchoolQuizSessions } = await import("./bigquery");
-    const result = await getSchoolQuizSessions("11223344");
+    const { getAvailableGrades } = await import("./bigquery");
+    const result = await getAvailableGrades("11223344");
 
-    expect(result).toEqual(rows);
+    expect(result).toEqual([9, 10]);
     expect(mocks.mockQueryFn).toHaveBeenCalledWith(
       expect.objectContaining({ params: { udise: "11223344" } })
     );
@@ -92,55 +90,52 @@ describe("getSchoolQuizSessions", () => {
   it("returns empty array on error", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 
-    const { getSchoolQuizSessions } = await import("./bigquery");
-    const result = await getSchoolQuizSessions("11223344");
+    const { getAvailableGrades } = await import("./bigquery");
+    const result = await getAvailableGrades("11223344");
 
     expect(result).toEqual([]);
   });
 });
 
-describe("getQuizResults", () => {
-  it("returns rows from BigQuery", async () => {
-    const rows = [
-      { quiz_id: "q1", student_full_name: "Amit", student_school_udise_code: "112233", attendance_status: "Present", total_marks_obtained: 80, total_marks: 100, percentage_score: 80 },
+describe("getBatchOverviewData", () => {
+  it("returns tests, totalEnrolled, and enrolledByStream from BigQuery", async () => {
+    const testRows = [
+      { session_id: "s1", test_name: "Quiz 1", start_date: "2025-01-15", student_count: 30, stream_student_count: 25, test_format: "full_test", test_stream: "engineering" },
     ];
-    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+    const enrolledRows = [
+      { stream: "engineering", total: 35 },
+      { stream: "medical", total: 10 },
+    ];
+    mocks.mockQueryFn
+      .mockResolvedValueOnce([testRows])
+      .mockResolvedValueOnce([enrolledRows]);
 
-    const { getQuizResults } = await import("./bigquery");
-    const result = await getQuizResults("q1", "112233");
+    const { getBatchOverviewData } = await import("./bigquery");
+    const result = await getBatchOverviewData("11223344", 10);
 
-    expect(result).toEqual(rows);
+    expect(result.tests).toEqual(testRows);
+    expect(result.totalEnrolled).toBe(45);
+    expect(result.enrolledByStream).toEqual({ engineering: 35, medical: 10 });
   });
 
-  it("returns empty array on error", async () => {
+  it("returns empty on error", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 
-    const { getQuizResults } = await import("./bigquery");
-    const result = await getQuizResults("q1", "112233");
+    const { getBatchOverviewData } = await import("./bigquery");
+    const result = await getBatchOverviewData("11223344", 10);
 
-    expect(result).toEqual([]);
-  });
-});
-
-describe("getQuizSubjectResults", () => {
-  it("returns rows from BigQuery", async () => {
-    const rows = [
-      { quiz_id: "q1", student_full_name: "Amit", subject_name: "Physics", subject_marks_obtained: 30, subject_total_marks: 40 },
-    ];
-    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
-
-    const { getQuizSubjectResults } = await import("./bigquery");
-    const result = await getQuizSubjectResults("q1", "112233");
-
-    expect(result).toEqual(rows);
+    expect(result).toEqual({ tests: [], totalEnrolled: null, enrolledByStream: {} });
   });
 
-  it("returns empty array on error", async () => {
-    mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
+  it("returns null totalEnrolled when no enrollment rows", async () => {
+    mocks.mockQueryFn
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]]);
 
-    const { getQuizSubjectResults } = await import("./bigquery");
-    const result = await getQuizSubjectResults("q1", "112233");
+    const { getBatchOverviewData } = await import("./bigquery");
+    const result = await getBatchOverviewData("11223344", 10);
 
-    expect(result).toEqual([]);
+    expect(result.totalEnrolled).toBeNull();
+    expect(result.enrolledByStream).toEqual({});
   });
 });

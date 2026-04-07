@@ -19,6 +19,8 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1011.0",
+    "@aws-sdk/lib-dynamodb": "^3.1011.0",
     "@google-cloud/bigquery": "^8.1.1",
     "@types/pg": "^8.15.6",
     "lucide-react": "^1.7.0",

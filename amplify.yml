@@ -18,6 +18,10 @@ frontend:
           echo "DB_SERVICE_URL=$DB_SERVICE_URL" >> .env.production
           echo "DB_SERVICE_TOKEN=$DB_SERVICE_TOKEN" >> .env.production
           echo "GOOGLE_SERVICE_ACCOUNT_JSON=$GOOGLE_SERVICE_ACCOUNT_JSON" >> .env.production
+          echo "DYNAMODB_URL=$DYNAMODB_URL" >> .env.production
+          echo "DYNAMODB_REGION=$DYNAMODB_REGION" >> .env.production
+          echo "DYNAMODB_ACCESS_KEY=$DYNAMODB_ACCESS_KEY" >> .env.production
+          echo "DYNAMODB_SECRET_KEY=$DYNAMODB_SECRET_KEY" >> .env.production
     build:
       commands:
         - npm run build
