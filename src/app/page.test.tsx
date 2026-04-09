@@ -188,6 +188,49 @@ describe("LoginPage", () => {
     expect(screen.queryByText("Invalid passcode")).not.toBeInTheDocument();
   });
 
+  // --- Dev login ---
+
+  it("renders dev login buttons in non-production", () => {
+    render(<LoginPage />);
+    expect(screen.getByText("dev login")).toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.getByText("Program Manager")).toBeInTheDocument();
+    expect(screen.getByText("Teacher")).toBeInTheDocument();
+    expect(screen.getByText("Read-Only")).toBeInTheDocument();
+  });
+
+  it("calls signIn('dev-login') with persona on dev button click", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("Admin"));
+    expect(mockSignIn).toHaveBeenCalledWith("dev-login", {
+      persona: "admin",
+      redirect: false,
+    });
+  });
+
+  it("redirects to /dashboard on successful dev login", async () => {
+    mockSignIn.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("Teacher"));
+    await vi.waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/dashboard");
+    });
+  });
+
+  it("does not redirect on failed dev login", async () => {
+    mockSignIn.mockResolvedValue({ error: "CredentialsSignin" });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await user.click(screen.getByText("Admin"));
+    await vi.waitFor(() => {
+      expect(screen.getByText("Admin")).toBeInTheDocument();
+    });
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
   // --- Back button ---
 
   it("goes back to login options and clears passcode/error", async () => {
