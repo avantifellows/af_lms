@@ -31,7 +31,7 @@ export async function GET(
 
     if (!data) {
       return NextResponse.json(
-        { error: "No results found for this test" },
+        { error: "No results available for this test yet. Please check back in a few hours." },
         { status: 404 }
       );
     }

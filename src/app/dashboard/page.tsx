@@ -260,10 +260,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   return (
     <div className="min-h-screen bg-bg">
       <header className="bg-bg-card border-b border-border shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div className="flex items-center gap-6">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-y-2">
+          <div className="flex items-center gap-3 sm:gap-6 min-w-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10" />
+            <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10 shrink-0" />
             <div className="hidden sm:block border-l border-border pl-4">
               <p className="text-xs text-text-muted uppercase tracking-wide">
                 {permission.role === "admin"
@@ -276,7 +276,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               </p>
             </div>
             {hasPMAccess && (
-              <nav className="flex gap-4">
+              <nav className="flex gap-3 sm:gap-4">
                 <Link
                   href="/dashboard"
                   className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1"
@@ -292,7 +292,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               </nav>
             )}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             {permission.role === "admin" && (
               <Link
                 href="/admin"

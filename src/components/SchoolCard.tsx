@@ -47,11 +47,6 @@ export default function SchoolCard({
           Code: {school.code}
         </p>
         {showStudentCount && school.student_count !== undefined && (
-          <p className="mt-2 text-sm text-text-secondary">
-            {school.student_count} students
-          </p>
-        )}
-        {showStudentCount && school.student_count !== undefined && (
           <p className="mt-2 text-sm font-medium text-brand-coral">
             {school.student_count} students
           </p>

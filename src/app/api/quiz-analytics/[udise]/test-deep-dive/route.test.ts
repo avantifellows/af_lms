@@ -111,7 +111,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
       routeParams({ udise: "1234" })
     );
     expect(res.status).toBe(404);
-    await expect(res.json()).resolves.toEqual({ error: "No results found for this test" });
+    await expect(res.json()).resolves.toEqual({ error: "No results available for this test yet. Please check back in a few hours." });
     expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "s1", undefined);
   });
 

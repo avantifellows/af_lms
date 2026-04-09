@@ -41,8 +41,11 @@ export default function TestDeepDive({
       `/api/quiz-analytics/${schoolUdise}/test-deep-dive?grade=${grade}&sessionId=${encodeURIComponent(sessionId)}${programParam}`,
       { signal: controller.signal }
     )
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch test details");
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error || "Failed to fetch test details");
+        }
         return res.json();
       })
       .then((d: TestDeepDiveData) => {
