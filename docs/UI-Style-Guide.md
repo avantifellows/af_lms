@@ -281,6 +281,8 @@ import { Modal } from "@/components/ui";
 
 Includes: backdrop (`bg-black/30`), Escape key handler, `z-50` (or `z-40` for secondary).
 
+**Scrollbar rule:** The outer fixed container must use `overflow-hidden`. Only the modal body (`flex-1 overflow-y-auto`) should scroll. Never nest multiple `overflow-y-auto` containers.
+
 ### Visit Form Components
 
 ```tsx
@@ -337,13 +339,11 @@ Extracted from 8 visit form files — single source of truth.
 ### Main app header (Dashboard, Visits)
 
 ```tsx
-<header className="bg-bg-card border-b-2 border-accent shadow-sm">
-  <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
-    <div className="flex items-center gap-6">
-      <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">
-        Schools
-      </h1>
-      <nav className="flex gap-4">
+<header className="bg-bg-card border-b border-border shadow-sm">
+  <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-y-2">
+    <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+      <img src="..." alt="Avanti Fellows" className="h-8 sm:h-10 shrink-0" />
+      <nav className="flex gap-3 sm:gap-4">
         {/* Active tab */}
         <Link className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1">
           Schools
@@ -354,7 +354,7 @@ Extracted from 8 visit form files — single source of truth.
         </Link>
       </nav>
     </div>
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-3 sm:gap-4">
       <Link className="text-sm font-bold text-accent hover:text-accent-hover uppercase">Admin</Link>
       <span className="text-sm text-text-muted font-mono hidden sm:inline">{email}</span>
       <Link className="text-sm font-bold text-danger hover:text-danger/80">Sign out</Link>
@@ -362,6 +362,8 @@ Extracted from 8 visit form files — single source of truth.
   </div>
 </header>
 ```
+
+**Mobile notes:** Use `flex-wrap` + `gap-y-2` so items wrap instead of colliding. Tighten gaps to `gap-3` on mobile, `sm:gap-6` on desktop. Add `shrink-0` on the logo to prevent compression.
 
 ### Sub-page header (Admin sub-pages, School detail)
 
