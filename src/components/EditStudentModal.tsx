@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { Grade } from "./StudentTable";
+import { Modal, Button } from "@/components/ui";
 
 interface Student {
   group_user_id: string;
@@ -87,7 +88,7 @@ function formatDateForInput(dateString: string | null): string {
 }
 
 const inputClassName =
-  "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
+  "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20";
 const labelClassName = "block text-sm font-medium text-gray-700";
 
 export default function EditStudentModal({
@@ -153,8 +154,6 @@ export default function EditStudentModal({
       setFormData((prev) => ({ ...prev, batch_group_id: "" }));
     }
   }, [availableBatches]);
-
-  if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,36 +239,27 @@ export default function EditStudentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div
-          className="fixed inset-0 bg-black bg-opacity-30"
-          onClick={onClose}
-        />
-        <div className="relative w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">
-              Edit Student
-            </h2>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <svg
-                className="h-6 w-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
+    <Modal open={isOpen} onClose={onClose} className="p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-gray-900">
+          Edit Student
+        </h2>
+        <Button variant="icon" onClick={onClose}>
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </Button>
+      </div>
 
           {error && (
             <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
@@ -427,8 +417,8 @@ export default function EditStudentModal({
 
             {/* Batch selection - shown when stream or grade changes */}
             {needsBatchUpdate && batches.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-                <label className={`${labelClassName} text-blue-800`}>
+              <div className="bg-hover-bg border border-accent rounded-md p-4">
+                <label className={`${labelClassName} text-accent-hover`}>
                   New Batch (required for {streamChanged && gradeChanged ? "stream and grade change" : streamChanged ? "stream change" : "grade change"})
                 </label>
                 {availableBatches.length === 0 ? (
@@ -452,7 +442,7 @@ export default function EditStudentModal({
                   </select>
                 )}
                 {availableBatches.length === 1 && (
-                  <p className="mt-1 text-xs text-blue-600">
+                  <p className="mt-1 text-xs text-accent">
                     Auto-selected: {availableBatches[0].name}
                   </p>
                 )}
@@ -466,7 +456,7 @@ export default function EditStudentModal({
                   name="isPWD"
                   checked={formData.isPWD}
                   onChange={handleChange}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
                 />
                 <span className={labelClassName}>
                   Person with Disability (PWD)
@@ -475,37 +465,34 @@ export default function EditStudentModal({
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={onClose}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
                 disabled={loading || (needsBatchUpdate && availableBatches.length === 0)}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
                 {loading ? "Saving..." : "Save Changes"}
-              </button>
+              </Button>
             </div>
           </form>
 
-          {/* Last Updated */}
-          {student.updated_at && (
-            <p className="mt-4 text-xs text-gray-400 text-right">
-              Last updated: {new Date(student.updated_at).toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
+      {/* Last Updated */}
+      {student.updated_at && (
+        <p className="mt-4 text-xs text-gray-400 text-right">
+          Last updated: {new Date(student.updated_at).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+      )}
+    </Modal>
   );
 }

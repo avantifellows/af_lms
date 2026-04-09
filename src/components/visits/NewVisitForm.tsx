@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import LoadingLink from "@/components/LoadingLink";
+import { FormLabel } from "@/components/ui";
 import {
   getAccurateLocation,
   getAccuracyStatus,
@@ -96,9 +97,9 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
 
         {/* School code display */}
         <div className="mb-6">
-          <label className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+          <FormLabel>
             School Code
-          </label>
+          </FormLabel>
           <input
             type="text"
             value={udise}
@@ -109,9 +110,9 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
 
         {/* GPS Status */}
         <div className="mb-6">
-          <label className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-2">
+          <FormLabel className="mb-2">
             Location
-          </label>
+          </FormLabel>
 
           {gpsState.status === "acquiring" && (
             <div className="flex items-center gap-3 p-4 bg-bg-card-alt border border-border">
@@ -220,14 +221,14 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
             type="button"
             onClick={handleStartVisit}
             disabled={gpsState.status !== "acquired" || isSubmitting}
-            className="flex-1 py-2.5 px-5 border border-transparent text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 rounded-lg py-2.5 px-5 border border-transparent text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? "Starting..." : "Start Visit"}
           </button>
           <LoadingLink
             href={`/school/${udise}`}
             loadingText="Going back..."
-            className="py-2.5 px-5 border border-border text-sm font-bold text-text-secondary bg-bg-card hover:bg-hover-bg disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg py-2.5 px-5 border border-border text-sm font-bold text-text-secondary bg-bg-card shadow-sm hover:bg-hover-bg active:bg-bg-card-alt transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel and go back
           </LoadingLink>

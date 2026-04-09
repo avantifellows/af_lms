@@ -1,20 +1,18 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 
 import {
   GROUP_STUDENT_DISCUSSION_CONFIG,
   VALID_GRADES,
 } from "@/lib/group-student-discussion";
+import { isPlainObject } from "@/lib/visit-form-utils";
+import { FormSection, RadioPair, RemarkField, Select, StickyProgressBar } from "@/components/ui";
 
 interface GroupStudentDiscussionFormProps {
   data: Record<string, unknown>;
   setData: (data: Record<string, unknown>) => void;
   disabled: boolean;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function getQuestionsFromData(
@@ -34,10 +32,6 @@ export default function GroupStudentDiscussionForm({
   setData,
   disabled,
 }: GroupStudentDiscussionFormProps) {
-  const [revealedRemarks, setRevealedRemarks] = useState<Set<string>>(
-    () => new Set()
-  );
-
   const grade =
     typeof data.grade === "number" && VALID_GRADES.includes(data.grade as 11 | 12)
       ? (data.grade as number)
@@ -131,15 +125,15 @@ export default function GroupStudentDiscussionForm({
       data-testid="action-renderer-group_student_discussion"
     >
       {/* Grade dropdown */}
-      <div className="border border-border p-4">
+      <FormSection spacing="">
         <label className="block text-sm font-semibold text-text-primary uppercase mb-2">
           Grade
         </label>
-        <select
+        <Select
           value={grade ?? ""}
           onChange={(e) => handleGradeChange(e.target.value)}
           disabled={disabled}
-          className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
+          className="w-full"
           data-testid="group-student-grade-select"
         >
           <option value="" disabled>
@@ -150,13 +144,12 @@ export default function GroupStudentDiscussionForm({
               {g}
             </option>
           ))}
-        </select>
-      </div>
+        </Select>
+      </FormSection>
 
       {/* Progress summary — only after grade selected */}
       {gradeSelected && (
-        <div
-          className="sticky top-12 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2"
+        <StickyProgressBar
           data-testid="group-student-discussion-progress"
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
@@ -165,16 +158,13 @@ export default function GroupStudentDiscussionForm({
               {GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length}
             </span>
           </div>
-        </div>
+        </StickyProgressBar>
       )}
 
       {/* Sections — only after grade selected */}
       {gradeSelected &&
         GROUP_STUDENT_DISCUSSION_CONFIG.sections.map((section) => (
-          <section
-            key={section.title}
-            className="border border-border p-4 space-y-4"
-          >
+          <FormSection key={section.title}>
             <h3 className="text-sm font-semibold text-text-primary uppercase">
               {section.title} Grade {grade}
             </h3>
@@ -184,8 +174,6 @@ export default function GroupStudentDiscussionForm({
               const answer = entry?.answer ?? null;
               const remark =
                 typeof entry?.remark === "string" ? entry.remark : "";
-              const remarkVisible =
-                remark.length > 0 || revealedRemarks.has(question.key);
 
               return (
                 <div key={question.key}>
@@ -194,74 +182,27 @@ export default function GroupStudentDiscussionForm({
                     <p className="mb-2 text-sm text-text-primary">
                       {question.label}
                     </p>
-                    <div className="flex items-center gap-4">
-                      <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                        <input
-                          type="radio"
-                          name={`group-student-${question.key}`}
-                          checked={answer === true}
-                          onChange={() =>
-                            handleAnswerChange(question.key, true)
-                          }
-                          disabled={disabled}
-                          className="h-4 w-4 accent-accent"
-                          data-testid={`group-student-${question.key}-yes`}
-                        />
-                        Yes
-                      </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                        <input
-                          type="radio"
-                          name={`group-student-${question.key}`}
-                          checked={answer === false}
-                          onChange={() =>
-                            handleAnswerChange(question.key, false)
-                          }
-                          disabled={disabled}
-                          className="h-4 w-4 accent-accent"
-                          data-testid={`group-student-${question.key}-no`}
-                        />
-                        No
-                      </label>
-                    </div>
+                    <RadioPair
+                      name={`group-student-${question.key}`}
+                      value={answer}
+                      onChange={(val) => handleAnswerChange(question.key, val)}
+                      disabled={disabled}
+                      yesTestId={`group-student-${question.key}-yes`}
+                      noTestId={`group-student-${question.key}-no`}
+                    />
                   </fieldset>
 
-                  {!remarkVisible && !disabled && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRevealedRemarks((current) =>
-                          new Set(current).add(question.key)
-                        );
-                      }}
-                      className="mt-2 text-xs font-medium text-accent underline hover:text-accent-hover"
-                    >
-                      Add remark
-                    </button>
-                  )}
-
-                  {remarkVisible && (
-                    <label className="mt-2 block">
-                      <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                        Remark
-                      </span>
-                      <textarea
-                        rows={2}
-                        value={remark}
-                        disabled={disabled}
-                        onChange={(e) =>
-                          handleRemarkChange(question.key, e.target.value)
-                        }
-                        placeholder="Optional remark"
-                        className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
-                        data-testid={`group-student-${question.key}-remark`}
-                      />
-                    </label>
-                  )}
+                  <RemarkField
+                    value={remark}
+                    onChange={(val) => handleRemarkChange(question.key, val)}
+                    disabled={disabled}
+                    testId={`group-student-${question.key}-remark`}
+                    defaultRevealed={remark.length > 0}
+                  />
                 </div>
               );
             })}
-          </section>
+          </FormSection>
         ))}
     </div>
   );

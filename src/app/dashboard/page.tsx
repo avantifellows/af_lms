@@ -14,6 +14,7 @@ import StudentSearch from "@/components/StudentSearch";
 import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
+import { Card } from "@/components/ui";
 
 
 const SCHOOLS_PER_PAGE = 20;
@@ -257,52 +258,53 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div className="flex items-center gap-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Schools</h1>
-              <p className="mt-1 text-sm text-gray-500">
+    <div className="min-h-screen bg-bg">
+      <header className="bg-bg-card border-b border-border shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center gap-y-2">
+          <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10 shrink-0" />
+            <div className="hidden sm:block border-l border-border pl-4">
+              <p className="text-xs text-text-muted uppercase tracking-wide">
                 {permission.role === "admin"
                   ? "Admin access"
                   : permission.level === 3
-                    ? "All schools access"
+                    ? "All schools"
                     : permission.level === 2
-                      ? `Region access: ${permission.regions?.join(", ")}`
+                      ? `Region: ${permission.regions?.join(", ")}`
                       : `${totalCount} school(s)`}
               </p>
             </div>
             {hasPMAccess && (
-              <nav className="flex gap-4 ml-8">
+              <nav className="flex gap-3 sm:gap-4">
                 <Link
                   href="/dashboard"
-                  className="text-sm font-medium text-gray-900"
+                  className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1"
                 >
                   Schools
                 </Link>
                 <Link
                   href="/visits"
-                  className="text-sm text-gray-600 hover:text-gray-900"
+                  className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
                 >
                   Visits
                 </Link>
               </nav>
             )}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             {permission.role === "admin" && (
               <Link
                 href="/admin"
-                className="text-sm text-blue-600 hover:text-blue-800"
+                className="text-sm font-bold text-accent hover:text-accent-hover uppercase"
               >
                 Admin
               </Link>
             )}
-            <span className="text-sm text-gray-500">{session.user.email}</span>
+            <span className="text-sm text-text-muted font-mono hidden sm:inline">{session.user.email}</span>
             <Link
               href="/api/auth/signout"
-              className="text-sm text-red-600 hover:text-red-800"
+              className="text-sm font-bold text-danger hover:text-danger/80"
             >
               Sign out
             </Link>
@@ -314,31 +316,31 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Stats - only show for PM users */}
         {hasPMAccess && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-sm font-medium text-gray-500">My Schools</div>
-              <div className="mt-1 text-3xl font-semibold text-gray-900">
+            <Card className="p-6 border-l-4 border-l-brand-gold">
+              <div className="text-xs font-bold text-brand-gold uppercase tracking-wide">My Schools</div>
+              <div className="mt-1 text-3xl font-bold text-text-primary font-mono">
                 {totalCount}
               </div>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="text-sm font-medium text-gray-500">Total Visits</div>
-              <div className="mt-1 text-3xl font-semibold text-gray-900">
+            </Card>
+            <Card className="p-6 border-l-4 border-l-brand-amber">
+              <div className="text-xs font-bold text-brand-amber uppercase tracking-wide">Total Visits</div>
+              <div className="mt-1 text-3xl font-bold text-text-primary font-mono">
                 {recentVisits.length}
               </div>
-            </div>
+            </Card>
           </div>
         )}
 
         {/* Search */}
         <div className="mb-6">
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
               Search Students
             </label>
             <StudentSearch />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
               Search Schools
             </label>
             <SchoolSearch defaultValue={searchQuery} />
@@ -348,7 +350,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Recent Visits - only show for PM users */}
         {hasPMAccess && recentVisits.length > 0 && (
           <div className="mb-8">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center mb-4 border-b-2 border-brand-amber pb-3">
               <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Recent Visits</h2>
               <Link
                 href="/visits"
@@ -415,8 +417,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Schools Grid */}
         <div>
           {hasPMAccess && (
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">My Schools</h2>
+            <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
+              <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">My Schools</h2>
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -432,7 +434,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   hasPMAccess ? (
                     <Link
                       href={`/school/${school.code}/visit/new`}
-                      className="inline-flex items-center px-3 py-1.5 text-sm font-bold text-text-on-accent bg-accent hover:bg-accent-hover uppercase"
+                      className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
                     >
                       Start Visit
                     </Link>
@@ -443,7 +445,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </div>
 
           {schoolsWithGrades.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-text-muted">
               {searchQuery
                 ? `No schools found matching "${searchQuery}"`
                 : "No schools found"}

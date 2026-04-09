@@ -118,7 +118,7 @@ export default function Pagination({
                   href={buildUrl(page)}
                   className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ring-1 ring-inset ring-gray-300 ${
                     page === currentPage
-                      ? "z-10 bg-blue-600 text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                      ? "z-10 bg-accent text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                       : "text-gray-900 hover:bg-gray-50"
                   }`}
                 >

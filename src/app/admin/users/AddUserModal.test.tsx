@@ -726,8 +726,8 @@ describe("AddUserModal — close/cancel", () => {
   it("calls onClose when backdrop overlay is clicked", () => {
     const { props } = renderModal();
 
-    // The backdrop is the div with bg-black bg-opacity-30
-    const backdrop = document.querySelector(".bg-black.bg-opacity-30");
+    // The backdrop is the div with aria-hidden="true" inside the Modal
+    const backdrop = document.querySelector("[aria-hidden='true']");
     expect(backdrop).toBeTruthy();
 
     fireEvent.click(backdrop!);

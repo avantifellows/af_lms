@@ -24,6 +24,7 @@ import {
 } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
 import { getActionTypeLabel, isActionType, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
+import { isPlainObject } from "@/lib/visit-form-utils";
 
 interface ActionRecord {
   id: number;
@@ -130,10 +131,6 @@ const FALLBACK_FORM_CONFIG: ActionFormConfig = {
     },
   ],
 };
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function readErrorDetails(details: unknown): string[] {
   if (!Array.isArray(details)) {
@@ -1093,7 +1090,7 @@ export default function ActionDetailForm({
             <button
               type="submit"
               disabled={isBusy}
-              className="inline-flex items-center bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {state === "saving" ? "Saving..." : "Save Now"}
             </button>
@@ -1105,7 +1102,7 @@ export default function ActionDetailForm({
                 void handleEndAction();
               }}
               disabled={isBusy}
-              className="inline-flex items-center bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {state === "acquiring"
                 ? "Getting location..."

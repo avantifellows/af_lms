@@ -36,8 +36,7 @@ describe("SchoolCard", () => {
     render(
       <SchoolCard school={school} href="/school/123" showStudentCount />
     );
-    const studentTexts = screen.getAllByText("42 students");
-    expect(studentTexts.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("42 students")).toBeInTheDocument();
   });
 
   it("does not show student count when showStudentCount=false", () => {

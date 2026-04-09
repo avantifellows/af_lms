@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Card } from "@/components/ui/Card";
 import type { ChapterAnalysisRow } from "@/types/quiz";
 
 interface Props {
@@ -27,7 +28,7 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
 
   if (chapters.length === 0) {
     return (
-      <div className="bg-bg-card border border-border">
+      <Card elevation="sm" className="overflow-hidden">
         <div className="px-4 md:px-6 py-3 md:py-4 border-b-2 border-border-accent">
           <h3 className="font-bold uppercase tracking-wide text-sm md:text-base text-text-primary">
             Chapter Analysis
@@ -36,7 +37,7 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
         <div className="p-4 md:p-6">
           <p className="text-sm text-text-muted">No chapter-level data available for this test.</p>
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -59,7 +60,7 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
   };
 
   return (
-    <div className="bg-bg-card border border-border">
+    <Card elevation="sm" className="overflow-hidden">
       <div className="px-4 md:px-6 py-3 md:py-4 border-b-2 border-border-accent">
         <h3 className="font-bold uppercase tracking-wide text-sm md:text-base text-text-primary">
           Chapter Analysis
@@ -73,7 +74,7 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
             <div key={subject}>
               <button
                 onClick={() => toggleSubject(subject)}
-                className={`flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors py-1 ${
+                className={`flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors min-h-[44px] py-1 rounded-lg px-2 hover:bg-hover-bg ${
                   isOpen ? "text-accent" : "text-text-primary hover:text-accent"
                 }`}
               >
@@ -119,6 +120,6 @@ export default function ChapterAnalysisSection({ chapters }: Props) {
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Select } from "@/components/ui/Select";
 import BatchOverview from "./performance/BatchOverview";
 import TestDeepDive from "./performance/TestDeepDive";
 
@@ -104,7 +105,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
 
   if (error) {
     return (
-      <div className="p-4 bg-danger-bg border border-danger text-danger">
+      <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
         {error}
       </div>
     );
@@ -121,7 +122,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
 
   if (programs.length === 0 && grades.length === 0) {
     return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border">
+      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
         <p className="text-sm text-text-muted">No quiz data available for this school yet.</p>
       </div>
     );
@@ -164,9 +165,9 @@ export default function PerformanceTab({ schoolUdise }: Props) {
             <button
               key={prog}
               onClick={() => handleProgramChange(prog)}
-              className={`px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-bold uppercase tracking-wide transition-colors ${
+              className={`px-3 md:px-4 py-1.5 md:py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg transition-colors ${
                 selectedProgram === prog
-                  ? "bg-accent text-text-on-accent"
+                  ? "bg-accent text-text-on-accent shadow-sm"
                   : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
               }`}
             >
@@ -182,8 +183,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
             Grade
           </label>
-          <select
-            className="px-3 py-2 text-sm bg-bg-card border-2 border-border text-text-primary focus:outline-none focus:border-accent transition-colors"
+          <Select
             value={selectedGrade ?? ""}
             onChange={handleGradeChange}
           >
@@ -193,7 +193,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
                 Grade {g}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       )}
 
@@ -203,9 +203,9 @@ export default function PerformanceTab({ schoolUdise }: Props) {
             <button
               key={cat}
               onClick={() => setTestCategory(cat)}
-              className={`px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm font-bold uppercase tracking-wide transition-colors ${
+              className={`px-3 md:px-4 py-1.5 md:py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg transition-colors ${
                 testCategory === cat
-                  ? "bg-accent text-text-on-accent"
+                  ? "bg-accent text-text-on-accent shadow-sm"
                   : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
               }`}
             >
@@ -217,11 +217,11 @@ export default function PerformanceTab({ schoolUdise }: Props) {
 
       {/* Content */}
       {showProgramTabs && !selectedProgram ? (
-        <div className="p-8 text-center bg-bg-card-alt border border-border">
+        <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
           <p className="text-sm text-text-muted">Select a program to view performance data.</p>
         </div>
       ) : selectedGrade == null ? (
-        <div className="p-8 text-center bg-bg-card-alt border border-border">
+        <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
           <p className="text-sm text-text-muted">Select a grade to view performance data.</p>
         </div>
       ) : deepDiveSession ? (

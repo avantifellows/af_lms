@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Modal, Input, Select, Button } from "@/components/ui";
 
 interface UserPermission {
   id: number;
@@ -34,7 +35,6 @@ interface School {
   region: string;
 }
 
-const inputClassName = "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const labelClassName = "block text-sm font-medium text-gray-700";
 
 export default function AddUserModal({ user, regions, onClose, onSave }: AddUserModalProps) {
@@ -162,19 +162,16 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black bg-opacity-30" onClick={onClose} />
-        <div className="relative w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+    <Modal open={true} onClose={onClose} className="p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xl font-semibold text-gray-900">
               {isEditing ? "Edit User" : "Add User"}
             </h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <Button variant="icon" onClick={onClose}>
               <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </Button>
           </div>
 
           {error && (
@@ -184,24 +181,24 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className={labelClassName}>Email</label>
-              <input
+              <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isEditing}
                 required
-                className={`${inputClassName} ${isEditing ? "bg-gray-100" : ""}`}
+                className={isEditing ? "bg-gray-100 mt-1" : "mt-1"}
               />
             </div>
 
             <div>
               <label className={labelClassName}>Full Name</label>
-              <input
+              <Input
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="e.g. Priya Sharma"
-                className={inputClassName}
+                className="mt-1"
               />
               <p className="mt-1 text-xs text-gray-500">
                 Display name shown in teacher dropdowns and reports
@@ -210,16 +207,16 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
 
             <div>
               <label className={labelClassName}>Role</label>
-              <select
+              <Select
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                className={inputClassName}
+                className="mt-1 w-full"
               >
                 <option value="teacher">Teacher - Student management view</option>
                 <option value="program_manager">Program Manager - School visits + student management</option>
                 <option value="program_admin">Program Admin - Scoped oversight with read-only visits</option>
                 <option value="admin">Admin - Full access + user management</option>
-              </select>
+              </Select>
               <p className="mt-1 text-xs text-gray-500">
                 {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools"}
                 {role === "program_admin" && "Program Admins can oversee scoped schools; visit workflows are read-only"}
@@ -236,15 +233,15 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
             <>
             <div>
               <label className={labelClassName}>School Access</label>
-              <select
+              <Select
                 value={level}
                 onChange={(e) => setLevel(Number(e.target.value))}
-                className={inputClassName}
+                className="mt-1 w-full"
               >
                 <option value={3}>All Schools - Access to all JNV schools</option>
                 <option value={2}>Region - Access to schools in specific regions</option>
                 <option value={1}>School - Access to specific schools</option>
-              </select>
+              </Select>
             </div>
 
             <div className="flex items-center">
@@ -253,7 +250,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                 id="readOnly"
                 checked={readOnly}
                 onChange={(e) => setReadOnly(e.target.checked)}
-                className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                className="h-4 w-4 text-accent rounded border-gray-300"
               />
               <label htmlFor="readOnly" className="ml-2 text-sm text-gray-800">
                 Read-only access (cannot edit students)
@@ -275,7 +272,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                       type="checkbox"
                       checked={selectedPrograms.includes(program.id)}
                       onChange={() => toggleProgram(program.id)}
-                      className="h-4 w-4 text-blue-600 rounded border-gray-300 mt-0.5"
+                      className="h-4 w-4 text-accent rounded border-gray-300 mt-0.5"
                     />
                     <div className="ml-3">
                       <span className="text-sm font-medium text-gray-900">
@@ -308,7 +305,7 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                         type="checkbox"
                         checked={selectedRegions.includes(region)}
                         onChange={() => toggleRegion(region)}
-                        className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                        className="h-4 w-4 text-accent rounded border-gray-300"
                       />
                       <span className="ml-2 text-sm text-gray-800">{region}</span>
                     </label>
@@ -325,12 +322,12 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
             {level === 1 && (
               <div>
                 <label className={labelClassName}>Assign Schools</label>
-                <input
+                <Input
                   type="text"
                   value={schoolSearch}
                   onChange={(e) => setSchoolSearch(e.target.value)}
                   placeholder="Search schools by name or code..."
-                  className={inputClassName}
+                  className="mt-1"
                 />
                 {searchResults.length > 0 && (
                   <div className="mt-1 max-h-40 overflow-y-auto border rounded-md bg-white shadow-lg">
@@ -352,13 +349,13 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                     {selectedSchools.map((code) => (
                       <span
                         key={code}
-                        className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-sm text-blue-800"
+                        className="inline-flex items-center rounded-full bg-hover-bg px-3 py-1 text-sm text-accent-hover"
                       >
                         {code}
                         <button
                           type="button"
                           onClick={() => removeSchool(code)}
-                          className="ml-2 text-blue-600 hover:text-blue-800"
+                          className="ml-2 text-accent hover:text-accent-hover"
                         >
                           &times;
                         </button>
@@ -374,24 +371,23 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
 
 
             <div className="mt-6 flex justify-end gap-3">
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={onClose}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
+                size="sm"
                 disabled={loading}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
               >
                 {loading ? "Saving..." : isEditing ? "Save Changes" : "Add User"}
-              </button>
+              </Button>
             </div>
           </form>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

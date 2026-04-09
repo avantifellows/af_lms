@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { Card } from "@/components/ui/Card";
 import type { StudentDeepDiveRow, StudentSubjectScore } from "@/types/quiz";
 
 interface Props {
@@ -102,7 +103,7 @@ export default function StudentResultsTable({ students }: Props) {
   };
 
   return (
-    <div className="bg-bg-card border border-border">
+    <Card elevation="sm" className="overflow-hidden">
       <div className="px-4 md:px-6 py-3 md:py-4 flex items-center justify-between border-b-2 border-border-accent">
         <h3 className="font-bold uppercase tracking-wide text-sm md:text-base text-text-primary">
           Student Results
@@ -211,6 +212,6 @@ export default function StudentResultsTable({ students }: Props) {
           </tbody>
         </table>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -8,6 +8,7 @@ import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
 import ActionPointList from "@/components/visits/ActionPointList";
 import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
 import { statusBadgeClass } from "@/lib/visit-actions";
+import { Card } from "@/components/ui";
 
 interface Visit {
   id: number;
@@ -163,7 +164,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
         </Link>
       </div>
 
-      <div className="bg-bg-card border border-border p-4 sm:p-6 mb-6">
+      <Card elevation="sm" className="p-4 sm:p-6 mb-6">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">
@@ -215,7 +216,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
             />
           </div>
         </div>
-      </div>
+      </Card>
 
       <div className="mb-6">
         {visit.status === "completed" ? (

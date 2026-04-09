@@ -91,7 +91,7 @@ export default function LogSessionModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-50 overflow-hidden">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black bg-opacity-30"
@@ -127,7 +127,7 @@ export default function LogSessionModal({
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
                 />
               </div>
 
@@ -143,7 +143,7 @@ export default function LogSessionModal({
                     max={12}
                     value={hours}
                     onChange={(e) => setHours(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-16 rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900 text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-16 rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900 text-center focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-sm text-gray-500">hrs</span>
                   <input
@@ -152,7 +152,7 @@ export default function LogSessionModal({
                     max={59}
                     value={minutes}
                     onChange={(e) => setMinutes(Math.min(59, Math.max(0, parseInt(e.target.value) || 0)))}
-                    className="w-16 rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900 text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-16 rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900 text-center focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-sm text-gray-500">mins</span>
                 </div>
@@ -200,7 +200,7 @@ export default function LogSessionModal({
                           onClick={() => hasTopics && toggleChapterExpand(chapter.id)}
                           disabled={!hasTopics}
                           className={`flex-1 flex items-center gap-2 text-left ${
-                            hasTopics ? "hover:text-blue-600" : "opacity-50 cursor-not-allowed"
+                            hasTopics ? "hover:text-accent" : "opacity-50 cursor-not-allowed"
                           }`}
                         >
                           {hasTopics && (
@@ -229,7 +229,7 @@ export default function LogSessionModal({
                           </span>
                         )}
                         {selectedCount > 0 && (
-                          <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">
+                          <span className="px-1.5 py-0.5 bg-hover-bg text-accent text-xs rounded">
                             {selectedCount} topics
                           </span>
                         )}
@@ -259,7 +259,7 @@ export default function LogSessionModal({
                                   type="checkbox"
                                   checked={isSelected}
                                   onChange={() => toggleTopic(topic.id)}
-                                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  className="w-4 h-4 rounded border-gray-300 text-accent focus:ring-accent/20"
                                 />
                                 <span className="flex-1 text-sm text-gray-700">
                                   {topic.name}
@@ -312,7 +312,7 @@ export default function LogSessionModal({
             <button
               onClick={handleSave}
               disabled={selectedTopicIds.size === 0 && completedChapterIds.size === 0}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Save Session
             </button>

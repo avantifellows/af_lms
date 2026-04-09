@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { ACTION_TYPE_VALUES, getActionTypeLabel, type ActionType } from "@/lib/visit-actions";
+import { Modal } from "@/components/ui";
 
 interface ActionTypePickerModalProps {
   isOpen: boolean;
@@ -25,17 +26,17 @@ export default function ActionTypePickerModal({
     return selectedType !== "" && !submitting;
   }, [selectedType, submitting]);
 
-  if (!isOpen) {
-    return null;
-  }
-
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4">
+    <Modal
+      open={isOpen}
+      onClose={submitting ? undefined : onClose}
+      zIndex="z-40"
+      className="max-h-[90vh] flex flex-col"
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="action-type-picker-title"
-        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-bg-card shadow-xl"
       >
         <div className="border-b-4 border-border-accent px-5 py-4 shrink-0">
           <h3 id="action-type-picker-title" className="text-base font-bold uppercase tracking-tight text-text-primary">
@@ -88,12 +89,12 @@ export default function ActionTypePickerModal({
               }
             }}
             disabled={!canSubmit}
-            className="inline-flex items-center bg-accent px-3 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center rounded-lg bg-accent px-3 py-2 text-sm font-bold uppercase text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? (submittingLabel ?? "Adding...") : "Add"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

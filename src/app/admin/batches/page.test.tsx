@@ -109,16 +109,14 @@ describe("BatchManagementPage (server component)", () => {
     expect(screen.getByText("Batch Metadata")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Configure stream and grade metadata for program batches"
+        "Configure stream and grade metadata"
       )
     ).toBeInTheDocument();
     expect(screen.getByText("admin@avantifellows.org")).toBeInTheDocument();
 
-    // Navigation
-    expect(screen.getByText("Back to Admin").closest("a")).toHaveAttribute(
-      "href",
-      "/admin"
-    );
+    // Navigation — back arrow links to /admin
+    const backLink = document.querySelector('a[href="/admin"]');
+    expect(backLink).toBeInTheDocument();
 
     // BatchList receives correct props
     const batchList = screen.getByTestId("batch-list");

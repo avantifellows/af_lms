@@ -119,19 +119,19 @@ describe("SchoolList", () => {
 
       // Check stats by finding the label and then checking sibling count
       const coeLabel = screen.getByText("CoE Schools");
-      const coeCard = coeLabel.closest("div.bg-white")!;
+      const coeCard = coeLabel.closest("div.p-4")!;
       expect(within(coeCard).getByText("2")).toBeInTheDocument();
 
       const nodalLabel = screen.getByText("Nodal Schools");
-      const nodalCard = nodalLabel.closest("div.bg-white")!;
+      const nodalCard = nodalLabel.closest("div.p-4")!;
       expect(within(nodalCard).getByText("1")).toBeInTheDocument();
 
       const nvsLabel = screen.getByText("NVS Schools");
-      const nvsCard = nvsLabel.closest("div.bg-white")!;
+      const nvsCard = nvsLabel.closest("div.p-4")!;
       expect(within(nvsCard).getByText("1")).toBeInTheDocument();
 
       const noneLabel = screen.getByText("No Programs");
-      const noneCard = noneLabel.closest("div.bg-white")!;
+      const noneCard = noneLabel.closest("div.p-4")!;
       expect(within(noneCard).getByText("1")).toBeInTheDocument();
     });
   });
@@ -342,8 +342,8 @@ describe("SchoolList", () => {
       await user.click(editButtons[0]);
       expect(screen.getByText("Edit Programs")).toBeInTheDocument();
 
-      // The backdrop is the div with bg-black bg-opacity-30
-      const backdrop = document.querySelector(".bg-opacity-30");
+      // The backdrop is the div with aria-hidden="true" inside the Modal
+      const backdrop = document.querySelector("[aria-hidden='true']");
       expect(backdrop).not.toBeNull();
       await user.click(backdrop!);
       expect(screen.queryByText("Edit Programs")).not.toBeInTheDocument();

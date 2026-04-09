@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/Card";
 import StatCard from "../StatCard";
 import type { BatchOverviewData, TestTrendPoint } from "@/types/quiz";
 import type { TestCategory } from "../PerformanceTab";
@@ -37,9 +38,10 @@ function TestCard({
       : null;
 
   return (
-    <div
+    <Card
+      elevation="sm"
       onClick={onClick}
-      className="bg-bg-card border border-border p-4 cursor-pointer transition-colors hover:border-accent/50 hover:bg-hover-bg"
+      className="p-4 cursor-pointer transition-colors hover:border-accent/50 hover:bg-hover-bg"
     >
       <div className="flex items-start justify-between mb-3">
         <div className="min-w-0 flex-1">
@@ -64,7 +66,7 @@ function TestCard({
           )}
         </p>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -107,7 +109,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, progra
 
   if (error) {
     return (
-      <div className="p-4 bg-danger-bg border border-danger text-danger">
+      <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
         {error}
       </div>
     );
@@ -115,7 +117,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, progra
 
   if (!data || data.tests.length === 0) {
     return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border">
+      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
         <p className="text-sm text-text-muted">No quiz data available for this grade yet.</p>
       </div>
     );
@@ -129,7 +131,7 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, progra
 
   if (tests.length === 0) {
     return (
-      <div className="p-8 text-center bg-bg-card-alt border border-border">
+      <div className="p-8 text-center bg-bg-card-alt border border-border rounded-lg shadow-sm">
         <p className="text-sm text-text-muted">
           No {testCategory === "chapter" ? "chapter" : "full"} tests available for this grade yet.
         </p>
@@ -144,10 +146,10 @@ export default function BatchOverview({ schoolUdise, grade, testCategory, progra
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-        <StatCard label="Tests Conducted" value={tests.length} />
-        <StatCard label="Avg Attendance" value={avgAttendance} />
+        <StatCard label="Tests Conducted" value={tests.length} color="brand-coral" />
+        <StatCard label="Avg Attendance" value={avgAttendance} color="brand-amber" />
         {totalEnrolled != null && (
-          <StatCard label="Total Enrolled" value={totalEnrolled} />
+          <StatCard label="Total Enrolled" value={totalEnrolled} color="brand-gold" />
         )}
       </div>
 
