@@ -21,6 +21,7 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
+import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 
 interface Student {
   group_user_id: string;
@@ -386,6 +387,10 @@ export default async function SchoolPage({ params }: PageProps) {
     <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />
   );
 
+  const quizSessionsContent = (
+    <QuizSessionsTab schoolId={school.id} />
+  );
+
   const curriculumContent = (
     <CurriculumTab
       schoolCode={school.code}
@@ -399,6 +404,7 @@ export default async function SchoolPage({ params }: PageProps) {
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
+    { id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent },
     ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
