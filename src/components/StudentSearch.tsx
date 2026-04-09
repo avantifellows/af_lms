@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { Input } from "@/components/ui";
 
 interface StudentSearchResult {
   user_id: string;
@@ -53,13 +54,13 @@ export default function StudentSearch({ schoolBasePath = "/school" }: StudentSea
   return (
     <div className="relative">
       <div className="relative">
-        <input
+        <Input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => query.length >= 2 && setShowResults(true)}
           placeholder="Search students by name, ID, or phone..."
-          className="w-full rounded-md border border-gray-300 px-4 py-2 pl-10 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="pl-10"
         />
         <svg
           className="absolute left-3 top-2.5 h-4 w-4 text-gray-400"
@@ -76,7 +77,7 @@ export default function StudentSearch({ schoolBasePath = "/school" }: StudentSea
         </svg>
         {loading && (
           <div className="absolute right-3 top-2.5">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-accent" />
           </div>
         )}
       </div>
@@ -125,7 +126,7 @@ export default function StudentSearch({ schoolBasePath = "/school" }: StudentSea
                           <span>Phone: {student.phone}</span>
                         )}
                       </div>
-                      <div className="mt-1 text-xs text-blue-600">
+                      <div className="mt-1 text-xs text-accent">
                         {student.school_name}
                       </div>
                     </Link>

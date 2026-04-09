@@ -133,7 +133,7 @@ describe("getProgressColorClass", () => {
       isChapterComplete: false,
       chapterCompletedDate: null,
     };
-    expect(getProgressColorClass(progress)).toBe("text-blue-600");
+    expect(getProgressColorClass(progress)).toBe("text-accent");
   });
 
   it("returns yellow for partial progress", () => {

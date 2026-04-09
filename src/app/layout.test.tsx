@@ -5,6 +5,10 @@ import { render, screen } from "@testing-library/react";
 
 vi.mock("./globals.css", () => ({}));
 
+vi.mock("next/font/google", () => ({
+  Inter: () => ({ variable: "--font-inter" }),
+}));
+
 vi.mock("@/components/Providers", () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) => (

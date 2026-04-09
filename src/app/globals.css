@@ -1,32 +1,46 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --font-geist-sans: Arial, Helvetica, sans-serif;
+  --background: #f5efe8;
+  --foreground: #261410;
+  --font-geist-sans: var(--font-inter), Arial, Helvetica, sans-serif;
   --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
 
-  /* Ledger UI design tokens */
-  --color-accent: #059669;
-  --color-accent-hover: #047857;
-  --color-bg: #F0F7F4;
-  --color-bg-card: #FFFFFF;
-  --color-bg-card-alt: #F5FAF7;
-  --color-bg-input: #FFFFFF;
-  --color-hover-bg: #E6F2EC;
-  --color-border: #D1E7DD;
-  --color-border-accent: #059669;
-  --color-text-primary: #2A2A2A;
-  --color-text-secondary: #6B6560;
-  --color-text-muted: #9A948D;
+  /* Avanti Fellows brand palette — matching AF HR internal app */
+  --color-accent: #ad2f2f;
+  --color-accent-hover: #8a2525;
+  --color-bg: #f5efe8;
+  --color-bg-card: #fffaf5;
+  --color-bg-card-alt: #f3ece5;
+  --color-bg-input: #ffffff;
+  --color-hover-bg: rgba(173, 47, 47, 0.06);
+  --color-border: rgba(38, 20, 16, 0.15);
+  --color-border-accent: #ad2f2f;
+  --color-text-primary: #261410;
+  --color-text-secondary: #685851;
+  --color-text-muted: #685851;
   --color-text-on-accent: #FFFFFF;
-  --color-danger: #ef4444;
-  --color-danger-bg: rgba(239, 68, 68, 0.08);
-  --color-success-bg: rgba(5, 150, 105, 0.08);
-  --color-warning-bg: #fef3c7;
-  --color-warning-border: #fcd34d;
-  --color-warning-text: #92400e;
+  --color-danger: #ad2f2f;
+  --color-danger-bg: rgba(173, 47, 47, 0.08);
+  --color-success: #1e6b4b;
+  --color-success-bg: rgba(30, 107, 75, 0.12);
+  --color-warning-bg: rgba(140, 90, 29, 0.08);
+  --color-warning-border: #8c5a1d;
+  --color-warning-text: #8c5a1d;
+  --color-info: #9AC4FA;
+  --color-info-bg: rgba(154, 196, 250, 0.15);
+
+  /* Brand color range — for variety across UI */
+  --color-brand-coral: #E96D57;
+  --color-brand-gold: #FFD063;
+  --color-brand-amber: #FFB763;
+  --color-brand-salmon: #FF9683;
+  --color-brand-blue: #9AC4FA;
+  --color-brand-coral-bg: rgba(233, 109, 87, 0.1);
+  --color-brand-gold-bg: rgba(255, 208, 99, 0.15);
+  --color-brand-amber-bg: rgba(255, 183, 99, 0.12);
+  --color-brand-blue-bg: rgba(154, 196, 250, 0.15);
 }
 
 @theme inline {
@@ -35,7 +49,7 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
-  /* Ledger UI tokens */
+  /* Avanti Fellows tokens */
   --color-accent: var(--color-accent);
   --color-accent-hover: var(--color-accent-hover);
   --color-bg: var(--color-bg);
@@ -51,23 +65,27 @@
   --color-text-on-accent: var(--color-text-on-accent);
   --color-danger: var(--color-danger);
   --color-danger-bg: var(--color-danger-bg);
+  --color-success: var(--color-success);
   --color-success-bg: var(--color-success-bg);
   --color-warning-bg: var(--color-warning-bg);
   --color-warning-border: var(--color-warning-border);
   --color-warning-text: var(--color-warning-text);
-}
+  --color-info: var(--color-info);
+  --color-info-bg: var(--color-info-bg);
 
-input:focus, input:focus-visible,
-select:focus, select:focus-visible,
-textarea:focus, textarea:focus-visible,
-button:focus, button:focus-visible,
-a:focus, a:focus-visible {
-  outline: none;
-  --tw-ring-shadow: 0 0 #000 !important;
+  /* Brand color range */
+  --color-brand-coral: var(--color-brand-coral);
+  --color-brand-gold: var(--color-brand-gold);
+  --color-brand-amber: var(--color-brand-amber);
+  --color-brand-salmon: var(--color-brand-salmon);
+  --color-brand-blue: var(--color-brand-blue);
+  --color-brand-coral-bg: var(--color-brand-coral-bg);
+  --color-brand-gold-bg: var(--color-brand-gold-bg);
+  --color-brand-amber-bg: var(--color-brand-amber-bg);
+  --color-brand-blue-bg: var(--color-brand-blue-bg);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

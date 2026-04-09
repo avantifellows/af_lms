@@ -41,6 +41,8 @@ interface FeedbackToast {
   message: string;
 }
 
+type SessionLifecycleState = "starts_later" | "live" | "ended" | "unknown";
+
 interface QuizTemplateOption {
   id: number;
   code: string;
@@ -110,18 +112,12 @@ function getStatusLabel(status?: string) {
   return status.toLowerCase();
 }
 
-function getStatusClasses(status?: string) {
+function getStatusTitle(status?: string) {
   const normalized = getStatusLabel(status);
-  if (normalized === "success") {
-    return "border border-border-accent bg-success-bg text-accent";
-  }
-  if (normalized === "failed") {
-    return "border border-red-200 bg-red-50 text-red-700";
-  }
-  if (normalized === "pending") {
-    return "border border-amber-200 bg-amber-50 text-amber-700";
-  }
-  return "border border-border bg-bg-card-alt text-text-secondary";
+  if (normalized === "success") return "Synced";
+  if (normalized === "failed") return "Failed";
+  if (normalized === "pending") return "Updating";
+  return "Unknown";
 }
 
 function getMetaString(
@@ -164,24 +160,52 @@ function toYesNo(value: boolean | undefined): string {
   return value ? "Yes" : "No";
 }
 
+function getSessionLifecycleState(
+  session: Pick<QuizSession, "start_time" | "end_time">
+): SessionLifecycleState {
+  if (!session.start_time || !session.end_time) return "unknown";
+
+  const startTime = new Date(session.start_time).getTime();
+  const endTime = new Date(session.end_time).getTime();
+  const now = Date.now();
+
+  if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+    return "unknown";
+  }
+
+  if (endTime <= now) return "ended";
+  if (startTime > now) return "starts_later";
+  return "live";
+}
+
+function getLifecycleLabel(state: SessionLifecycleState): string {
+  if (state === "live") return "Live Now";
+  if (state === "starts_later") return "Starts Later";
+  if (state === "ended") return "Ended";
+  return "Unknown";
+}
+
+function getLifecycleClasses(state: SessionLifecycleState): string {
+  if (state === "live") {
+    return "border border-border-accent bg-success-bg text-accent";
+  }
+  if (state === "starts_later") {
+    return "border border-sky-200 bg-sky-50 text-sky-700";
+  }
+  if (state === "ended") {
+    return "border border-border bg-bg-card-alt text-text-secondary";
+  }
+  return "border border-border bg-bg-card-alt text-text-secondary";
+}
+
 function isSessionPending(session: QuizSession | null | undefined): boolean {
   if (!session) return false;
   return getStatusLabel(getMetaString(session.meta_data, "status")) === "pending";
 }
 
 function canEndNow(session: QuizSession | null | undefined): boolean {
-  if (!session || isSessionPending(session) || !session.end_time) return false;
-
-  const now = Date.now();
-  const endTime = new Date(session.end_time).getTime();
-  if (Number.isNaN(endTime) || endTime <= now) return false;
-
-  if (!session.start_time) return true;
-
-  const startTime = new Date(session.start_time).getTime();
-  if (Number.isNaN(startTime)) return true;
-
-  return startTime <= now;
+  if (!session || isSessionPending(session)) return false;
+  return getSessionLifecycleState(session) === "live";
 }
 
 export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
@@ -397,7 +421,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          endTime: new Date().toISOString(),
+          action: "end_now",
         }),
       });
 
@@ -501,13 +525,13 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                 Class Batches
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                Start
+                Window
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                End
+                State
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                Status
+                Sync
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
                 Enabled
@@ -533,6 +557,8 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
             ) : (
               sessions.map((session) => {
                 const status = getMetaString(session.meta_data, "status");
+                const lifecycle = getSessionLifecycleState(session);
+                const testCode = getMetaString(session.meta_data, "test_code");
                 const classBatchIds = getMetaString(session.meta_data, "batch_id")
                   ?.split(",")
                   .filter(Boolean);
@@ -544,26 +570,36 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                   <tr
                     key={session.id}
                     onClick={() => setSelectedSession(session)}
-                    className="cursor-pointer hover:bg-hover-bg"
+                    className={`cursor-pointer hover:bg-hover-bg ${
+                      lifecycle === "ended" ? "opacity-80" : ""
+                    }`}
                   >
-                    <td className="px-4 py-4 text-sm font-semibold text-text-primary">
-                      {session.name}
+                    <td className="px-4 py-4 text-sm">
+                      <div className="font-semibold text-text-primary">{session.name}</div>
+                      {testCode ? (
+                        <div className="mt-1 font-mono text-xs text-text-secondary">
+                          {testCode}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-4 text-sm text-text-secondary">
                       {classBatchNames?.length ? classBatchNames.join(", ") : "-"}
                     </td>
                     <td className="px-4 py-4 text-sm font-mono text-text-secondary">
-                      {formatDateTime(session.start_time)}
-                    </td>
-                    <td className="px-4 py-4 text-sm font-mono text-text-secondary">
-                      {formatDateTime(session.end_time)}
+                      <div>Start {formatDateTime(session.start_time)}</div>
+                      <div className="mt-1">End {formatDateTime(session.end_time)}</div>
                     </td>
                     <td className="px-4 py-4 text-sm">
                       <span
-                        className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getStatusClasses(status)}`}
+                        className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
+                          lifecycle
+                        )}`}
                       >
-                        {getStatusLabel(status)}
+                        {getLifecycleLabel(lifecycle)}
                       </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm">
+                      <ProcessingStatusDot status={status} />
                     </td>
                     <td className="px-4 py-4 text-sm">
                       <span
@@ -676,64 +712,66 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
 
             return (
               <>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!currentSession) return;
-              setEditingSession(currentSession);
-              setMenuState(null);
-            }}
-            disabled={pending || busy}
-            className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-          >
-            Edit
-          </button>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!currentSession) return;
-              handleToggleEnabled(currentSession);
-              setMenuState(null);
-            }}
-            disabled={pending || busy}
-            className="flex w-full items-center justify-between px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-          >
-            <span>{enabled ? "Disable Session" : "Enable Session"}</span>
-            <span
-              className={`text-base leading-none ${
-                enabled ? "text-accent" : "text-red-700"
-              }`}
-              aria-hidden="true"
-            >
-              {enabled ? "✓" : "✕"}
-            </span>
-          </button>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!currentSession) return;
-              handleEndNow(currentSession);
-              setMenuState(null);
-            }}
-            disabled={!endNowAvailable || busy}
-            className="flex w-full items-center justify-between px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-          >
-            <span>End Now</span>
-            <span className="text-base leading-none text-amber-700" aria-hidden="true">
-              ⏱
-            </span>
-          </button>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              handleRegenerate(menuState.id);
-              setMenuState(null);
-            }}
-            disabled={pending || busy}
-            className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-          >
-            Regenerate
-          </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!currentSession) return;
+                    setEditingSession(currentSession);
+                    setMenuState(null);
+                  }}
+                  disabled={pending || busy}
+                  className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!currentSession) return;
+                    handleToggleEnabled(currentSession);
+                    setMenuState(null);
+                  }}
+                  disabled={pending || busy}
+                  className="flex w-full items-center justify-between px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                >
+                  <span>{enabled ? "Disable Session" : "Enable Session"}</span>
+                  <span
+                    className={`text-base leading-none ${
+                      enabled ? "text-accent" : "text-red-700"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {enabled ? "✓" : "✕"}
+                  </span>
+                </button>
+                {endNowAvailable ? (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!currentSession) return;
+                      handleEndNow(currentSession);
+                      setMenuState(null);
+                    }}
+                    disabled={busy}
+                    className="flex w-full items-center justify-between px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                  >
+                    <span>End Now</span>
+                    <span className="text-base leading-none text-amber-700" aria-hidden="true">
+                      ⏱
+                    </span>
+                  </button>
+                ) : null}
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleRegenerate(menuState.id);
+                    setMenuState(null);
+                  }}
+                  disabled={pending || busy}
+                  className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                >
+                  Regenerate
+                </button>
               </>
             );
           })()}
@@ -1787,6 +1825,7 @@ function QuizSessionDetailsModal({
   }, [onClose]);
 
   const parentId = getMetaString(session.meta_data, "parent_id");
+  const lifecycle = getSessionLifecycleState(session);
   const classBatchIds = getMetaString(session.meta_data, "batch_id")
     ?.split(",")
     .filter(Boolean);
@@ -1833,9 +1872,10 @@ function QuizSessionDetailsModal({
             <div className="grid gap-4 sm:grid-cols-2">
               <InfoRow label="Session ID" value={String(session.id)} mono />
               <InfoRow label="Session Name" value={session.name} />
+              <InfoRow label="Window State" value={getLifecycleLabel(lifecycle)} />
               <InfoRow
-                label="Status"
-                value={getStatusLabel(getMetaString(session.meta_data, "status"))}
+                label="Sync Status"
+                value={getStatusTitle(getMetaString(session.meta_data, "status"))}
               />
               <InfoRow
                 label="Parent Batch"
@@ -1957,6 +1997,35 @@ function QuizSessionDetailsModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProcessingStatusDot({ status }: { status?: string }) {
+  const normalized = getStatusLabel(status);
+  const title = getStatusTitle(status);
+
+  if (normalized === "pending") {
+    return (
+      <div className="flex items-center" title={title} aria-label={title}>
+        <span className="relative flex h-3 w-3">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
+        </span>
+      </div>
+    );
+  }
+
+  const toneClass =
+    normalized === "success"
+      ? "bg-accent"
+      : normalized === "failed"
+        ? "bg-danger"
+        : "bg-text-muted";
+
+  return (
+    <div className="flex items-center" title={title} aria-label={title}>
+      <span className={`inline-flex h-3 w-3 rounded-full ${toneClass}`} />
     </div>
   );
 }

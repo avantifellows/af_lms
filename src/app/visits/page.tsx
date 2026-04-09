@@ -9,6 +9,7 @@ import {
   isScopedVisitsRole,
 } from "@/lib/visits-policy";
 import Link from "next/link";
+import { Card, Input, Select, FormLabel, Button } from "@/components/ui";
 
 interface Visit {
   id: number;
@@ -150,8 +151,48 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
   const completed = visits.filter((v) => v.status === "completed");
 
   return (
-    <main className="min-h-screen bg-bg">
-      <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
+    <div className="min-h-screen bg-bg">
+      <header className="bg-bg-card border-b border-border shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex justify-between items-center">
+          <div className="flex items-center gap-6">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="https://cdn.avantifellows.org/af_logos/avanti_logo_black_text.webp" alt="Avanti Fellows" className="h-8 sm:h-10" />
+            <nav className="flex gap-4">
+              <Link
+                href="/dashboard"
+                className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
+              >
+                Schools
+              </Link>
+              <Link
+                href="/visits"
+                className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1"
+              >
+                Visits
+              </Link>
+            </nav>
+          </div>
+          <div className="flex items-center gap-4">
+            {permission.role === "admin" && (
+              <Link
+                href="/admin"
+                className="text-sm font-bold text-accent hover:text-accent-hover uppercase"
+              >
+                Admin
+              </Link>
+            )}
+            <span className="text-sm text-text-muted font-mono hidden sm:inline">{session.user.email}</span>
+            <Link
+              href="/api/auth/signout"
+              className="text-sm font-bold text-danger hover:text-danger/80"
+            >
+              Sign out
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <main className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-6 border-b-4 border-border-accent pb-4">
           <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">All Visits</h1>
           <div className="text-sm text-text-secondary font-mono">
@@ -160,77 +201,77 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
         </div>
 
         {isScopedRole && (
-          <form method="get" className="mb-6 bg-bg-card border border-border p-4">
+          <form method="get">
+          <Card elevation="sm" className="mb-6 p-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <label htmlFor="school_code" className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+                <FormLabel htmlFor="school_code">
                   School Code
-                </label>
-                <input
+                </FormLabel>
+                <Input
                   id="school_code"
                   name="school_code"
                   defaultValue={scopedFilters.schoolCode || ""}
                   placeholder="e.g. 70705"
-                  className="w-full border-2 border-border px-3 py-2 text-sm bg-bg-input focus:border-accent"
                 />
               </div>
               <div>
-                <label htmlFor="status" className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+                <FormLabel htmlFor="status">
                   Status
-                </label>
-                <select
+                </FormLabel>
+                <Select
                   id="status"
                   name="status"
                   defaultValue={scopedFilters.status || ""}
-                  className="w-full border-2 border-border px-3 py-2 text-sm bg-bg-input focus:border-accent"
                 >
                   <option value="">All</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>
-                </select>
+                </Select>
               </div>
               <div>
-                <label htmlFor="pm_email" className="block text-xs font-bold uppercase tracking-wide text-text-muted mb-1">
+                <FormLabel htmlFor="pm_email">
                   PM Email
-                </label>
-                <input
+                </FormLabel>
+                <Input
                   id="pm_email"
                   name="pm_email"
                   type="email"
                   defaultValue={scopedFilters.pmEmail || ""}
                   placeholder="pm@avantifellows.org"
-                  className="w-full border-2 border-border px-3 py-2 text-sm bg-bg-input focus:border-accent"
                 />
               </div>
               <div className="flex items-end gap-2 sm:col-span-1">
-                <button
+                <Button
                   type="submit"
-                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover flex-1 sm:flex-none"
+                  size="sm"
+                  className="flex-1 sm:flex-none uppercase tracking-wide"
                 >
                   Apply
-                </button>
+                </Button>
                 <Link
                   href="/visits"
-                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-secondary bg-bg-card-alt border border-border hover:bg-hover-bg flex-1 sm:flex-none"
+                  className="inline-flex items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-bold uppercase tracking-wide text-text-secondary shadow-sm hover:bg-hover-bg active:bg-bg-card-alt min-h-[36px] py-1.5 flex-1 sm:flex-none"
                 >
                   Reset
                 </Link>
               </div>
             </div>
+          </Card>
           </form>
         )}
 
         {/* In Progress Section */}
         {inProgress.length > 0 && (
           <div className="mb-8">
-            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2">
+            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-brand-amber pb-2">
               In Progress
             </h2>
 
             {/* Mobile: card layout */}
             <div className="sm:hidden space-y-3">
               {inProgress.map((visit) => (
-                <div key={visit.id} className="bg-bg-card border border-border p-4">
+                <Card key={visit.id} elevation="sm" className="p-4">
                   <div className="flex justify-between items-start gap-3 mb-3">
                     <div>
                       <div className="text-sm font-medium text-text-primary">
@@ -245,16 +286,16 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                   </div>
                   <Link
                     href={`/visits/${visit.id}`}
-                    className="inline-flex items-center justify-center w-full px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+                    className="inline-flex items-center justify-center w-full rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 min-h-[44px] py-2.5 uppercase tracking-wide"
                   >
                     Continue
                   </Link>
-                </div>
+                </Card>
               ))}
             </div>
 
             {/* Desktop: table layout */}
-            <div className="hidden sm:block bg-bg-card border border-border overflow-hidden">
+            <Card elevation="sm" className="hidden sm:block overflow-hidden">
               <table className="min-w-full">
                 <thead className="bg-bg-card-alt border-b-2 border-border-accent">
                   <tr>
@@ -302,7 +343,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                         <Link
                           href={`/visits/${visit.id}`}
-                          className="inline-flex items-center px-3 py-1 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+                          className="inline-flex items-center rounded-lg bg-accent px-3 py-1 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
                         >
                           Continue
                         </Link>
@@ -311,19 +352,19 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </Card>
           </div>
         )}
 
         {/* Completed Section */}
         {completed.length > 0 && (
           <div>
-            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-border-accent pb-2">Completed</h2>
+            <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide mb-4 border-b-2 border-brand-gold pb-2">Completed</h2>
 
             {/* Mobile: card layout */}
             <div className="sm:hidden space-y-3">
               {completed.map((visit) => (
-                <div key={visit.id} className="bg-bg-card border border-border p-4">
+                <Card key={visit.id} elevation="sm" className="p-4">
                   <div className="mb-3">
                     <div className="text-sm font-medium text-text-primary">
                       {visit.school_name || visit.school_code}
@@ -340,12 +381,12 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                   >
                     View
                   </Link>
-                </div>
+                </Card>
               ))}
             </div>
 
             {/* Desktop: table layout */}
-            <div className="hidden sm:block bg-bg-card border border-border overflow-hidden">
+            <Card elevation="sm" className="hidden sm:block overflow-hidden">
               <table className="min-w-full">
                 <thead className="bg-bg-card-alt border-b-2 border-border-accent">
                   <tr>
@@ -402,7 +443,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </Card>
           </div>
         )}
 
@@ -417,7 +458,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
             </Link>
           </div>
         )}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

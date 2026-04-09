@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { statusBadgeClass } from "@/lib/visit-actions";
+import { Card } from "@/components/ui";
 
 interface Tab {
   id: string;
@@ -22,16 +23,16 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
 
   return (
     <div>
-      <div className="border-b-2 border-border mb-6 overflow-x-auto">
-        <nav className="-mb-px flex space-x-4 sm:space-x-8" aria-label="Tabs">
+      <div className="border-b-2 border-border-accent mb-6 overflow-x-auto">
+        <nav className="-mb-px flex space-x-4 sm:space-x-6" aria-label="Tabs">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`whitespace-nowrap py-4 px-1 border-b-2 text-xs sm:text-sm uppercase font-bold ${
+              className={`whitespace-nowrap min-h-[48px] py-3 px-1 border-b-2 text-xs sm:text-sm uppercase tracking-wide font-bold transition-colors ${
                 activeTab === tab.id
                   ? "border-accent text-accent"
-                  : "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
+                  : "border-transparent text-text-muted hover:text-text-primary hover:border-border"
               }`}
             >
               {tab.label}
@@ -64,7 +65,7 @@ export function VisitHistorySection({ visits, schoolCode, canEdit = false }: Vis
         {canEdit && (
           <Link
             href={`/school/${schoolCode}/visit/new`}
-            className="inline-flex items-center mt-4 px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+            className="inline-flex items-center mt-4 rounded-lg px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
           >
             Start First Visit
           </Link>
@@ -74,13 +75,13 @@ export function VisitHistorySection({ visits, schoolCode, canEdit = false }: Vis
   }
 
   return (
-    <div className="bg-bg-card border border-border p-6 mb-6">
+    <Card elevation="sm" className="p-6 mb-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
         <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Visit History</h2>
         {canEdit && (
           <Link
             href={`/school/${schoolCode}/visit/new`}
-            className="inline-flex items-center px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent hover:bg-accent-hover"
+            className="inline-flex items-center rounded-lg px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
           >
             Start New Visit
           </Link>
@@ -132,6 +133,6 @@ export function VisitHistorySection({ visits, schoolCode, canEdit = false }: Vis
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }

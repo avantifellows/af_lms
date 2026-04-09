@@ -3,13 +3,33 @@
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button, Card, Input } from "@/components/ui";
+
+const IS_DEV = process.env.NODE_ENV !== "production";
+
+const DEV_PERSONAS = [
+  { key: "admin", label: "Admin", description: "Level 3, all schools" },
+  { key: "program_manager", label: "Program Manager", description: "Level 1, 2 schools" },
+  { key: "teacher", label: "Teacher", description: "Level 1, 1 school" },
+  { key: "read_only", label: "Read-Only", description: "Level 3, read-only flag" },
+] as const;
 
 export default function LoginPage() {
   const [showPasscode, setShowPasscode] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [devLoading, setDevLoading] = useState<string | null>(null);
   const router = useRouter();
+
+  const handleDevLogin = async (persona: string) => {
+    setDevLoading(persona);
+    const result = await signIn("dev-login", { persona, redirect: false });
+    setDevLoading(null);
+    if (result?.ok) {
+      router.push("/dashboard");
+    }
+  };
 
   const handlePasscodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +54,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow-lg">
+      <Card elevation="xl" className="w-full max-w-md space-y-8 p-8">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-gray-900">Avanti Fellows</h1>
           <p className="mt-2 text-sm text-gray-600">Student Enrollment Management</p>
@@ -82,6 +102,33 @@ export default function LoginPage() {
             >
               Enter School Passcode
             </button>
+
+            {IS_DEV && (
+              <>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="bg-white px-2 text-gray-500">dev login</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {DEV_PERSONAS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => handleDevLogin(p.key)}
+                      disabled={devLoading !== null}
+                      className="rounded-lg border border-dashed border-orange-300 bg-orange-50 px-3 py-2 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 transition-colors"
+                    >
+                      {devLoading === p.key ? "..." : p.label}
+                      <span className="block text-[10px] font-normal text-orange-500">{p.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <form onSubmit={handlePasscodeSubmit} className="mt-8 space-y-4">
@@ -89,25 +136,26 @@ export default function LoginPage() {
               <label htmlFor="passcode" className="block text-sm font-medium text-gray-700">
                 School Passcode
               </label>
-              <input
+              <Input
                 id="passcode"
                 type="text"
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                 placeholder="Enter 8-digit code"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-lg tracking-widest shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1 text-center text-lg tracking-widest"
                 maxLength={8}
               />
               {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
             </div>
 
-            <button
+            <Button
               type="submit"
               disabled={passcode.length !== 8 || loading}
-              className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 transition-colors"
+              className="w-full"
+              size="lg"
             >
               {loading ? "Verifying..." : "Continue"}
-            </button>
+            </Button>
 
             <button
               type="button"
@@ -122,7 +170,7 @@ export default function LoginPage() {
             </button>
           </form>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
+import { Card, Badge, Button, Modal, Input } from "@/components/ui";
 
 interface Student {
   group_user_id: string;
@@ -56,7 +57,7 @@ function getCategoryColor(category: string | null): string {
     case "Gen":
       return "bg-green-100 text-green-800";
     case "OBC":
-      return "bg-blue-100 text-blue-800";
+      return "bg-hover-bg text-accent-hover";
     case "SC":
       return "bg-purple-100 text-purple-800";
     case "ST":
@@ -92,7 +93,7 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
   const isDropout = student.status === "dropout";
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+    <Card elevation="md" className="overflow-hidden">
       {/* Main card content - always visible */}
       <div className="p-3 sm:p-4">
         {/* Top row: name + expand button */}
@@ -103,21 +104,22 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
                 {[student.first_name, student.last_name].filter(Boolean).join(" ") || "—"}
               </h3>
               {student.grade && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                <Badge variant="info">
                   Grade {student.grade}
-                </span>
+                </Badge>
               )}
               {isDropout && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                <Badge variant="danger">
                   Dropout
-                </span>
+                </Badge>
               )}
             </div>
           </div>
-          <button
+          <Button
+            variant="icon"
             onClick={() => setExpanded(!expanded)}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors shrink-0"
             aria-label={expanded ? "Collapse" : "Expand"}
+            className="shrink-0"
           >
             <svg
               className={`w-5 h-5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
@@ -127,7 +129,7 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
-          </button>
+          </Button>
         </div>
 
         {/* Key info row */}
@@ -149,18 +151,12 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
         {/* Action buttons */}
         {canEdit && !isDropout && (
           <div className="flex items-center gap-2 mt-3">
-            <button
-              onClick={onEdit}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors shadow-sm"
-            >
+            <Button variant="ghost" size="sm" onClick={onEdit}>
               Edit
-            </button>
-            <button
-              onClick={onDropout}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors shadow-sm"
-            >
+            </Button>
+            <Button variant="danger-ghost" size="sm" onClick={onDropout}>
               Dropout
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -200,7 +196,7 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -216,8 +212,6 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
   const [dropoutYear, setDropoutYear] = useState(getCurrentAcademicYear());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  if (!isOpen) return null;
 
   const handleSubmit = async () => {
     setError("");
@@ -255,70 +249,63 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
   const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ") || "this student";
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black bg-opacity-30" onClick={onClose} />
-        <div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Mark as Dropout
-          </h2>
+    <Modal open={isOpen} onClose={onClose} className="max-w-md p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-4">
+        Mark as Dropout
+      </h2>
 
-          {error && (
-            <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+      {error && (
+        <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
-          <p className="text-sm text-gray-900 mb-4">
-            Are you sure you want to mark <strong>{studentName}</strong> as a dropout?
-            This action cannot be undone.
-          </p>
+      <p className="text-sm text-gray-900 mb-4">
+        Are you sure you want to mark <strong>{studentName}</strong> as a dropout?
+        This action cannot be undone.
+      </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-900 mb-1">
-                Dropout Date
-              </label>
-              <input
-                type="date"
-                value={dropoutDate}
-                onChange={(e) => setDropoutDate(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-900 mb-1">
-                Academic Year
-              </label>
-              <input
-                type="text"
-                value={dropoutYear}
-                onChange={(e) => setDropoutYear(e.target.value)}
-                placeholder="e.g., 2025-2026"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              disabled={loading}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
-            >
-              {loading ? "Processing..." : "Confirm Dropout"}
-            </button>
-          </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-1">
+            Dropout Date
+          </label>
+          <Input
+            type="date"
+            value={dropoutDate}
+            onChange={(e) => setDropoutDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-900 mb-1">
+            Academic Year
+          </label>
+          <Input
+            type="text"
+            value={dropoutYear}
+            onChange={(e) => setDropoutYear(e.target.value)}
+            placeholder="e.g., 2025-2026"
+          />
         </div>
       </div>
-    </div>
+
+      <div className="flex justify-end gap-3">
+        <Button
+          variant="secondary"
+          onClick={onClose}
+          disabled={loading}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="danger"
+          onClick={handleSubmit}
+          disabled={loading}
+        >
+          {loading ? "Processing..." : "Confirm Dropout"}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -390,7 +377,7 @@ export default function StudentTable({
               onClick={() => handleTabChange("active")}
               className={`px-3 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === "active"
-                  ? "border-blue-600 text-blue-600"
+                  ? "border-accent text-accent"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
@@ -400,7 +387,7 @@ export default function StudentTable({
               onClick={() => handleTabChange("dropout")}
               className={`px-3 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === "dropout"
-                  ? "border-blue-600 text-blue-600"
+                  ? "border-accent text-accent"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
@@ -422,7 +409,7 @@ export default function StudentTable({
           id="gradeFilter"
           value={selectedGrade}
           onChange={(e) => setSelectedGrade(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
         >
           <option value="all">All Grades ({currentStudents.length})</option>
           {studentGrades.map((grade) => (
@@ -441,13 +428,13 @@ export default function StudentTable({
       {/* Student cards */}
       <div className="max-w-3xl mx-auto space-y-3">
         {filteredStudents.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-sm text-gray-500">
+          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500">
             {currentStudents.length === 0
               ? activeTab === "active"
                 ? "No active students enrolled in this school"
                 : "No dropout students"
               : "No students match the selected filter"}
-          </div>
+          </Card>
         ) : (
           filteredStudents.map((student) => (
             <StudentCard

@@ -750,8 +750,8 @@ describe("EditStudentModal", () => {
     it("calls onClose when backdrop is clicked", () => {
       const { props } = renderModal();
 
-      // The backdrop has bg-black bg-opacity-30 and onClick={onClose}
-      const backdrop = document.querySelector(".bg-black");
+      // The backdrop is rendered by <Modal> with bg-black/30 and aria-hidden
+      const backdrop = document.querySelector("[aria-hidden='true']");
       expect(backdrop).toBeTruthy();
       fireEvent.click(backdrop!);
 

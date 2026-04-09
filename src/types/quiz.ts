@@ -1,39 +1,92 @@
-export interface QuizSession {
-  id: number;
-  name: string;
-  quiz_id: string | null;
-  start_time: string;
-  end_time: string | null;
-  batch_name: string;
-}
+// --- Batch Overview types ---
 
-export interface QuizResult {
-  student_name: string;
-  attendance_status: string;
-  marks_obtained: number | null;
-  total_marks: number | null;
-  percentage: number | null;
-}
-
-export interface SubjectScore {
-  subject_name: string;
-  avg_percentage: number;
+export interface TestTrendPoint {
+  session_id: string;
+  test_name: string;
+  start_date: string;
   student_count: number;
+  stream_student_count: number;
+  test_format: string | null;
+  test_stream: string | null;
 }
 
-export interface QuizSummary {
-  total_students: number;
-  present_count: number;
-  absent_count: number;
+export interface BatchSummary {
+  tests_conducted: number;
+  avg_participation: number;
+}
+
+export interface BatchOverviewData {
+  summary: BatchSummary;
+  tests: TestTrendPoint[];
+  totalEnrolled: number | null;
+  enrolledByStream: Record<string, number>;
+}
+
+// --- Test Deep Dive types ---
+
+export interface TestDeepDiveSummary {
+  test_name: string;
+  start_date: string;
+  students_appeared: number;
   avg_score: number;
   min_score: number;
   max_score: number;
-  score_distribution: ScoreDistribution[];
-  subject_scores: SubjectScore[];
-  student_results: QuizResult[];
+  avg_accuracy: number;
+  avg_attempt_rate: number;
 }
 
-export interface ScoreDistribution {
-  range: string;
-  count: number;
+export interface SubjectAnalysisRow {
+  subject: string;
+  avg_score: number;
+  avg_accuracy: number;
+  avg_attempt_rate: number;
+  total_questions: number;
+}
+
+export interface ChapterAnalysisRow {
+  subject: string;
+  chapter_name: string;
+  avg_score: number;
+  accuracy: number;
+  attempt_rate: number;
+  questions: number;
+  avg_time: number | null;
+}
+
+export interface StudentChapterScore {
+  subject: string;
+  chapter_name: string;
+  marks_scored: number;
+  max_marks: number;
+  accuracy: number;
+  attempt_rate: number;
+  total_questions: number;
+}
+
+export interface StudentSubjectScore {
+  subject: string;
+  percentage: number;
+  marks_scored: number;
+  max_marks: number;
+  accuracy: number;
+  attempt_rate: number;
+  chapters?: StudentChapterScore[];
+}
+
+export interface StudentDeepDiveRow {
+  student_name: string;
+  gender: string | null;
+  marks_scored: number;
+  max_marks: number;
+  percentage: number;
+  accuracy: number;
+  attempt_rate: number;
+  subject_scores: StudentSubjectScore[];
+}
+
+export interface TestDeepDiveData {
+  summary: TestDeepDiveSummary;
+  subjects: SubjectAnalysisRow[];
+  chapters: ChapterAnalysisRow[];
+  students: StudentDeepDiveRow[];
 }

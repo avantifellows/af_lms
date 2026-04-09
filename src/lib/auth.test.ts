@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
-import { authOptions } from "./auth";
+import { authOptions, DEV_LOGIN_PERSONAS } from "./auth";
 
-// Extract the credentials provider and callbacks
-// In NextAuth v4, the user's authorize fn is under options.authorize
+// Extract providers by id
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const credentialsProvider = authOptions.providers.find((p: any) => p.type === "credentials") as any;
-const authorize = credentialsProvider.options.authorize as (
+const findProvider = (id: string) => authOptions.providers.find((p: any) => p.options?.id === id) as any;
+
+const passcodeProvider = findProvider("passcode");
+const authorize = passcodeProvider.options.authorize as (
+  credentials: Record<string, string> | undefined
+) => Promise<unknown>;
+
+const devProvider = findProvider("dev-login");
+const devAuthorize = devProvider?.options?.authorize as (
   credentials: Record<string, string> | undefined
 ) => Promise<unknown>;
 const jwtCallback = authOptions.callbacks!.jwt!;
@@ -80,5 +86,63 @@ describe("session callback", () => {
     const result = await (sessionCallback as any)({ session, token, user: undefined as any });
     expect(result.schoolCode).toBeUndefined();
     expect(result.isPasscodeUser).toBeUndefined();
+  });
+});
+
+describe("Dev login provider", () => {
+  it("is registered in non-production environment", () => {
+    expect(devProvider).toBeDefined();
+    expect(devProvider.options.id).toBe("dev-login");
+  });
+
+  it("returns user for valid admin persona", async () => {
+    const result = await devAuthorize({ persona: "admin" });
+    expect(result).toEqual({
+      id: "dev-admin",
+      email: DEV_LOGIN_PERSONAS.admin.email,
+      name: "Dev Admin",
+    });
+  });
+
+  it("returns user for valid program_manager persona", async () => {
+    const result = await devAuthorize({ persona: "program_manager" });
+    expect(result).toEqual({
+      id: "dev-program_manager",
+      email: DEV_LOGIN_PERSONAS.program_manager.email,
+      name: "Dev PM",
+    });
+  });
+
+  it("returns user for valid teacher persona", async () => {
+    const result = await devAuthorize({ persona: "teacher" });
+    expect(result).toEqual({
+      id: "dev-teacher",
+      email: DEV_LOGIN_PERSONAS.teacher.email,
+      name: "Dev Teacher",
+    });
+  });
+
+  it("returns user for valid read_only persona", async () => {
+    const result = await devAuthorize({ persona: "read_only" });
+    expect(result).toEqual({
+      id: "dev-read_only",
+      email: DEV_LOGIN_PERSONAS.read_only.email,
+      name: "Dev Read-Only",
+    });
+  });
+
+  it("returns null for unknown persona", async () => {
+    const result = await devAuthorize({ persona: "superadmin" });
+    expect(result).toBeNull();
+  });
+
+  it("returns null for missing persona", async () => {
+    const result = await devAuthorize({});
+    expect(result).toBeNull();
+  });
+
+  it("returns null for undefined credentials", async () => {
+    const result = await devAuthorize(undefined);
+    expect(result).toBeNull();
   });
 });

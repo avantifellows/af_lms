@@ -1,17 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
+import { isPlainObject } from "@/lib/visit-form-utils";
+import { FormSection, RadioPair, RemarkField, StickyProgressBar } from "@/components/ui";
 
 interface PrincipalInteractionFormProps {
   data: Record<string, unknown>;
   setData: (data: Record<string, unknown>) => void;
   disabled: boolean;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function getQuestionsFromData(data: Record<string, unknown>): Record<string, { answer: boolean | null; remark?: string }> {
@@ -26,8 +24,6 @@ export default function PrincipalInteractionForm({
   setData,
   disabled,
 }: PrincipalInteractionFormProps) {
-  const [revealedRemarks, setRevealedRemarks] = useState<Set<string>>(() => new Set());
-
   const questions = getQuestionsFromData(data);
 
   const handleAnswerChange = useCallback(
@@ -80,8 +76,7 @@ export default function PrincipalInteractionForm({
   return (
     <div className="space-y-4" data-testid="action-renderer-principal_interaction">
       {/* Progress summary */}
-      <div
-        className="sticky top-12 z-10 border-2 border-border-accent bg-bg-card-alt px-3 py-2"
+      <StickyProgressBar
         data-testid="principal-interaction-progress"
       >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
@@ -89,82 +84,44 @@ export default function PrincipalInteractionForm({
             Answered: {answeredCount}/{PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys.length}
           </span>
         </div>
-      </div>
+      </StickyProgressBar>
 
       {/* Sections */}
       {PRINCIPAL_INTERACTION_CONFIG.sections.map((section) => (
-        <section key={section.title} className="border border-border p-4 space-y-4">
+        <FormSection key={section.title}>
           <h3 className="text-sm font-semibold text-text-primary uppercase">{section.title}</h3>
 
           {section.questions.map((question) => {
             const entry = questions[question.key];
             const answer = entry?.answer ?? null;
             const remark = typeof entry?.remark === "string" ? entry.remark : "";
-            const remarkVisible = remark.length > 0 || revealedRemarks.has(question.key);
 
             return (
               <div key={question.key}>
                 <fieldset disabled={disabled}>
                   <legend className="sr-only">{question.label}</legend>
                   <p className="mb-2 text-sm text-text-primary">{question.label}</p>
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                      <input
-                        type="radio"
-                        name={`principal-interaction-${question.key}`}
-                        checked={answer === true}
-                        onChange={() => handleAnswerChange(question.key, true)}
-                        disabled={disabled}
-                        className="h-4 w-4 accent-accent"
-                        data-testid={`principal-interaction-${question.key}-yes`}
-                      />
-                      Yes
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer text-sm text-text-primary">
-                      <input
-                        type="radio"
-                        name={`principal-interaction-${question.key}`}
-                        checked={answer === false}
-                        onChange={() => handleAnswerChange(question.key, false)}
-                        disabled={disabled}
-                        className="h-4 w-4 accent-accent"
-                        data-testid={`principal-interaction-${question.key}-no`}
-                      />
-                      No
-                    </label>
-                  </div>
+                  <RadioPair
+                    name={`principal-interaction-${question.key}`}
+                    value={answer}
+                    onChange={(val) => handleAnswerChange(question.key, val)}
+                    disabled={disabled}
+                    yesTestId={`principal-interaction-${question.key}-yes`}
+                    noTestId={`principal-interaction-${question.key}-no`}
+                  />
                 </fieldset>
 
-                {!remarkVisible && !disabled && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRevealedRemarks((current) => new Set(current).add(question.key));
-                    }}
-                    className="mt-2 text-xs font-medium text-accent underline hover:text-accent-hover"
-                  >
-                    Add remark
-                  </button>
-                )}
-
-                {remarkVisible && (
-                  <label className="mt-2 block">
-                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">Remark</span>
-                    <textarea
-                      rows={2}
-                      value={remark}
-                      disabled={disabled}
-                      onChange={(e) => handleRemarkChange(question.key, e.target.value)}
-                      placeholder="Optional remark"
-                      className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-card-alt"
-                      data-testid={`principal-interaction-${question.key}-remark`}
-                    />
-                  </label>
-                )}
+                <RemarkField
+                  value={remark}
+                  onChange={(val) => handleRemarkChange(question.key, val)}
+                  disabled={disabled}
+                  testId={`principal-interaction-${question.key}-remark`}
+                  defaultRevealed={remark.length > 0}
+                />
               </div>
             );
           })}
-        </section>
+        </FormSection>
       ))}
     </div>
   );

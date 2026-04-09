@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AddUserModal from "./AddUserModal";
+import { Button } from "@/components/ui";
 
 interface UserPermission {
   id: number;
@@ -28,7 +29,7 @@ const LEVEL_LABELS: Record<number, string> = {
 };
 
 const LEVEL_COLORS: Record<number, string> = {
-  3: "bg-blue-100 text-blue-800",
+  3: "bg-hover-bg text-accent-hover",
   2: "bg-green-100 text-green-800",
   1: "bg-gray-100 text-gray-800",
 };
@@ -105,12 +106,12 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
         <div className="text-sm text-gray-500">
           Manage user access levels and permissions
         </div>
-        <button
+        <Button
           onClick={() => setShowAddModal(true)}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          size="sm"
         >
           Add User
-        </button>
+        </Button>
       </div>
 
       <div className="overflow-x-auto bg-white shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
@@ -175,7 +176,7 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                       {user.program_ids.map((id) => (
                         <span
                           key={id}
-                          className="inline-flex px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800"
+                          className="inline-flex px-2 py-0.5 text-xs rounded-full bg-hover-bg text-accent-hover"
                         >
                           {PROGRAM_LABELS[id] || `Program ${id}`}
                         </span>
@@ -195,19 +196,22 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setEditingUser(user)}
-                    className="text-blue-600 hover:text-blue-800 mr-4"
+                    className="mr-2"
                   >
                     Edit
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="danger-ghost"
+                    size="sm"
                     onClick={() => handleDelete(user.id, user.email)}
                     disabled={deleting === user.id || user.email.toLowerCase() === currentUserEmail.toLowerCase()}
-                    className="text-red-600 hover:text-red-800 disabled:text-gray-300 disabled:cursor-not-allowed"
                   >
                     {deleting === user.id ? "Deleting..." : "Delete"}
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}

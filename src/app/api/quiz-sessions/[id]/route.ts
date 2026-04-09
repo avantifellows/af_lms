@@ -11,6 +11,7 @@ const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
 const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
 
 interface PatchQuizSessionBody {
+  action?: "end_now";
   name?: string;
   startTime?: string;
   endTime?: string;
@@ -54,6 +55,11 @@ function storedSessionTimeToUtcIso(value: string | null | undefined): string | n
     return value;
   }
   return dbIstTimestampToUtcIso(value);
+}
+
+function isLiveWindow(start: Date | null, end: Date | null, now: Date): boolean {
+  if (!start || !end) return false;
+  return start.getTime() <= now.getTime() && now.getTime() < end.getTime();
 }
 
 export async function PATCH(
@@ -100,9 +106,32 @@ export async function PATCH(
 
   const currentSession = (await currentResponse.json()) as DbServiceSession;
   const currentMetaData = normalizeMetaData(currentSession.meta_data);
+  const currentStartTime = storedSessionTimeToUtcIso(currentSession.start_time);
+  const currentEndTime = storedSessionTimeToUtcIso(currentSession.end_time);
 
-  const nextStartTime = body.startTime ?? storedSessionTimeToUtcIso(currentSession.start_time);
-  const nextEndTime = body.endTime ?? storedSessionTimeToUtcIso(currentSession.end_time);
+  const nextStartTime = body.startTime ?? currentStartTime;
+  let nextEndTime = body.endTime ?? currentEndTime;
+
+  if (body.action === "end_now") {
+    const now = new Date();
+    const currentStart = currentStartTime ? new Date(currentStartTime) : null;
+    const currentEnd = currentEndTime ? new Date(currentEndTime) : null;
+
+    if (
+      !currentStart ||
+      !currentEnd ||
+      Number.isNaN(currentStart.getTime()) ||
+      Number.isNaN(currentEnd.getTime()) ||
+      !isLiveWindow(currentStart, currentEnd, now)
+    ) {
+      return NextResponse.json(
+        { error: "Only live sessions can be ended now" },
+        { status: 400 }
+      );
+    }
+
+    nextEndTime = now.toISOString();
+  }
 
   const start = nextStartTime ? new Date(nextStartTime) : null;
   const end = nextEndTime ? new Date(nextEndTime) : null;
@@ -120,12 +149,14 @@ export async function PATCH(
     );
   }
 
-  const payload: DbServiceSession = {
-    ...currentSession,
+  const payload: Partial<DbServiceSession> = {
     ...(typeof body.name === "string" ? { name: body.name.trim() || currentSession.name } : {}),
     ...(typeof body.isActive === "boolean" ? { is_active: body.isActive } : {}),
     ...(body.startTime ? { start_time: utcToISTDate(body.startTime) } : {}),
     ...(body.endTime ? { end_time: utcToISTDate(body.endTime) } : {}),
+    ...(body.action === "end_now" && nextEndTime
+      ? { end_time: utcToISTDate(nextEndTime) }
+      : {}),
     meta_data: {
       ...currentMetaData,
       ...(typeof body.showAnswers === "boolean"
