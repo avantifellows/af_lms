@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { query } from "@/lib/db";
 import {
   dbIstTimestampToUtcIso,
   utcToISTDate,
@@ -30,6 +31,15 @@ interface DbServiceSession {
   is_active?: boolean | null;
   meta_data?: Record<string, unknown> | string | null;
   [key: string]: unknown;
+}
+
+interface SessionRow {
+  id: number;
+  name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  is_active: boolean | null;
+  meta_data: Record<string, unknown> | string | null;
 }
 
 function normalizeMetaData(
@@ -87,24 +97,21 @@ export async function PATCH(
 
   const body = (await request.json()) as PatchQuizSessionBody;
 
-  const currentResponse = await fetch(`${DB_SERVICE_URL}/session/${sessionId}`, {
-    headers: {
-      Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
-      accept: "application/json",
-    },
-    cache: "no-store",
-  });
+  const currentSessionRows = await query<SessionRow>(
+    `
+    SELECT id, name, start_time::text AS start_time, end_time::text AS end_time, is_active, meta_data
+    FROM session
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [sessionId]
+  );
 
-  if (!currentResponse.ok) {
-    const errorText = await currentResponse.text();
-    console.error("Failed to fetch session for patch:", errorText);
-    return NextResponse.json(
-      { error: "Failed to load session for editing" },
-      { status: currentResponse.status }
-    );
+  const currentSession = currentSessionRows[0];
+  if (!currentSession) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  const currentSession = (await currentResponse.json()) as DbServiceSession;
   const currentMetaData = normalizeMetaData(currentSession.meta_data);
   const currentStartTime = storedSessionTimeToUtcIso(currentSession.start_time);
   const currentEndTime = storedSessionTimeToUtcIso(currentSession.end_time);
@@ -169,7 +176,6 @@ export async function PATCH(
       ...(typeof body.gurukulFormatType === "string"
         ? { gurukul_format_type: body.gurukulFormatType }
         : {}),
-      status: "pending",
     },
   };
 

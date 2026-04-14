@@ -42,6 +42,10 @@ interface FeedbackToast {
 }
 
 type SessionLifecycleState = "starts_later" | "live" | "ended" | "unknown";
+type CreateTimingMode = "start_now" | "schedule";
+type FetchSessionsOptions = {
+  background?: boolean;
+};
 
 interface QuizTemplateOption {
   id: number;
@@ -72,6 +76,12 @@ interface BatchDerivation {
 
 const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
+
+function getCompactBatchLabel(values: string[] | undefined): string {
+  if (!values?.length) return "-";
+  if (values.length === 1) return values[0];
+  return `${values[0]} +${values.length - 1}`;
+}
 
 function parseBatchGrade(batchId: string): number | null {
   const parts = batchId.split("_");
@@ -112,12 +122,31 @@ function getStatusLabel(status?: string) {
   return status.toLowerCase();
 }
 
-function getStatusTitle(status?: string) {
-  const normalized = getStatusLabel(status);
-  if (normalized === "success") return "Synced";
-  if (normalized === "failed") return "Failed";
-  if (normalized === "pending") return "Updating";
+function getSyncLabel(meta: Record<string, unknown> | null | undefined) {
+  const normalized = getStatusLabel(getMetaString(meta, "status"));
+  const hasSyncedToBq = meta?.has_synced_to_bq;
+
+  if (normalized === "pending") return "Queued";
+  if (normalized === "failed") return "Sync Failed";
+  if (hasSyncedToBq === true) return "Synced";
+  if (hasSyncedToBq === false) return "Not Synced";
   return "Unknown";
+}
+
+function getSyncToneClasses(meta: Record<string, unknown> | null | undefined) {
+  const normalized = getStatusLabel(getMetaString(meta, "status"));
+  const hasSyncedToBq = meta?.has_synced_to_bq;
+
+  if (normalized === "pending") {
+    return "border border-amber-200 bg-amber-50 text-amber-700";
+  }
+  if (normalized === "failed") {
+    return "border border-red-200 bg-red-50 text-red-700";
+  }
+  if (hasSyncedToBq === true) {
+    return "border border-border-accent bg-success-bg text-accent";
+  }
+  return "border border-border bg-bg-card-alt text-text-secondary";
 }
 
 function getMetaString(
@@ -161,26 +190,26 @@ function toYesNo(value: boolean | undefined): string {
 }
 
 function getSessionLifecycleState(
-  session: Pick<QuizSession, "start_time" | "end_time">
+  session: Pick<QuizSession, "start_time" | "end_time">,
+  nowMs = Date.now()
 ): SessionLifecycleState {
   if (!session.start_time || !session.end_time) return "unknown";
 
   const startTime = new Date(session.start_time).getTime();
   const endTime = new Date(session.end_time).getTime();
-  const now = Date.now();
 
   if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
     return "unknown";
   }
 
-  if (endTime <= now) return "ended";
-  if (startTime > now) return "starts_later";
+  if (endTime <= nowMs) return "ended";
+  if (startTime > nowMs) return "starts_later";
   return "live";
 }
 
 function getLifecycleLabel(state: SessionLifecycleState): string {
-  if (state === "live") return "Live Now";
-  if (state === "starts_later") return "Starts Later";
+  if (state === "live") return "Live";
+  if (state === "starts_later") return "Scheduled";
   if (state === "ended") return "Ended";
   return "Unknown";
 }
@@ -203,9 +232,14 @@ function isSessionPending(session: QuizSession | null | undefined): boolean {
   return getStatusLabel(getMetaString(session.meta_data, "status")) === "pending";
 }
 
-function canEndNow(session: QuizSession | null | undefined): boolean {
+function canEndNow(session: QuizSession | null | undefined, nowMs = Date.now()): boolean {
   if (!session || isSessionPending(session)) return false;
-  return getSessionLifecycleState(session) === "live";
+  if (session.is_active === false) return false;
+  return getSessionLifecycleState(session, nowMs) === "live";
+}
+
+function areSessionsEqual(previous: QuizSession[], next: QuizSession[]): boolean {
+  return JSON.stringify(previous) === JSON.stringify(next);
 }
 
 export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
@@ -216,8 +250,9 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
   const [hasMore, setHasMore] = useState(false);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<FeedbackToast | null>(null);
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<QuizSession | null>(null);
   const [editingSession, setEditingSession] = useState<QuizSession | null>(null);
@@ -253,7 +288,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
 
   const fetchBatches = useCallback(async () => {
     setLoadingBatches(true);
-    setError(null);
+    setLoadError(null);
     try {
       const response = await fetch(`/api/quiz-sessions/batches?schoolId=${schoolId}`);
       if (!response.ok) {
@@ -263,16 +298,23 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       setBatches(data.batches || []);
     } catch (err) {
       console.error(err);
-      setError("Failed to fetch class batches.");
+      setLoadError("Failed to fetch class batches.");
     } finally {
       setLoadingBatches(false);
     }
   }, [schoolId]);
 
   const fetchSessions = useCallback(
-    async (pageIndex: number, classBatchId?: string) => {
-      setLoadingSessions(true);
-      setError(null);
+    async (
+      pageIndex: number,
+      classBatchId?: string,
+      options?: FetchSessionsOptions
+    ) => {
+      const background = options?.background ?? false;
+      if (!background) {
+        setLoadingSessions(true);
+        setLoadError(null);
+      }
       try {
         const params = new URLSearchParams({
           schoolId,
@@ -289,13 +331,25 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         }
 
         const data = await response.json();
-        setSessions(data.sessions || []);
+        const nextSessions = data.sessions || [];
+        setSessions((previous) =>
+          areSessionsEqual(previous, nextSessions) ? previous : nextSessions
+        );
         setHasMore(Boolean(data.hasMore));
+        setSelectedSession((previous) => {
+          if (!previous) return previous;
+          const refreshed = nextSessions.find((session: QuizSession) => session.id === previous.id);
+          return refreshed ?? previous;
+        });
       } catch (err) {
         console.error(err);
-        setError("Failed to fetch quiz sessions.");
+        if (!background) {
+          setLoadError("Failed to fetch quiz sessions.");
+        }
       } finally {
-        setLoadingSessions(false);
+        if (!background) {
+          setLoadingSessions(false);
+        }
       }
     },
     [schoolId]
@@ -311,10 +365,18 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      fetchSessions(page, selectedClassBatch || undefined);
-    }, 30000);
+      if (document.visibilityState !== "visible") return;
+      fetchSessions(page, selectedClassBatch || undefined, { background: true });
+    }, 60000);
     return () => window.clearInterval(intervalId);
   }, [page, selectedClassBatch, fetchSessions]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCurrentTimeMs(Date.now());
+    }, 15000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     if (!menuState) return;
@@ -340,15 +402,14 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       }
       setFeedbackToast({
         variant: "info",
-        message: "Regeneration requested. Links will update shortly.",
+        message: "Sync requested. Session data will refresh shortly.",
       });
       await fetchSessions(page, selectedClassBatch || undefined);
     } catch (err) {
       console.error(err);
-      setError("Failed to regenerate quiz.");
       setFeedbackToast({
         variant: "error",
-        message: "Failed to regenerate quiz.",
+        message: "Failed to request sync.",
       });
     } finally {
       setSavingActionId(null);
@@ -376,7 +437,6 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
   const handleToggleEnabled = async (session: QuizSession) => {
     try {
       setSavingActionId(session.id);
-      setError(null);
       setFeedbackToast(null);
 
       const response = await fetch(`/api/quiz-sessions/${session.id}`, {
@@ -401,7 +461,6 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       await fetchSessions(page, selectedClassBatch || undefined);
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : "Failed to update session.");
       setFeedbackToast({
         variant: "error",
         message: err instanceof Error ? err.message : "Failed to update session.",
@@ -414,7 +473,6 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
   const handleEndNow = async (session: QuizSession) => {
     try {
       setSavingActionId(session.id);
-      setError(null);
       setFeedbackToast(null);
 
       const response = await fetch(`/api/quiz-sessions/${session.id}`, {
@@ -437,12 +495,15 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       });
       await fetchSessions(page, selectedClassBatch || undefined);
     } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Failed to end session.");
+      const message = err instanceof Error ? err.message : "Failed to end session.";
+      if (message !== "Only live sessions can be ended now") {
+        console.error(err);
+      }
       setFeedbackToast({
-        variant: "error",
-        message: err instanceof Error ? err.message : "Failed to end session.",
+        variant: message === "Only live sessions can be ended now" ? "warning" : "error",
+        message,
       });
+      await fetchSessions(page, selectedClassBatch || undefined, { background: true });
     } finally {
       setSavingActionId(null);
     }
@@ -462,56 +523,46 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
 
       <div className="bg-bg-card border border-border shadow-sm">
         <div className="flex flex-col gap-4 border-b-4 border-border-accent px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
-              Quiz Sessions
-            </h2>
-            <p className="text-sm text-text-secondary">
-              Create and manage quiz sessions for this school.
-            </p>
-          </div>
+          <h2 className="text-lg font-semibold text-text-primary">Quiz Sessions</h2>
           <button
             onClick={() => setIsCreateOpen(true)}
-            className="inline-flex items-center justify-center bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover"
+            className="inline-flex items-center justify-center gap-2 bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover"
           >
-            Create Quiz Session
+            <span aria-hidden="true" className="relative inline-block h-3.5 w-3.5 shrink-0">
+              <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-current" />
+              <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-current" />
+            </span>
+            <span>Create Quiz Session</span>
           </button>
         </div>
       </div>
 
-      {error && (
+      {loadError && (
         <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+          {loadError}
         </div>
       )}
 
-      <div className="bg-bg-card border border-border shadow-sm">
-        <div className="border-b-2 border-border-accent px-4 py-3">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-text-primary">
-            Filter Sessions
-          </h3>
-        </div>
-        <div className="p-4">
-          <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-            Class Batch
-          </label>
-          <select
-            value={selectedClassBatch}
-            onChange={(event) => {
-              setSelectedClassBatch(event.target.value);
-              setPage(0);
-            }}
-            disabled={loadingBatches}
-            className="block w-full max-w-sm border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none disabled:bg-bg-card-alt"
-          >
-            <option value="">All class batches</option>
-            {classBatches.map((batch) => (
-              <option key={batch.id} value={batch.batch_id}>
-                {batch.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center">
+        <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
+          Class Batch
+        </label>
+        <select
+          value={selectedClassBatch}
+          onChange={(event) => {
+            setSelectedClassBatch(event.target.value);
+            setPage(0);
+          }}
+          disabled={loadingBatches}
+          className="block w-full max-w-sm border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none disabled:bg-bg-card-alt"
+        >
+          <option value="">All class batches</option>
+          {classBatches.map((batch) => (
+            <option key={batch.id} value={batch.batch_id}>
+              {batch.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="overflow-x-auto bg-bg-card border border-border shadow-sm">
@@ -528,13 +579,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                 Window
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                State
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                Sync
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                Enabled
+                Sync Status
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
                 Actions
@@ -542,22 +587,21 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border bg-bg-card">
-            {loadingSessions ? (
+            {loadingSessions && sessions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-text-secondary">
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-text-secondary">
                   Loading sessions...
                 </td>
               </tr>
             ) : sessions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-text-secondary">
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-text-secondary">
                   No quiz sessions found.
                 </td>
               </tr>
             ) : (
               sessions.map((session) => {
-                const status = getMetaString(session.meta_data, "status");
-                const lifecycle = getSessionLifecycleState(session);
+                const lifecycle = getSessionLifecycleState(session, currentTimeMs);
                 const testCode = getMetaString(session.meta_data, "test_code");
                 const classBatchIds = getMetaString(session.meta_data, "batch_id")
                   ?.split(",")
@@ -583,35 +627,17 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                       ) : null}
                     </td>
                     <td className="px-4 py-4 text-sm text-text-secondary">
-                      {classBatchNames?.length ? classBatchNames.join(", ") : "-"}
-                    </td>
-                    <td className="px-4 py-4 text-sm font-mono text-text-secondary">
-                      <div>Start {formatDateTime(session.start_time)}</div>
-                      <div className="mt-1">End {formatDateTime(session.end_time)}</div>
+                      {getCompactBatchLabel(classBatchNames)}
                     </td>
                     <td className="px-4 py-4 text-sm">
-                      <span
-                        className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
-                          lifecycle
-                        )}`}
-                      >
-                        {getLifecycleLabel(lifecycle)}
-                      </span>
+                      <SessionWindowSummary session={session} lifecycle={lifecycle} />
                     </td>
                     <td className="px-4 py-4 text-sm">
-                      <ProcessingStatusDot status={status} />
-                    </td>
-                    <td className="px-4 py-4 text-sm">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                          session.is_active === false
-                            ? "border border-red-200 bg-red-50 text-red-700"
-                            : "border border-border-accent bg-success-bg text-accent"
-                        }`}
-                      >
-                        <span aria-hidden="true">{session.is_active === false ? "✕" : "✓"}</span>
-                        <span>{session.is_active === false ? "Disabled" : "Enabled"}</span>
-                      </span>
+                      <SyncSummary
+                        session={session}
+                        busy={savingActionId === session.id}
+                        onSync={() => handleRegenerate(session.id)}
+                      />
                     </td>
                     <td className="px-4 py-4 text-sm text-text-secondary">
                       <div className="relative inline-block text-left" data-menu-root>
@@ -708,7 +734,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
             const pending = isSessionPending(currentSession);
             const busy = savingActionId === menuState.id;
             const enabled = currentSession?.is_active !== false;
-            const endNowAvailable = canEndNow(currentSession);
+            const endNowAvailable = canEndNow(currentSession, currentTimeMs);
 
             return (
               <>
@@ -793,13 +819,13 @@ function QuizSessionCreateModal({
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
-  const [batchSearch, setBatchSearch] = useState("");
   const [testFormat, setTestFormat] = useState("");
-  const [templateSearch, setTemplateSearch] = useState("");
   const [templates, setTemplates] = useState<QuizTemplateOption[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [timingMode, setTimingMode] = useState<CreateTimingMode>("start_now");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [showAnswers, setShowAnswers] = useState(false);
   const [showScores, setShowScores] = useState(true);
   const [shuffle, setShuffle] = useState(false);
@@ -839,14 +865,6 @@ function QuizSessionCreateModal({
     () => batches.filter((batch) => batch.parent_id !== null && !parentIdSet.has(batch.id)),
     [batches, parentIdSet]
   );
-
-  const filteredClassBatches = useMemo(() => {
-    const search = batchSearch.trim().toLowerCase();
-    if (!search) return availableClassBatches;
-    return availableClassBatches.filter((batch) =>
-      `${batch.name} ${batch.batch_id}`.toLowerCase().includes(search)
-    );
-  }, [availableClassBatches, batchSearch]);
 
   const batchDerivation = useMemo<BatchDerivation>(() => {
     const selectedRows = classBatchIds
@@ -1018,21 +1036,6 @@ function QuizSessionCreateModal({
       }
   }, [name, nameEdited, selectedTemplate]);
 
-  const filteredTemplates = useMemo(() => {
-    const search = templateSearch.trim().toLowerCase();
-    if (!search) return templates;
-    return templates.filter((template) =>
-      `${template.name} ${template.code}`.toLowerCase().includes(search)
-    );
-  }, [templateSearch, templates]);
-
-  const selectedBatchNames = useMemo(
-    () =>
-      classBatchIds
-        .map((batchId) => batches.find((batch) => batch.batch_id === batchId)?.name || batchId),
-    [batches, classBatchIds]
-  );
-
   const toggleBatch = (batchId: string) => {
     setClassBatchIds((previous) =>
       previous.includes(batchId)
@@ -1051,13 +1054,15 @@ function QuizSessionCreateModal({
     if (!testFormat) return "Test format is required.";
     if (!selectedTemplate) return "Please select a paper.";
 
-    const start = new Date(startTime);
-    const end = new Date(endTime);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      return "Start time and end time must be valid.";
-    }
-    if (end <= start) {
-      return "End time must be after start time.";
+    if (timingMode === "schedule") {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return "Start time and end time must be valid.";
+      }
+      if (end <= start) {
+        return "End time must be after start time.";
+      }
     }
 
     return null;
@@ -1076,6 +1081,13 @@ function QuizSessionCreateModal({
     setError(null);
 
     try {
+      const computedStart =
+        timingMode === "start_now" ? new Date() : new Date(startTime);
+      const computedEnd =
+        timingMode === "start_now"
+          ? addHours(computedStart, DEFAULT_DURATION_HOURS)
+          : new Date(endTime);
+
       const payload = {
         name: name.trim() || selectedTemplate.name,
         resourceId: selectedTemplate.id,
@@ -1087,8 +1099,8 @@ function QuizSessionCreateModal({
         showScores,
         shuffle,
         gurukulFormatType,
-        startTime: new Date(startTime).toISOString(),
-        endTime: new Date(endTime).toISOString(),
+        startTime: computedStart.toISOString(),
+        endTime: computedEnd.toISOString(),
       };
 
       const response = await fetch("/api/quiz-sessions", {
@@ -1119,7 +1131,7 @@ function QuizSessionCreateModal({
         onClick={onClose}
       >
         <div
-          className="relative flex max-h-[92vh] w-full max-w-5xl flex-col border border-border bg-bg-card shadow-xl"
+          className="relative flex max-h-[92vh] w-full max-w-4xl flex-col border border-border bg-bg-card shadow-xl"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
@@ -1127,9 +1139,6 @@ function QuizSessionCreateModal({
               <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
                 Create Quiz Session
               </h2>
-              <p className="text-sm text-text-secondary">
-                Pick the class batch, choose the paper, then set the test window.
-              </p>
             </div>
             <button
               onClick={onClose}
@@ -1148,30 +1157,19 @@ function QuizSessionCreateModal({
             )}
 
             <div className="space-y-5">
-              <SectionCard
-                title="Who Is Taking The Test"
-                subtitle="Choose one or more class batches from the same parent batch."
-              >
+              <SectionCard title="1. Select Class Batches">
                 <div className="space-y-4">
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                      Search Class Batches
-                    </label>
-                    <input
-                      value={batchSearch}
-                      onChange={(event) => setBatchSearch(event.target.value)}
-                      placeholder="Search by batch name"
-                      className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-                    />
+                  <div className="text-sm text-text-secondary">
+                    Select one or more class batches from the same parent batch.
                   </div>
 
                   <div className="max-h-64 overflow-y-auto border border-border">
-                    {filteredClassBatches.length === 0 ? (
+                    {availableClassBatches.length === 0 ? (
                       <div className="px-3 py-4 text-sm text-text-secondary">
-                        No class batches match your search.
+                        No class batches are available.
                       </div>
                     ) : (
-                      filteredClassBatches.map((batch) => {
+                      availableClassBatches.map((batch) => {
                         const checked = classBatchIds.includes(batch.batch_id);
                         return (
                           <label
@@ -1190,9 +1188,6 @@ function QuizSessionCreateModal({
                               <span className="block font-medium text-text-primary">
                                 {batch.name}
                               </span>
-                              <span className="block font-mono text-xs text-text-secondary">
-                                {batch.batch_id}
-                              </span>
                             </span>
                           </label>
                         );
@@ -1200,75 +1195,39 @@ function QuizSessionCreateModal({
                     )}
                   </div>
 
-                  {selectedBatchNames.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedBatchNames.map((batchName) => (
-                        <span
-                          key={batchName}
-                          className="inline-flex border border-border-accent bg-success-bg px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-accent"
-                        >
-                          {batchName}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <div className="text-sm text-text-secondary">
+                    {classBatchIds.length} selected
+                  </div>
 
                   {batchDerivation.error && (
                     <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                       {batchDerivation.error}
                     </div>
                   )}
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ReadOnlyField label="Parent Batch" value={batchDerivation.parentBatchName} />
-                    <ReadOnlyField
-                      label="Grade"
-                      value={batchDerivation.grade ? String(batchDerivation.grade) : ""}
-                    />
-                    <ReadOnlyField label="Stream" value={batchDerivation.stream} />
-                  </div>
                 </div>
               </SectionCard>
 
-              <SectionCard
-                title="Which Paper"
-                subtitle="Pick the format first. Then choose from the papers available for that batch."
-              >
+              <SectionCard title="2. Select Paper">
                 <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                        Test Format
-                      </label>
-                      <select
-                        value={testFormat}
-                        onChange={(event) => {
-                          setTestFormat(event.target.value);
-                          setSelectedTemplateId(null);
-                        }}
-                        className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-                      >
-                        <option value="">Select test format</option>
-                        {TestFormatOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                        Search Paper
-                      </label>
-                      <input
-                        value={templateSearch}
-                        onChange={(event) => setTemplateSearch(event.target.value)}
-                        placeholder="Search by paper name"
-                        disabled={!testFormat}
-                        className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none disabled:bg-bg-card-alt"
-                      />
-                    </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                      Test Format
+                    </label>
+                    <select
+                      value={testFormat}
+                      onChange={(event) => {
+                        setTestFormat(event.target.value);
+                        setSelectedTemplateId(null);
+                      }}
+                      className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                    >
+                      <option value="">Select test format</option>
+                      {TestFormatOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {!classBatchIds.length ||
@@ -1277,7 +1236,7 @@ function QuizSessionCreateModal({
                   batchDerivation.error ||
                   !testFormat ? (
                     <div className="border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
-                      Choose the class batch and test format to load papers.
+                      Choose class batches and a test format first.
                     </div>
                   ) : loadingTemplates ? (
                     <div className="border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
@@ -1287,203 +1246,227 @@ function QuizSessionCreateModal({
                     <div className="border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
                       {templateError}
                     </div>
-                  ) : filteredTemplates.length === 0 ? (
+                  ) : templates.length === 0 ? (
                     <div className="border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                       No papers are available for this batch and format.
                     </div>
                   ) : (
                     <div className="max-h-72 overflow-y-auto border border-border">
-                      {filteredTemplates.map((template) => {
+                      {templates.map((template) => {
                         const isSelected = template.id === selectedTemplateId;
                         return (
-                          <button
+                          <div
                             key={template.id}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
                             onClick={() => setSelectedTemplateId(template.id)}
-                            className={`flex w-full items-start justify-between border-b border-border px-3 py-3 text-left last:border-b-0 ${
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setSelectedTemplateId(template.id);
+                              }
+                            }}
+                            className={`flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left last:border-b-0 ${
                               isSelected
                                 ? "bg-success-bg"
                                 : "bg-bg-card hover:bg-hover-bg"
                             }`}
                           >
-                            <div className="min-w-0">
+                            <span
+                              className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border text-[11px] leading-none ${
+                                isSelected
+                                  ? "border-accent bg-accent text-text-on-accent"
+                                  : "border-border bg-bg-card text-transparent"
+                              }`}
+                              aria-hidden="true"
+                            >
+                              ✓
+                            </span>
+                            <div className="min-w-0 flex-1">
                               <div className="text-sm font-semibold text-text-primary">
                                 {template.name}
+                              </div>
+                              <div className="mt-1 font-mono text-xs text-accent">
+                                {template.code || "-"}
                               </div>
                               <div className="mt-1 text-xs text-text-secondary">
                                 Ranking cutoff: {formatDate(template.rankingCutoffDate)}
                               </div>
+                              <div className="mt-2">
+                                <PaperResourceLinks
+                                  questionHref={template.questionPdf}
+                                  solutionHref={template.solutionPdf}
+                                  inline
+                                />
+                              </div>
                             </div>
-                            <span
-                              className={`ml-3 mt-0.5 h-4 w-4 shrink-0 border ${
-                                isSelected
-                                  ? "border-accent bg-accent"
-                                  : "border-border bg-bg-card"
-                              }`}
-                              aria-hidden="true"
-                            />
-                          </button>
+                          </div>
                         );
                       })}
-                    </div>
-                  )}
-
-                  {selectedTemplate && (
-                    <div className="border border-border-accent bg-success-bg p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="space-y-1">
-                          <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                            Selected Paper
-                          </div>
-                          <div className="text-base font-semibold text-text-primary">
-                            {selectedTemplate.name}
-                          </div>
-                          <div className="font-mono text-sm text-accent">
-                            {selectedTemplate.code || "-"}
-                          </div>
-                          <div className="text-sm text-text-secondary">
-                            Ranking cutoff: {formatDate(selectedTemplate.rankingCutoffDate)}
-                          </div>
-                        </div>
-                        <div className="space-y-2 sm:min-w-60">
-                          <CompactLinkRow label="Question PDF" href={selectedTemplate.questionPdf} />
-                          <CompactLinkRow label="Solution PDF" href={selectedTemplate.solutionPdf} />
-                        </div>
-                      </div>
                     </div>
                   )}
                 </div>
               </SectionCard>
 
-              <SectionCard
-                title="When And How"
-                subtitle="Set the session window and student-facing test behaviour."
-              >
+              <SectionCard title="3. When And How">
                 <div className="space-y-4">
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                      Session Name
-                    </label>
-                    <input
-                      value={name}
-                      onChange={(event) => {
-                        setName(event.target.value);
-                        setNameEdited(true);
-                      }}
-                      placeholder="Session name"
-                      className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-                    />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setTimingMode("start_now")}
+                      className={`border px-4 py-4 text-left ${
+                        timingMode === "start_now"
+                          ? "border-border-accent bg-success-bg"
+                          : "border-border bg-bg-card hover:bg-hover-bg"
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-text-primary">Start now</div>
+                      <div className="mt-1 text-sm text-text-secondary">
+                        Starts when you create the session and ends {DEFAULT_DURATION_HOURS} hours later.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTimingMode("schedule")}
+                      className={`border px-4 py-4 text-left ${
+                        timingMode === "schedule"
+                          ? "border-border-accent bg-success-bg"
+                          : "border-border bg-bg-card hover:bg-hover-bg"
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-text-primary">Schedule</div>
+                      <div className="mt-1 text-sm text-text-secondary">
+                        Pick the exact start and end time.
+                      </div>
+                    </button>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                        Start Time
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={startTime}
-                        onChange={(event) => setStartTime(event.target.value)}
-                        className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                        End Time
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={endTime}
-                        onChange={(event) => {
-                          setEndTime(event.target.value);
-                          setEndTimeEdited(true);
-                        }}
-                        className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-                      />
-                      <p className="mt-1 text-xs text-text-secondary">
-                        Default window is {DEFAULT_DURATION_HOURS} hours.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 border border-border bg-bg-card-alt p-4">
-                    <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                      Student Experience
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-text-primary">
-                      <input
-                        type="checkbox"
-                        checked={showScores}
-                        onChange={(event) => setShowScores(event.target.checked)}
-                        className="h-4 w-4 accent-accent"
-                      />
-                      Show scores after submission
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-text-primary">
-                      <input
-                        type="checkbox"
-                        checked={showAnswers}
-                        onChange={(event) => setShowAnswers(event.target.checked)}
-                        className="h-4 w-4 accent-accent"
-                      />
-                      Show answers after submission
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-text-primary">
-                      <input
-                        type="checkbox"
-                        checked={shuffle}
-                        onChange={(event) => setShuffle(event.target.checked)}
-                        className="h-4 w-4 accent-accent"
-                      />
-                      Shuffle question order
-                    </label>
-
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                      <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                        Gurukul Format
-                      </div>
-                      <div className="inline-flex w-full flex-wrap border border-border sm:w-auto">
-                        {GurukulFormatOptions.map((option) => {
-                          const selected = gurukulFormatType === option.value;
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              onClick={() => setGurukulFormatType(option.value)}
-                              className={`px-3 py-2 text-xs font-bold uppercase tracking-wide ${
-                                selected
-                                  ? "bg-accent text-text-on-accent"
-                                  : "bg-bg-card text-text-primary hover:bg-hover-bg"
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="border border-border bg-bg-card-alt p-4">
-                    <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                      Ready To Create
-                    </div>
-                    <div className="mt-2 space-y-2 text-sm text-text-secondary">
+                  {timingMode === "schedule" ? (
+                    <div className="grid gap-4 md:grid-cols-2">
                       <div>
-                        <span className="font-medium text-text-primary">Batch:</span>{" "}
-                        {selectedBatchNames.length ? selectedBatchNames.join(", ") : "-"}
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                          Start Time
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={startTime}
+                          onChange={(event) => setStartTime(event.target.value)}
+                          className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                        />
                       </div>
+
                       <div>
-                        <span className="font-medium text-text-primary">Paper:</span>{" "}
-                        {selectedTemplate?.name || "-"}
-                      </div>
-                      <div>
-                        <span className="font-medium text-text-primary">Window:</span>{" "}
-                        {startTime ? formatDateTime(new Date(startTime).toISOString()) : "-"} to{" "}
-                        {endTime ? formatDateTime(new Date(endTime).toISOString()) : "-"}
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                          End Time
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={endTime}
+                          onChange={(event) => {
+                            setEndTime(event.target.value);
+                            setEndTimeEdited(true);
+                          }}
+                          className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                        />
+                        <p className="mt-1 text-xs text-text-secondary">
+                          Default window is {DEFAULT_DURATION_HOURS} hours.
+                        </p>
                       </div>
                     </div>
+                  ) : (
+                    <div className="border border-border bg-bg-card-alt px-4 py-3 text-sm text-text-secondary">
+                      The session will start immediately after you create it and end{" "}
+                      {DEFAULT_DURATION_HOURS} hours later.
+                    </div>
+                  )}
+
+                  <div className="border border-border bg-bg-card-alt">
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedOpen((value) => !value)}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left"
+                    >
+                      <span className="text-sm font-semibold text-text-primary">
+                        Advanced Settings
+                      </span>
+                      <ChevronDownIcon
+                        className={`h-5 w-5 text-text-secondary transition-transform ${
+                          advancedOpen ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+
+                    {advancedOpen ? (
+                      <div className="space-y-4 border-t border-border px-4 py-4">
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                            Session Name
+                          </label>
+                          <input
+                            value={name}
+                            onChange={(event) => {
+                              setName(event.target.value);
+                              setNameEdited(true);
+                            }}
+                            placeholder="Session name"
+                            className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                          />
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm text-text-primary">
+                          <input
+                            type="checkbox"
+                            checked={showScores}
+                            onChange={(event) => setShowScores(event.target.checked)}
+                            className="h-4 w-4 accent-accent"
+                          />
+                          Show scores after submission
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-text-primary">
+                          <input
+                            type="checkbox"
+                            checked={showAnswers}
+                            onChange={(event) => setShowAnswers(event.target.checked)}
+                            className="h-4 w-4 accent-accent"
+                          />
+                          Show answers after submission
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-text-primary">
+                          <input
+                            type="checkbox"
+                            checked={shuffle}
+                            onChange={(event) => setShuffle(event.target.checked)}
+                            className="h-4 w-4 accent-accent"
+                          />
+                          Shuffle question order
+                        </label>
+
+                        <div className="space-y-2">
+                          <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
+                            Gurukul Format
+                          </div>
+                          <div className="inline-flex w-full flex-wrap border border-border sm:w-auto">
+                            {GurukulFormatOptions.map((option) => {
+                              const selected = gurukulFormatType === option.value;
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  onClick={() => setGurukulFormatType(option.value)}
+                                  className={`px-3 py-2 text-xs font-bold uppercase tracking-wide ${
+                                    selected
+                                      ? "bg-accent text-text-on-accent"
+                                      : "bg-bg-card text-text-primary hover:bg-hover-bg"
+                                  }`}
+                                >
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </SectionCard>
@@ -1623,14 +1606,9 @@ function QuizSessionEditModal({
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
-                Edit Quiz Session
-              </h2>
-              <p className="text-sm text-text-secondary">
-                Update timing and session settings. Paper and batch selection stay fixed.
-              </p>
-            </div>
+            <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
+              Edit Quiz Session
+            </h2>
             <button
               onClick={onClose}
               className="text-text-secondary hover:text-text-primary"
@@ -1648,10 +1626,7 @@ function QuizSessionEditModal({
             )}
 
             <div className="space-y-5">
-              <SectionCard
-                title="Fixed Context"
-                subtitle="These parts are carried from the original session and cannot be changed here."
-              >
+              <SectionCard title="Selected Batch And Paper">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <InfoRow
                     label="Paper"
@@ -1674,10 +1649,7 @@ function QuizSessionEditModal({
                 </div>
               </SectionCard>
 
-              <SectionCard
-                title="Timing"
-                subtitle="Adjust the test window if the schedule changes."
-              >
+              <SectionCard title="When And How">
                 <div className="space-y-4">
                   <div>
                     <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
@@ -1718,10 +1690,7 @@ function QuizSessionEditModal({
                 </div>
               </SectionCard>
 
-              <SectionCard
-                title="Session Settings"
-                subtitle="These match the teacher-controlled options from session creation."
-              >
+              <SectionCard title="Advanced Settings">
                 <div className="space-y-4">
                   <div className="space-y-3 border border-border bg-bg-card-alt p-4">
                     <label className="flex items-center gap-2 text-sm text-text-primary">
@@ -1824,8 +1793,6 @@ function QuizSessionDetailsModal({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [onClose]);
 
-  const parentId = getMetaString(session.meta_data, "parent_id");
-  const lifecycle = getSessionLifecycleState(session);
   const classBatchIds = getMetaString(session.meta_data, "batch_id")
     ?.split(",")
     .filter(Boolean);
@@ -1849,9 +1816,6 @@ function QuizSessionDetailsModal({
               <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
                 Session Details
               </h2>
-              <p className="text-sm text-text-secondary">
-                Links, paper details, and session settings.
-              </p>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -1872,18 +1836,17 @@ function QuizSessionDetailsModal({
             <div className="grid gap-4 sm:grid-cols-2">
               <InfoRow label="Session ID" value={String(session.id)} mono />
               <InfoRow label="Session Name" value={session.name} />
-              <InfoRow label="Window State" value={getLifecycleLabel(lifecycle)} />
               <InfoRow
-                label="Sync Status"
-                value={getStatusTitle(getMetaString(session.meta_data, "status"))}
-              />
-              <InfoRow
-                label="Parent Batch"
-                value={parentId ? batchNameMap.get(parentId) || parentId : "-"}
+                label="Data Sync"
+                value={getSyncLabel(session.meta_data)}
               />
               <InfoRow
                 label="Class Batches"
                 value={classBatchNames?.length ? classBatchNames.join(", ") : "-"}
+              />
+              <InfoRow
+                label="Availability"
+                value={session.is_active === false ? "Disabled" : "Enabled"}
               />
               <InfoRow
                 label="Start Time"
@@ -1893,54 +1856,30 @@ function QuizSessionDetailsModal({
               <InfoRow label="End Time" value={formatDateTime(session.end_time)} mono />
             </div>
 
-            <SectionCard title="Paper" subtitle="Template and paper details used for this session.">
-              <div className="space-y-3">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <InfoRow
-                    label="Paper Name"
-                    value={getMetaString(session.meta_data, "resource_name") || session.name}
-                  />
-                  <InfoRow
-                    label="Test Code"
-                    value={getMetaString(session.meta_data, "test_code") || "-"}
-                    mono
-                  />
-                  <InfoRow
-                    label="Test Format"
-                    value={getMetaString(session.meta_data, "test_format") || "-"}
-                  />
-                  <InfoRow
-                    label="Test Purpose"
-                    value={getMetaString(session.meta_data, "test_purpose") || "-"}
-                  />
-                  <InfoRow
-                    label="Test Type"
-                    value={getMetaString(session.meta_data, "test_type") || "-"}
-                  />
-                  <InfoRow
-                    label="Ranking Cutoff"
-                    value={formatDate(getMetaString(session.meta_data, "ranking_cutoff_date"))}
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <ActionLinkRow
-                    label="Question PDF"
-                    href={getMetaString(session.meta_data, "question_pdf")}
-                  />
-                  <ActionLinkRow
-                    label="Solution PDF"
-                    href={getMetaString(session.meta_data, "solution_pdf")}
-                  />
-                </div>
+            <SectionCard title="Paper">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <InfoRow
+                  label="Test Name"
+                  value={getMetaString(session.meta_data, "resource_name") || session.name}
+                />
+                <InfoRow
+                  label="Test Code"
+                  value={getMetaString(session.meta_data, "test_code") || "-"}
+                  mono
+                />
+                <InfoRow
+                  label="Ranking Cutoff"
+                  value={formatDate(getMetaString(session.meta_data, "ranking_cutoff_date"))}
+                />
+                <PaperResourceLinks
+                  questionHref={getMetaString(session.meta_data, "question_pdf")}
+                  solutionHref={getMetaString(session.meta_data, "solution_pdf")}
+                />
               </div>
             </SectionCard>
 
-            <SectionCard title="Session Settings" subtitle="These are the options used while creating the session.">
+            <SectionCard title="Additional Settings">
               <div className="grid gap-4 sm:grid-cols-2">
-                <InfoRow
-                  label="Enabled"
-                  value={toYesNo(session.is_active ?? true)}
-                />
                 <InfoRow
                   label="Show Scores"
                   value={toYesNo(getMetaBoolean(session.meta_data, "show_scores"))}
@@ -1960,7 +1899,7 @@ function QuizSessionDetailsModal({
               </div>
             </SectionCard>
 
-            <SectionCard title="Access Links" subtitle="Open or copy the session links from here.">
+            <SectionCard title="Access Links">
               <div className="grid gap-3 sm:grid-cols-2">
                 <ActionLinkRow
                   label="Q&A Link"
@@ -2001,31 +1940,100 @@ function QuizSessionDetailsModal({
   );
 }
 
-function ProcessingStatusDot({ status }: { status?: string }) {
-  const normalized = getStatusLabel(status);
-  const title = getStatusTitle(status);
-
-  if (normalized === "pending") {
-    return (
-      <div className="flex items-center" title={title} aria-label={title}>
-        <span className="relative flex h-3 w-3">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
-        </span>
-      </div>
-    );
-  }
-
-  const toneClass =
-    normalized === "success"
-      ? "bg-accent"
-      : normalized === "failed"
-        ? "bg-danger"
-        : "bg-text-muted";
+function SessionWindowSummary({
+  session,
+  lifecycle,
+}: {
+  session: QuizSession;
+  lifecycle: SessionLifecycleState;
+}) {
+  const enabled = session.is_active !== false;
 
   return (
-    <div className="flex items-center" title={title} aria-label={title}>
-      <span className={`inline-flex h-3 w-3 rounded-full ${toneClass}`} />
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
+            enabled ? getLifecycleClasses(lifecycle) : "border border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {enabled ? getLifecycleLabel(lifecycle) : "Disabled"}
+        </span>
+        {!enabled ? (
+          <span
+            className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
+              lifecycle
+            )}`}
+          >
+            {getLifecycleLabel(lifecycle)}
+          </span>
+        ) : null}
+      </div>
+      <div className="space-y-1 font-mono text-text-secondary">
+        <div>Start {formatDateTime(session.start_time)}</div>
+        <div>End {formatDateTime(session.end_time)}</div>
+      </div>
+    </div>
+  );
+}
+
+function SyncSummary({
+  session,
+  busy,
+  onSync,
+}: {
+  session: QuizSession;
+  busy: boolean;
+  onSync: () => void;
+}) {
+  const syncLabel = getSyncLabel(session.meta_data);
+  const pending = isSessionPending(session);
+  const buttonLabel =
+    syncLabel === "Synced"
+      ? "Sync Again"
+      : syncLabel === "Sync Failed"
+        ? "Retry Sync"
+        : "Sync Now";
+  const syncIcon =
+    syncLabel === "Synced"
+      ? "✓"
+      : syncLabel === "Sync Failed"
+        ? "!"
+        : syncLabel === "Queued"
+          ? "…"
+          : "•";
+
+  return (
+    <div className="space-y-2">
+      <span
+        className={`inline-flex items-center px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getSyncToneClasses(
+          session.meta_data
+        )}`}
+      >
+        <span aria-hidden="true" className="mr-1 text-[11px] leading-none">
+          {syncIcon}
+        </span>
+        {syncLabel}
+      </span>
+      {!pending ? (
+        <div>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSync();
+            }}
+            disabled={busy}
+            className={`inline-flex items-center rounded border px-2.5 py-1 text-xs font-semibold transition-colors ${
+              syncLabel === "Synced"
+                ? "border-border-accent bg-success-bg text-accent hover:border-accent hover:text-accent-hover"
+                : "border-border text-text-primary hover:border-accent hover:text-accent"
+            } disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted`}
+          >
+            {busy ? "Syncing..." : buttonLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2052,19 +2060,6 @@ function SectionCard({
   );
 }
 
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
-        {label}
-      </div>
-      <div className="border border-border bg-bg-card-alt px-3 py-2 text-sm text-text-primary">
-        {value || "—"}
-      </div>
-    </div>
-  );
-}
-
 function InfoRow({
   label,
   value,
@@ -2084,32 +2079,135 @@ function InfoRow({
   );
 }
 
-function CompactLinkRow({ label, href }: { label: string; href?: string }) {
-  const value = href?.trim();
+function ExternalLinkIcon() {
   return (
-    <div className="flex items-center justify-between gap-3 border border-border bg-bg-card px-3 py-2">
-      <div className="text-xs font-bold uppercase tracking-wide text-text-muted">{label}</div>
-      {value ? (
-        <div className="flex items-center gap-2">
-          <a
-            href={value}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sm font-bold uppercase tracking-wide text-accent hover:text-accent-hover"
-          >
-            Open
-          </a>
-          <button
-            type="button"
-            onClick={() => copyToClipboard(value)}
-            className="border border-border px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
-          >
-            Copy
-          </button>
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5">
+      <path d="M6 3h7v7" />
+      <path d="M13 3 3 13" />
+      <path d="M10 13H3V6" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="m3.5 6 4.5 4 4.5-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5">
+      <rect x="5" y="5" width="8" height="8" rx="1.5" />
+      <path d="M3 10V3.5A1.5 1.5 0 0 1 4.5 2H11" />
+    </svg>
+  );
+}
+
+function LinkIconButton({
+  href,
+  title,
+}: {
+  href?: string;
+  title: string;
+}) {
+  const value = href?.trim();
+  if (!value) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <a
+        href={value}
+        target="_blank"
+        rel="noreferrer"
+        title={title}
+        aria-label={title}
+        className="inline-flex h-8 w-8 items-center justify-center border border-border bg-bg-card text-accent hover:border-accent hover:text-accent-hover"
+      >
+        <ExternalLinkIcon />
+      </a>
+      <button
+        type="button"
+        onClick={() => copyToClipboard(value)}
+        title={`Copy ${title}`}
+        aria-label={`Copy ${title}`}
+        className="inline-flex h-8 w-8 items-center justify-center border border-border bg-bg-card text-text-primary hover:border-accent hover:text-accent"
+      >
+        <CopyIcon />
+      </button>
+    </div>
+  );
+}
+
+function PaperLinkChip({
+  href,
+  label,
+}: {
+  href?: string;
+  label: string;
+}) {
+  const value = href?.trim();
+  if (!value) return null;
+
+  return (
+    <a
+      href={value}
+      target="_blank"
+      rel="noreferrer"
+      title={label}
+      aria-label={label}
+      className="inline-flex items-center gap-1.5 border border-border bg-bg-card px-2 py-1 text-xs font-medium text-text-primary hover:border-accent hover:text-accent"
+    >
+      <span>{label}</span>
+      <ExternalLinkIcon />
+    </a>
+  );
+}
+
+function PaperResourceLinks({
+  questionHref,
+  solutionHref,
+  inline = false,
+}: {
+  questionHref?: string;
+  solutionHref?: string;
+  inline?: boolean;
+}) {
+  if (!questionHref?.trim() && !solutionHref?.trim()) {
+    return inline ? <span className="text-xs text-text-secondary">No test paper files</span> : (
+      <div>
+        <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
+          Paper Files
         </div>
-      ) : (
-        <span className="text-sm text-text-secondary">-</span>
-      )}
+        <div className="mt-1 text-sm text-text-secondary">-</div>
+      </div>
+    );
+  }
+
+  const content = (
+    <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+      <PaperLinkChip href={questionHref} label="Question PDF" />
+      <PaperLinkChip href={solutionHref} label="Answer PDF" />
+    </div>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase tracking-wide text-text-muted">Test Paper Files</div>
+      <div className="mt-2">{content}</div>
     </div>
   );
 }
@@ -2124,21 +2222,7 @@ function ActionLinkRow({ label, href }: { label: string; href?: string }) {
       </div>
       {value ? (
         <div className="flex shrink-0 items-center gap-2">
-          <a
-            href={value}
-            target="_blank"
-            rel="noreferrer"
-            className="bg-accent px-3 py-2 text-xs font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover"
-          >
-            Open
-          </a>
-          <button
-            type="button"
-            onClick={() => copyToClipboard(value)}
-            className="border-2 border-border px-3 py-2 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
-          >
-            Copy
-          </button>
+          <LinkIconButton href={value} title={label} />
         </div>
       ) : (
         <div className="shrink-0 text-sm text-text-secondary">N/A</div>
