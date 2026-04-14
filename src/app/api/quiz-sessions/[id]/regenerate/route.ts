@@ -84,13 +84,13 @@ export async function POST(
 
   if (!patchResponse.ok) {
     const errorText = await patchResponse.text();
-    console.error("Failed to queue sync:", errorText);
+    console.error("Failed to queue regeneration:", errorText);
     return NextResponse.json(
-      { error: "Failed to queue sync" },
+      { error: "Failed to queue regeneration" },
       { status: patchResponse.status }
     );
   }
 
   await publishMessage({ action: "regenerate_quiz", id: sessionId });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, message: "Regeneration requested." });
 }

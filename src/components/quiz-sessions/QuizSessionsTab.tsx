@@ -46,6 +46,7 @@ type CreateTimingMode = "start_now" | "schedule";
 type FetchSessionsOptions = {
   background?: boolean;
 };
+type RowActionKind = "sync" | "regenerate" | "toggle" | "end_now";
 
 interface QuizTemplateOption {
   id: number;
@@ -76,6 +77,13 @@ interface BatchDerivation {
 
 const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
+const LMS_SESSION_PREFIX = "[LMS] ";
+
+function getDefaultSessionName(baseName: string): string {
+  return baseName.startsWith(LMS_SESSION_PREFIX)
+    ? baseName
+    : `${LMS_SESSION_PREFIX}${baseName}`;
+}
 
 function getCompactBatchLabel(values: string[] | undefined): string {
   if (!values?.length) return "-";
@@ -123,18 +131,19 @@ function getStatusLabel(status?: string) {
 }
 
 function getSyncLabel(meta: Record<string, unknown> | null | undefined) {
-  const normalized = getStatusLabel(getMetaString(meta, "status"));
+  const normalized = getStatusLabel(getMetaString(meta, "etl_sync_status"));
   const hasSyncedToBq = meta?.has_synced_to_bq;
 
   if (normalized === "pending") return "Queued";
   if (normalized === "failed") return "Sync Failed";
+  if (normalized === "synced") return "Synced";
   if (hasSyncedToBq === true) return "Synced";
   if (hasSyncedToBq === false) return "Not Synced";
   return "Unknown";
 }
 
 function getSyncToneClasses(meta: Record<string, unknown> | null | undefined) {
-  const normalized = getStatusLabel(getMetaString(meta, "status"));
+  const normalized = getStatusLabel(getMetaString(meta, "etl_sync_status"));
   const hasSyncedToBq = meta?.has_synced_to_bq;
 
   if (normalized === "pending") {
@@ -142,6 +151,9 @@ function getSyncToneClasses(meta: Record<string, unknown> | null | undefined) {
   }
   if (normalized === "failed") {
     return "border border-red-200 bg-red-50 text-red-700";
+  }
+  if (normalized === "synced") {
+    return "border border-border-accent bg-success-bg text-accent";
   }
   if (hasSyncedToBq === true) {
     return "border border-border-accent bg-success-bg text-accent";
@@ -227,13 +239,18 @@ function getLifecycleClasses(state: SessionLifecycleState): string {
   return "border border-border bg-bg-card-alt text-text-secondary";
 }
 
-function isSessionPending(session: QuizSession | null | undefined): boolean {
+function isSessionProcessing(session: QuizSession | null | undefined): boolean {
   if (!session) return false;
   return getStatusLabel(getMetaString(session.meta_data, "status")) === "pending";
 }
 
+function isSyncPending(session: QuizSession | null | undefined): boolean {
+  if (!session) return false;
+  return getStatusLabel(getMetaString(session.meta_data, "etl_sync_status")) === "pending";
+}
+
 function canEndNow(session: QuizSession | null | undefined, nowMs = Date.now()): boolean {
-  if (!session || isSessionPending(session)) return false;
+  if (!session || isSessionProcessing(session)) return false;
   if (session.is_active === false) return false;
   return getSessionLifecycleState(session, nowMs) === "live";
 }
@@ -256,7 +273,10 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<QuizSession | null>(null);
   const [editingSession, setEditingSession] = useState<QuizSession | null>(null);
-  const [savingActionId, setSavingActionId] = useState<number | null>(null);
+  const [savingAction, setSavingAction] = useState<{
+    id: number;
+    kind: RowActionKind;
+  } | null>(null);
   const [menuState, setMenuState] = useState<{
     id: number;
     left: number;
@@ -367,7 +387,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
     const intervalId = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       fetchSessions(page, selectedClassBatch || undefined, { background: true });
-    }, 60000);
+    }, 40000);
     return () => window.clearInterval(intervalId);
   }, [page, selectedClassBatch, fetchSessions]);
 
@@ -390,29 +410,64 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
     return () => document.removeEventListener("click", handleClick);
   }, [menuState]);
 
-  const handleRegenerate = async (sessionId: number) => {
+  const handleSync = async (sessionId: number) => {
     try {
-      setSavingActionId(sessionId);
+      setSavingAction({ id: sessionId, kind: "sync" });
       setFeedbackToast(null);
-      const response = await fetch(`/api/quiz-sessions/${sessionId}/regenerate`, {
+      const response = await fetch(`/api/quiz-sessions/${sessionId}/sync`, {
         method: "POST",
       });
+      const data = (await response.json().catch(() => null)) as
+        | { message?: string; warning?: string; error?: string }
+        | null;
       if (!response.ok) {
-        throw new Error("Failed to regenerate");
+        throw new Error(data?.error || "Failed to request sync");
       }
       setFeedbackToast({
         variant: "info",
-        message: "Sync requested. Session data will refresh shortly.",
+        message:
+          data?.warning ||
+          data?.message ||
+          "Sync requested. Updated results should appear shortly.",
       });
       await fetchSessions(page, selectedClassBatch || undefined);
     } catch (err) {
       console.error(err);
       setFeedbackToast({
         variant: "error",
-        message: "Failed to request sync.",
+        message: "Could not request sync.",
       });
     } finally {
-      setSavingActionId(null);
+      setSavingAction(null);
+    }
+  };
+
+  const handleRegenerate = async (sessionId: number) => {
+    try {
+      setSavingAction({ id: sessionId, kind: "regenerate" });
+      setFeedbackToast(null);
+      const response = await fetch(`/api/quiz-sessions/${sessionId}/regenerate`, {
+        method: "POST",
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { message?: string; error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to request regeneration");
+      }
+      setFeedbackToast({
+        variant: "info",
+        message: data?.message || "Regeneration requested. Session links will refresh shortly.",
+      });
+      await fetchSessions(page, selectedClassBatch || undefined);
+    } catch (err) {
+      console.error(err);
+      setFeedbackToast({
+        variant: "error",
+        message: "Failed to request regeneration.",
+      });
+    } finally {
+      setSavingAction(null);
     }
   };
 
@@ -436,7 +491,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
 
   const handleToggleEnabled = async (session: QuizSession) => {
     try {
-      setSavingActionId(session.id);
+      setSavingAction({ id: session.id, kind: "toggle" });
       setFeedbackToast(null);
 
       const response = await fetch(`/api/quiz-sessions/${session.id}`, {
@@ -454,7 +509,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
 
       setSelectedSession(null);
       setFeedbackToast({
-        variant: "success",
+        variant: session.is_active === false ? "success" : "info",
         message:
           session.is_active === false ? "Session enabled." : "Session disabled.",
       });
@@ -466,13 +521,13 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         message: err instanceof Error ? err.message : "Failed to update session.",
       });
     } finally {
-      setSavingActionId(null);
+      setSavingAction(null);
     }
   };
 
   const handleEndNow = async (session: QuizSession) => {
     try {
-      setSavingActionId(session.id);
+      setSavingAction({ id: session.id, kind: "end_now" });
       setFeedbackToast(null);
 
       const response = await fetch(`/api/quiz-sessions/${session.id}`, {
@@ -505,7 +560,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       });
       await fetchSessions(page, selectedClassBatch || undefined, { background: true });
     } finally {
-      setSavingActionId(null);
+      setSavingAction(null);
     }
   };
 
@@ -579,7 +634,10 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                 Window
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
-                Sync Status
+                Status
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
+                Sync
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
                 Actions
@@ -589,13 +647,13 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
           <tbody className="divide-y divide-border bg-bg-card">
             {loadingSessions && sessions.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-sm text-text-secondary">
+                <td colSpan={6} className="px-4 py-10 text-center text-sm text-text-secondary">
                   Loading sessions...
                 </td>
               </tr>
             ) : sessions.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-sm text-text-secondary">
+                <td colSpan={6} className="px-4 py-10 text-center text-sm text-text-secondary">
                   No quiz sessions found.
                 </td>
               </tr>
@@ -609,6 +667,9 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                 const classBatchNames = classBatchIds?.map(
                   (batchId) => batchNameMap.get(batchId) || batchId
                 );
+                const regenerateBusy =
+                  savingAction?.id === session.id && savingAction.kind === "regenerate";
+                const sessionProcessing = isSessionProcessing(session);
 
                 return (
                   <tr
@@ -633,13 +694,24 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                       <SessionWindowSummary session={session} lifecycle={lifecycle} />
                     </td>
                     <td className="px-4 py-4 text-sm">
-                      <SyncSummary
+                      <StatusSummary
                         session={session}
-                        busy={savingActionId === session.id}
-                        onSync={() => handleRegenerate(session.id)}
+                        sessionProcessing={sessionProcessing}
+                        regenerateBusy={regenerateBusy}
                       />
                     </td>
-                    <td className="px-4 py-4 text-sm text-text-secondary">
+                    <td className="px-4 py-4 text-sm">
+                      <SyncSummary
+                        session={session}
+                        busy={savingAction?.id === session.id && savingAction.kind === "sync"}
+                        onSync={() => handleSync(session.id)}
+                      />
+                    </td>
+                    <td
+                      className={`px-4 py-4 text-sm text-text-secondary ${
+                        sessionProcessing ? "opacity-60" : ""
+                      }`}
+                    >
                       <div className="relative inline-block text-left" data-menu-root>
                         <button
                           data-menu-root
@@ -731,8 +803,8 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         >
           {(() => {
             const currentSession = sessions.find((session) => session.id === menuState.id);
-            const pending = isSessionPending(currentSession);
-            const busy = savingActionId === menuState.id;
+            const sessionProcessing = isSessionProcessing(currentSession);
+            const busy = savingAction?.id === menuState.id;
             const enabled = currentSession?.is_active !== false;
             const endNowAvailable = canEndNow(currentSession, currentTimeMs);
 
@@ -745,7 +817,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                     setEditingSession(currentSession);
                     setMenuState(null);
                   }}
-                  disabled={pending || busy}
+                  disabled={sessionProcessing || busy}
                   className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
                 >
                   Edit
@@ -757,7 +829,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                     handleToggleEnabled(currentSession);
                     setMenuState(null);
                   }}
-                  disabled={pending || busy}
+                  disabled={sessionProcessing || busy}
                   className="flex w-full items-center justify-between px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
                 >
                   <span>{enabled ? "Disable Session" : "Enable Session"}</span>
@@ -793,7 +865,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                     handleRegenerate(menuState.id);
                     setMenuState(null);
                   }}
-                  disabled={pending || busy}
+                  disabled={sessionProcessing || busy}
                   className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
                 >
                   Regenerate
@@ -1032,8 +1104,8 @@ function QuizSessionCreateModal({
       return;
     }
     if (!nameEdited || !name.trim()) {
-        setName(selectedTemplate.name);
-      }
+      setName(getDefaultSessionName(selectedTemplate.name));
+    }
   }, [name, nameEdited, selectedTemplate]);
 
   const toggleBatch = (batchId: string) => {
@@ -1089,7 +1161,7 @@ function QuizSessionCreateModal({
           : new Date(endTime);
 
       const payload = {
-        name: name.trim() || selectedTemplate.name,
+        name: name.trim() || getDefaultSessionName(selectedTemplate.name),
         resourceId: selectedTemplate.id,
         grade: batchDerivation.grade,
         parentBatchId: batchDerivation.parentBatchId,
@@ -1193,10 +1265,6 @@ function QuizSessionCreateModal({
                         );
                       })
                     )}
-                  </div>
-
-                  <div className="text-sm text-text-secondary">
-                    {classBatchIds.length} selected
                   </div>
 
                   {batchDerivation.error && (
@@ -1821,7 +1889,7 @@ function QuizSessionDetailsModal({
               <button
                 type="button"
                 onClick={onEdit}
-                disabled={isSessionPending(session)}
+                disabled={isSessionProcessing(session)}
                 className="border-2 border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
               >
                 Edit
@@ -1947,28 +2015,21 @@ function SessionWindowSummary({
   session: QuizSession;
   lifecycle: SessionLifecycleState;
 }) {
-  const enabled = session.is_active !== false;
+  const showLifecycleBadge = lifecycle === "live" || lifecycle === "ended";
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
-            enabled ? getLifecycleClasses(lifecycle) : "border border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {enabled ? getLifecycleLabel(lifecycle) : "Disabled"}
-        </span>
-        {!enabled ? (
+      {showLifecycleBadge ? (
+        <div className="flex flex-wrap items-center gap-2">
           <span
-            className={`inline-flex px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
+            className={`inline-flex min-h-6 items-center justify-center px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
               lifecycle
             )}`}
           >
             {getLifecycleLabel(lifecycle)}
           </span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <div className="space-y-1 font-mono text-text-secondary">
         <div>Start {formatDateTime(session.start_time)}</div>
         <div>End {formatDateTime(session.end_time)}</div>
@@ -1987,7 +2048,7 @@ function SyncSummary({
   onSync: () => void;
 }) {
   const syncLabel = getSyncLabel(session.meta_data);
-  const pending = isSessionPending(session);
+  const pending = isSyncPending(session);
   const buttonLabel =
     syncLabel === "Synced"
       ? "Sync Again"
@@ -2024,17 +2085,45 @@ function SyncSummary({
               onSync();
             }}
             disabled={busy}
-            className={`inline-flex items-center rounded border px-2.5 py-1 text-xs font-semibold transition-colors ${
-              syncLabel === "Synced"
-                ? "border-border-accent bg-success-bg text-accent hover:border-accent hover:text-accent-hover"
-                : "border-border text-text-primary hover:border-accent hover:text-accent"
-            } disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted`}
+            className="inline-flex items-center rounded border border-border px-2.5 py-1 text-xs font-semibold text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
           >
             {busy ? "Syncing..." : buttonLabel}
           </button>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function StatusSummary({
+  session,
+  sessionProcessing,
+  regenerateBusy,
+}: {
+  session: QuizSession;
+  sessionProcessing: boolean;
+  regenerateBusy: boolean;
+}) {
+  let label = "Enabled";
+  let classes = "border border-border-accent bg-success-bg text-accent";
+
+  if (regenerateBusy) {
+    label = "Regenerating";
+    classes = "border border-amber-200 bg-amber-50 text-amber-700";
+  } else if (sessionProcessing) {
+    label = "Processing";
+    classes = "border border-amber-200 bg-amber-50 text-amber-700";
+  } else if (session.is_active === false) {
+    label = "Disabled";
+    classes = "border border-border bg-bg-card-alt text-text-secondary";
+  }
+
+  return (
+    <span
+      className={`inline-flex min-h-6 min-w-[96px] items-center justify-center px-2.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${classes}`}
+    >
+      {label}
+    </span>
   );
 }
 

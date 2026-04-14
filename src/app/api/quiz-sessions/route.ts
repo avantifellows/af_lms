@@ -16,6 +16,7 @@ import {
 
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
 const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
+const LMS_SESSION_PREFIX = "[LMS] ";
 
 interface SessionRow {
   id: number;
@@ -48,6 +49,12 @@ interface CreateQuizSessionBody {
   gurukulFormatType?: string;
   startTime?: string;
   endTime?: string;
+}
+
+function getDefaultSessionName(baseName: string): string {
+  return baseName.startsWith(LMS_SESSION_PREFIX)
+    ? baseName
+    : `${LMS_SESSION_PREFIX}${baseName}`;
 }
 
 async function getBatchesForSchool(
@@ -299,7 +306,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const sessionName = body.name?.trim() || selectedTemplate.name;
+  const sessionName = body.name?.trim() || getDefaultSessionName(selectedTemplate.name);
   const testType = selectedTemplate.testType || "assessment";
   const gurukulFormatType = body.gurukulFormatType || "both";
   const cmsLink = selectedTemplate.cmsLink;
