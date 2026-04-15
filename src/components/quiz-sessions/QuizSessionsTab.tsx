@@ -576,12 +576,12 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         />
       )}
 
-      <div className="bg-bg-card border border-border shadow-sm">
+      <div className="rounded-lg border border-border bg-bg-card shadow-sm">
         <div className="flex flex-col gap-4 border-b-4 border-border-accent px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold text-text-primary">Quiz Sessions</h2>
           <button
             onClick={() => setIsCreateOpen(true)}
-            className="inline-flex items-center justify-center gap-2 bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
           >
             <span aria-hidden="true" className="relative inline-block h-3.5 w-3.5 shrink-0">
               <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-current" />
@@ -609,7 +609,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
             setPage(0);
           }}
           disabled={loadingBatches}
-          className="block w-full max-w-sm border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none disabled:bg-bg-card-alt"
+          className="block min-h-[44px] w-full max-w-sm rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:bg-bg-card-alt"
         >
           <option value="">All class batches</option>
           {classBatches.map((batch) => (
@@ -620,8 +620,9 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         </select>
       </div>
 
-      <div className="overflow-x-auto bg-bg-card border border-border shadow-sm">
-        <table className="min-w-full divide-y divide-border">
+      <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-border">
           <thead className="bg-bg-card-alt border-b-2 border-border-accent">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted">
@@ -724,7 +725,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                                 : { id: session.id, left: rect.left, top: rect.bottom }
                             );
                           }}
-                          className="px-2 py-1 text-text-secondary hover:text-text-primary"
+                          className="rounded-lg px-2 py-1 text-text-secondary hover:bg-hover-bg hover:text-text-primary"
                           aria-label="Open actions"
                         >
                           <svg
@@ -745,14 +746,15 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
               })
             )}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
 
       <div className="flex items-center justify-between">
         <button
           onClick={() => setPage((previous) => Math.max(0, previous - 1))}
           disabled={page === 0}
-          className="border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
+          className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
         >
           Previous
         </button>
@@ -760,7 +762,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         <button
           onClick={() => setPage((previous) => previous + 1)}
           disabled={!hasMore}
-          className="border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
+          className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
         >
           Next
         </button>
@@ -798,7 +800,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       {menuState && (
         <div
           data-menu-root
-          className="fixed z-50 w-48 border border-border bg-bg-card shadow-md"
+          className="fixed z-50 w-48 overflow-hidden rounded-lg border border-border bg-bg-card shadow-md"
           style={{ left: menuState.left, top: menuState.top }}
         >
           {(() => {
@@ -1203,7 +1205,7 @@ function QuizSessionCreateModal({
         onClick={onClose}
       >
         <div
-          className="relative flex max-h-[92vh] w-full max-w-4xl flex-col border border-border bg-bg-card shadow-xl"
+          className="relative flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-border bg-bg-card shadow-xl"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
@@ -1235,7 +1237,7 @@ function QuizSessionCreateModal({
                     Select one or more class batches from the same parent batch.
                   </div>
 
-                  <div className="max-h-64 overflow-y-auto border border-border">
+                  <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
                     {availableClassBatches.length === 0 ? (
                       <div className="px-3 py-4 text-sm text-text-secondary">
                         No class batches are available.
@@ -1268,7 +1270,7 @@ function QuizSessionCreateModal({
                   </div>
 
                   {batchDerivation.error && (
-                    <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                       {batchDerivation.error}
                     </div>
                   )}
@@ -1287,7 +1289,7 @@ function QuizSessionCreateModal({
                         setTestFormat(event.target.value);
                         setSelectedTemplateId(null);
                       }}
-                      className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                      className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                     >
                       <option value="">Select test format</option>
                       {TestFormatOptions.map((option) => (
@@ -1303,23 +1305,23 @@ function QuizSessionCreateModal({
                   !batchDerivation.stream ||
                   batchDerivation.error ||
                   !testFormat ? (
-                    <div className="border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                    <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                       Choose class batches and a test format first.
                     </div>
                   ) : loadingTemplates ? (
-                    <div className="border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                    <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                       Loading papers...
                     </div>
                   ) : templateError ? (
-                    <div className="border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
                       {templateError}
                     </div>
                   ) : templates.length === 0 ? (
-                    <div className="border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                    <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
                       No papers are available for this batch and format.
                     </div>
                   ) : (
-                    <div className="max-h-72 overflow-y-auto border border-border">
+                    <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
                       {templates.map((template) => {
                         const isSelected = template.id === selectedTemplateId;
                         return (
@@ -1382,7 +1384,7 @@ function QuizSessionCreateModal({
                     <button
                       type="button"
                       onClick={() => setTimingMode("start_now")}
-                      className={`border px-4 py-4 text-left ${
+                      className={`rounded-lg border px-4 py-4 text-left shadow-sm transition-colors ${
                         timingMode === "start_now"
                           ? "border-border-accent bg-success-bg"
                           : "border-border bg-bg-card hover:bg-hover-bg"
@@ -1396,7 +1398,7 @@ function QuizSessionCreateModal({
                     <button
                       type="button"
                       onClick={() => setTimingMode("schedule")}
-                      className={`border px-4 py-4 text-left ${
+                      className={`rounded-lg border px-4 py-4 text-left shadow-sm transition-colors ${
                         timingMode === "schedule"
                           ? "border-border-accent bg-success-bg"
                           : "border-border bg-bg-card hover:bg-hover-bg"
@@ -1419,7 +1421,7 @@ function QuizSessionCreateModal({
                           type="datetime-local"
                           value={startTime}
                           onChange={(event) => setStartTime(event.target.value)}
-                          className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                          className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                         />
                       </div>
 
@@ -1434,7 +1436,7 @@ function QuizSessionCreateModal({
                             setEndTime(event.target.value);
                             setEndTimeEdited(true);
                           }}
-                          className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                          className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                         />
                         <p className="mt-1 text-xs text-text-secondary">
                           Default window is {DEFAULT_DURATION_HOURS} hours.
@@ -1442,13 +1444,13 @@ function QuizSessionCreateModal({
                       </div>
                     </div>
                   ) : (
-                    <div className="border border-border bg-bg-card-alt px-4 py-3 text-sm text-text-secondary">
+                    <div className="rounded-lg border border-border bg-bg-card-alt px-4 py-3 text-sm text-text-secondary">
                       The session will start immediately after you create it and end{" "}
                       {DEFAULT_DURATION_HOURS} hours later.
                     </div>
                   )}
 
-                  <div className="border border-border bg-bg-card-alt">
+                  <div className="overflow-hidden rounded-lg border border-border bg-bg-card-alt">
                     <button
                       type="button"
                       onClick={() => setAdvancedOpen((value) => !value)}
@@ -1477,7 +1479,7 @@ function QuizSessionCreateModal({
                               setNameEdited(true);
                             }}
                             placeholder="Session name"
-                            className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                            className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                           />
                         </div>
 
@@ -1513,7 +1515,7 @@ function QuizSessionCreateModal({
                           <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
                             Gurukul Format
                           </div>
-                          <div className="inline-flex w-full flex-wrap border border-border sm:w-auto">
+                          <div className="inline-flex w-full flex-wrap overflow-hidden rounded-lg border border-border sm:w-auto">
                             {GurukulFormatOptions.map((option) => {
                               const selected = gurukulFormatType === option.value;
                               return (
@@ -1521,7 +1523,7 @@ function QuizSessionCreateModal({
                                   key={option.value}
                                   type="button"
                                   onClick={() => setGurukulFormatType(option.value)}
-                                  className={`px-3 py-2 text-xs font-bold uppercase tracking-wide ${
+                                  className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide ${
                                     selected
                                       ? "bg-accent text-text-on-accent"
                                       : "bg-bg-card text-text-primary hover:bg-hover-bg"
@@ -1545,14 +1547,14 @@ function QuizSessionCreateModal({
             <button
               type="button"
               onClick={onClose}
-              className="border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+              className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
             >
               Cancel
             </button>
             <button
               onClick={handleSubmit}
               disabled={saving}
-              className="bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create Session"}
             </button>
@@ -1670,7 +1672,7 @@ function QuizSessionEditModal({
         onClick={onClose}
       >
         <div
-          className="relative flex max-h-[92vh] w-full max-w-3xl flex-col border border-border bg-bg-card shadow-xl"
+          className="relative flex max-h-[92vh] w-full max-w-3xl flex-col rounded-xl border border-border bg-bg-card shadow-xl"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
@@ -1726,7 +1728,7 @@ function QuizSessionEditModal({
                     <input
                       value={name}
                       onChange={(event) => setName(event.target.value)}
-                      className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                      className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                     />
                   </div>
 
@@ -1739,7 +1741,7 @@ function QuizSessionEditModal({
                         type="datetime-local"
                         value={startTime}
                         onChange={(event) => setStartTime(event.target.value)}
-                        className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                       />
                     </div>
 
@@ -1751,7 +1753,7 @@ function QuizSessionEditModal({
                         type="datetime-local"
                         value={endTime}
                         onChange={(event) => setEndTime(event.target.value)}
-                        className="w-full border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                       />
                     </div>
                   </div>
@@ -1760,7 +1762,7 @@ function QuizSessionEditModal({
 
               <SectionCard title="Advanced Settings">
                 <div className="space-y-4">
-                  <div className="space-y-3 border border-border bg-bg-card-alt p-4">
+                  <div className="space-y-3 rounded-lg border border-border bg-bg-card-alt p-4">
                     <label className="flex items-center gap-2 text-sm text-text-primary">
                       <input
                         type="checkbox"
@@ -1793,7 +1795,7 @@ function QuizSessionEditModal({
                       <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
                         Gurukul Format
                       </div>
-                      <div className="inline-flex w-full flex-wrap border border-border sm:w-auto">
+                      <div className="inline-flex w-full flex-wrap overflow-hidden rounded-lg border border-border sm:w-auto">
                         {GurukulFormatOptions.map((option) => {
                           const selected = gurukulFormatType === option.value;
                           return (
@@ -1801,7 +1803,7 @@ function QuizSessionEditModal({
                               key={option.value}
                               type="button"
                               onClick={() => setGurukulFormatType(option.value)}
-                              className={`px-3 py-2 text-xs font-bold uppercase tracking-wide ${
+                              className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide ${
                                 selected
                                   ? "bg-accent text-text-on-accent"
                                   : "bg-bg-card text-text-primary hover:bg-hover-bg"
@@ -1823,14 +1825,14 @@ function QuizSessionEditModal({
             <button
               type="button"
               onClick={onClose}
-              className="border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+              className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
             >
               Cancel
             </button>
             <button
               onClick={handleSubmit}
               disabled={saving}
-              className="bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>
@@ -1876,7 +1878,7 @@ function QuizSessionDetailsModal({
         onClick={onClose}
       >
         <div
-          className="relative w-full max-w-3xl border border-border bg-bg-card shadow-xl"
+          className="relative w-full max-w-3xl rounded-xl border border-border bg-bg-card shadow-xl"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
@@ -1890,7 +1892,7 @@ function QuizSessionDetailsModal({
                 type="button"
                 onClick={onEdit}
                 disabled={isSessionProcessing(session)}
-                className="border-2 border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
+                className="min-h-[36px] rounded-lg border-2 border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
               >
                 Edit
               </button>
@@ -1997,7 +1999,7 @@ function QuizSessionDetailsModal({
             <button
               type="button"
               onClick={onClose}
-              className="border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+              className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
             >
               Close
             </button>
@@ -2022,7 +2024,7 @@ function SessionWindowSummary({
       {showLifecycleBadge ? (
         <div className="flex flex-wrap items-center gap-2">
           <span
-            className={`inline-flex min-h-6 items-center justify-center px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
+            className={`inline-flex min-h-6 items-center justify-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${getLifecycleClasses(
               lifecycle
             )}`}
           >
@@ -2067,7 +2069,7 @@ function SyncSummary({
   return (
     <div className="space-y-2">
       <span
-        className={`inline-flex items-center px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getSyncToneClasses(
+        className={`inline-flex items-center rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getSyncToneClasses(
           session.meta_data
         )}`}
       >
@@ -2085,7 +2087,7 @@ function SyncSummary({
               onSync();
             }}
             disabled={busy}
-            className="inline-flex items-center rounded border border-border px-2.5 py-1 text-xs font-semibold text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
+            className="inline-flex min-h-[36px] items-center rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
           >
             {busy ? "Syncing..." : buttonLabel}
           </button>
@@ -2120,7 +2122,7 @@ function StatusSummary({
 
   return (
     <span
-      className={`inline-flex min-h-6 min-w-[96px] items-center justify-center px-2.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${classes}`}
+      className={`inline-flex min-h-6 min-w-[96px] items-center justify-center rounded-full px-2.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${classes}`}
     >
       {label}
     </span>
@@ -2137,7 +2139,7 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <div className="border border-border bg-bg-card">
+    <div className="rounded-lg border border-border bg-bg-card shadow-sm">
       <div className="border-b-2 border-border-accent px-4 py-3">
         <div className="text-sm font-bold uppercase tracking-wide text-text-primary">
           {title}
@@ -2220,7 +2222,7 @@ function LinkIconButton({
         rel="noreferrer"
         title={title}
         aria-label={title}
-        className="inline-flex h-8 w-8 items-center justify-center border border-border bg-bg-card text-accent hover:border-accent hover:text-accent-hover"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg-card text-accent hover:border-accent hover:text-accent-hover"
       >
         <ExternalLinkIcon />
       </a>
@@ -2229,7 +2231,7 @@ function LinkIconButton({
         onClick={() => copyToClipboard(value)}
         title={`Copy ${title}`}
         aria-label={`Copy ${title}`}
-        className="inline-flex h-8 w-8 items-center justify-center border border-border bg-bg-card text-text-primary hover:border-accent hover:text-accent"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg-card text-text-primary hover:border-accent hover:text-accent"
       >
         <CopyIcon />
       </button>
@@ -2254,7 +2256,7 @@ function PaperLinkChip({
       rel="noreferrer"
       title={label}
       aria-label={label}
-      className="inline-flex items-center gap-1.5 border border-border bg-bg-card px-2 py-1 text-xs font-medium text-text-primary hover:border-accent hover:text-accent"
+      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-card px-2.5 py-1 text-xs font-medium text-text-primary hover:border-accent hover:text-accent"
     >
       <span>{label}</span>
       <ExternalLinkIcon />
@@ -2305,7 +2307,7 @@ function ActionLinkRow({ label, href }: { label: string; href?: string }) {
   const value = href?.trim();
 
   return (
-    <div className="flex items-center justify-between gap-3 border border-border bg-bg-card-alt px-3 py-3">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-bg-card-alt px-3 py-3">
       <div className="min-w-0 text-xs font-bold uppercase tracking-wide text-text-muted">
         {label}
       </div>
