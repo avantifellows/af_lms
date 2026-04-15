@@ -1443,12 +1443,7 @@ function QuizSessionCreateModal({
                         </p>
                       </div>
                     </div>
-                  ) : (
-                    <div className="rounded-lg border border-border bg-bg-card-alt px-4 py-3 text-sm text-text-secondary">
-                      The session will start immediately after you create it and end{" "}
-                      {DEFAULT_DURATION_HOURS} hours later.
-                    </div>
-                  )}
+                  ) : null}
 
                   <div className="overflow-hidden rounded-lg border border-border bg-bg-card-alt">
                     <button
