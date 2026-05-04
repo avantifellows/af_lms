@@ -208,8 +208,7 @@ const noProgramContext = {
 };
 
 // setupAdmin: admin (level 4) has hasPMAccess=true via getFeatureAccess
-// Query order when schools present: schools, count, gradeCounts, visits
-// Query order when no schools (empty IDs → getSchoolGradeCounts returns early): schools, count, visits
+// Query order: schools, count, [visits if PM]
 function setupAdmin(schools: unknown[] = [], totalCount = 0) {
   mockGetServerSession.mockResolvedValue(adminSession);
   mockGetUserPermission.mockResolvedValue(adminPermission);
@@ -217,13 +216,8 @@ function setupAdmin(schools: unknown[] = [], totalCount = 0) {
   mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
   mockGetAccessibleSchoolCodes.mockResolvedValue("all");
 
-  const hasSchools = schools.length > 0;
   mockQuery.mockResolvedValueOnce(schools); // schools query
   mockQuery.mockResolvedValueOnce([{ total: String(totalCount) }]); // count query
-  if (hasSchools) {
-    mockQuery.mockResolvedValueOnce([]); // getSchoolGradeCounts
-  }
-  // Promise.all: [gradeCounts(returns early if empty), getRecentVisits]
   mockQuery.mockResolvedValueOnce([]); // getRecentVisits
 }
 
@@ -238,12 +232,8 @@ function setupPM(
   mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
   mockGetAccessibleSchoolCodes.mockResolvedValue("all");
 
-  const hasSchools = schools.length > 0;
   mockQuery.mockResolvedValueOnce(schools); // schools query
   mockQuery.mockResolvedValueOnce([{ total: String(totalCount) }]); // count query
-  if (hasSchools) {
-    mockQuery.mockResolvedValueOnce([]); // getSchoolGradeCounts
-  }
   mockQuery.mockResolvedValueOnce(visits); // getRecentVisits
 }
 
@@ -258,12 +248,8 @@ function setupTeacher(
   mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
   mockGetAccessibleSchoolCodes.mockResolvedValue(codes);
 
-  const hasSchools = schools.length > 0;
   mockQuery.mockResolvedValueOnce(schools); // schools query
   mockQuery.mockResolvedValueOnce([{ total: String(totalCount) }]); // count query
-  if (hasSchools) {
-    mockQuery.mockResolvedValueOnce([]); // getSchoolGradeCounts
-  }
   // No PM queries since hasPMAccess=false
 }
 
@@ -384,13 +370,13 @@ describe("DashboardPage (server component)", () => {
     expect(screen.getByText("Admin access")).toBeInTheDocument();
   });
 
-  it("shows 'All schools access' for level 3", async () => {
+  it("shows 'All schools' for level 3", async () => {
     setupPM([], 0);
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(screen.getByText("All schools access")).toBeInTheDocument();
+    expect(screen.getByText("All schools")).toBeInTheDocument();
   });
 
   it("shows region access text for level 2", async () => {
@@ -402,15 +388,12 @@ describe("DashboardPage (server component)", () => {
     mockQuery
       .mockResolvedValueOnce([]) // schools
       .mockResolvedValueOnce([{ total: "0" }]) // count
-      .mockResolvedValueOnce([]) // visits
-      .mockResolvedValueOnce([{ count: "0" }]); // open issues
+      .mockResolvedValueOnce([]); // visits
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(
-      screen.getByText("Region access: North, South")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Region: North, South")).toBeInTheDocument();
   });
 
   it("shows school count text for level 1", async () => {
@@ -531,8 +514,8 @@ describe("DashboardPage (server component)", () => {
     const card = screen.getByTestId("school-card-SC001");
     expect(card).toBeInTheDocument();
     expect(card).toHaveAttribute("data-href", "/school/SC001");
-    expect(card).toHaveAttribute("data-show-student-count", "true");
-    expect(card).toHaveAttribute("data-show-grade-breakdown", "true");
+    expect(card).toHaveAttribute("data-show-student-count", "false");
+    expect(card).toHaveAttribute("data-show-grade-breakdown", "false");
   });
 
   it("shows Start Visit action for PM users", async () => {
@@ -579,30 +562,6 @@ describe("DashboardPage (server component)", () => {
 
     const card = screen.getByTestId("school-card-SC001");
     expect(card).toHaveAttribute("data-show-region", "false");
-  });
-
-  // --- Grade counts integration ---
-
-  it("merges grade counts into school data", async () => {
-    const school = makeSchool({ id: "s1", code: "SC001" });
-    mockGetServerSession.mockResolvedValue(adminSession);
-    mockGetUserPermission.mockResolvedValue(adminPermission);
-    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
-    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
-    mockGetAccessibleSchoolCodes.mockResolvedValue("all");
-    mockQuery
-      .mockResolvedValueOnce([school]) // schools
-      .mockResolvedValueOnce([{ total: "1" }]) // count
-      .mockResolvedValueOnce([
-        { school_id: "s1", grade: 9, count: "10" },
-        { school_id: "s1", grade: 10, count: "15" },
-      ]) // grade counts
-      .mockResolvedValueOnce([]); // visits
-
-    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
-    render(jsx);
-
-    expect(screen.getByTestId("school-card-SC001")).toBeInTheDocument();
   });
 
   // --- Recent visits table ---
@@ -778,7 +737,7 @@ describe("DashboardPage (server component)", () => {
     render(jsx);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Schools" })
+      screen.getByRole("img", { name: "Avanti Fellows" })
     ).toBeInTheDocument();
     expect(
       screen.getByText("admin@avantifellows.org")
@@ -816,7 +775,7 @@ describe("DashboardPage (server component)", () => {
     expect(params[0]).toEqual(["SC001", "SC002"]);
   });
 
-  it("passes school IDs to getSchoolGradeCounts", async () => {
+  it("does not fetch grade counts (school cards no longer show numbers)", async () => {
     const school = makeSchool({ id: "s99" });
     mockGetServerSession.mockResolvedValue(teacherSession);
     mockGetUserPermission.mockResolvedValue(teacherPermission);
@@ -825,25 +784,11 @@ describe("DashboardPage (server component)", () => {
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
     mockQuery
       .mockResolvedValueOnce([school]) // schools query
-      .mockResolvedValueOnce([{ total: "1" }]) // count query
-      .mockResolvedValueOnce([]); // getSchoolGradeCounts
+      .mockResolvedValueOnce([{ total: "1" }]); // count query
 
     await DashboardPage({ searchParams: defaultSearchParams });
 
-    // Third query call is getSchoolGradeCounts (no PM queries for teacher)
-    const gradeCountsCall = mockQuery.mock.calls[2];
-    const [sql, params] = gradeCountsCall;
-    expect(sql).toContain("grade");
-    expect(params[0]).toEqual(["s99"]);
-  });
-
-  it("skips grade count query when no schools found", async () => {
-    setupTeacher([], 0);
-
-    await DashboardPage({ searchParams: defaultSearchParams });
-
-    // getSchoolGradeCounts returns early when schoolIds is empty — no query
-    // Only 2 queries: schools + count
+    // Only 2 queries: schools + count (teacher has no PM access for visits)
     expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 

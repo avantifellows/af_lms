@@ -1223,3 +1223,118 @@ describe("StudentTable - Dropout modal error edge cases", () => {
     });
   });
 });
+
+// ─── Program filter + enrollment summary ─────────────────────────────────────
+
+describe("StudentTable - enrollment summary", () => {
+  const coeG11 = makeStudent({ group_user_id: "c11a", user_id: "uc11a", program_id: 1, program_name: "JNV CoE", grade: 11 });
+  const coeG11b = makeStudent({ group_user_id: "c11b", user_id: "uc11b", program_id: 1, program_name: "JNV CoE", grade: 11 });
+  const coeG12 = makeStudent({ group_user_id: "c12", user_id: "uc12", program_id: 1, program_name: "JNV CoE", grade: 12 });
+  const nodalG11 = makeStudent({ group_user_id: "n11", user_id: "un11", program_id: 2, program_name: "JNV Nodal", grade: 11 });
+  const coeG9 = makeStudent({ group_user_id: "c9", user_id: "uc9", program_id: 1, program_name: "JNV CoE", grade: 9 });
+
+  // Given a label inside a StatCard in the summary section, read the value.
+  // Scoped to the `<h2>… Students</h2>` container because grade labels also
+  // appear elsewhere (e.g., per-student badges).
+  function statValue(label: string): string {
+    const heading = screen.getByRole("heading", { name: /Students$/ });
+    const container = heading.parentElement!;
+    const labelEl = within(container).getByText(label);
+    // Label is a direct child of the StatCard root; the value is a font-mono
+    // span within the same card.
+    const card = labelEl.parentElement!;
+    const valueSpan = card.querySelector("span.font-mono");
+    expect(valueSpan).not.toBeNull();
+    return valueSpan!.textContent ?? "";
+  }
+
+  it("shows summary card with total + grade 11 and 12 only (no 9 or 10)", () => {
+    render(
+      <StudentTable
+        students={[coeG11, coeG11b, coeG12, coeG9]}
+        grades={defaultGrades}
+        userProgramIds={[1]}
+      />,
+    );
+
+    expect(statValue("Total JNV CoE")).toBe("4");
+    expect(statValue("Grade 11")).toBe("2");
+    expect(statValue("Grade 12")).toBe("1");
+    const heading = screen.getByRole("heading", { name: /Students$/ });
+    const summary = heading.parentElement!;
+    expect(within(summary).queryByText("Grade 9")).not.toBeInTheDocument();
+    expect(within(summary).queryByText("Grade 10")).not.toBeInTheDocument();
+  });
+
+  it("defaults to user's first assigned program when multiple programs exist", () => {
+    render(
+      <StudentTable
+        students={[coeG11, coeG12, nodalG11]}
+        grades={defaultGrades}
+        userProgramIds={[2]}
+      />,
+    );
+
+    expect(statValue("Total JNV Nodal")).toBe("1");
+    expect(statValue("Grade 11")).toBe("1");
+    expect(statValue("Grade 12")).toBe("0");
+  });
+
+  it("falls back to 'All Programs' when admin has no program_ids match", () => {
+    render(
+      <StudentTable
+        students={[coeG11, coeG12, nodalG11]}
+        grades={defaultGrades}
+        isAdmin={true}
+        userProgramIds={null}
+      />,
+    );
+
+    expect(statValue("Total All Programs")).toBe("3");
+    expect(statValue("Grade 11")).toBe("2");
+    expect(statValue("Grade 12")).toBe("1");
+  });
+
+  it("hides program filter when only one program is present", () => {
+    render(
+      <StudentTable
+        students={[coeG11, coeG12]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/Filter by Program/)).not.toBeInTheDocument();
+  });
+
+  it("shows program filter when multiple programs are present", () => {
+    render(
+      <StudentTable
+        students={[coeG11, nodalG11]}
+        grades={defaultGrades}
+        isAdmin={true}
+      />,
+    );
+
+    expect(screen.getByLabelText(/Filter by Program/)).toBeInTheDocument();
+  });
+
+  it("summary updates when program filter changes", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[coeG11, coeG12, nodalG11]}
+        grades={defaultGrades}
+        userProgramIds={[1, 2]}
+      />,
+    );
+
+    // Default: first of userProgramIds that is present (CoE, id=1)
+    expect(statValue("Total JNV CoE")).toBe("2");
+
+    const programSelect = screen.getByLabelText(/Filter by Program/) as HTMLSelectElement;
+    await user.selectOptions(programSelect, "2");
+
+    expect(statValue("Total JNV Nodal")).toBe("1");
+  });
+});

@@ -13,7 +13,6 @@ import {
 import StudentTable, { Grade } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
-import StatCard from "@/components/StatCard";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
@@ -293,26 +292,6 @@ export default async function SchoolPage({ params }: PageProps) {
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
 
-  // Calculate NVS student counts by grade
-  const nvsStudents = activeStudents.filter(
-    (s) => Number(s.program_id) === JNV_NVS_PROGRAM_ID
-  );
-  const totalNVSCount = nvsStudents.length;
-
-  // Group by grade
-  const gradeCounts = nvsStudents.reduce((acc, student) => {
-    const grade = student.grade;
-    if (grade !== null) {
-      acc[grade] = (acc[grade] || 0) + 1;
-    }
-    return acc;
-  }, {} as Record<number, number>);
-
-  // Sort grades and create array
-  const gradeCountsArray = Object.entries(gradeCounts)
-    .map(([grade, count]) => ({ grade: parseInt(grade), count }))
-    .sort((a, b) => a.grade - b.grade);
-
   // Check if user has access to multiple schools (to show/hide back arrow)
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
 
@@ -346,17 +325,6 @@ export default async function SchoolPage({ params }: PageProps) {
           </details>
         </div>
       )}
-
-      {/* NVS Student Stats */}
-      <Card elevation="md" className="p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <StatCard label="Total NVS" value={totalNVSCount} />
-          {gradeCountsArray.map((gc) => (
-            <StatCard key={gc.grade} label={`Grade ${gc.grade}`} value={gc.count} size="sm" />
-          ))}
-        </div>
-      </Card>
 
       <StudentTable
         students={activeStudents}

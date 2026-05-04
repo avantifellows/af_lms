@@ -703,93 +703,7 @@ describe("SchoolPage (server component)", () => {
     );
   });
 
-  // --- Student data ---
-
-  it("renders NVS student stats with grade breakdown", async () => {
-    const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-3", user_id: "u-3", grade: 12, program_id: 64, status: "active" }),
-    ];
-
-    setupAdminDefaults();
-    mockProcessStudents.mockResolvedValue({ students, issues: [] });
-
-    await renderPage();
-
-    // Total NVS stat card
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 3"
-    );
-    // Grade breakdown stat cards
-    expect(screen.getByTestId("stat-card-Grade 11")).toHaveTextContent(
-      "Grade 11: 2"
-    );
-    expect(screen.getByTestId("stat-card-Grade 12")).toHaveTextContent(
-      "Grade 12: 1"
-    );
-    // Grade stat cards should be small size
-    expect(screen.getByTestId("stat-card-Grade 11")).toHaveAttribute(
-      "data-size",
-      "sm"
-    );
-  });
-
-  it("excludes dropout students from NVS counts", async () => {
-    const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "dropout" }),
-    ];
-
-    setupAdminDefaults();
-    mockProcessStudents.mockResolvedValue({ students, issues: [] });
-
-    await renderPage();
-
-    // Only 1 active NVS student
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 1"
-    );
-  });
-
-  it("excludes non-NVS students from NVS counts", async () => {
-    const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 1, status: "active" }),
-    ];
-
-    setupAdminDefaults();
-    mockProcessStudents.mockResolvedValue({ students, issues: [] });
-
-    await renderPage();
-
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 1"
-    );
-  });
-
-  it("handles students with null grade in NVS counts", async () => {
-    const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: null, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "active" }),
-    ];
-
-    setupAdminDefaults();
-    mockProcessStudents.mockResolvedValue({ students, issues: [] });
-
-    await renderPage();
-
-    // Total NVS includes both (2 NVS students), but grade breakdown only shows grade 11
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 2"
-    );
-    expect(screen.getByTestId("stat-card-Grade 11")).toHaveTextContent(
-      "Grade 11: 1"
-    );
-    expect(
-      screen.queryByTestId("stat-card-Grade null")
-    ).not.toBeInTheDocument();
-  });
+  // Summary / stat cards are rendered inside StudentTable now — covered by StudentTable.test.tsx.
 
   // --- StudentTable props ---
 
@@ -1142,9 +1056,6 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 0"
-    );
     expect(screen.getByTestId("student-table")).toBeInTheDocument();
     const table = screen.getByTestId("student-table");
     const props = JSON.parse(table.getAttribute("data-props") || "{}");
