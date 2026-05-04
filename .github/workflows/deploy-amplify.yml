@@ -87,7 +87,6 @@ jobs:
           AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
           AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
           APP_ENV: ${{ secrets.APP_ENV }}
-          QUIZ_ETL_HELPER_URL: ${{ secrets.QUIZ_ETL_HELPER_URL }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -111,7 +110,6 @@ jobs:
             --arg r "$AF_SECRET_ACCESS_KEY" \
             --arg s "$AF_TOPIC_ARN" \
             --arg t "$APP_ENV" \
-            --arg u "$QUIZ_ETL_HELPER_URL" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -132,8 +130,7 @@ jobs:
               AF_ACCESS_KEY_ID: $q,
               AF_SECRET_ACCESS_KEY: $r,
               AF_TOPIC_ARN: $s,
-              APP_ENV: $t,
-              QUIZ_ETL_HELPER_URL: $u
+              APP_ENV: $t
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -222,7 +219,6 @@ jobs:
           AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
           AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
           APP_ENV: ${{ secrets.APP_ENV }}
-          QUIZ_ETL_HELPER_URL: ${{ secrets.QUIZ_ETL_HELPER_URL }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -246,7 +242,6 @@ jobs:
             --arg r "$AF_SECRET_ACCESS_KEY" \
             --arg s "$AF_TOPIC_ARN" \
             --arg t "$APP_ENV" \
-            --arg u "$QUIZ_ETL_HELPER_URL" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -267,8 +262,7 @@ jobs:
               AF_ACCESS_KEY_ID: $q,
               AF_SECRET_ACCESS_KEY: $r,
               AF_TOPIC_ARN: $s,
-              APP_ENV: $t,
-              QUIZ_ETL_HELPER_URL: $u
+              APP_ENV: $t
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -368,7 +362,6 @@ jobs:
           AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
           AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
           APP_ENV: ${{ secrets.APP_ENV }}
-          QUIZ_ETL_HELPER_URL: ${{ secrets.QUIZ_ETL_HELPER_URL }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -391,7 +384,6 @@ jobs:
             --arg r "$AF_SECRET_ACCESS_KEY" \
             --arg s "$AF_TOPIC_ARN" \
             --arg t "$APP_ENV" \
-            --arg u "$QUIZ_ETL_HELPER_URL" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -412,8 +404,7 @@ jobs:
               AF_ACCESS_KEY_ID: $q,
               AF_SECRET_ACCESS_KEY: $r,
               AF_TOPIC_ARN: $s,
-              APP_ENV: $t,
-              QUIZ_ETL_HELPER_URL: $u
+              APP_ENV: $t
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \

@@ -26,7 +26,6 @@ frontend:
           echo "AF_SECRET_ACCESS_KEY=$AF_SECRET_ACCESS_KEY" >> .env.production
           echo "AF_TOPIC_ARN=$AF_TOPIC_ARN" >> .env.production
           echo "APP_ENV=$APP_ENV" >> .env.production
-          echo "QUIZ_ETL_HELPER_URL=$QUIZ_ETL_HELPER_URL" >> .env.production
     build:
       commands:
         - npm run build
