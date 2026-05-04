@@ -138,10 +138,26 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("none");
     });
 
+    it("gives teachers edit on quiz sessions", () => {
+      const perm = makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.COE] });
+      const result = getFeatureAccess(perm, "quiz_sessions");
+      expect(result.access).toBe("edit");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(true);
+    });
+
     it("gives PMs edit on visits", () => {
       const perm = makePermission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "visits");
       expect(result.canEdit).toBe(true);
+    });
+
+    it("gives PMs view on quiz sessions", () => {
+      const perm = makePermission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] });
+      const result = getFeatureAccess(perm, "quiz_sessions");
+      expect(result.access).toBe("view");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(false);
     });
 
     it("gives program_admin view on visits", () => {
@@ -152,10 +168,26 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(false);
     });
 
+    it("gives program_admin view on quiz sessions", () => {
+      const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.COE] });
+      const result = getFeatureAccess(perm, "quiz_sessions");
+      expect(result.access).toBe("view");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(false);
+    });
+
     it("gives admin edit on visits", () => {
       const perm = makePermission({ role: "admin" });
       const result = getFeatureAccess(perm, "visits");
       expect(result.canEdit).toBe(true);
+    });
+
+    it("gives admin view on quiz sessions", () => {
+      const perm = makePermission({ role: "admin" });
+      const result = getFeatureAccess(perm, "quiz_sessions");
+      expect(result.access).toBe("view");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(false);
     });
   });
 
@@ -166,6 +198,15 @@ describe("getFeatureAccess", () => {
         program_ids: [PROGRAM_IDS.NVS],
       });
       const result = getFeatureAccess(perm, "visits");
+      expect(result.access).toBe("none");
+    });
+
+    it("blocks NVS-only user from quiz sessions", () => {
+      const perm = makePermission({
+        role: "program_manager",
+        program_ids: [PROGRAM_IDS.NVS],
+      });
+      const result = getFeatureAccess(perm, "quiz_sessions");
       expect(result.access).toBe("none");
     });
 
@@ -201,6 +242,14 @@ describe("getFeatureAccess", () => {
     it("downgrades edit to view for read_only users", () => {
       const perm = makePermission({ role: "teacher", read_only: true, program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "students");
+      expect(result.access).toBe("view");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(false);
+    });
+
+    it("downgrades quiz session edit to view for read_only teachers", () => {
+      const perm = makePermission({ role: "teacher", read_only: true, program_ids: [PROGRAM_IDS.COE] });
+      const result = getFeatureAccess(perm, "quiz_sessions");
       expect(result.access).toBe("view");
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
