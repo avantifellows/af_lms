@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import {
+  canAccessQuizSessionBatches,
+  requireQuizSessionAccess,
+} from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import {
   dbIstTimestampToUtcIso,
@@ -82,6 +86,11 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const access = await requireQuizSessionAccess(session.user.email, "edit");
+  if (!access.ok) {
+    return access.response;
+  }
+
   if (!DB_SERVICE_URL || !DB_SERVICE_TOKEN) {
     return NextResponse.json(
       { error: "DB service is not configured" },
@@ -113,6 +122,14 @@ export async function PATCH(
   }
 
   const currentMetaData = normalizeMetaData(currentSession.meta_data);
+  const currentBatchIds =
+    typeof currentMetaData.batch_id === "string"
+      ? currentMetaData.batch_id.split(",").filter(Boolean)
+      : [];
+  if (!(await canAccessQuizSessionBatches(access.permission, currentBatchIds))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const currentStartTime = storedSessionTimeToUtcIso(currentSession.start_time);
   const currentEndTime = storedSessionTimeToUtcIso(currentSession.end_time);
 

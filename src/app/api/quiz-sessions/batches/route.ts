@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getUserPermission } from "@/lib/permissions";
+import {
+  canAccessQuizSessionSchool,
+  requireQuizSessionAccess,
+} from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 
 interface BatchRow {
@@ -31,8 +34,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid schoolId" }, { status: 400 });
   }
 
-  const permission = await getUserPermission(session.user.email);
-  const programIds = permission?.program_ids ?? [];
+  const access = await requireQuizSessionAccess(session.user.email, "view");
+  if (!access.ok) {
+    return access.response;
+  }
+
+  if (!(await canAccessQuizSessionSchool(access.permission, schoolId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const programIds = access.permission.program_ids ?? [];
 
   if (programIds.length === 0) {
     return NextResponse.json({ batches: [] });

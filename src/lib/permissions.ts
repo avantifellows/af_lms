@@ -17,7 +17,15 @@ export const PROGRAM_IDS = {
 } as const;
 
 // Feature types for permission checking
-export type Feature = "students" | "visits" | "curriculum" | "mentorship" | "performance" | "summary_stats" | "pm_dashboard";
+export type Feature =
+  | "students"
+  | "visits"
+  | "curriculum"
+  | "mentorship"
+  | "performance"
+  | "summary_stats"
+  | "pm_dashboard"
+  | "quiz_sessions";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
@@ -31,11 +39,12 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
   summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  quiz_sessions: { teacher: "edit",  program_manager: "view",  program_admin: "view",  admin: "view" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
 const NVS_GATED_FEATURES: Set<Feature> = new Set([
-  "visits", "curriculum", "mentorship", "pm_dashboard", "summary_stats",
+  "visits", "curriculum", "mentorship", "pm_dashboard", "summary_stats", "quiz_sessions",
 ]);
 
 export interface FeatureAccessResult {
@@ -303,4 +312,3 @@ export async function getProgramContext(
   const permission = await getUserPermission(email);
   return getProgramContextSync(permission);
 }
-

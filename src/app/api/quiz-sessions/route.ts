@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getUserPermission } from "@/lib/permissions";
+import {
+  canAccessQuizSessionBatches,
+  canAccessQuizSessionSchool,
+  requireQuizSessionAccess,
+} from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import {
   dbIstTimestampToUtcIso,
@@ -144,7 +148,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid schoolId" }, { status: 400 });
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const access = await requireQuizSessionAccess(session.user.email, "view");
+  if (!access.ok) {
+    return access.response;
+  }
+
+  const permission = access.permission;
+  if (!(await canAccessQuizSessionSchool(permission, schoolId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const programIds = permission?.program_ids ?? [];
   const batches = await getBatchesForSchool(schoolId, programIds);
   const classBatchIds = batches
@@ -222,6 +235,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const access = await requireQuizSessionAccess(session.user.email, "edit");
+  if (!access.ok) {
+    return access.response;
+  }
+
   if (!DB_SERVICE_URL || !DB_SERVICE_TOKEN) {
     return NextResponse.json(
       { error: "DB service is not configured" },
@@ -247,6 +265,10 @@ export async function POST(request: NextRequest) {
       { error: "At least one class batch is required" },
       { status: 400 }
     );
+  }
+
+  if (!(await canAccessQuizSessionBatches(access.permission, body.classBatchIds))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (!body.grade || !body.stream) {

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import {
+  canAccessQuizSessionBatches,
+  requireQuizSessionAccess,
+} from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import { publishMessage } from "@/lib/sns";
 
@@ -39,6 +43,11 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const access = await requireQuizSessionAccess(session.user.email, "edit");
+  if (!access.ok) {
+    return access.response;
+  }
+
   const { id } = await params;
   const sessionId = Number(id);
   if (Number.isNaN(sessionId)) {
@@ -68,6 +77,14 @@ export async function POST(
   }
 
   const metaData = normalizeMetaData(currentSession.meta_data);
+  const batchIds =
+    typeof metaData.batch_id === "string"
+      ? metaData.batch_id.split(",").filter(Boolean)
+      : [];
+  if (!(await canAccessQuizSessionBatches(access.permission, batchIds))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const patchResponse = await fetch(`${DB_SERVICE_URL}/session/${sessionId}`, {
     method: "PATCH",
     headers: {

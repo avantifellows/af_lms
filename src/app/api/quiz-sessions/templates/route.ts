@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
 import {
   parseQuizTemplateResource,
   type RawQuizTemplateResource,
@@ -16,6 +17,11 @@ export async function GET(request: NextRequest) {
 
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const access = await requireQuizSessionAccess(session.user.email, "view");
+  if (!access.ok) {
+    return access.response;
   }
 
   if (!DB_SERVICE_URL || !DB_SERVICE_TOKEN) {

@@ -46,7 +46,7 @@ type CreateTimingMode = "start_now" | "schedule";
 type FetchSessionsOptions = {
   background?: boolean;
 };
-type RowActionKind = "sync" | "regenerate" | "toggle" | "end_now";
+type RowActionKind = "regenerate" | "toggle" | "end_now";
 
 interface QuizTemplateOption {
   id: number;
@@ -77,6 +77,7 @@ interface BatchDerivation {
 
 const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
+const AUTO_SYNC_INTERVAL_MINUTES = 30;
 const LMS_SESSION_PREFIX = "[LMS] ";
 
 function getDefaultSessionName(baseName: string): string {
@@ -159,6 +160,24 @@ function getSyncToneClasses(meta: Record<string, unknown> | null | undefined) {
     return "border border-border-accent bg-success-bg text-accent";
   }
   return "border border-border bg-bg-card-alt text-text-secondary";
+}
+
+function getLastSyncedAt(meta: Record<string, unknown> | null | undefined): string | null {
+  const timestampKeys = [
+    "last_synced_at",
+    "last_sync_at",
+    "synced_at",
+    "etl_synced_at",
+    "bq_synced_at",
+    "bq_last_synced_at",
+  ];
+
+  for (const key of timestampKeys) {
+    const value = getMetaString(meta, key);
+    if (value) return value;
+  }
+
+  return null;
 }
 
 function getMetaString(
@@ -244,11 +263,6 @@ function isSessionProcessing(session: QuizSession | null | undefined): boolean {
   return getStatusLabel(getMetaString(session.meta_data, "status")) === "pending";
 }
 
-function isSyncPending(session: QuizSession | null | undefined): boolean {
-  if (!session) return false;
-  return getStatusLabel(getMetaString(session.meta_data, "etl_sync_status")) === "pending";
-}
-
 function canEndNow(session: QuizSession | null | undefined, nowMs = Date.now()): boolean {
   if (!session || isSessionProcessing(session)) return false;
   if (session.is_active === false) return false;
@@ -259,7 +273,13 @@ function areSessionsEqual(previous: QuizSession[], next: QuizSession[]): boolean
   return JSON.stringify(previous) === JSON.stringify(next);
 }
 
-export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
+export default function QuizSessionsTab({
+  schoolId,
+  canEdit = false,
+}: {
+  schoolId: string;
+  canEdit?: boolean;
+}) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [sessions, setSessions] = useState<QuizSession[]>([]);
   const [selectedClassBatch, setSelectedClassBatch] = useState("");
@@ -410,38 +430,6 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
     return () => document.removeEventListener("click", handleClick);
   }, [menuState]);
 
-  const handleSync = async (sessionId: number) => {
-    try {
-      setSavingAction({ id: sessionId, kind: "sync" });
-      setFeedbackToast(null);
-      const response = await fetch(`/api/quiz-sessions/${sessionId}/sync`, {
-        method: "POST",
-      });
-      const data = (await response.json().catch(() => null)) as
-        | { message?: string; warning?: string; error?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error(data?.error || "Failed to request sync");
-      }
-      setFeedbackToast({
-        variant: "info",
-        message:
-          data?.warning ||
-          data?.message ||
-          "Sync requested. Updated results should appear shortly.",
-      });
-      await fetchSessions(page, selectedClassBatch || undefined);
-    } catch (err) {
-      console.error(err);
-      setFeedbackToast({
-        variant: "error",
-        message: "Could not request sync.",
-      });
-    } finally {
-      setSavingAction(null);
-    }
-  };
-
   const handleRegenerate = async (sessionId: number) => {
     try {
       setSavingAction({ id: sessionId, kind: "regenerate" });
@@ -579,16 +567,18 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
       <div className="rounded-lg border border-border bg-bg-card shadow-sm">
         <div className="flex flex-col gap-4 border-b-4 border-border-accent px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold text-text-primary">Quiz Sessions</h2>
-          <button
-            onClick={() => setIsCreateOpen(true)}
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
-          >
-            <span aria-hidden="true" className="relative inline-block h-3.5 w-3.5 shrink-0">
-              <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-current" />
-              <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-current" />
-            </span>
-            <span>Create Quiz Session</span>
-          </button>
+          {canEdit ? (
+            <button
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
+            >
+              <span aria-hidden="true" className="relative inline-block h-3.5 w-3.5 shrink-0">
+                <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-current" />
+                <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-current" />
+              </span>
+              <span>Create Quiz Session</span>
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -598,26 +588,31 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         </div>
       )}
 
-      <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center">
-        <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-          Class Batch
-        </label>
-        <select
-          value={selectedClassBatch}
-          onChange={(event) => {
-            setSelectedClassBatch(event.target.value);
-            setPage(0);
-          }}
-          disabled={loadingBatches}
-          className="block min-h-[44px] w-full max-w-sm rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:bg-bg-card-alt"
-        >
-          <option value="">All class batches</option>
-          {classBatches.map((batch) => (
-            <option key={batch.id} value={batch.batch_id}>
-              {batch.name}
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-col gap-3 px-1 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
+            Class Batch
+          </label>
+          <select
+            value={selectedClassBatch}
+            onChange={(event) => {
+              setSelectedClassBatch(event.target.value);
+              setPage(0);
+            }}
+            disabled={loadingBatches}
+            className="block min-h-[44px] w-full max-w-sm rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:bg-bg-card-alt"
+          >
+            <option value="">All class batches</option>
+            {classBatches.map((batch) => (
+              <option key={batch.id} value={batch.batch_id}>
+                {batch.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="text-xs leading-5 text-text-secondary">
+          Results sync automatically every {AUTO_SYNC_INTERVAL_MINUTES} minutes. Manual sync is not needed.
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
@@ -702,44 +697,44 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
                       />
                     </td>
                     <td className="px-4 py-4 text-sm">
-                      <SyncSummary
-                        session={session}
-                        busy={savingAction?.id === session.id && savingAction.kind === "sync"}
-                        onSync={() => handleSync(session.id)}
-                      />
+                      <SyncSummary session={session} />
                     </td>
                     <td
                       className={`px-4 py-4 text-sm text-text-secondary ${
                         sessionProcessing ? "opacity-60" : ""
                       }`}
                     >
-                      <div className="relative inline-block text-left" data-menu-root>
-                        <button
-                          data-menu-root
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            setMenuState((previous) =>
-                              previous?.id === session.id
-                                ? null
-                                : { id: session.id, left: rect.left, top: rect.bottom }
-                            );
-                          }}
-                          className="rounded-lg px-2 py-1 text-text-secondary hover:bg-hover-bg hover:text-text-primary"
-                          aria-label="Open actions"
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                            className="h-5 w-5"
-                            aria-hidden="true"
+                      {canEdit ? (
+                        <div className="relative inline-block text-left" data-menu-root>
+                          <button
+                            data-menu-root
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              setMenuState((previous) =>
+                                previous?.id === session.id
+                                  ? null
+                                  : { id: session.id, left: rect.left, top: rect.bottom }
+                              );
+                            }}
+                            className="rounded-lg px-2 py-1 text-text-secondary hover:bg-hover-bg hover:text-text-primary"
+                            aria-label="Open actions"
                           >
-                            <circle cx="5" cy="12" r="1.8" />
-                            <circle cx="12" cy="12" r="1.8" />
-                            <circle cx="19" cy="12" r="1.8" />
-                          </svg>
-                        </button>
-                      </div>
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="currentColor"
+                              className="h-5 w-5"
+                              aria-hidden="true"
+                            >
+                              <circle cx="5" cy="12" r="1.8" />
+                              <circle cx="12" cy="12" r="1.8" />
+                              <circle cx="19" cy="12" r="1.8" />
+                            </svg>
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs font-medium text-text-muted">View only</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -780,6 +775,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         <QuizSessionDetailsModal
           session={selectedSession}
           batchNameMap={batchNameMap}
+          canEdit={canEdit}
           onEdit={() => {
             setEditingSession(selectedSession);
             setSelectedSession(null);
@@ -797,7 +793,7 @@ export default function QuizSessionsTab({ schoolId }: { schoolId: string }) {
         />
       )}
 
-      {menuState && (
+      {canEdit && menuState && (
         <div
           data-menu-root
           className="fixed z-50 w-48 overflow-hidden rounded-lg border border-border bg-bg-card shadow-md"
@@ -1224,12 +1220,6 @@ function QuizSessionCreateModal({
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
-            {error && (
-              <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
             <div className="space-y-5">
               <SectionCard title="1. Select Class Batches">
                 <div className="space-y-4">
@@ -1538,21 +1528,35 @@ function QuizSessionCreateModal({
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={saving}
-              className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? "Creating..." : "Create Session"}
-            </button>
+          <div className="border-t border-border px-5 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-h-[20px] flex-1">
+                {error ? (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  >
+                    {error}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={saving}
+                  className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving ? "Creating..." : "Create Session"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1684,12 +1688,6 @@ function QuizSessionEditModal({
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
-            {error && (
-              <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
             <div className="space-y-5">
               <SectionCard title="Selected Batch And Paper">
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1816,21 +1814,35 @@ function QuizSessionEditModal({
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={saving}
-              className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
+          <div className="border-t border-border px-5 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-h-[20px] flex-1">
+                {error ? (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  >
+                    {error}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="min-h-[44px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={saving}
+                  className="min-h-[44px] rounded-lg bg-accent px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1841,11 +1853,13 @@ function QuizSessionEditModal({
 function QuizSessionDetailsModal({
   session,
   batchNameMap,
+  canEdit,
   onEdit,
   onClose,
 }: {
   session: QuizSession;
   batchNameMap: Map<string, string>;
+  canEdit: boolean;
   onEdit: () => void;
   onClose: () => void;
 }) {
@@ -1883,14 +1897,16 @@ function QuizSessionDetailsModal({
               </h2>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={onEdit}
-                disabled={isSessionProcessing(session)}
-                className="min-h-[36px] rounded-lg border-2 border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
-              >
-                Edit
-              </button>
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  disabled={isSessionProcessing(session)}
+                  className="min-h-[36px] rounded-lg border-2 border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-text-primary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
+                >
+                  Edit
+                </button>
+              ) : null}
               <button onClick={onClose} className="text-text-secondary hover:text-text-primary">
                 ✕
               </button>
@@ -2035,23 +2051,10 @@ function SessionWindowSummary({
   );
 }
 
-function SyncSummary({
-  session,
-  busy,
-  onSync,
-}: {
-  session: QuizSession;
-  busy: boolean;
-  onSync: () => void;
-}) {
+function SyncSummary({ session }: { session: QuizSession }) {
   const syncLabel = getSyncLabel(session.meta_data);
-  const pending = isSyncPending(session);
-  const buttonLabel =
-    syncLabel === "Synced"
-      ? "Sync Again"
-      : syncLabel === "Sync Failed"
-        ? "Retry Sync"
-        : "Sync Now";
+  const lastSyncedAt = getLastSyncedAt(session.meta_data);
+  const showMissingSyncTime = syncLabel === "Synced" && !lastSyncedAt;
   const syncIcon =
     syncLabel === "Synced"
       ? "✓"
@@ -2073,19 +2076,13 @@ function SyncSummary({
         </span>
         {syncLabel}
       </span>
-      {!pending ? (
-        <div>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onSync();
-            }}
-            disabled={busy}
-            className="inline-flex min-h-[36px] items-center rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted"
-          >
-            {busy ? "Syncing..." : buttonLabel}
-          </button>
+      {lastSyncedAt ? (
+        <div className="text-xs leading-5 text-text-secondary">
+          Last synced: {formatDateTime(lastSyncedAt)}
+        </div>
+      ) : showMissingSyncTime ? (
+        <div className="text-xs leading-5 text-text-secondary">
+          Sync time not recorded
         </div>
       ) : null}
     </div>

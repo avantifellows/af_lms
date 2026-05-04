@@ -276,6 +276,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
   const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
+  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data)
   const [allStudents, grades, batches] = await Promise.all([
@@ -388,7 +389,7 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const quizSessionsContent = (
-    <QuizSessionsTab schoolId={school.id} />
+    <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />
   );
 
   const curriculumContent = (
@@ -404,7 +405,7 @@ export default async function SchoolPage({ params }: PageProps) {
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
-    { id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent },
+    ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
     ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
