@@ -11,7 +11,7 @@ import { query } from "@/lib/db";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
-import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
+import SchoolCard, { School } from "@/components/SchoolCard";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
@@ -116,40 +116,6 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise student counts for loaded schools (all programs)
-async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
-  if (schoolIds.length === 0) return new Map();
-
-  const results = await query<{ school_id: string; grade: number; count: string }>(
-    `SELECT
-       s.id as school_id,
-       gr.number as grade,
-       COUNT(DISTINCT gu_school.user_id) as count
-     FROM school s
-     JOIN "group" g_school ON g_school.type = 'school' AND g_school.child_id = s.id
-     JOIN group_user gu_school ON gu_school.group_id = g_school.id
-     LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
-       AND er.group_type = 'grade' AND er.is_current = true
-     LEFT JOIN grade gr ON er.group_id = gr.id
-     WHERE s.id = ANY($1) AND gr.number IS NOT NULL
-     GROUP BY s.id, gr.number
-     ORDER BY gr.number`,
-    [schoolIds]
-  );
-
-  const gradeMap = new Map<string, GradeCount[]>();
-  results.forEach((row) => {
-    if (!gradeMap.has(row.school_id)) {
-      gradeMap.set(row.school_id, []);
-    }
-    gradeMap.get(row.school_id)!.push({
-      grade: row.grade,
-      count: parseInt(row.count, 10),
-    });
-  });
-  return gradeMap;
-}
-
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
   return query<Visit>(
     `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
@@ -239,23 +205,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
   const totalPages = Math.ceil(totalCount / SCHOOLS_PER_PAGE);
 
-  const schoolIds = schools.map((s) => s.id);
-
-  const [gradeCounts, recentVisits] = await Promise.all([
-    getSchoolGradeCounts(schoolIds),
-    hasPMAccess ? getRecentVisits(session.user.email) : Promise.resolve([] as Visit[]),
-  ]);
-
-  // Merge grade counts into schools and derive total from grade counts
-  const schoolsWithGrades = schools.map((school) => {
-    const counts = gradeCounts.get(school.id) || [];
-    const total = counts.reduce((sum, gc) => sum + gc.count, 0);
-    return {
-      ...school,
-      grade_counts: counts,
-      student_count: total,
-    };
-  });
+  const recentVisits = hasPMAccess
+    ? await getRecentVisits(session.user.email)
+    : [];
 
   return (
     <div className="min-h-screen bg-bg">
@@ -422,13 +374,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {schoolsWithGrades.map((school) => (
+            {schools.map((school) => (
               <SchoolCard
                 key={school.id}
                 school={school}
                 href={`/school/${school.code}`}
-                showStudentCount
-                showGradeBreakdown
                 showRegion={hasPMAccess}
                 actions={
                   hasPMAccess ? (
@@ -444,7 +394,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             ))}
           </div>
 
-          {schoolsWithGrades.length === 0 && (
+          {schools.length === 0 && (
             <div className="text-center py-12 text-text-muted">
               {searchQuery
                 ? `No schools found matching "${searchQuery}"`

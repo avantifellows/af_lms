@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input } from "@/components/ui";
+import StatCard from "./StatCard";
 
 interface Student {
   group_user_id: string;
@@ -309,6 +310,8 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
   );
 }
 
+const SUMMARY_GRADES = [11, 12] as const;
+
 export default function StudentTable({
   students,
   dropoutStudents = [],
@@ -320,9 +323,35 @@ export default function StudentTable({
   batches = [],
   nvsStreams = [],
 }: StudentTableProps) {
+  // Distinct programs present across active + dropout students
+  const programs = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const s of [...students, ...dropoutStudents]) {
+      if (s.program_id !== null && !map.has(Number(s.program_id))) {
+        map.set(Number(s.program_id), s.program_name ?? `Program ${s.program_id}`);
+      }
+    }
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [students, dropoutStudents]);
+
+  // Default program: first of the user's assigned programs that exists in this school.
+  // Falls back to "all" for admins, passcode users, or when no match is found.
+  const defaultProgram = useMemo<string>(() => {
+    if (userProgramIds && userProgramIds.length > 0) {
+      const match = userProgramIds.find((id) =>
+        programs.some((p) => p.id === Number(id)),
+      );
+      if (match !== undefined) return String(match);
+    }
+    return "all";
+  }, [userProgramIds, programs]);
+
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  const [selectedProgram, setSelectedProgram] = useState<string>(defaultProgram);
   const [activeTab, setActiveTab] = useState<"active" | "dropout">("active");
   const router = useRouter();
 
@@ -335,21 +364,45 @@ export default function StudentTable({
     return userProgramIds.includes(Number(student.program_id));
   };
 
-  // Determine which students to show based on tab
+  // Tab-scoped students
   const currentStudents = activeTab === "active" ? students : dropoutStudents;
 
-  // Get unique grades from current students for filtering
+  // Program-filtered students (drives summary + feeds grade filter)
+  const programFilteredStudents =
+    selectedProgram === "all"
+      ? currentStudents
+      : currentStudents.filter((s) => Number(s.program_id) === parseInt(selectedProgram));
+
+  // Grade options within the current program filter
   const studentGrades = [
     ...new Set(
-      currentStudents.map((s) => s.grade).filter((g): g is number => g !== null),
+      programFilteredStudents.map((s) => s.grade).filter((g): g is number => g !== null),
     ),
   ].sort((a, b) => a - b);
 
-  // Filter students by selected grade
+  // Final filtered students for the list
   const filteredStudents =
     selectedGrade === "all"
-      ? currentStudents
-      : currentStudents.filter((s) => s.grade === parseInt(selectedGrade));
+      ? programFilteredStudents
+      : programFilteredStudents.filter((s) => s.grade === parseInt(selectedGrade));
+
+  // Summary label reflects the selected program
+  const selectedProgramName =
+    selectedProgram === "all"
+      ? "All Programs"
+      : programs.find((p) => p.id === parseInt(selectedProgram))?.name ?? "Program";
+
+  // Summary lives on the Active tab (dropout tab shows its own list only)
+  const summaryStudents =
+    selectedProgram === "all"
+      ? students
+      : students.filter((s) => Number(s.program_id) === parseInt(selectedProgram));
+
+  const summaryTotal = summaryStudents.length;
+  const summaryByGrade: Record<number, number> = {};
+  for (const grade of SUMMARY_GRADES) {
+    summaryByGrade[grade] = summaryStudents.filter((s) => s.grade === grade).length;
+  }
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
   const handleTabChange = (tab: "active" | "dropout") => {
@@ -361,6 +414,11 @@ export default function StudentTable({
     }
   };
 
+  const handleProgramChange = (value: string) => {
+    setSelectedProgram(value);
+    setSelectedGrade("all");
+  };
+
   const handleSave = () => {
     router.refresh();
   };
@@ -369,6 +427,24 @@ export default function StudentTable({
 
   return (
     <>
+      {/* Program-scoped enrollment summary */}
+      <Card elevation="md" className="p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          {selectedProgramName} Students
+        </h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <StatCard label={`Total ${selectedProgramName}`} value={summaryTotal} />
+          {SUMMARY_GRADES.map((grade) => (
+            <StatCard
+              key={grade}
+              label={`Grade ${grade}`}
+              value={summaryByGrade[grade]}
+              size="sm"
+            />
+          ))}
+        </div>
+      </Card>
+
       {/* Tabs - only show if there are dropout students */}
       {showTabs && (
         <div className="max-w-3xl mx-auto mb-4">
@@ -397,8 +473,31 @@ export default function StudentTable({
         </div>
       )}
 
-      {/* Grade filter - centered */}
+      {/* Program + Grade filters - centered */}
       <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+        {programs.length > 1 && (
+          <>
+            <label
+              htmlFor="programFilter"
+              className="text-sm font-medium text-gray-700"
+            >
+              Filter by Program:
+            </label>
+            <select
+              id="programFilter"
+              value={selectedProgram}
+              onChange={(e) => handleProgramChange(e.target.value)}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
+            >
+              <option value="all">All Programs ({currentStudents.length})</option>
+              {programs.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({currentStudents.filter((s) => Number(s.program_id) === p.id).length})
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <label
           htmlFor="gradeFilter"
           className="text-sm font-medium text-gray-700"
@@ -411,14 +510,14 @@ export default function StudentTable({
           onChange={(e) => setSelectedGrade(e.target.value)}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
         >
-          <option value="all">All Grades ({currentStudents.length})</option>
+          <option value="all">All Grades ({programFilteredStudents.length})</option>
           {studentGrades.map((grade) => (
             <option key={grade} value={grade}>
-              Grade {grade} ({currentStudents.filter((s) => s.grade === grade).length})
+              Grade {grade} ({programFilteredStudents.filter((s) => s.grade === grade).length})
             </option>
           ))}
         </select>
-        {selectedGrade !== "all" && (
+        {(selectedGrade !== "all" || selectedProgram !== "all") && (
           <span className="text-sm text-gray-500">
             Showing {filteredStudents.length} of {currentStudents.length} students
           </span>
