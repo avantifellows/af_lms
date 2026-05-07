@@ -64,7 +64,9 @@ next-env.d.ts
 .planning
 ralph/*
 pral/
-.claude/commands
+.claude/
+CLAUDE.local.md
+graphify-out/
 .env.dont.touch
 # Discord bot scripts
 start-discord-bot.sh
