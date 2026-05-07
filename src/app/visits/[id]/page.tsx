@@ -5,6 +5,7 @@ import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
 import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
+import DeleteVisitButton from "@/components/visits/DeleteVisitButton";
 import ActionPointList from "@/components/visits/ActionPointList";
 import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
 import { statusBadgeClass } from "@/lib/visit-actions";
@@ -47,7 +48,8 @@ async function getVisitDetail(id: string): Promise<VisitDetail> {
             s.name as school_name, s.region as school_region
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.id = $1`,
+     WHERE v.id = $1
+       AND v.deleted_at IS NULL`,
     [id]
   );
 
@@ -224,7 +226,12 @@ export default async function VisitDetailPage({ params }: PageProps) {
             This visit is completed and read-only.
           </p>
         ) : canEdit ? (
-          <CompleteVisitButton visitId={visit.id} />
+          <div className="space-y-4">
+            <CompleteVisitButton visitId={visit.id} />
+            <div className="border-t border-danger/20 pt-4">
+              <DeleteVisitButton visitId={visit.id} mode="detail" />
+            </div>
+          </div>
         ) : (
           <p className="text-sm text-text-secondary bg-bg-card-alt border border-border px-4 py-3">
             This visit is read-only for your role.
