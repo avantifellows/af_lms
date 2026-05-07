@@ -162,6 +162,15 @@ vi.mock("@/components/PerformanceTab", () => ({
   ),
 }));
 
+vi.mock("@/components/quiz-sessions/QuizSessionsTab", () => ({
+  __esModule: true,
+  default: ({ schoolId }: { schoolId: string }) => (
+    <div data-testid="quiz-sessions-tab" data-school-id={schoolId}>
+      QuizSessionsTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/VisitsTab", () => ({
   __esModule: true,
   default: ({ schoolCode }: { schoolCode: string }) => (
@@ -613,6 +622,7 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.getByTestId("tab-curriculum")).toBeInTheDocument();
     expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-quiz_sessions")).toBeInTheDocument();
     expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
     expect(screen.getByTestId("tab-visits")).toBeInTheDocument();
   });
@@ -687,6 +697,19 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("performance-tab")).toHaveAttribute(
       "data-school-udise",
       "70705"
+    );
+  });
+
+  // --- QuizSessionsTab props ---
+
+  it("passes school id to QuizSessionsTab", async () => {
+    setupAdminDefaults({ id: "school-42" });
+
+    await renderPage();
+
+    expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
+      "data-school-id",
+      "school-42"
     );
   });
 

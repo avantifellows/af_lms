@@ -22,6 +22,10 @@ frontend:
           echo "DYNAMODB_REGION=$DYNAMODB_REGION" >> .env.production
           echo "DYNAMODB_ACCESS_KEY=$DYNAMODB_ACCESS_KEY" >> .env.production
           echo "DYNAMODB_SECRET_KEY=$DYNAMODB_SECRET_KEY" >> .env.production
+          echo "AF_ACCESS_KEY_ID=$AF_ACCESS_KEY_ID" >> .env.production
+          echo "AF_SECRET_ACCESS_KEY=$AF_SECRET_ACCESS_KEY" >> .env.production
+          echo "AF_TOPIC_ARN=$AF_TOPIC_ARN" >> .env.production
+          echo "APP_ENV=$APP_ENV" >> .env.production
     build:
       commands:
         - npm run build

@@ -83,6 +83,10 @@ jobs:
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
           DYNAMODB_ACCESS_KEY: ${{ secrets.DYNAMODB_ACCESS_KEY }}
           DYNAMODB_SECRET_KEY: ${{ secrets.DYNAMODB_SECRET_KEY }}
+          AF_ACCESS_KEY_ID: ${{ secrets.AF_ACCESS_KEY_ID }}
+          AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
+          AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
+          APP_ENV: ${{ secrets.APP_ENV }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -102,6 +106,10 @@ jobs:
             --arg n "$DYNAMODB_REGION" \
             --arg o "$DYNAMODB_ACCESS_KEY" \
             --arg p "$DYNAMODB_SECRET_KEY" \
+            --arg q "$AF_ACCESS_KEY_ID" \
+            --arg r "$AF_SECRET_ACCESS_KEY" \
+            --arg s "$AF_TOPIC_ARN" \
+            --arg t "$APP_ENV" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -118,7 +126,11 @@ jobs:
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
               DYNAMODB_ACCESS_KEY: $o,
-              DYNAMODB_SECRET_KEY: $p
+              DYNAMODB_SECRET_KEY: $p,
+              AF_ACCESS_KEY_ID: $q,
+              AF_SECRET_ACCESS_KEY: $r,
+              AF_TOPIC_ARN: $s,
+              APP_ENV: $t
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -203,6 +215,10 @@ jobs:
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
           DYNAMODB_ACCESS_KEY: ${{ secrets.DYNAMODB_ACCESS_KEY }}
           DYNAMODB_SECRET_KEY: ${{ secrets.DYNAMODB_SECRET_KEY }}
+          AF_ACCESS_KEY_ID: ${{ secrets.AF_ACCESS_KEY_ID }}
+          AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
+          AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
+          APP_ENV: ${{ secrets.APP_ENV }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -222,6 +238,10 @@ jobs:
             --arg n "$DYNAMODB_REGION" \
             --arg o "$DYNAMODB_ACCESS_KEY" \
             --arg p "$DYNAMODB_SECRET_KEY" \
+            --arg q "$AF_ACCESS_KEY_ID" \
+            --arg r "$AF_SECRET_ACCESS_KEY" \
+            --arg s "$AF_TOPIC_ARN" \
+            --arg t "$APP_ENV" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -238,7 +258,11 @@ jobs:
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
               DYNAMODB_ACCESS_KEY: $o,
-              DYNAMODB_SECRET_KEY: $p
+              DYNAMODB_SECRET_KEY: $p,
+              AF_ACCESS_KEY_ID: $q,
+              AF_SECRET_ACCESS_KEY: $r,
+              AF_TOPIC_ARN: $s,
+              APP_ENV: $t
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -334,6 +358,10 @@ jobs:
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
           DYNAMODB_ACCESS_KEY: ${{ secrets.DYNAMODB_ACCESS_KEY }}
           DYNAMODB_SECRET_KEY: ${{ secrets.DYNAMODB_SECRET_KEY }}
+          AF_ACCESS_KEY_ID: ${{ secrets.AF_ACCESS_KEY_ID }}
+          AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
+          AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
+          APP_ENV: ${{ secrets.APP_ENV }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -352,6 +380,10 @@ jobs:
             --arg n "$DYNAMODB_REGION" \
             --arg o "$DYNAMODB_ACCESS_KEY" \
             --arg p "$DYNAMODB_SECRET_KEY" \
+            --arg q "$AF_ACCESS_KEY_ID" \
+            --arg r "$AF_SECRET_ACCESS_KEY" \
+            --arg s "$AF_TOPIC_ARN" \
+            --arg t "$APP_ENV" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -368,7 +400,11 @@ jobs:
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
               DYNAMODB_ACCESS_KEY: $o,
-              DYNAMODB_SECRET_KEY: $p
+              DYNAMODB_SECRET_KEY: $p,
+              AF_ACCESS_KEY_ID: $q,
+              AF_SECRET_ACCESS_KEY: $r,
+              AF_TOPIC_ARN: $s,
+              APP_ENV: $t
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \

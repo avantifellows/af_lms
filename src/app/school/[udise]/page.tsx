@@ -21,6 +21,7 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
+import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 
 interface Student {
   group_user_id: string;
@@ -275,6 +276,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
   const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
+  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data)
   const [allStudents, grades, batches] = await Promise.all([
@@ -386,6 +388,10 @@ export default async function SchoolPage({ params }: PageProps) {
     <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />
   );
 
+  const quizSessionsContent = (
+    <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />
+  );
+
   const curriculumContent = (
     <CurriculumTab
       schoolCode={school.code}
@@ -399,6 +405,7 @@ export default async function SchoolPage({ params }: PageProps) {
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
+    ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
     ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];

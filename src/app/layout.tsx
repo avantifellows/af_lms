@@ -6,7 +6,7 @@ import Providers from "@/components/Providers";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Student Enrollments - Avanti Fellows",
+  title: "LMS - Avanti Fellows",
   description: "Student enrollment management system",
 };
 

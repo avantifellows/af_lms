@@ -23,8 +23,8 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
 
   return (
     <div>
-      <div className="border-b-2 border-border-accent mb-6 overflow-x-auto">
-        <nav className="-mb-px flex space-x-4 sm:space-x-6" aria-label="Tabs">
+      <div className="mb-6 border-b-2 border-border-accent">
+        <nav className="-mb-px flex flex-wrap gap-x-4 gap-y-2 sm:gap-x-6" aria-label="Tabs">
           {tabs.map((tab) => (
             <button
               key={tab.id}
