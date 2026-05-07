@@ -168,6 +168,7 @@ function getLastSyncedAt(meta: Record<string, unknown> | null | undefined): stri
     "last_sync_at",
     "synced_at",
     "etl_synced_at",
+    "etl_last_synced_at",
     "bq_synced_at",
     "bq_last_synced_at",
   ];

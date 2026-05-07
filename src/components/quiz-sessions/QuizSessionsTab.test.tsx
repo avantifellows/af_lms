@@ -88,7 +88,7 @@ function makeSessions() {
     },
     {
       id: 3,
-      name: "Synced Quiz Without Time",
+      name: "Synced Quiz With Last Time",
       start_time: "2026-04-15T05:00:00.000Z",
       end_time: "2026-04-15T09:00:00.000Z",
       is_active: true,
@@ -96,9 +96,10 @@ function makeSessions() {
       meta_data: {
         batch_id: "EnableStudents_11_Engg_A",
         test_code: "PT-SYNCED",
-        resource_name: "Synced Quiz Without Time",
+        resource_name: "Synced Quiz With Last Time",
         status: "ready",
         has_synced_to_bq: true,
+        etl_last_synced_at: "2026-05-07T07:24:38+00:00",
       },
     },
   ];
@@ -232,7 +233,7 @@ describe("QuizSessionsTab", () => {
 
     expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
     expect(screen.getByText("Second Quiz")).toBeInTheDocument();
-    expect(screen.getByText("Synced Quiz Without Time")).toBeInTheDocument();
+    expect(screen.getByText("Synced Quiz With Last Time")).toBeInTheDocument();
     expect(
       screen.getByText("Results sync automatically every 30 minutes. Manual sync is not needed.")
     ).toBeInTheDocument();
@@ -241,7 +242,7 @@ describe("QuizSessionsTab", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("Existing Quiz")).not.toBeInTheDocument();
-      expect(screen.queryByText("Synced Quiz Without Time")).not.toBeInTheDocument();
+      expect(screen.queryByText("Synced Quiz With Last Time")).not.toBeInTheDocument();
       expect(screen.getByText("Second Quiz")).toBeInTheDocument();
     });
 
@@ -327,8 +328,8 @@ describe("QuizSessionsTab", () => {
     expect(existingQuizRow).not.toBeNull();
     const secondQuizRow = screen.getByText("Second Quiz").closest("tr");
     expect(secondQuizRow).not.toBeNull();
-    const syncedWithoutTimeRow = screen.getByText("Synced Quiz Without Time").closest("tr");
-    expect(syncedWithoutTimeRow).not.toBeNull();
+    const syncedWithLastTimeRow = screen.getByText("Synced Quiz With Last Time").closest("tr");
+    expect(syncedWithLastTimeRow).not.toBeNull();
 
     expect(
       within(existingQuizRow as HTMLTableRowElement).getByText(/Last synced:/)
@@ -346,7 +347,7 @@ describe("QuizSessionsTab", () => {
       within(secondQuizRow as HTMLTableRowElement).queryByText("Sync time not recorded")
     ).not.toBeInTheDocument();
     expect(
-      within(syncedWithoutTimeRow as HTMLTableRowElement).getByText("Sync time not recorded")
+      within(syncedWithLastTimeRow as HTMLTableRowElement).getByText(/Last synced:/)
     ).toBeInTheDocument();
     expect(screen.queryByText("Last synced: -")).not.toBeInTheDocument();
   });
