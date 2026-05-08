@@ -145,19 +145,20 @@ async function fillIndividualStudentDiscussionForm(page: Page) {
   await expect(gradeFilter).toBeVisible();
   await gradeFilter.selectOption("11");
 
-  // Wait for students to load and select the first available student
-  const addSelect = page.getByTestId("add-student-select");
-  await expect(addSelect).toBeVisible({ timeout: 10_000 });
-  const options = addSelect.locator("option:not([disabled])");
-  await expect(options.first()).toBeAttached({ timeout: 10_000 });
-  await addSelect.selectOption({ index: 1 });
+  // Wait for students to load and add the first available student
+  await page.getByTestId("multi-select-student-trigger").click();
+  await expect(page.getByTestId("multi-select-student-panel")).toBeVisible({ timeout: 10_000 });
+  const firstCheckbox = page.locator('[data-testid^="student-checkbox-"]').first();
+  await expect(firstCheckbox).toBeVisible({ timeout: 10_000 });
+  await firstCheckbox.check();
+  await page.getByTestId("add-selected-students").click();
 
   // The new student section should auto-expand
-  const studentSections = page.locator('[data-testid^="student-section-"]');
-  await expect(studentSections).toHaveCount(1);
+  const section = page.locator('[data-testid^="student-section-"]').first();
+  await expect(section).toBeVisible();
 
   // Get the student ID from the section's data-testid
-  const sectionTestId = await studentSections.first().getAttribute("data-testid");
+  const sectionTestId = await section.getAttribute("data-testid");
   const studentId = sectionTestId!.replace("student-section-", "");
 
   // Answer all 2 questions with Yes
@@ -1348,6 +1349,86 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     // Both action types show as completed on the visit detail page
     await expect(refreshedGroupCard.getByRole("link", { name: "View Details" })).toBeVisible();
     await expect(refreshedIndividualCard.getByRole("link", { name: "View Details" })).toBeVisible();
+  });
+
+  test("pm-batch-adds-students-and-ends-individual-student-interaction", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}`);
+
+    await pmPage.getByRole("button", { name: "Add Action Point" }).click();
+    const dialog = pmPage.getByRole("dialog");
+    await dialog.getByLabel("Individual Student Interaction").click();
+    await dialog.getByRole("button", { name: "Add" }).click();
+
+    await pmPage.waitForURL(/\/visits\/\d+\/actions\/\d+/);
+    const actionId = pmPage.url().split("/actions/")[1]!;
+
+    await pmPage.getByTestId("student-grade-filter").selectOption("11");
+    await pmPage.getByTestId("multi-select-student-trigger").click();
+    await expect(pmPage.getByTestId("multi-select-student-panel")).toBeVisible();
+
+    const checkboxes = pmPage.locator('[data-testid^="student-checkbox-"]');
+    await expect(checkboxes.nth(0)).toBeVisible({ timeout: 10_000 });
+    await expect(checkboxes.nth(1)).toBeVisible({ timeout: 10_000 });
+    await checkboxes.nth(0).check();
+    await checkboxes.nth(1).check();
+    await pmPage.getByTestId("add-selected-students").click();
+
+    const sections = pmPage.locator('[data-testid^="student-section-"]');
+    await expect(sections).toHaveCount(2);
+
+    const studentIds: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const section = sections.nth(index);
+      const sectionTestId = await section.getAttribute("data-testid");
+      const studentId = sectionTestId!.replace("student-section-", "");
+      studentIds.push(studentId);
+
+      await pmPage.getByTestId(`student-header-${studentId}`).click();
+      for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+        await pmPage.getByTestId(`student-${studentId}-${key}-yes`).check();
+      }
+    }
+
+    const requestOrder: string[] = [];
+    pmPage.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PATCH" && url.pathname.includes(`/actions/${actionId}`)) {
+        requestOrder.push("patch");
+      }
+      if (request.method() === "POST" && url.pathname.includes(`/actions/${actionId}/end`)) {
+        requestOrder.push("end");
+      }
+    });
+
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+    expect(requestOrder).toEqual(["patch", "end"]);
+
+    const actionRows = await pool.query<{ status: string; data: Record<string, unknown> }>(
+      `SELECT status, data FROM lms_pm_school_visit_actions WHERE id = $1`,
+      [actionId]
+    );
+    const actionRow = actionRows.rows[0];
+    expect(actionRow?.status).toBe("completed");
+
+    const students = actionRow?.data?.students as Array<Record<string, unknown>>;
+    expect(Array.isArray(students)).toBe(true);
+    expect(students.length).toBeGreaterThanOrEqual(2);
+    for (const student of students) {
+      expect(typeof student.id).toBe("number");
+      expect(typeof student.name).toBe("string");
+      expect(student.grade).toBe(11);
+      const questions = student.questions as Record<string, Record<string, unknown>>;
+      for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+        expect(questions[key]?.answer).toBe(true);
+      }
+    }
+    expect(studentIds.length).toBe(2);
   });
 
   test("visit-completion-requires-school-staff-interaction", async ({ pmPage }) => {

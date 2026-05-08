@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 
 import { fuzzyMatch } from "@/lib/fuzzy-match";
 import {
@@ -10,7 +19,7 @@ import {
 } from "@/lib/individual-student-discussion";
 import { getStudentDisplayName, type Student } from "@/lib/student-utils";
 import { isPlainObject } from "@/lib/visit-form-utils";
-import { FormSection, RadioPair, RemarkField, Select, StickyProgressBar } from "@/components/ui";
+import { FormSection, RadioPair, Select, StickyProgressBar } from "@/components/ui";
 
 interface IndividualStudentDiscussionFormProps {
   data: Record<string, unknown>;
@@ -40,19 +49,21 @@ function getQuestionProgress(entry: IndividualStudentEntry): string {
   return `${answered}/${total}`;
 }
 
-/* -- Searchable student combobox ----------------------------------------- */
+/* -- Multi-select student dropdown --------------------------------------- */
 
-interface SearchableStudentSelectProps {
+interface MultiSelectStudentSearchProps {
   students: Student[];
-  onSelect: (id: number) => void;
+  onAddStudents: (students: Student[]) => void;
 }
 
-function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelectProps) {
+function MultiSelectStudentSearch({ students, onAddStudents }: MultiSelectStudentSearchProps) {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(() => new Set());
   const containerRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const panelId = useId();
 
   const filtered = useMemo(() => {
     if (query.trim() === "") return students;
@@ -63,7 +74,20 @@ function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelect
     );
   }, [students, query]);
 
-  // Close on outside click
+  const selectedStudents = useMemo(
+    () => students.filter((s) => checkedIds.has(Number(s.id))),
+    [students, checkedIds]
+  );
+
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every((student) => checkedIds.has(Number(student.id)));
+
+  useEffect(() => {
+    if (isOpen) {
+      searchRef.current?.focus();
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     function handleMouseDown(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -74,110 +98,142 @@ function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelect
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
-  // Scroll highlighted item into view
-  useEffect(() => {
-    if (highlightIndex >= 0 && listRef.current) {
-      const items = listRef.current.children;
-      if (items[highlightIndex]) {
-        (items[highlightIndex] as HTMLElement).scrollIntoView?.({ block: "nearest" });
-      }
-    }
-  }, [highlightIndex]);
-
-  function selectStudent(id: number) {
-    onSelect(id);
-    setQuery("");
-    setIsOpen(false);
-    setHighlightIndex(-1);
+  function focusTrigger() {
+    triggerRef.current?.focus();
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (!isOpen) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        setIsOpen(true);
-        setHighlightIndex(0);
-        e.preventDefault();
+  function resetAndClose() {
+    setCheckedIds(new Set());
+    setQuery("");
+    setIsOpen(false);
+    focusTrigger();
+  }
+
+  function handleAddSelected() {
+    if (checkedIds.size === 0) return;
+    onAddStudents(selectedStudents);
+    resetAndClose();
+  }
+
+  function toggleStudent(studentId: number) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  }
+
+  function toggleVisibleStudents() {
+    if (filtered.length === 0) return;
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const student of filtered) next.delete(Number(student.id));
+      } else {
+        for (const student of filtered) next.add(Number(student.id));
       }
+      return next;
+    });
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleAddSelected();
       return;
     }
-
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        setHighlightIndex((prev) => (prev < filtered.length - 1 ? prev + 1 : prev));
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
-        break;
-      case "Enter":
-        e.preventDefault();
-        if (highlightIndex >= 0 && highlightIndex < filtered.length) {
-          selectStudent(Number(filtered[highlightIndex].id));
-        }
-        break;
-      case "Escape":
-        setIsOpen(false);
-        setHighlightIndex(-1);
-        break;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      resetAndClose();
     }
   }
 
   return (
     <div ref={containerRef} className="relative" data-testid="student-search-container">
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setIsOpen(true);
-          setHighlightIndex(-1);
-        }}
-        onFocus={() => setIsOpen(true)}
+      <button
+        ref={triggerRef}
+        type="button"
         onClick={() => setIsOpen(true)}
-        onKeyDown={handleKeyDown}
-        placeholder="Search students..."
-        className="border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none w-56"
-        data-testid="add-student-select"
-        role="combobox"
+        className="min-h-[44px] w-56 rounded-lg border-2 border-border px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-bg-card-alt focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+        data-testid="multi-select-student-trigger"
         aria-expanded={isOpen}
-        aria-autocomplete="list"
-        aria-controls="student-search-listbox"
-        autoComplete="off"
-      />
+        aria-controls={panelId}
+      >
+        Add students
+      </button>
       {isOpen && (
-        <ul
-          ref={listRef}
-          id="student-search-listbox"
-          role="listbox"
-          data-testid="student-search-listbox"
-          className="absolute z-20 mt-1 max-h-48 w-full overflow-auto border-2 border-border bg-bg-card shadow-md"
+        <div
+          id={panelId}
+          role="group"
+          aria-label="Student selection"
+          data-testid="multi-select-student-panel"
+          className="absolute z-20 mt-1 w-80 border-2 border-border bg-bg-card shadow-md"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              resetAndClose();
+            }
+          }}
         >
-          {filtered.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-text-muted" role="option" aria-selected={false}>
-              No matches
-            </li>
-          ) : (
-            filtered.map((s, idx) => (
-              <li
-                key={s.id}
-                role="option"
-                aria-selected={highlightIndex === idx}
-                data-testid={`student-option-${s.id}`}
-                className={`cursor-pointer px-3 py-2 text-sm ${
-                  highlightIndex === idx ? "bg-accent/10 text-accent" : "text-text-primary hover:bg-bg-card-alt"
-                }`}
-                onMouseEnter={() => setHighlightIndex(idx)}
-                onMouseDown={(e) => {
-                  e.preventDefault(); // prevent input blur before click registers
-                  selectStudent(Number(s.id));
-                }}
-              >
-                {getStudentDisplayName(s)}
-              </li>
-            ))
-          )}
-        </ul>
+          <div className="space-y-2 border-b border-border p-3">
+            <button
+              type="button"
+              onClick={toggleVisibleStudents}
+              disabled={filtered.length === 0}
+              className="text-sm font-semibold text-accent disabled:cursor-not-allowed disabled:text-text-muted"
+              data-testid="select-all-students"
+            >
+              {allVisibleSelected ? "Deselect All" : "Select All"}
+            </button>
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search students..."
+              className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
+              data-testid="multi-select-student-search"
+            />
+          </div>
+          <fieldset className="max-h-60 overflow-y-auto p-2">
+            <legend className="sr-only">Students</legend>
+            {filtered.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-text-muted">No matches</p>
+            ) : (
+              filtered.map((student) => {
+                const studentId = Number(student.id);
+                return (
+                  <label
+                    key={student.id}
+                    className="flex cursor-pointer items-center gap-2 px-2 py-2 text-sm text-text-primary hover:bg-bg-card-alt"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.has(studentId)}
+                      onChange={() => toggleStudent(studentId)}
+                      data-testid={`student-checkbox-${studentId}`}
+                      className="h-4 w-4"
+                    />
+                    <span>{getStudentDisplayName(student)}</span>
+                  </label>
+                );
+              })
+            )}
+          </fieldset>
+          <div className="sticky bottom-0 border-t border-border bg-bg-card p-3">
+            <button
+              type="button"
+              onClick={handleAddSelected}
+              disabled={selectedStudents.length === 0}
+              className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-border disabled:text-text-muted"
+              data-testid="add-selected-students"
+            >
+              Add Selected ({selectedStudents.length})
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -238,9 +294,6 @@ export default function IndividualStudentDiscussionForm({
     [availableStudents, recordedStudentIds]
   );
 
-  const availableStudentsRef = useRef(availableStudents);
-  availableStudentsRef.current = availableStudents;
-
   const selectedGradeRef = useRef(selectedGrade);
   selectedGradeRef.current = selectedGrade;
 
@@ -253,27 +306,36 @@ export default function IndividualStudentDiscussionForm({
     });
   }, []);
 
-  const handleAddStudent = useCallback(
-    (studentId: number) => {
-      const student = availableStudentsRef.current.find((s) => Number(s.id) === studentId);
-      if (!student) return;
-      const name = getStudentDisplayName(student);
+  const handleAddStudents = useCallback(
+    (students: Student[]) => {
+      if (students.length === 0) return;
+
+      const currentIds = new Set(getStudentEntriesFromData(data).map((student) => student.id));
+      const studentsToAdd = students.filter((student) => !currentIds.has(Number(student.id)));
+      if (studentsToAdd.length === 0) return;
+
       const grade = selectedGradeRef.current;
 
       setData((current) => {
         const entries = getStudentEntriesFromData(current);
-        const newEntry: IndividualStudentEntry = {
-          id: Number(student.id),
-          name,
-          grade: grade ?? 11,
-          questions: {},
-        };
-        return { ...current, students: [...entries, newEntry] };
+        const existingIds = new Set(entries.map((student) => student.id));
+        const newEntries: IndividualStudentEntry[] = studentsToAdd
+          .filter((student) => !existingIds.has(Number(student.id)))
+          .map((student) => ({
+            id: Number(student.id),
+            name: getStudentDisplayName(student),
+            grade: grade ?? 11,
+            questions: {},
+          }));
+        if (newEntries.length === 0) return current;
+        return { ...current, students: [...entries, ...newEntries] };
       });
 
-      setExpandedIds((prev) => new Set(prev).add(Number(student.id)));
+      if (studentsToAdd.length === 1) {
+        setExpandedIds((prev) => new Set(prev).add(Number(studentsToAdd[0].id)));
+      }
     },
-    [setData]
+    [data, setData]
   );
 
   const handleRemoveStudent = useCallback(
@@ -335,7 +397,7 @@ export default function IndividualStudentDiscussionForm({
 
   return (
     <div className="space-y-4" data-testid="action-renderer-individual_student_discussion">
-      {/* Grade filter + Student select */}
+      {/* Grade filter + student picker */}
       {!disabled && (
         <FormSection spacing="" className="flex flex-wrap items-end gap-3">
           <div>
@@ -362,9 +424,10 @@ export default function IndividualStudentDiscussionForm({
           </div>
 
           {selectedGrade !== null && !studentsLoading && !studentsError && remainingStudents.length > 0 && (
-            <SearchableStudentSelect
+            <MultiSelectStudentSearch
+              key={selectedGrade}
               students={remainingStudents}
-              onSelect={handleAddStudent}
+              onAddStudents={handleAddStudents}
             />
           )}
         </FormSection>

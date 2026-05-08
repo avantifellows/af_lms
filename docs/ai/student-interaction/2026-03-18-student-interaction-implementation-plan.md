@@ -1,3 +1,5 @@
+# Superseded by #34
+
 # Plan: Student Interaction Action Types
 
 ## Context

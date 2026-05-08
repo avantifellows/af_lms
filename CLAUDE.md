@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that allows school administrators to view and manage student enrollments. Features dual authentication (Google OAuth + school passcodes) with permission-based access control.
 
-PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), an individual student interaction per-student checklist (2 binary questions with grade filter and student dropdown), and a school staff interaction checklist (2 binary questions, no teacher/student/grade selection).
+PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), an individual student interaction per-student checklist (2 binary questions with grade filter and multi-select checkbox dropdown with batch-add), and a school staff interaction checklist (2 binary questions, no teacher/student/grade selection).
 
 ## Development Commands
 
@@ -147,7 +147,7 @@ Visit tables:
 - Form component: `src/components/visits/GroupStudentDiscussionForm.tsx`
 
 ### PM Visits: Individual Student Interaction (v1)
-- Per-student 2-question binary checklist with grade filter and student dropdown across 1 section — no attendance gating
+- Per-student 2-question binary checklist with grade filter and multi-select checkbox dropdown with batch-add across 1 section — no attendance gating
 - Payload: `{ students: [{ id, name, grade, questions: { [key]: { answer: boolean|null, remark?: string } } }] }`
 - Grade filter fetches students from `/api/pm/students?school_code=X&grade=N`
 - 1 section: Operational Health (2 questions) — 2 total
