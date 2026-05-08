@@ -1517,21 +1517,26 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(actionParams).toEqual(["10", "101"]);
   });
 
-  it("returns 409 when action status is completed", async () => {
+  it("soft-deletes completed action — resets status/timestamps to satisfy DB constraints", async () => {
     setupPmView();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
-      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }]);
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }])
+      .mockResolvedValueOnce([{ id: 101 }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "DELETE",
     });
     const res = await DELETE(req as never, params);
 
-    expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toEqual({
-      error: "Only pending or in-progress actions can be deleted",
-    });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+
+    const [deleteQueryText] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(deleteQueryText).toContain("status = 'pending'");
+    expect(deleteQueryText).toContain("started_at = NULL");
+    expect(deleteQueryText).toContain("ended_at = NULL");
+    expect(deleteQueryText).toContain("deleted_at IS NULL");
   });
 
   it("soft-deletes pending action — resets status to pending and bumps updated_at", async () => {
@@ -1581,6 +1586,6 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(deleteQueryText).toContain("status = 'pending'");
     expect(deleteQueryText).toContain("started_at = NULL");
     expect(deleteQueryText).toContain("ended_at = NULL");
-    expect(deleteQueryText).toContain("status IN ('pending', 'in_progress')");
+    expect(deleteQueryText).toContain("deleted_at IS NULL");
   });
 });

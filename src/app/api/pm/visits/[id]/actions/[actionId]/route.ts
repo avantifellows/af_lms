@@ -333,10 +333,6 @@ export async function DELETE(
     return apiError(404, "Action not found");
   }
 
-  if (action.status !== "pending" && action.status !== "in_progress") {
-    return apiError(409, "Only pending or in-progress actions can be deleted");
-  }
-
   const deleted = await query<{ id: number }>(
     `UPDATE lms_pm_school_visit_actions
      SET status = 'pending',
@@ -349,7 +345,6 @@ export async function DELETE(
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE visit_id = $1
        AND id = $2
-       AND status IN ('pending', 'in_progress')
        AND deleted_at IS NULL
      RETURNING id`,
     [id, actionId]
