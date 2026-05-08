@@ -154,7 +154,7 @@ function MultiSelectStudentSearch({ students, onAddStudents }: MultiSelectStuden
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={() => setIsOpen((prev) => !prev)}
         className="min-h-[44px] w-56 rounded-lg border-2 border-border px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-bg-card-alt focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
         data-testid="multi-select-student-trigger"
         aria-expanded={isOpen}
@@ -168,7 +168,7 @@ function MultiSelectStudentSearch({ students, onAddStudents }: MultiSelectStuden
           role="group"
           aria-label="Student selection"
           data-testid="multi-select-student-panel"
-          className="absolute z-20 mt-1 w-80 border-2 border-border bg-bg-card shadow-md"
+          className="absolute z-20 mt-1 w-full sm:w-80 max-w-[calc(100vw-1rem)] border-2 border-border bg-bg-card shadow-md"
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.preventDefault();
@@ -193,6 +193,7 @@ function MultiSelectStudentSearch({ students, onAddStudents }: MultiSelectStuden
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               placeholder="Search students..."
+              autoComplete="off"
               className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
               data-testid="multi-select-student-search"
             />
@@ -310,16 +311,13 @@ export default function IndividualStudentDiscussionForm({
     (students: Student[]) => {
       if (students.length === 0) return;
 
-      const currentIds = new Set(getStudentEntriesFromData(data).map((student) => student.id));
-      const studentsToAdd = students.filter((student) => !currentIds.has(Number(student.id)));
-      if (studentsToAdd.length === 0) return;
-
       const grade = selectedGradeRef.current;
+      let committed: IndividualStudentEntry[] = [];
 
       setData((current) => {
         const entries = getStudentEntriesFromData(current);
         const existingIds = new Set(entries.map((student) => student.id));
-        const newEntries: IndividualStudentEntry[] = studentsToAdd
+        committed = students
           .filter((student) => !existingIds.has(Number(student.id)))
           .map((student) => ({
             id: Number(student.id),
@@ -327,15 +325,15 @@ export default function IndividualStudentDiscussionForm({
             grade: grade ?? 11,
             questions: {},
           }));
-        if (newEntries.length === 0) return current;
-        return { ...current, students: [...entries, ...newEntries] };
+        if (committed.length === 0) return current;
+        return { ...current, students: [...entries, ...committed] };
       });
 
-      if (studentsToAdd.length === 1) {
-        setExpandedIds((prev) => new Set(prev).add(Number(studentsToAdd[0].id)));
+      if (committed.length === 1) {
+        setExpandedIds((prev) => new Set(prev).add(committed[0].id));
       }
     },
-    [data, setData]
+    [setData]
   );
 
   const handleRemoveStudent = useCallback(

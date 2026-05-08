@@ -1370,8 +1370,9 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(pmPage.getByTestId("multi-select-student-panel")).toBeVisible();
 
     const checkboxes = pmPage.locator('[data-testid^="student-checkbox-"]');
-    await expect(checkboxes.nth(0)).toBeVisible({ timeout: 10_000 });
-    await expect(checkboxes.nth(1)).toBeVisible({ timeout: 10_000 });
+    await checkboxes.first().waitFor({ state: "visible", timeout: 10_000 });
+    const checkboxCount = await checkboxes.count();
+    expect(checkboxCount).toBeGreaterThanOrEqual(2);
     await checkboxes.nth(0).check();
     await checkboxes.nth(1).check();
     await pmPage.getByTestId("add-selected-students").click();
