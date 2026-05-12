@@ -5,12 +5,29 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Select } from "@/components/ui/Select";
 import BatchOverview from "./performance/BatchOverview";
 import TestDeepDive from "./performance/TestDeepDive";
+import CumulativeALTable from "./performance/CumulativeALTable";
 
 interface Props {
   schoolUdise: string;
 }
 
 export type TestCategory = "chapter" | "full";
+export type FullTestView = "per_test" | "cumulative";
+
+const STREAM_LABELS: Record<string, string> = {
+  pcm: "PCM",
+  pcb: "PCB",
+  pcmb: "PCMB",
+  engineering: "Engineering",
+  medical: "Medical",
+  foundation: "Foundation",
+  clat: "CLAT",
+  ca: "CA",
+};
+
+function streamLabel(canonical: string): string {
+  return STREAM_LABELS[canonical] || canonical.charAt(0).toUpperCase() + canonical.slice(1);
+}
 
 export default function PerformanceTab({ schoolUdise }: Props) {
   const router = useRouter();
@@ -20,6 +37,10 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   const urlProgram = searchParams.get("program") || null;
   const urlGrade = searchParams.get("grade");
   const urlSession = searchParams.get("session");
+  const urlStream = searchParams.get("stream") || null;
+  const urlSubject = searchParams.get("subject") || null;
+  const urlView = (searchParams.get("view") as FullTestView | null) || null;
+  const urlCategory = (searchParams.get("category") as TestCategory | null) || null;
 
   const [programs, setPrograms] = useState<string[] | null>(null);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(urlProgram);
@@ -33,14 +54,28 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   } | null>(
     urlSession ? { sessionId: urlSession, testName: "" } : null
   );
-  const [testCategory, setTestCategory] = useState<TestCategory>("chapter");
+  const [testCategory, setTestCategory] = useState<TestCategory>(
+    urlCategory === "full" ? "full" : "chapter"
+  );
+  const [selectedStream, setSelectedStream] = useState<string | null>(urlStream);
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(urlSubject);
+  const [fullTestView, setFullTestView] = useState<FullTestView>(urlView === "cumulative" ? "cumulative" : "per_test");
+  const [availableStreams, setAvailableStreams] = useState<string[]>([]);
+  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Update URL when state changes
   const updateUrl = useCallback(
-    (opts: { program?: string | null; grade?: number | null; session?: string | null }) => {
+    (opts: {
+      program?: string | null;
+      grade?: number | null;
+      session?: string | null;
+      stream?: string | null;
+      subject?: string | null;
+      view?: FullTestView | null;
+      category?: TestCategory | null;
+    }) => {
       const params = new URLSearchParams(searchParams.toString());
-      // Keep non-performance params (like tab)
       if (opts.program !== undefined) {
         if (opts.program) params.set("program", opts.program);
         else params.delete("program");
@@ -52,6 +87,23 @@ export default function PerformanceTab({ schoolUdise }: Props) {
       if (opts.session !== undefined) {
         if (opts.session) params.set("session", opts.session);
         else params.delete("session");
+      }
+      if (opts.stream !== undefined) {
+        if (opts.stream) params.set("stream", opts.stream);
+        else params.delete("stream");
+      }
+      if (opts.subject !== undefined) {
+        if (opts.subject) params.set("subject", opts.subject);
+        else params.delete("subject");
+      }
+      if (opts.view !== undefined) {
+        if (opts.view && opts.view !== "per_test") params.set("view", opts.view);
+        else params.delete("view");
+      }
+      if (opts.category !== undefined) {
+        // Default category is "chapter" — only encode in URL when it diverges
+        if (opts.category && opts.category !== "chapter") params.set("category", opts.category);
+        else params.delete("category");
       }
       router.replace(`?${params.toString()}`, { scroll: false });
     },
@@ -103,6 +155,15 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     );
   }, []);
 
+  // Receive available filter values from BatchOverview as it loads data.
+  const handleFilterOptions = useCallback(
+    (opts: { streams: string[]; subjects: string[] }) => {
+      setAvailableStreams(opts.streams);
+      setAvailableSubjects(opts.subjects);
+    },
+    []
+  );
+
   if (error) {
     return (
       <div className="p-4 bg-danger-bg border border-danger text-danger rounded-lg">
@@ -132,8 +193,10 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     setSelectedProgram(program);
     setSelectedGrade(null);
     setDeepDiveSession(null);
+    setSelectedStream(null);
+    setSelectedSubject(null);
     setGrades(null); // trigger re-fetch
-    updateUrl({ program, grade: null, session: null });
+    updateUrl({ program, grade: null, session: null, stream: null, subject: null });
   };
 
   const handleGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -141,7 +204,9 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     const grade = val ? parseInt(val, 10) : null;
     setSelectedGrade(grade);
     setDeepDiveSession(null);
-    updateUrl({ grade, session: null });
+    setSelectedStream(null);
+    setSelectedSubject(null);
+    updateUrl({ grade, session: null, stream: null, subject: null });
   };
 
   const handleTestClick = (sessionId: string, testName: string) => {
@@ -152,6 +217,29 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   const handleBack = () => {
     setDeepDiveSession(null);
     updateUrl({ session: null });
+  };
+
+  const handleCategoryChange = (cat: TestCategory) => {
+    setTestCategory(cat);
+    // Subject filter is chapter-only; clear when leaving chapter tab
+    const subjectReset = cat !== "chapter" && selectedSubject;
+    if (subjectReset) setSelectedSubject(null);
+    updateUrl({ category: cat, subject: subjectReset ? null : undefined });
+  };
+
+  const handleStreamChange = (stream: string | null) => {
+    setSelectedStream(stream);
+    updateUrl({ stream });
+  };
+
+  const handleSubjectChange = (subject: string | null) => {
+    setSelectedSubject(subject);
+    updateUrl({ subject });
+  };
+
+  const handleFullViewChange = (view: FullTestView) => {
+    setFullTestView(view);
+    updateUrl({ view });
   };
 
   const showProgramTabs = programs.length > 1;
@@ -177,7 +265,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
         </div>
       )}
 
-      {/* Grade selector + test category */}
+      {/* Grade selector */}
       {grades.length > 0 && (
         <div className="flex items-center gap-4">
           <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
@@ -197,12 +285,13 @@ export default function PerformanceTab({ schoolUdise }: Props) {
         </div>
       )}
 
+      {/* Chapter / Full Tests toggle */}
       {selectedGrade != null && !deepDiveSession && (
         <div className="flex gap-1">
           {(["chapter", "full"] as const).map((cat) => (
             <button
               key={cat}
-              onClick={() => setTestCategory(cat)}
+              onClick={() => handleCategoryChange(cat)}
               className={`px-3 md:px-4 py-1.5 md:py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg transition-colors ${
                 testCategory === cat
                   ? "bg-accent text-text-on-accent shadow-sm"
@@ -210,6 +299,85 @@ export default function PerformanceTab({ schoolUdise }: Props) {
               }`}
             >
               {cat === "chapter" ? "Chapter Tests" : "Full Tests"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Per Test / Cumulative sub-tab — Full Tests only */}
+      {selectedGrade != null && !deepDiveSession && testCategory === "full" && (
+        <div className="flex gap-1">
+          {(["per_test", "cumulative"] as const).map((view) => (
+            <button
+              key={view}
+              onClick={() => handleFullViewChange(view)}
+              className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
+                fullTestView === view
+                  ? "bg-accent/15 text-accent border border-accent/40"
+                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/40 hover:text-text-primary"
+              }`}
+            >
+              {view === "per_test" ? "Per Test" : "Cumulative"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Stream filter */}
+      {selectedGrade != null && !deepDiveSession && availableStreams.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold uppercase tracking-wide text-text-muted mr-1">Stream</span>
+          <button
+            onClick={() => handleStreamChange(null)}
+            className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
+              !selectedStream
+                ? "bg-accent text-text-on-accent shadow-sm"
+                : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
+            }`}
+          >
+            All
+          </button>
+          {availableStreams.map((s) => (
+            <button
+              key={s}
+              onClick={() => handleStreamChange(s)}
+              className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
+                selectedStream === s
+                  ? "bg-accent text-text-on-accent shadow-sm"
+                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
+              }`}
+            >
+              {streamLabel(s)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Subject filter — Chapter Tests only */}
+      {selectedGrade != null && !deepDiveSession && testCategory === "chapter" && availableSubjects.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold uppercase tracking-wide text-text-muted mr-1">Subject</span>
+          <button
+            onClick={() => handleSubjectChange(null)}
+            className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
+              !selectedSubject
+                ? "bg-accent text-text-on-accent shadow-sm"
+                : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
+            }`}
+          >
+            All
+          </button>
+          {availableSubjects.map((s) => (
+            <button
+              key={s}
+              onClick={() => handleSubjectChange(s)}
+              className={`px-3 py-1.5 min-h-[36px] text-xs font-bold uppercase tracking-wide rounded-lg transition-colors ${
+                selectedSubject === s
+                  ? "bg-accent text-text-on-accent shadow-sm"
+                  : "bg-bg-card-alt text-text-muted border border-border hover:border-accent/50 hover:text-text-primary"
+              }`}
+            >
+              {s}
             </button>
           ))}
         </div>
@@ -231,8 +399,16 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           sessionId={deepDiveSession.sessionId}
           testName={deepDiveSession.testName}
           program={selectedProgram || undefined}
+          stream={selectedStream || undefined}
           onBack={handleBack}
           onDataLoaded={handleDeepDiveData}
+        />
+      ) : testCategory === "full" && fullTestView === "cumulative" ? (
+        <CumulativeALTable
+          schoolUdise={schoolUdise}
+          grade={selectedGrade}
+          program={selectedProgram || undefined}
+          stream={selectedStream || undefined}
         />
       ) : (
         <BatchOverview
@@ -240,7 +416,10 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           grade={selectedGrade}
           testCategory={testCategory}
           program={selectedProgram || undefined}
+          stream={selectedStream || undefined}
+          subject={selectedSubject || undefined}
           onTestClick={handleTestClick}
+          onFilterOptions={handleFilterOptions}
         />
       )}
     </div>

@@ -39,12 +39,14 @@ interface StudentIdentifiers {
   first_name: string;
   last_name: string | null;
   gender: string | null;
+  stream: string | null;
 }
 
 async function getSchoolStudentIdentifiers(
   schoolId: string,
   grade: number,
-  program?: string
+  program?: string,
+  stream?: string
 ): Promise<StudentIdentifiers[]> {
   const programJoin = program
     ? `JOIN group_user gu_batch ON gu_batch.user_id = u.id
@@ -53,7 +55,13 @@ async function getSchoolStudentIdentifiers(
        JOIN program p ON b.program_id = p.id`
     : "";
   const programWhere = program ? `AND p.name = $3` : "";
-  const params = program ? [schoolId, grade, program] : [schoolId, grade];
+  const streamWhere = stream
+    ? `AND LOWER(s.stream) = $${program ? 4 : 3}`
+    : "";
+  const params: (string | number)[] = program
+    ? [schoolId, grade, program]
+    : [schoolId, grade];
+  if (stream) params.push(stream);
 
   return query<StudentIdentifiers>(
     `SELECT DISTINCT
@@ -62,7 +70,8 @@ async function getSchoolStudentIdentifiers(
       s.apaar_id,
       u.first_name,
       u.last_name,
-      u.gender
+      u.gender,
+      s.stream
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
@@ -75,7 +84,8 @@ async function getSchoolStudentIdentifiers(
     WHERE g.type = 'school' AND g.child_id = $1
       AND gr.number = $2
       AND (s.status IS NULL OR s.status != 'dropout')
-      ${programWhere}`,
+      ${programWhere}
+      ${streamWhere}`,
     params
   );
 }
@@ -169,10 +179,11 @@ export async function getTestDeepDiveFromDynamo(
   schoolId: string,
   grade: number,
   sessionId: string,
-  program?: string
+  program?: string,
+  stream?: string
 ): Promise<TestDeepDiveData | null> {
   // Step 1: Get student identifiers from Postgres
-  const students = await getSchoolStudentIdentifiers(schoolId, grade, program);
+  const students = await getSchoolStudentIdentifiers(schoolId, grade, program, stream);
   if (students.length === 0) return null;
 
   // Step 2: Query DynamoDB for each student with concurrency limit

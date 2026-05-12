@@ -23,7 +23,8 @@ export async function GET(
 
   try {
     const program = url.searchParams.get("program") || undefined;
-    const raw = await getBatchOverviewData(udise, grade, program);
+    const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
+    const raw = await getBatchOverviewData(udise, grade, program, stream);
 
     const tests = raw.tests;
     const testsCount = tests.length;
@@ -42,6 +43,7 @@ export async function GET(
       tests: raw.tests,
       totalEnrolled: raw.totalEnrolled,
       enrolledByStream: raw.enrolledByStream,
+      streams: raw.streams,
     };
 
     return NextResponse.json(response);

@@ -112,7 +112,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     );
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "No results available for this test yet. Please check back in a few hours." });
-    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "s1", undefined);
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "s1", undefined, undefined);
   });
 
   it("returns full TestDeepDiveData on success", async () => {
@@ -168,7 +168,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     expect(json.chapters).toHaveLength(2);
     expect(json.students).toHaveLength(1);
     expect(json.students[0].student_name).toBe("Alice");
-    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "sess-123", undefined);
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "sess-123", undefined, undefined);
   });
 
   it("returns 500 when getTestDeepDiveFromDynamo throws", async () => {
