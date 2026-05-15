@@ -166,6 +166,19 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
+  });
+
   it("returns 422 when no completed classroom observation exists", async () => {
     setupPmEdit();
     mockQuery
@@ -301,6 +314,10 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(json.visit.end_lng).toBeUndefined();
     expect(json.visit.end_accuracy).toBeUndefined();
 
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
+
     const [completionQueryText, completionParams] = mockQuery.mock.calls[9] as [string, unknown[]];
     expect(completionQueryText).toContain("UPDATE lms_pm_school_visits v");
     expect(completionQueryText).toContain("status = 'completed'");
@@ -312,6 +329,7 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(completionQueryText).toContain("a.status = 'in_progress'");
     expect(completionQueryText).toContain("a.deleted_at IS NULL");
     expect(completionQueryText).toContain("v.status = 'in_progress'");
+    expect(completionQueryText).toContain("v.deleted_at IS NULL");
     expect(completionParams).toEqual(["10", 28.6, 77.2, 10]);
   });
 
