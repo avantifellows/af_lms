@@ -45,7 +45,7 @@ describe("DeleteVisitButton", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("deletes and redirects to visits in detail mode", async () => {
+  it("deletes and redirects to /visits by default in detail mode", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(() =>
       Promise.resolve({
@@ -66,6 +66,24 @@ describe("DeleteVisitButton", () => {
     expect(mockPush).toHaveBeenCalledWith("/visits");
     expect(mockRefresh).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("deletes and redirects to redirectTo when provided", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DeleteVisitButton visitId={10} mode="detail" redirectTo="/school/23460706804" />);
+
+    await user.click(screen.getByRole("button", { name: "Delete Visit" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(mockPush).toHaveBeenCalledWith("/school/23460706804");
   });
 
   it("deletes and refreshes in list mode", async () => {

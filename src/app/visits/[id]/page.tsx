@@ -22,6 +22,7 @@ interface Visit {
   inserted_at: string;
   updated_at: string;
   school_name?: string | null;
+  school_udise?: string | null;
 }
 
 interface VisitAction {
@@ -45,7 +46,8 @@ async function getVisitDetail(id: string): Promise<VisitDetail> {
   const visits = await query<Visit>(
     `SELECT v.id, v.school_code, v.pm_email, v.visit_date, v.status,
             v.completed_at, v.inserted_at, v.updated_at,
-            s.name as school_name, s.region as school_region
+            s.name as school_name, s.region as school_region,
+            s.udise_code as school_udise
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      WHERE v.id = $1
@@ -229,7 +231,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
           <div className="space-y-4">
             <CompleteVisitButton visitId={visit.id} />
             <div className="border-t border-danger/20 pt-4">
-              <DeleteVisitButton visitId={visit.id} mode="detail" />
+              <DeleteVisitButton visitId={visit.id} mode="detail" redirectTo={visit.school_udise ? `/school/${visit.school_udise}` : "/visits"} />
             </div>
           </div>
         ) : (

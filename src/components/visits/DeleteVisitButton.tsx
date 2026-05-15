@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui";
 interface DeleteVisitButtonProps {
   visitId: number;
   mode: "detail" | "list";
+  redirectTo?: string;
 }
 
 function parseApiError(payload: unknown, fallback: string): string {
@@ -29,7 +30,7 @@ async function readJsonSafely(response: Response): Promise<unknown> {
   }
 }
 
-export default function DeleteVisitButton({ visitId, mode }: DeleteVisitButtonProps) {
+export default function DeleteVisitButton({ visitId, mode, redirectTo }: DeleteVisitButtonProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -56,7 +57,7 @@ export default function DeleteVisitButton({ visitId, mode }: DeleteVisitButtonPr
         setIsOpen(false);
       });
       if (mode === "detail") {
-        router.push("/visits");
+        router.push(redirectTo || "/visits");
       } else {
         router.refresh();
       }
