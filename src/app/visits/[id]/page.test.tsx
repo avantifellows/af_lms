@@ -50,6 +50,14 @@ vi.mock("@/components/visits/CompleteVisitButton", () => ({
     </button>
   ),
 }));
+vi.mock("@/components/visits/DeleteVisitButton", () => ({
+  __esModule: true,
+  default: ({ visitId, mode }: { visitId: number; mode: "detail" | "list" }) => (
+    <button type="button" data-testid="delete-visit-button" data-visit-id={visitId} data-mode={mode}>
+      Delete Visit
+    </button>
+  ),
+}));
 
 import VisitDetailPage from "./page";
 
@@ -73,6 +81,15 @@ const adminPermission = {
   regions: ["North"],
   program_ids: [1],
   read_only: false,
+};
+const programAdminPermission = {
+  level: 2,
+  role: "program_admin",
+  email: "program-admin@avantifellows.org",
+  school_codes: null,
+  regions: ["North"],
+  program_ids: [1],
+  read_only: true,
 };
 
 function setupPmAuth() {
@@ -214,6 +231,8 @@ describe("VisitDetailPage", () => {
     expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);
     expect(screen.getByText("In Progress")).toBeInTheDocument();
     expect(screen.getByTestId("complete-visit-button")).toHaveAttribute("data-visit-id", "1");
+    expect(screen.getByTestId("delete-visit-button")).toHaveAttribute("data-visit-id", "1");
+    expect(screen.getByTestId("delete-visit-button")).toHaveAttribute("data-mode", "detail");
     expect(screen.queryByText("Ended")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Visit" })).not.toBeInTheDocument();
   });
@@ -248,6 +267,22 @@ describe("VisitDetailPage", () => {
     expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);
     expect(screen.getByText("This visit is completed and read-only.")).toBeInTheDocument();
     expect(screen.queryByTestId("complete-visit-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
+  });
+
+  it("hides delete button for program_admin", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "program-admin@avantifellows.org" } });
+    mockGetUserPermission.mockResolvedValue(programAdminPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
+    mockQuery
+      .mockResolvedValueOnce([makeVisit({ pm_email: "other-pm@avantifellows.org" })])
+      .mockResolvedValueOnce(makeActions());
+
+    const jsx = await VisitDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("This visit is read-only for your role.")).toBeInTheDocument();
+    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
   });
 
   it("queries visit and actions without selecting visit.data", async () => {
@@ -263,6 +298,7 @@ describe("VisitDetailPage", () => {
     const [visitSql, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(visitSql).toContain("FROM lms_pm_school_visits v");
     expect(visitSql).toContain("v.id = $1");
+    expect(visitSql).toContain("v.deleted_at IS NULL");
     expect(visitSql).not.toContain("v.data");
     expect(visitParams).toEqual(["42"]);
 

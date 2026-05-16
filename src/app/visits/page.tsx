@@ -9,6 +9,7 @@ import {
   isScopedVisitsRole,
 } from "@/lib/visits-policy";
 import Link from "next/link";
+import DeleteVisitButton from "@/components/visits/DeleteVisitButton";
 import { Card, Input, Select, FormLabel, Button } from "@/components/ui";
 
 interface Visit {
@@ -60,7 +61,7 @@ async function getVisits(
   filters: VisitFilters
 ): Promise<Visit[]> {
   const actor = buildVisitsActor(actorEmail, permission);
-  const whereClauses: string[] = [];
+  const whereClauses: string[] = ["v.deleted_at IS NULL"];
   const params: unknown[] = [];
   let paramIndex = 1;
 
@@ -149,6 +150,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
 
   const inProgress = visits.filter((v) => v.status === "in_progress");
   const completed = visits.filter((v) => v.status === "completed");
+  const canDeleteVisits = permission.role === "program_manager" || permission.role === "admin";
 
   return (
     <div className="min-h-screen bg-bg">
@@ -290,6 +292,11 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                   >
                     Continue
                   </Link>
+                  {canDeleteVisits && (
+                    <div className="mt-3">
+                      <DeleteVisitButton visitId={visit.id} mode="list" />
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>
@@ -341,12 +348,17 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
                         })}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                        <Link
-                          href={`/visits/${visit.id}`}
-                          className="inline-flex items-center rounded-lg bg-accent px-3 py-1 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
-                        >
-                          Continue
-                        </Link>
+                        <div className="flex items-center justify-end gap-4">
+                          <Link
+                            href={`/visits/${visit.id}`}
+                            className="inline-flex items-center rounded-lg bg-accent px-3 py-1 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover"
+                          >
+                            Continue
+                          </Link>
+                          {canDeleteVisits && (
+                            <DeleteVisitButton visitId={visit.id} mode="list" />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

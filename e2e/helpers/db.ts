@@ -159,9 +159,14 @@ export async function dropDatabase(): Promise<void> {
  * Seed a test visit for the PM test user.
  * Finds a school in AHMEDABAD region (or uses provided code) and inserts an in_progress visit.
  */
+interface SeedTestVisitOptions {
+  deletedAt?: Date;
+}
+
 export async function seedTestVisit(
   pool: Pool,
-  schoolCode?: string
+  schoolCode?: string,
+  options: SeedTestVisitOptions = {}
 ): Promise<{ visitId: number; schoolCode: string }> {
   if (!schoolCode) {
     const schoolResult = await pool.query(
@@ -175,14 +180,23 @@ export async function seedTestVisit(
     schoolCode = schoolResult.rows[0].code as string;
   }
 
-  const result = await pool.query(
-    `INSERT INTO lms_pm_school_visits
-       (school_code, pm_email, visit_date, status,
-        start_lat, start_lng, start_accuracy)
-     VALUES ($1, $2, CURRENT_DATE, 'in_progress', 23.0225, 72.5714, 50)
-     RETURNING id`,
-    [schoolCode, "e2e-pm@test.local"]
-  );
+  const result = options.deletedAt
+    ? await pool.query(
+        `INSERT INTO lms_pm_school_visits
+           (school_code, pm_email, visit_date, status,
+            start_lat, start_lng, start_accuracy, deleted_at)
+         VALUES ($1, $2, CURRENT_DATE, 'in_progress', 23.0225, 72.5714, 50, $3)
+         RETURNING id`,
+        [schoolCode, "e2e-pm@test.local", options.deletedAt]
+      )
+    : await pool.query(
+        `INSERT INTO lms_pm_school_visits
+           (school_code, pm_email, visit_date, status,
+            start_lat, start_lng, start_accuracy)
+         VALUES ($1, $2, CURRENT_DATE, 'in_progress', 23.0225, 72.5714, 50)
+         RETURNING id`,
+        [schoolCode, "e2e-pm@test.local"]
+      );
 
   return { visitId: result.rows[0].id, schoolCode: schoolCode as string };
 }

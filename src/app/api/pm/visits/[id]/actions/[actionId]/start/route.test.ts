@@ -144,6 +144,24 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/start", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
+    setupPmEdit();
+    mockQuery.mockResolvedValueOnce([]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/start", {
+      method: "POST",
+      body: JSON.stringify({ start_lat: 28.6, start_lng: 77.2, start_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
+  });
+
   it("returns 409 when visit is completed", async () => {
     setupPmEdit();
     mockQuery.mockResolvedValueOnce([{ ...VISIT_ROW, status: "completed" }]);
@@ -219,6 +237,10 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/start", () => {
     expect(json.action.start_lng).toBeUndefined();
     expect(json.action.end_lat).toBeUndefined();
     expect(json.action.end_lng).toBeUndefined();
+
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
 
     const [updateQueryText, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
     expect(updateQueryText).toContain("UPDATE lms_pm_school_visit_actions");

@@ -663,6 +663,31 @@ describe("VisitActionDetailPage", () => {
     expect(actionParams).toEqual(["1", "101"]);
   });
 
+  it("renders visit-not-found state when visit query returns empty", async () => {
+    setupPmAuth();
+    mockQuery.mockResolvedValueOnce([]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("Visit not found")).toBeInTheDocument();
+    expect(screen.getByText("The requested visit does not exist.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
+  });
+
+  it("filters soft-deleted visits in the visit query", async () => {
+    setupPmAuth();
+    mockQuery.mockResolvedValueOnce([]);
+
+    await VisitActionDetailPage(pageProps("42", "99"));
+
+    const [visitSql, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitSql).toContain("FROM lms_pm_school_visits v");
+    expect(visitSql).toContain("v.id = $1");
+    expect(visitSql).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["42"]);
+  });
+
   it("loads the AF Team Interaction renderer for af_team_interaction actions", async () => {
     setupPmAuth();
     mockQuery
