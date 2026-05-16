@@ -15,8 +15,9 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 import { getServerSession } from "next-auth";
 import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { GET } from "./route";
+import { DELETE, GET } from "./route";
 import {
+  ADMIN_SESSION,
   routeParams,
   NO_SESSION,
   PASSCODE_SESSION,
@@ -47,6 +48,16 @@ const PROGRAM_ADMIN_PERM = {
   email: "pa@avantifellows.org",
   level: 2 as const,
   role: "program_admin" as const,
+  school_codes: null,
+  regions: ["North"],
+  program_ids: [1],
+  read_only: false,
+};
+
+const ADMIN_PERM = {
+  email: "admin@avantifellows.org",
+  level: 2 as const,
+  role: "admin" as const,
   school_codes: null,
   regions: ["North"],
   program_ids: [1],
@@ -133,6 +144,9 @@ describe("GET /api/pm/visits/[id]", () => {
     const res = await GET(req as never, params);
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
   });
 
   it("returns 403 when PM is not owner and not admin", async () => {
@@ -170,6 +184,7 @@ describe("GET /api/pm/visits/[id]", () => {
 
     const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(visitQueryText).toContain("s.region as school_region");
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
     expect(visitQueryText).not.toContain("start_lat");
     expect(visitQueryText).not.toContain("start_lng");
     expect(visitQueryText).not.toContain("end_lat");
@@ -293,5 +308,195 @@ describe("GET /api/pm/visits/[id]", () => {
     const res = await GET(req as never, params);
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
+  });
+});
+
+describe("DELETE /api/pm/visits/[id]", () => {
+  function deleteRequest(body?: unknown) {
+    return new Request("http://localhost/api/pm/visits/10", {
+      method: "DELETE",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  it("returns 401 when not authenticated", async () => {
+    mockSession.mockResolvedValue(NO_SESSION);
+
+    const req = deleteRequest();
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
+  });
+
+  it("returns 403 for program admins and passcode users", async () => {
+    mockSession.mockResolvedValueOnce(PROGRAM_ADMIN_SESSION as never);
+    mockGetPermission.mockResolvedValueOnce(PROGRAM_ADMIN_PERM as never);
+    mockFeatureAccess.mockReturnValueOnce({ access: "view", canView: true, canEdit: false });
+
+    const programAdminRes = await DELETE(deleteRequest() as never, params);
+    expect(programAdminRes.status).toBe(403);
+    await expect(programAdminRes.json()).resolves.toEqual({ error: "Forbidden" });
+
+    mockSession.mockResolvedValueOnce(PASSCODE_SESSION as never);
+
+    const passcodeRes = await DELETE(deleteRequest() as never, params);
+    expect(passcodeRes.status).toBe(403);
+    await expect(passcodeRes.json()).resolves.toEqual({
+      error: "Passcode users cannot access visit routes",
+    });
+  });
+
+  it("returns 404 when the active visit does not exist", async () => {
+    setupAuth();
+    mockQuery.mockResolvedValue([]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+  });
+
+  it("returns 403 when PM is not owner", async () => {
+    setupAuth();
+    mockQuery.mockResolvedValue([{ ...VISIT_DETAIL, pm_email: "other@avantifellows.org" }]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
+  });
+
+  it("returns 403 when admin is outside school scope", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue(ADMIN_PERM as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery.mockResolvedValue([
+      { ...VISIT_DETAIL, pm_email: "other@avantifellows.org", school_region: "South" },
+    ]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
+  });
+
+  it("returns 409 with the write-lock message for a completed visit before the CTE", async () => {
+    setupAuth();
+    mockQuery.mockResolvedValue([COMPLETED_VISIT_DETAIL]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "Visit is completed and read-only",
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("soft-deletes an in-progress visit for the owner PM without requiring GPS", async () => {
+    setupAuth();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_DETAIL])
+      .mockResolvedValueOnce([{ id: 10 }]);
+
+    const res = await DELETE(deleteRequest({ arbitrary: "body without GPS" }) as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+
+    const [loadQueryText, loadParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(loadQueryText).toContain("v.deleted_at IS NULL");
+    expect(loadParams).toEqual(["10"]);
+
+    const [cteQueryText, cteParams] = mockQuery.mock.calls[1] as [string, unknown[]];
+    expect(cteQueryText).toContain("WITH deleted_visit AS");
+    expect(cteQueryText).toContain("WHERE id = $1");
+    expect(cteQueryText).toContain("AND status = 'in_progress'");
+    expect(cteQueryText).toContain("AND deleted_at IS NULL");
+    expect(cteQueryText).toContain("visit_id = (SELECT id FROM deleted_visit)");
+    expect(cteQueryText).toContain("status = 'pending'");
+    expect(cteQueryText).toContain("started_at = NULL");
+    expect(cteQueryText).toContain("ended_at = NULL");
+    expect(cteQueryText).toContain("start_lat = NULL");
+    expect(cteQueryText).toContain("start_lng = NULL");
+    expect(cteQueryText).toContain("start_accuracy = NULL");
+    expect(cteQueryText).toContain("end_lat = NULL");
+    expect(cteQueryText).toContain("end_lng = NULL");
+    expect(cteQueryText).toContain("end_accuracy = NULL");
+    expect(cteQueryText).toContain("deleted_at = (NOW() AT TIME ZONE 'UTC')");
+    expect(cteQueryText).toContain("AND deleted_at IS NULL");
+    expect(cteQueryText).toContain("SELECT id FROM deleted_visit");
+    expect(cteQueryText).not.toContain("data =");
+    expect(cteParams).toEqual(["10"]);
+  });
+
+  it("soft-deletes an in-progress visit for an in-scope admin", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue(ADMIN_PERM as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_DETAIL, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([{ id: 10 }]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+  });
+
+  it("returns success for a zero-action visit using the visit CTE result", async () => {
+    setupAuth();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_DETAIL])
+      .mockResolvedValueOnce([{ id: 10 }]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+    const [cteQueryText] = mockQuery.mock.calls[1] as [string, unknown[]];
+    expect(cteQueryText.trim().endsWith("SELECT id FROM deleted_visit;")).toBe(true);
+  });
+
+  it("returns 409 when the visit is completed between the lock check and CTE", async () => {
+    setupAuth();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_DETAIL])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...COMPLETED_VISIT_DETAIL, deleted_at: null }]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "Completed visits cannot be deleted",
+    });
+  });
+
+  it("returns 404 when the visit is already soft-deleted or deleted concurrently", async () => {
+    setupAuth();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_DETAIL])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...VISIT_DETAIL, deleted_at: "2026-02-15T10:05:00Z" }]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+  });
+
+  it("returns 404 when the visit disappears before the CTE re-read", async () => {
+    setupAuth();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_DETAIL])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
   });
 });

@@ -390,7 +390,7 @@ describe("DashboardPage (server component)", () => {
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(screen.getByText("All schools access")).toBeInTheDocument();
+    expect(screen.getByText("All schools")).toBeInTheDocument();
   });
 
   it("shows region access text for level 2", async () => {
@@ -409,7 +409,7 @@ describe("DashboardPage (server component)", () => {
     render(jsx);
 
     expect(
-      screen.getByText("Region access: North, South")
+      screen.getByText("Region: North, South")
     ).toBeInTheDocument();
   });
 
@@ -652,6 +652,17 @@ describe("DashboardPage (server component)", () => {
     expect(continueLink.closest("a")).toHaveAttribute("href", "/visits/11");
   });
 
+  it("filters deleted visits from recent visits query", async () => {
+    setupPM([], 0, []);
+
+    await DashboardPage({ searchParams: defaultSearchParams });
+
+    const [recentVisitsSql, recentVisitsParams] = mockQuery.mock.calls.at(-1) as [string, unknown[]];
+    expect(recentVisitsSql).toContain("FROM lms_pm_school_visits v");
+    expect(recentVisitsSql).toContain("v.deleted_at IS NULL");
+    expect(recentVisitsParams).toEqual(["pm@avantifellows.org", 5]);
+  });
+
   it("does not render recent visits when PM has no visits", async () => {
     setupPM([], 0, []);
 
@@ -777,9 +788,7 @@ describe("DashboardPage (server component)", () => {
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Schools" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Schools" })).toHaveAttribute("href", "/dashboard");
     expect(
       screen.getByText("admin@avantifellows.org")
     ).toBeInTheDocument();

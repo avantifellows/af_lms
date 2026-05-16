@@ -35,6 +35,14 @@ vi.mock("next/link", () => ({
     children: React.ReactNode;
   }) => <a href={href}>{children}</a>,
 }));
+vi.mock("@/components/visits/DeleteVisitButton", () => ({
+  __esModule: true,
+  default: ({ visitId, mode }: { visitId: number; mode: "detail" | "list" }) => (
+    <button type="button" data-testid="delete-visit-button" data-visit-id={visitId} data-mode={mode}>
+      Delete
+    </button>
+  ),
+}));
 
 import VisitsListPage from "./page";
 
@@ -53,6 +61,19 @@ const programManagerPermission = {
   level: 3,
   role: "program_manager",
   read_only: false,
+};
+const adminPermission = {
+  email: "admin@avantifellows.org",
+  level: 3,
+  role: "admin",
+  read_only: false,
+};
+const programAdminPermission = {
+  email: "program-admin@avantifellows.org",
+  level: 2,
+  role: "program_admin",
+  regions: ["AHMEDABAD"],
+  read_only: true,
 };
 
 function setupAuth(permission = programManagerPermission) {
@@ -168,6 +189,11 @@ describe("VisitsListPage (server component)", () => {
 
     const continueLinks = screen.getAllByText("Continue");
     expect(continueLinks[0].closest("a")).toHaveAttribute("href", "/visits/1");
+
+    const deleteButtons = screen.getAllByTestId("delete-visit-button");
+    expect(deleteButtons).toHaveLength(2);
+    expect(deleteButtons[0]).toHaveAttribute("data-visit-id", "1");
+    expect(deleteButtons[0]).toHaveAttribute("data-mode", "list");
   });
 
   it("renders completed visits with View links and uses completed_at timestamp", async () => {
@@ -190,6 +216,7 @@ describe("VisitsListPage (server component)", () => {
 
     const viewLinks = screen.getAllByText("View");
     expect(viewLinks[0].closest("a")).toHaveAttribute("href", "/visits/2");
+    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
   });
 
   it("keeps visits list as a two-state UI with no ended state", async () => {
@@ -241,8 +268,29 @@ describe("VisitsListPage (server component)", () => {
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("WHERE v.deleted_at IS NULL AND LOWER(v.pm_email) = LOWER($1)");
     expect(sql).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(params).toEqual(["pm@avantifellows.org"]);
+  });
+
+  it("renders delete buttons for admin on in-progress visits", async () => {
+    setupAuth(adminPermission);
+    mockQuery.mockResolvedValue([inProgressVisit]);
+
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.getAllByTestId("delete-visit-button")).toHaveLength(2);
+  });
+
+  it("does not render delete buttons for program_admin", async () => {
+    setupAuth(programAdminPermission);
+    mockQuery.mockResolvedValue([inProgressVisit]);
+
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
   });
 
   it("shows scoped-role filters and maps admin filter query params", async () => {

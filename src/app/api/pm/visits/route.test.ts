@@ -126,6 +126,7 @@ describe("GET /api/pm/visits", () => {
     expect(queryText).toContain("v.completed_at");
     expect(queryText).not.toContain("v.ended_at");
     expect(queryText).not.toContain("v.data");
+    expect(queryText).toContain("WHERE v.deleted_at IS NULL AND LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).not.toContain("v.school_code = ANY(");
     expect(queryText).not.toContain("COALESCE(s.region, '') = ANY(");
@@ -146,6 +147,7 @@ describe("GET /api/pm/visits", () => {
     const res = await GET(nextReq("/api/pm/visits"));
     expect(res.status).toBe(200);
     const [queryText] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(queryText).toContain("v.deleted_at IS NULL");
     expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).not.toContain("COALESCE(s.region, '') = ANY(");
   });
@@ -172,6 +174,7 @@ describe("GET /api/pm/visits", () => {
     );
     expect(res.status).toBe(200);
     const [queryText, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(queryText).toContain("WHERE v.deleted_at IS NULL");
     expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).toContain("v.school_code = $2");
     expect(queryText).toContain("v.status = $3");
@@ -196,6 +199,7 @@ describe("GET /api/pm/visits", () => {
     expect(res.status).toBe(200);
 
     const [queryText, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(queryText).toContain("WHERE v.deleted_at IS NULL");
     expect(queryText).toContain("LOWER(v.pm_email) = LOWER($1)");
     expect(queryText).toContain("COALESCE(s.region, '') = ANY($2)");
     expect(queryText).toContain("LIMIT $3");
@@ -212,6 +216,21 @@ describe("GET /api/pm/visits", () => {
     expect(res.status).toBe(200);
     const [, params] = mockQuery.mock.calls[0] as [string, unknown[]];
     expect(params[params.length - 1]).toBe(50);
+  });
+
+  it("filters out soft-deleted visits even when no optional filters are present", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({ ...ADMIN_PERM, level: 3 } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery.mockResolvedValue([]);
+
+    const res = await GET(nextReq("/api/pm/visits"));
+
+    expect(res.status).toBe(200);
+    const [queryText, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(queryText).toContain("WHERE v.deleted_at IS NULL");
+    expect(queryText).toContain("LIMIT $1");
+    expect(params).toEqual([50]);
   });
 });
 

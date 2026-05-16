@@ -114,7 +114,7 @@ describe("GET /api/pm/visits/[id]/actions", () => {
     });
   });
 
-  it("returns 404 when visit does not exist", async () => {
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
     setupPmView();
     mockQuery.mockResolvedValueOnce([]);
 
@@ -124,6 +124,9 @@ describe("GET /api/pm/visits/[id]/actions", () => {
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
     expect(mockQuery).toHaveBeenCalledTimes(1);
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
   });
 
   it("returns 403 for non-owner PM", async () => {
@@ -146,6 +149,10 @@ describe("GET /api/pm/visits/[id]/actions", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ actions: ACTION_ROWS });
+
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
 
     const [actionsQueryText, actionsParams] = mockQuery.mock.calls[1] as [string, unknown[]];
     expect(actionsQueryText).toContain("FROM lms_pm_school_visit_actions");
@@ -252,7 +259,7 @@ describe("POST /api/pm/visits/[id]/actions", () => {
     });
   });
 
-  it("returns 404 when visit does not exist", async () => {
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
     setupPmView();
     mockQuery.mockResolvedValueOnce([]);
 
@@ -265,6 +272,9 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
   });
 
   it("returns 403 when PM is not visit owner", async () => {
@@ -355,6 +365,10 @@ describe("POST /api/pm/visits/[id]/actions", () => {
 
     expect(res.status).toBe(201);
     await expect(res.json()).resolves.toEqual({ action: createdAction });
+
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
 
     const [insertQueryText, insertParams] = mockQuery.mock.calls[1] as [string, unknown[]];
     expect(insertQueryText).toContain("INSERT INTO lms_pm_school_visit_actions");

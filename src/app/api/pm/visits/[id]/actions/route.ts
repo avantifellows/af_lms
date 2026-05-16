@@ -41,7 +41,8 @@ async function loadVisitAccessTarget(visitId: string): Promise<VisitAccessRow | 
             s.region as school_region
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.id = $1`,
+     WHERE v.id = $1
+       AND v.deleted_at IS NULL`,
     [visitId]
   );
 

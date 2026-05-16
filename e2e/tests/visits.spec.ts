@@ -33,6 +33,34 @@ async function setGoodGps(page: Page) {
   });
 }
 
+function visitLink(page: Page, visitId: number) {
+  return page.locator(`a[href="/visits/${visitId}"]`);
+}
+
+function visitTableRow(page: Page, visitId: number) {
+  return page.locator("tr", { has: visitLink(page, visitId) });
+}
+
+async function markVisitCompleted(visitId: number) {
+  await pool.query(
+    `UPDATE lms_pm_school_visits
+     SET status = 'completed',
+         completed_at = (NOW() AT TIME ZONE 'UTC'),
+         updated_at = (NOW() AT TIME ZONE 'UTC')
+     WHERE id = $1`,
+    [visitId]
+  );
+}
+
+async function expectDeleteVisitDialog(page: Page) {
+  const dialog = page.getByRole("dialog", { name: "Delete Visit" });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByText("This visit and all its action points will be removed. This cannot be undone.")
+  ).toBeVisible();
+  return dialog;
+}
+
 async function fillClassroomRubricScores(page: Page) {
   // Select teacher and grade (required before rubric is visible)
   const teacherSelect = page.getByTestId("teacher-select");
@@ -240,6 +268,122 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(pmPage.getByRole("link", { name: "View" }).first()).toBeVisible();
 
     expect(inProgressVisit.visitId).not.toBe(completedVisit.visitId);
+  });
+
+  test("deleted-visit-does-not-appear-in-visit-list", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode, {
+      deletedAt: new Date(),
+    });
+
+    await pmPage.goto("/visits");
+
+    await expect(pmPage.locator(`a[href="/visits/${visitId}"]`)).toHaveCount(0);
+  });
+
+  test("pm-can-cancel-visit-delete-confirmation", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Delete Visit" }).click();
+
+    const dialog = await expectDeleteVisitDialog(pmPage);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(pmPage.getByText("Visit not found.")).toHaveCount(0);
+
+    await pmPage.goto("/visits");
+    await expect(visitLink(pmPage, visitId)).toBeVisible();
+  });
+
+  test("pm-can-delete-in-progress-visit-from-detail-page", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await pmPage.goto(`/visits/${visitId}`);
+    await pmPage.getByRole("button", { name: "Delete Visit" }).click();
+    const dialog = await expectDeleteVisitDialog(pmPage);
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    await pmPage.waitForURL("/visits");
+    await expect(visitLink(pmPage, visitId)).toHaveCount(0);
+  });
+
+  test("pm-can-delete-in-progress-visit-from-list-page", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await pmPage.goto("/visits");
+    const row = visitTableRow(pmPage, visitId);
+    await expect(row).toBeVisible();
+
+    await row.getByRole("button", { name: "Delete" }).click();
+    const dialog = await expectDeleteVisitDialog(pmPage);
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    await expect(visitLink(pmPage, visitId)).toHaveCount(0);
+  });
+
+  test("admin-can-delete-in-progress-visit-within-scope", async ({ adminPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await adminPage.goto(`/visits/${visitId}`);
+    await adminPage.getByRole("button", { name: "Delete Visit" }).click();
+    const dialog = await expectDeleteVisitDialog(adminPage);
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    await adminPage.waitForURL("/visits");
+    await expect(visitLink(adminPage, visitId)).toHaveCount(0);
+  });
+
+  test("completed-visit-does-not-show-delete-button", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    await markVisitCompleted(visitId);
+
+    await pmPage.goto("/visits");
+    const row = visitTableRow(pmPage, visitId);
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("button", { name: "Delete" })).toHaveCount(0);
+
+    await pmPage.goto(`/visits/${visitId}`);
+    await expect(pmPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
+  });
+
+  test("program-admin-does-not-see-delete-button", async ({ programAdminPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+
+    await programAdminPage.goto("/visits");
+    const row = visitTableRow(programAdminPage, visitId);
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("button", { name: "Delete" })).toHaveCount(0);
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(
+      programAdminPage.getByText("This visit is read-only for your role.")
+    ).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
+  });
+
+  test("deleted-visit-action-deep-link-shows-not-found", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode, {
+      deletedAt: new Date(),
+    });
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "principal_interaction",
+      status: "pending",
+    });
+
+    await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
+
+    await expect(pmPage.getByText("Visit not found")).toBeVisible();
+  });
+
+  test("deleted-visit-does-not-appear-in-dashboard-recent-visits", async ({ pmPage }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode, {
+      deletedAt: new Date(),
+    });
+
+    await pmPage.goto("/dashboard");
+
+    await expect(visitLink(pmPage, visitId)).toHaveCount(0);
   });
 
   test("pm-can-add-and-delete-in-progress-action", async ({ pmPage }) => {

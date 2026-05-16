@@ -36,7 +36,8 @@ async function loadVisitAccessTarget(visitId: string): Promise<VisitAccessRow | 
             s.region AS school_region
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
-     WHERE v.id = $1`,
+     WHERE v.id = $1
+       AND v.deleted_at IS NULL`,
     [visitId]
   );
 
@@ -290,6 +291,7 @@ export async function POST(
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE v.id = $1
        AND v.status = 'in_progress'
+       AND v.deleted_at IS NULL
        AND NOT EXISTS (
          SELECT 1
          FROM lms_pm_school_visit_actions a

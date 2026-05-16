@@ -196,7 +196,7 @@ describe("GET /api/pm/visits/[id]/actions/[actionId]", () => {
     });
   });
 
-  it("returns 404 when visit does not exist", async () => {
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
     setupPmView();
     mockQuery.mockResolvedValueOnce([]);
 
@@ -205,6 +205,9 @@ describe("GET /api/pm/visits/[id]/actions/[actionId]", () => {
 
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
   });
 
   it("returns 404 when action is missing (including soft-deleted)", async () => {
@@ -254,6 +257,9 @@ describe("GET /api/pm/visits/[id]/actions/[actionId]", () => {
     });
 
     const [actionQueryText] = mockQuery.mock.calls[1] as [string, unknown[]];
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
     expect(actionQueryText).not.toContain("start_lat");
     expect(actionQueryText).not.toContain("start_lng");
     expect(actionQueryText).not.toContain("end_lat");
@@ -298,6 +304,24 @@ describe("GET /api/pm/visits/[id]/actions/[actionId]", () => {
 });
 
 describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
+    setupPmView();
+    mockQuery.mockResolvedValueOnce([]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: { notes: "updated" } }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
+  });
+
   it("returns 403 for passcode users", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION as never);
 
@@ -1404,6 +1428,22 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 });
 
 describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
+  it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
+    setupPmView();
+    mockQuery.mockResolvedValueOnce([]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "DELETE",
+    });
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
+  });
+
   it("returns 403 for passcode users", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION as never);
 
@@ -1477,21 +1517,26 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(actionParams).toEqual(["10", "101"]);
   });
 
-  it("returns 409 when action status is completed", async () => {
+  it("soft-deletes completed action — resets status/timestamps to satisfy DB constraints", async () => {
     setupPmView();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
-      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }]);
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, status: "completed" }])
+      .mockResolvedValueOnce([{ id: 101 }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "DELETE",
     });
     const res = await DELETE(req as never, params);
 
-    expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toEqual({
-      error: "Only pending or in-progress actions can be deleted",
-    });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+
+    const [deleteQueryText] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(deleteQueryText).toContain("status = 'pending'");
+    expect(deleteQueryText).toContain("started_at = NULL");
+    expect(deleteQueryText).toContain("ended_at = NULL");
+    expect(deleteQueryText).toContain("deleted_at IS NULL");
   });
 
   it("soft-deletes pending action — resets status to pending and bumps updated_at", async () => {
@@ -1508,6 +1553,10 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true });
+
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    expect(visitQueryText).toContain("v.deleted_at IS NULL");
+    expect(visitParams).toEqual(["10"]);
 
     const [deleteQueryText, deleteParams] = mockQuery.mock.calls[2] as [string, unknown[]];
     expect(deleteQueryText).toContain("UPDATE lms_pm_school_visit_actions");
@@ -1537,6 +1586,6 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     expect(deleteQueryText).toContain("status = 'pending'");
     expect(deleteQueryText).toContain("started_at = NULL");
     expect(deleteQueryText).toContain("ended_at = NULL");
-    expect(deleteQueryText).toContain("status IN ('pending', 'in_progress')");
+    expect(deleteQueryText).toContain("deleted_at IS NULL");
   });
 });

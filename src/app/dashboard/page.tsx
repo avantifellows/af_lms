@@ -157,6 +157,7 @@ async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visi
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      WHERE v.pm_email = $1
+       AND v.deleted_at IS NULL
      ORDER BY v.visit_date DESC, v.inserted_at DESC
      LIMIT $2`,
     [pmEmail, limit]

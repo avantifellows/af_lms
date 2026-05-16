@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     return apiError(403, "Forbidden");
   }
 
-  const whereClauses: string[] = [];
+  const whereClauses: string[] = ["v.deleted_at IS NULL"];
   const params: unknown[] = [];
   let paramIndex = 1;
 
