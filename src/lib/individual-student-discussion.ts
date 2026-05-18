@@ -21,15 +21,32 @@ export interface IndividualStudentDiscussionConfig {
 export const VALID_GRADES = [11, 12] as const;
 export type ValidGrade = (typeof VALID_GRADES)[number];
 
+export type IndividualStudentQuestionAnswer = {
+  answer: boolean | null;
+  remark?: string;
+};
+
 export interface IndividualStudentEntry {
   id: number;
   name: string;
   grade: number;
-  questions: Record<string, { answer: boolean | null; remark?: string }>;
+  questions: Record<string, IndividualStudentQuestionAnswer>;
+}
+
+export interface IndividualStudentRef {
+  id: number;
+  name: string;
+}
+
+export interface IndividualStudentDiscussionEntry {
+  id: string;
+  grade: ValidGrade;
+  students: IndividualStudentRef[];
+  questions: Record<string, IndividualStudentQuestionAnswer>;
 }
 
 export interface IndividualStudentDiscussionData {
-  students: IndividualStudentEntry[];
+  entries: IndividualStudentDiscussionEntry[];
 }
 
 const sections: SectionConfig[] = [
@@ -47,7 +64,7 @@ export const INDIVIDUAL_STUDENT_DISCUSSION_CONFIG: IndividualStudentDiscussionCo
   allQuestionKeys: sections.flatMap((s) => s.questions.map((q) => q.key)),
 };
 
-const ALLOWED_TOP_LEVEL_KEYS = new Set(["students"]);
+export const ALLOWED_TOP_LEVEL_KEYS = new Set(["entries", "students"]);
 
 const questionKeyToLabel = new Map<string, string>(
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => {
@@ -64,128 +81,276 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function createEntryId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  if (typeof randomUUID !== "function") {
+    throw new Error("crypto.randomUUID is unavailable");
+  }
+  return randomUUID.call(globalThis.crypto);
+}
+
+function normalizeQuestions(value: unknown): Record<string, unknown> {
+  return isPlainObject(value) ? value : {};
+}
+
+export function isLegacyIndividualStudentDiscussionData(data: unknown): boolean {
+  return isPlainObject(data) && "students" in data && !("entries" in data);
+}
+
+export function getEntriesFromData(data: unknown): IndividualStudentDiscussionEntry[] {
+  if (!isPlainObject(data) || !Array.isArray(data.entries)) {
+    return [];
+  }
+
+  return data.entries.filter((entry): entry is IndividualStudentDiscussionEntry => {
+    if (!isPlainObject(entry) || typeof entry.id !== "string" || entry.id === "") {
+      return false;
+    }
+    if (!isValidGrade(entry.grade) || !Array.isArray(entry.students)) {
+      return false;
+    }
+    if (!isPlainObject(entry.questions)) {
+      return false;
+    }
+    return entry.students.every(
+      (student) =>
+        isPlainObject(student) &&
+        typeof student.id === "number" &&
+        Number.isInteger(student.id) &&
+        student.id > 0 &&
+        typeof student.name === "string" &&
+        student.name !== ""
+    );
+  });
+}
+
+export function canonicalizeIndividualStudentDiscussionData(data: unknown): Record<string, unknown> {
+  if (!isPlainObject(data)) {
+    return { entries: [] };
+  }
+
+  if ("students" in data && "entries" in data) {
+    throw new Error("Payload cannot contain both students and entries");
+  }
+
+  if ("entries" in data) {
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    return {
+      entries: entries
+        .filter(isPlainObject)
+        .map((entry) => ({
+          ...entry,
+          id: typeof entry.id === "string" && entry.id !== "" ? entry.id : createEntryId(),
+        })),
+    };
+  }
+
+  if (!Array.isArray(data.students)) {
+    return { entries: [] };
+  }
+
+  const seenStudentIds = new Set<number>();
+  const entries = data.students.flatMap((student) => {
+    if (!isPlainObject(student)) {
+      return [];
+    }
+
+    const id = student.id;
+    if (
+      typeof id !== "number" ||
+      !Number.isInteger(id) ||
+      id <= 0 ||
+      seenStudentIds.has(id)
+    ) {
+      return [];
+    }
+
+    seenStudentIds.add(id);
+
+    return [
+      {
+        id: createEntryId(),
+        grade: student.grade,
+        students: [
+          {
+            id,
+            name: typeof student.name === "string" ? student.name : "",
+          },
+        ],
+        questions: normalizeQuestions(student.questions),
+      },
+    ];
+  });
+
+  return { entries };
+}
+
 function isValidGrade(value: unknown): value is ValidGrade {
   return typeof value === "number" && Number.isInteger(value) && (VALID_GRADES as readonly number[]).includes(value);
 }
 
-function validateStudentEntries(students: unknown, strict: boolean): string[] {
+function validateEntries(entries: unknown, strict: boolean): string[] {
   const errors: string[] = [];
 
-  if (!Array.isArray(students)) {
-    errors.push("students must be an array");
+  if (!Array.isArray(entries)) {
+    errors.push("entries must be an array");
     return errors;
   }
 
-  const seenIds = new Set<number>();
+  if (strict && entries.length === 0) {
+    errors.push("At least one entry must be recorded");
+  }
 
-  for (let i = 0; i < students.length; i++) {
-    const entry = students[i];
+  const seenEntryIds = new Set<string>();
+  const seenStudentIds = new Set<number>();
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
 
     if (!isPlainObject(entry)) {
-      errors.push(`Student entry ${i}: must be an object`);
+      errors.push(`Entry ${i}: must be an object`);
       continue;
     }
 
     const record = entry as Record<string, unknown>;
 
-    // Validate id
-    const id = record.id;
-    if (
-      typeof id !== "number" ||
-      !Number.isFinite(id) ||
-      id <= 0 ||
-      !Number.isInteger(id)
-    ) {
-      errors.push(`Student entry ${i}: id must be a positive integer`);
+    const entryId = record.id;
+    if (typeof entryId !== "string" || entryId === "") {
+      errors.push(`Entry ${i}: id must be a non-empty string`);
     } else {
-      if (seenIds.has(id)) {
-        errors.push(`Duplicate student id: ${id}`);
+      if (seenEntryIds.has(entryId)) {
+        errors.push(`Duplicate entry id: ${entryId}`);
       }
-      seenIds.add(id);
+      seenEntryIds.add(entryId);
     }
 
-    // Validate name
-    const name = record.name;
-    if (typeof name !== "string" || name === "") {
-      if (strict || name !== undefined) {
-        errors.push(`Student entry ${i}: name must be a non-empty string`);
-      }
-    }
-
-    const studentName = typeof name === "string" && name !== "" ? name : `Entry ${i}`;
-
-    // Validate grade
     const grade = record.grade;
-    if (grade !== undefined) {
-      if (!isValidGrade(grade)) {
-        errors.push(`Student ${studentName}: grade must be 11 or 12`);
+    if (grade === undefined || grade === null) {
+      if (strict) {
+        errors.push(`Entry ${i}: grade is required`);
       }
-    } else if (strict) {
-      errors.push(`Student ${studentName}: grade is required`);
+    } else if (!isValidGrade(grade)) {
+      errors.push(`Entry ${i}: grade must be 11 or 12`);
     }
 
-    // Validate questions
+    const students = record.students;
+    if (!Array.isArray(students)) {
+      errors.push(`Entry ${i}: students must be an array`);
+    } else {
+      if (students.length === 0) {
+        errors.push(`Entry ${i}: at least one student is required`);
+      }
+
+      for (let j = 0; j < students.length; j++) {
+        const student = students[j];
+        if (!isPlainObject(student)) {
+          errors.push(`Entry ${i} student ${j}: must be an object`);
+          continue;
+        }
+
+        const studentId = student.id;
+        if (
+          typeof studentId !== "number" ||
+          !Number.isInteger(studentId) ||
+          studentId <= 0
+        ) {
+          errors.push(`Entry ${i} student ${j}: id must be a positive integer`);
+        } else {
+          if (seenStudentIds.has(studentId)) {
+            errors.push(`Duplicate student id: ${studentId}`);
+          }
+          seenStudentIds.add(studentId);
+        }
+
+        if (typeof student.name !== "string" || student.name === "") {
+          errors.push(`Entry ${i} student ${j}: name must be a non-empty string`);
+        }
+      }
+    }
+
     const questions = record.questions;
-    if (questions !== undefined) {
-      if (!isPlainObject(questions)) {
-        errors.push(`Student entry ${i}: questions must be an object`);
-      } else {
-        const questionsRecord = questions as Record<string, unknown>;
+    if (questions === undefined) {
+      if (strict) {
         for (const key of knownQuestionKeys) {
           const label = questionKeyToLabel.get(key)!;
-          const value = questionsRecord[key];
-
-          if (value === undefined) {
-            if (strict) {
-              errors.push(`Student ${studentName}: ${label}: answer is required`);
-            }
-            continue;
-          }
-
-          if (!isPlainObject(value)) {
-            errors.push(`Student ${studentName}: ${label}: must be an object`);
-            continue;
-          }
-
-          const qEntry = value as Record<string, unknown>;
-
-          if ("answer" in qEntry) {
-            const answer = qEntry.answer;
-            if (answer !== null && typeof answer !== "boolean") {
-              errors.push(`Student ${studentName}: ${label}: answer must be true, false, or null`);
-            } else if (strict && answer === null) {
-              errors.push(`Student ${studentName}: ${label}: answer is required`);
-            }
-          } else if (strict) {
-            errors.push(`Student ${studentName}: ${label}: answer is required`);
-          }
-
-          if ("remark" in qEntry && qEntry.remark !== undefined && typeof qEntry.remark !== "string") {
-            errors.push(`Student ${studentName}: ${label}: remark must be a string`);
-          }
-        }
-
-        // In strict mode, questions must exist for all keys
-        if (strict) {
-          for (const key of knownQuestionKeys) {
-            if (!(key in questionsRecord)) {
-              const label = questionKeyToLabel.get(key)!;
-              const alreadyReported = errors.some(
-                (e) => e.includes(label) && e.includes("answer is required")
-              );
-              if (!alreadyReported) {
-                errors.push(`Student ${studentName}: ${label}: answer is required`);
-              }
-            }
-          }
+          errors.push(`Entry ${i}: ${label}: answer is required`);
         }
       }
-    } else if (strict) {
-      errors.push(`Student ${studentName}: all questions must be answered`);
+      continue;
+    }
+
+    if (!isPlainObject(questions)) {
+      errors.push(`Entry ${i}: questions must be an object`);
+      continue;
+    }
+
+    const questionsRecord = questions as Record<string, unknown>;
+    for (const key of knownQuestionKeys) {
+      const label = questionKeyToLabel.get(key)!;
+      const value = questionsRecord[key];
+
+      if (value === undefined) {
+        if (strict) {
+          errors.push(`Entry ${i}: ${label}: answer is required`);
+        }
+        continue;
+      }
+
+      if (!isPlainObject(value)) {
+        errors.push(`Entry ${i}: ${label}: must be an object`);
+        continue;
+      }
+
+      const qEntry = value as Record<string, unknown>;
+
+      if ("answer" in qEntry) {
+        const answer = qEntry.answer;
+        if (answer !== null && typeof answer !== "boolean") {
+          errors.push(`Entry ${i}: ${label}: answer must be true, false, or null`);
+        } else if (strict && answer === null) {
+          errors.push(`Entry ${i}: ${label}: answer is required`);
+        }
+      } else if (strict) {
+        errors.push(`Entry ${i}: ${label}: answer is required`);
+      }
+
+      if ("remark" in qEntry && qEntry.remark !== undefined && typeof qEntry.remark !== "string") {
+        errors.push(`Entry ${i}: ${label}: remark must be a string`);
+      }
     }
   }
 
   return errors;
+}
+
+function getCanonicalEntriesForValidation(payload: Record<string, unknown>): {
+  entries?: unknown;
+  errors: string[];
+} {
+  if ("students" in payload && "entries" in payload) {
+    return {
+      errors: ["Payload cannot contain both students and entries"],
+    };
+  }
+
+  if ("entries" in payload) {
+    return { entries: payload.entries, errors: [] };
+  }
+
+  if ("students" in payload) {
+    try {
+      return {
+        entries: canonicalizeIndividualStudentDiscussionData(payload).entries,
+        errors: [],
+      };
+    } catch (error) {
+      return {
+        errors: [error instanceof Error ? error.message : "Invalid individual student discussion payload"],
+      };
+    }
+  }
+
+  return { entries: undefined, errors: [] };
 }
 
 export function validateIndividualStudentDiscussionSave(data: unknown): ValidationResult {
@@ -203,8 +368,11 @@ export function validateIndividualStudentDiscussionSave(data: unknown): Validati
     errors.push(`Unknown field: ${key}`);
   }
 
-  if ("students" in payload) {
-    errors.push(...validateStudentEntries(payload.students, false));
+  const canonical = getCanonicalEntriesForValidation(payload);
+  errors.push(...canonical.errors);
+
+  if (canonical.entries !== undefined) {
+    errors.push(...validateEntries(canonical.entries, false));
   }
 
   return { valid: errors.length === 0, errors };
@@ -225,12 +393,22 @@ export function validateIndividualStudentDiscussionComplete(data: unknown): Vali
     errors.push(`Unknown field: ${key}`);
   }
 
-  if (!("students" in payload) || !Array.isArray(payload.students) || payload.students.length === 0) {
+  const canonical = getCanonicalEntriesForValidation(payload);
+  errors.push(...canonical.errors);
+
+  if (
+    "students" in payload &&
+    !("entries" in payload) &&
+    Array.isArray(payload.students) &&
+    payload.students.length === 0
+  ) {
     errors.push("At least one student must be recorded");
   }
 
-  if ("students" in payload) {
-    errors.push(...validateStudentEntries(payload.students, true));
+  if (canonical.entries === undefined) {
+    errors.push("At least one entry must be recorded");
+  } else {
+    errors.push(...validateEntries(canonical.entries, true));
   }
 
   return { valid: errors.length === 0, errors };
