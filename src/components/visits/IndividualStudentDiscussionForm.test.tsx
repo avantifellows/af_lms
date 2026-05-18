@@ -410,4 +410,30 @@ describe("IndividualStudentDiscussionForm", () => {
     expect(screen.queryByTestId("individual-student-progress")).not.toBeInTheDocument();
     expect(screen.queryByTestId(/^entry-section-/)).not.toBeInTheDocument();
   });
+
+  it("supports ArrowDown/ArrowUp/Enter keyboard navigation in the picker", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await selectGrade(user);
+    await waitForPicker();
+
+    const input = screen.getByTestId("add-student-select");
+    await user.click(input);
+
+    expect(screen.getByTestId("student-search-listbox")).toBeInTheDocument();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByTestId("student-option-1")).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByTestId("student-option-2")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("student-option-1")).toHaveAttribute("aria-selected", "false");
+
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByTestId("student-option-1")).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("pending-student-chip-1")).toHaveTextContent("Alice Student");
+  });
 });

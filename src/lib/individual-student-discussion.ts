@@ -132,8 +132,10 @@ export function canonicalizeIndividualStudentDiscussionData(data: unknown): Reco
       entries: entries
         .filter(isPlainObject)
         .map((entry) => ({
-          ...entry,
           id: typeof entry.id === "string" && entry.id !== "" ? entry.id : createEntryId(),
+          grade: entry.grade,
+          students: entry.students,
+          questions: normalizeQuestions(entry.questions),
         })),
     };
   }
@@ -388,15 +390,6 @@ export function validateIndividualStudentDiscussionComplete(data: unknown): Vali
 
   const canonical = getCanonicalEntriesForValidation(payload);
   errors.push(...canonical.errors);
-
-  if (
-    "students" in payload &&
-    !("entries" in payload) &&
-    Array.isArray(payload.students) &&
-    payload.students.length === 0
-  ) {
-    errors.push("At least one student must be recorded");
-  }
 
   if (canonical.entries === undefined) {
     errors.push("At least one entry must be recorded");

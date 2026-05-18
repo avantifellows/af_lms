@@ -256,30 +256,21 @@ export async function PATCH(
   }
 
   if (action.action_type === "individual_student_discussion") {
+    const validation =
+      action.status === "completed"
+        ? validateIndividualStudentDiscussionComplete(data)
+        : validateIndividualStudentDiscussionSave(data);
+
+    if (!validation.valid) {
+      return apiError(422, "Invalid individual student discussion data", validation.errors);
+    }
+
     try {
       dataToStore = canonicalizeIndividualStudentDiscussionData(data);
     } catch (error) {
       return apiError(422, "Invalid individual student discussion data", [
         error instanceof Error ? error.message : "Invalid individual student discussion data",
       ]);
-    }
-
-    const inputValidation =
-      action.status === "completed"
-        ? validateIndividualStudentDiscussionComplete(data)
-        : validateIndividualStudentDiscussionSave(data);
-
-    if (!inputValidation.valid) {
-      return apiError(422, "Invalid individual student discussion data", inputValidation.errors);
-    }
-
-    const validation =
-      action.status === "completed"
-        ? validateIndividualStudentDiscussionComplete(dataToStore)
-        : validateIndividualStudentDiscussionSave(dataToStore);
-
-    if (!validation.valid) {
-      return apiError(422, "Invalid individual student discussion data", validation.errors);
     }
   }
 

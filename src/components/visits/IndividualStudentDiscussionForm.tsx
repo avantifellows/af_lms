@@ -65,7 +65,9 @@ function SearchableStudentSelect({
 }: SearchableStudentSelectProps) {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   const filtered = useMemo(() => {
     if (query.trim() === "") return students;
@@ -75,6 +77,16 @@ function SearchableStudentSelect({
         (s.student_id !== null && fuzzyMatch(query, s.student_id))
     );
   }, [students, query]);
+
+  useEffect(() => {
+    setHighlightIndex(-1);
+  }, [filtered]);
+
+  useEffect(() => {
+    if (highlightIndex < 0 || !listRef.current) return;
+    const item = listRef.current.children[highlightIndex] as HTMLElement | undefined;
+    if (typeof item?.scrollIntoView === "function") item.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex]);
 
   // Close on outside click
   useEffect(() => {
@@ -90,6 +102,31 @@ function SearchableStudentSelect({
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") {
       setIsOpen(false);
+      return;
+    }
+
+    if (!isOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      setIsOpen(true);
+      setHighlightIndex(0);
+      e.preventDefault();
+      return;
+    }
+
+    if (!isOpen || filtered.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev + 1) % filtered.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev <= 0 ? filtered.length - 1 : prev - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightIndex >= 0 && highlightIndex < filtered.length) {
+        onToggle(Number(filtered[highlightIndex].id));
+        setQuery("");
+        setIsOpen(true);
+      }
     }
   }
 
@@ -111,13 +148,16 @@ function SearchableStudentSelect({
         role="combobox"
         aria-expanded={isOpen}
         aria-controls="student-search-listbox"
+        aria-activedescendant={highlightIndex >= 0 && filtered[highlightIndex] ? `student-opt-${filtered[highlightIndex].id}` : undefined}
         autoComplete="off"
         disabled={disabled}
       />
       {isOpen && !disabled && (
         <ul
+          ref={listRef}
           id="student-search-listbox"
           data-testid="student-search-listbox"
+          role="listbox"
           className="absolute z-20 mt-1 max-h-48 w-full overflow-auto border-2 border-border bg-bg-card shadow-md"
         >
           {filtered.length === 0 ? (
@@ -125,15 +165,19 @@ function SearchableStudentSelect({
               {query.trim() === "" ? emptyMessage : "No matches"}
             </li>
           ) : (
-            filtered.map((s) => (
+            filtered.map((s, index) => (
               <li
                 key={s.id}
+                id={`student-opt-${s.id}`}
                 data-testid={`student-option-${s.id}`}
-                className="px-3 py-2 text-sm text-text-primary hover:bg-bg-card-alt"
+                role="option"
+                aria-selected={index === highlightIndex}
+                className={`px-3 py-2 text-sm text-text-primary hover:bg-bg-card-alt${index === highlightIndex ? " bg-bg-card-alt" : ""}`}
               >
                 <label className="flex cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
+                    tabIndex={-1}
                     data-testid={`student-checkbox-${s.id}`}
                     onChange={() => {
                       onToggle(Number(s.id));

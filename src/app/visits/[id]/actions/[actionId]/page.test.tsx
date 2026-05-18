@@ -1580,6 +1580,42 @@ describe("VisitActionDetailPage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("does not passively upgrade completed legacy individual student discussion for admins", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("entry-1") });
+    setupAdminAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit({ pm_email: "other@avantifellows.org" })])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          status: "completed",
+          data: {
+            students: [
+              {
+                id: 1,
+                name: "Test Student",
+                grade: 11,
+                questions: {},
+              },
+            ],
+          },
+        }),
+      ]);
+
+    const fetchMock = vi.fn() as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("auto-saves group student discussion data before calling /end", async () => {
     setupPmAuth();
     const groupStudentData = {

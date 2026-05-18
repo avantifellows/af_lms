@@ -776,12 +776,13 @@ export default function ActionDetailForm({
   useEffect(() => {
     if (
       action.action_type === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE &&
+      action.status === "in_progress" &&
       isLegacyIndividualStudentDiscussionData(initialAction.data)
     ) {
       markSynced(initialAction.data);
       setFormData((prev) => ({ ...prev }));
     }
-  }, [action.action_type, initialAction.data, markSynced]);
+  }, [action.action_type, action.status, initialAction.data, markSynced]);
 
   async function persistActionData(dataToPersist: Record<string, unknown>) {
     const response = await fetch(`/api/pm/visits/${visitId}/actions/${action.id}`, {

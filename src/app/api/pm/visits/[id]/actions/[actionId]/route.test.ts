@@ -1442,7 +1442,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     const json = await res.json();
     expect(json.error).toBe("Invalid individual student discussion data");
     expect(json.details).toEqual(
-      expect.arrayContaining([expect.stringContaining("At least one student")])
+      expect.arrayContaining([expect.stringContaining("At least one entry")])
     );
   });
 
