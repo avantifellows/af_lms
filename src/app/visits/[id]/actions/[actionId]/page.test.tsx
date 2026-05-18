@@ -1275,7 +1275,7 @@ describe("VisitActionDetailPage", () => {
       .mockResolvedValueOnce([
         makeAction({
           action_type: "individual_student_discussion",
-          data: { students: [] },
+          data: { entries: [] },
         }),
       ]);
 

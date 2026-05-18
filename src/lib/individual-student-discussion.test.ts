@@ -9,7 +9,6 @@ import {
   validateIndividualStudentDiscussionSave,
   type IndividualStudentDiscussionData,
   type IndividualStudentDiscussionEntry,
-  type IndividualStudentEntry,
   type IndividualStudentRef,
 } from "./individual-student-discussion";
 
@@ -33,7 +32,12 @@ function buildLegacyStudent(
   id: number,
   name = `Student ${id}`,
   grade = 11
-): IndividualStudentEntry {
+): {
+  id: number;
+  name: string;
+  grade: number;
+  questions: Record<string, { answer: boolean }>;
+} {
   return {
     id,
     name,
@@ -67,18 +71,17 @@ describe("INDIVIDUAL_STUDENT_DISCUSSION_CONFIG", () => {
     expect(new Set(INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys).size).toBe(2);
   });
 
-  it("exports the new entry types while preserving the legacy student entry type", () => {
-    const legacy: IndividualStudentEntry = buildLegacyStudent(1, "Alice", 12);
+  it("exports the entries-based data types", () => {
+    const questions = buildLegacyStudent(1, "Alice", 12).questions;
     const student: IndividualStudentRef = { id: 1, name: "Alice" };
     const entry: IndividualStudentDiscussionEntry = {
       id: "entry-1",
       grade: 12,
       students: [student],
-      questions: legacy.questions,
+      questions,
     };
     const data: IndividualStudentDiscussionData = { entries: [entry] };
 
-    expect(legacy).toMatchObject({ id: 1, name: "Alice", grade: 12 });
     expect(data.entries[0].students).toEqual([student]);
   });
 

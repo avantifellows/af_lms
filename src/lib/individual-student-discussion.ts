@@ -26,13 +26,6 @@ export type IndividualStudentQuestionAnswer = {
   remark?: string;
 };
 
-export interface IndividualStudentEntry {
-  id: number;
-  name: string;
-  grade: number;
-  questions: Record<string, IndividualStudentQuestionAnswer>;
-}
-
 export interface IndividualStudentRef {
   id: number;
   name: string;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { act, useState } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,13 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import IndividualStudentDiscussionForm from "./IndividualStudentDiscussionForm";
 import {
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG,
-  type IndividualStudentEntry,
+  type IndividualStudentDiscussionEntry,
 } from "@/lib/individual-student-discussion";
 
 const MOCK_STUDENTS = [
   { id: 1, full_name: "Alice Student", student_id: "STU001", grade: 11 },
   { id: 2, full_name: "Bob Learner", student_id: "STU002", grade: 11 },
   { id: 3, full_name: "Carol Pupil", student_id: "STU003", grade: 11 },
+  { id: 4, full_name: "Dev Student", student_id: "STU004", grade: 11 },
+  { id: 5, full_name: "Esha Student", student_id: "STU005", grade: 11 },
+  { id: 6, full_name: "Farah Student", student_id: "STU006", grade: 11 },
 ];
 
 let mockFetch: ReturnType<typeof vi.fn>;
@@ -37,596 +40,374 @@ interface HarnessProps {
   disabled?: boolean;
   initialData?: Record<string, unknown>;
   schoolCode?: string;
+  onSetData?: (next: Record<string, unknown>) => void;
 }
 
-function Harness({ disabled = false, initialData = {}, schoolCode = "12345" }: HarnessProps) {
+function Harness({
+  disabled = false,
+  initialData = {},
+  schoolCode = "12345",
+  onSetData,
+}: HarnessProps) {
   const [data, setData] = useState<Record<string, unknown>>(initialData);
 
   return (
     <IndividualStudentDiscussionForm
       data={data}
-      setData={setData}
+      setData={(updater) => {
+        setData((current) => {
+          const next =
+            typeof updater === "function"
+              ? (updater as (value: Record<string, unknown>) => Record<string, unknown>)(current)
+              : updater;
+          onSetData?.(next);
+          return next;
+        });
+      }}
       disabled={disabled}
       schoolCode={schoolCode}
     />
   );
 }
 
-function buildStudentEntry(
-  id: number,
-  name: string,
-  grade: number = 11,
-  answerAll = false
-): IndividualStudentEntry {
+function buildQuestions(answerAll = false) {
   const questions: Record<string, { answer: boolean | null; remark?: string }> = {};
   if (answerAll) {
     for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
       questions[key] = { answer: true };
     }
   }
-  return { id, name, grade, questions };
+  return questions;
 }
 
-async function selectGrade(user: ReturnType<typeof userEvent.setup>, grade: string = "11") {
+function buildEntry(
+  id: string,
+  students: { id: number; name: string }[],
+  answerAll = false
+): IndividualStudentDiscussionEntry {
+  return {
+    id,
+    grade: 11,
+    students,
+    questions: buildQuestions(answerAll),
+  };
+}
+
+async function selectGrade(user: ReturnType<typeof userEvent.setup>, grade = "11") {
   await user.selectOptions(screen.getByTestId("student-grade-filter"), grade);
 }
 
-/** Focus the search input to open the dropdown listbox */
-async function openStudentSearch(user: ReturnType<typeof userEvent.setup>) {
+async function openPicker(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByTestId("add-student-select"));
 }
 
-/** Select a student by clicking their option in the searchable dropdown */
-async function selectStudentOption(user: ReturnType<typeof userEvent.setup>, studentId: number) {
-  const option = screen.getByTestId(`student-option-${studentId}`);
-  await user.click(option);
+async function waitForPicker() {
+  await waitFor(() => {
+    expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
+  });
+}
+
+function deferredFetch(students: typeof MOCK_STUDENTS) {
+  let resolve!: (value: { ok: true; json: () => Promise<{ students: typeof MOCK_STUDENTS }> }) => void;
+  const promise = new Promise<{ ok: true; json: () => Promise<{ students: typeof MOCK_STUDENTS }> }>(
+    (res) => {
+      resolve = res;
+    }
+  );
+  return {
+    promise,
+    resolve: () =>
+      resolve({
+        ok: true,
+        json: () => Promise.resolve({ students }),
+      }),
+  };
 }
 
 describe("IndividualStudentDiscussionForm", () => {
   beforeEach(() => {
     mockFetchStudents();
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "entry-1") });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  describe("grade filter and student fetch", () => {
-    it("renders grade filter dropdown with valid grades", () => {
-      render(<Harness />);
+  it("keeps the picker disabled until grade is selected and fetches students for the grade", async () => {
+    const user = userEvent.setup();
+    render(<Harness schoolCode="SCH999" />);
 
-      const gradeFilter = screen.getByTestId("student-grade-filter");
-      expect(gradeFilter).toBeInTheDocument();
-      expect(within(gradeFilter).getByText("11")).toBeInTheDocument();
-      expect(within(gradeFilter).getByText("12")).toBeInTheDocument();
+    expect(screen.getByTestId("add-student-select")).toBeDisabled();
+    expect(screen.getByTestId("add-individual-student-entry")).toBeDisabled();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    await selectGrade(user, "11");
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("/api/pm/students?school_code=SCH999&grade=11");
     });
+    expect(screen.getByTestId("add-student-select")).not.toBeDisabled();
+  });
 
-    it("does not fetch students until a grade is selected", () => {
-      render(<Harness />);
+  it("shows loading and error states while fetching students", async () => {
+    mockFetch = vi.fn().mockReturnValue(new Promise(() => {}));
+    vi.stubGlobal("fetch", mockFetch);
+    const user = userEvent.setup();
+    const { unmount } = render(<Harness />);
 
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(screen.queryByTestId("add-student-select")).not.toBeInTheDocument();
-    });
+    await selectGrade(user, "11");
+    expect(screen.getByTestId("individual-student-loading")).toHaveTextContent("Loading students");
 
-    it("fetches students with correct school_code and grade params when grade selected", async () => {
-      const user = userEvent.setup();
-      render(<Harness schoolCode="SCH999" />);
+    unmount();
+    mockFetchStudentsError();
+    render(<Harness />);
+    await selectGrade(user, "11");
 
-      await selectGrade(user, "11");
-
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          "/api/pm/students?school_code=SCH999&grade=11"
-        );
-      });
-    });
-
-    it("re-fetches students when grade changes", async () => {
-      const user = userEvent.setup();
-      render(<Harness schoolCode="SCH999" />);
-
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          "/api/pm/students?school_code=SCH999&grade=11"
-        );
-      });
-
-      await selectGrade(user, "12");
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          "/api/pm/students?school_code=SCH999&grade=12"
-        );
-      });
-    });
-
-    it("shows loading state during fetch", async () => {
-      // Use a never-resolving fetch to keep loading state
-      mockFetch = vi.fn().mockReturnValue(new Promise(() => {}));
-      vi.stubGlobal("fetch", mockFetch);
-
-      const user = userEvent.setup();
-      render(<Harness />);
-
-      await selectGrade(user, "11");
-
-      await waitFor(() => {
-        expect(screen.getByTestId("individual-student-loading")).toHaveTextContent(
-          "Loading students..."
-        );
-      });
-    });
-
-    it("shows error state on fetch failure", async () => {
-      mockFetchStudentsError();
-      const user = userEvent.setup();
-      render(<Harness />);
-
-      await selectGrade(user, "11");
-
-      await waitFor(() => {
-        expect(screen.getByTestId("individual-student-error")).toHaveTextContent(
-          "Failed to load students"
-        );
-      });
-    });
-
-    it("renders searchable student input after successful fetch", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
-
-      await selectGrade(user, "11");
-
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
-
-      // Focus to open dropdown
-      await openStudentSearch(user);
-
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).getByText("Alice Student")).toBeInTheDocument();
-      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
-      expect(within(listbox).getByText("Carol Pupil")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("individual-student-error")).toHaveTextContent(
+        "Failed to load students"
+      );
     });
   });
 
-  describe("searchable dropdown", () => {
-    it("filters students by name as user types", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
+  it("filters the checkbox picker by name and student id with no-match messaging", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
 
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+    await selectGrade(user);
+    await waitForPicker();
+    await openPicker(user);
 
-      await user.type(screen.getByTestId("add-student-select"), "alice");
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("Alice Student")).toBeInTheDocument();
+    await user.type(screen.getByTestId("add-student-select"), "bob learn");
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("Bob Learner")).toBeInTheDocument();
+    expect(within(screen.getByTestId("student-search-listbox")).queryByText("Alice Student")).not.toBeInTheDocument();
 
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).getByText("Alice Student")).toBeInTheDocument();
-      expect(within(listbox).queryByText("Bob Learner")).not.toBeInTheDocument();
-      expect(within(listbox).queryByText("Carol Pupil")).not.toBeInTheDocument();
-    });
+    await user.clear(screen.getByTestId("add-student-select"));
+    await user.type(screen.getByTestId("add-student-select"), "STU003");
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("Carol Pupil")).toBeInTheDocument();
 
-    it("filters students by student_id", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
+    await user.clear(screen.getByTestId("add-student-select"));
+    await user.type(screen.getByTestId("add-student-select"), "zzzzz");
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("No matches")).toBeInTheDocument();
+  });
 
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+  it("shows no-students messaging when the selected grade has no available students", async () => {
+    mockFetchStudents([]);
+    const user = userEvent.setup();
+    render(<Harness />);
 
-      await user.type(screen.getByTestId("add-student-select"), "STU002");
+    await selectGrade(user);
+    await waitForPicker();
+    await openPicker(user);
 
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
-      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
-    });
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("No students in this grade")).toBeInTheDocument();
+  });
 
-    it("shows 'No matches' when filter returns empty", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
+  it("creates a grouped entry from checked students with one entry-level question set", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
 
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+    await selectGrade(user);
+    await waitForPicker();
+    await openPicker(user);
 
-      await user.type(screen.getByTestId("add-student-select"), "zzzzz");
+    await user.click(screen.getByTestId("student-checkbox-1"));
+    await user.click(screen.getByTestId("student-checkbox-2"));
 
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).getByText("No matches")).toBeInTheDocument();
-    });
+    expect(screen.getByTestId("pending-student-chip-1")).toHaveTextContent("Alice Student");
+    expect(screen.getByTestId("pending-student-chip-2")).toHaveTextContent("Bob Learner");
 
-    it("supports multi-token fuzzy matching", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
+    await user.click(screen.getByTestId("add-individual-student-entry"));
 
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+    expect(screen.getByTestId("entry-section-entry-1")).toBeInTheDocument();
+    expect(screen.getByTestId("entry-header-entry-1")).toHaveTextContent("Alice Student");
+    expect(screen.getByTestId("entry-header-entry-1")).toHaveTextContent("Bob Learner");
+    expect(screen.getByTestId("entry-grade-badge-entry-1")).toHaveTextContent("Grade 11");
+    expect(screen.getByTestId("entry-progress-entry-1")).toHaveTextContent("0/2");
+    expect(screen.getByTestId("individual-student-progress")).toHaveTextContent(
+      "Entries: 1 | Students: 2"
+    );
 
-      // "bob learn" should match "Bob Learner"
-      await user.type(screen.getByTestId("add-student-select"), "bob learn");
+    const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
+    expect(screen.getByTestId(`entry-entry-1-${firstKey}-yes`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`student-1-${firstKey}-yes`)).not.toBeInTheDocument();
+  });
 
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
-      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
-    });
+  it("does not emit pending chip selections to setData until Add Entry is clicked", async () => {
+    const user = userEvent.setup();
+    const onSetData = vi.fn();
+    render(<Harness onSetData={onSetData} />);
 
-    it("selects student via keyboard (arrow down + enter)", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
+    await selectGrade(user);
+    await waitForPicker();
+    await openPicker(user);
+    await user.click(screen.getByTestId("student-checkbox-1"));
 
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+    expect(screen.getByTestId("pending-student-chip-1")).toBeInTheDocument();
+    expect(onSetData).not.toHaveBeenCalled();
 
-      const input = screen.getByTestId("add-student-select");
-      await user.click(input);
-      await user.keyboard("{ArrowDown}{Enter}");
-
-      expect(screen.getByTestId("student-section-1")).toBeInTheDocument();
-    });
-
-    it("closes dropdown on Escape", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
-
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
-
-      await openStudentSearch(user);
-      expect(screen.getByTestId("student-search-listbox")).toBeInTheDocument();
-
-      await user.keyboard("{Escape}");
-      expect(screen.queryByTestId("student-search-listbox")).not.toBeInTheDocument();
-    });
-
-    it("clears input after selecting a student", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
-
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
-
-      await user.type(screen.getByTestId("add-student-select"), "alice");
-      await user.click(screen.getByTestId("student-option-1"));
-
-      expect(screen.getByTestId("add-student-select")).toHaveValue("");
+    await user.click(screen.getByTestId("add-individual-student-entry"));
+    expect(onSetData).toHaveBeenCalledWith({
+      entries: [
+        {
+          id: "entry-1",
+          grade: 11,
+          students: [{ id: 1, name: "Alice Student" }],
+          questions: {},
+        },
+      ],
     });
   });
 
-  describe("add student + sections", () => {
-    it("selecting student from dropdown creates new expanded section", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
+  it("keeps the grade selected after adding and clears pending chips when the grade changes", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
 
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+    await selectGrade(user, "11");
+    await waitForPicker();
+    await openPicker(user);
+    await user.click(screen.getByTestId("student-checkbox-1"));
+    await user.click(screen.getByTestId("add-individual-student-entry"));
 
-      await openStudentSearch(user);
-      await selectStudentOption(user, 1);
+    expect(screen.getByTestId("student-grade-filter")).toHaveValue("11");
+    expect(screen.queryByTestId("pending-student-chip-1")).not.toBeInTheDocument();
 
-      expect(screen.getByTestId("student-section-1")).toBeInTheDocument();
-      // Section should be expanded — question radios visible
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
-      expect(screen.getByTestId(`student-1-${firstKey}-yes`)).toBeInTheDocument();
-    });
+    await openPicker(user);
+    await user.click(screen.getByTestId("student-checkbox-2"));
+    expect(screen.getByTestId("pending-student-chip-2")).toBeInTheDocument();
 
-    it("added student is removed from the dropdown", async () => {
-      const user = userEvent.setup();
-      render(<Harness />);
-
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
-
-      await openStudentSearch(user);
-      await selectStudentOption(user, 1);
-
-      // Type a space to re-open the dropdown and show all remaining
-      const input = screen.getByTestId("add-student-select");
-      await user.click(input);
-      await waitFor(() => {
-        expect(screen.getByTestId("student-search-listbox")).toBeInTheDocument();
-      });
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
-      expect(within(listbox).getByText("Bob Learner")).toBeInTheDocument();
-    });
-
-    it("section header shows name, grade badge, and question progress", async () => {
-      render(
-        <Harness
-          initialData={{ students: [buildStudentEntry(1, "Alice Student", 11, true)] }}
-        />
-      );
-
-      expect(screen.getByTestId("student-header-1")).toHaveTextContent("Alice Student");
-      expect(screen.getByTestId("student-grade-badge-1")).toHaveTextContent("Grade 11");
-      expect(screen.getByTestId("student-progress-1")).toHaveTextContent("2/2");
-    });
+    await selectGrade(user, "12");
+    expect(screen.queryByTestId("pending-student-chip-2")).not.toBeInTheDocument();
   });
 
-  describe("collapsible behavior", () => {
-    it("clicking header toggles expand/collapse", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{ students: [buildStudentEntry(1, "Alice Student")] }}
-        />
-      );
+  it("excludes pending and committed students from the picker, and chip removal releases pending students", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialData={{ entries: [buildEntry("existing", [{ id: 1, name: "Alice Student" }])] }} />);
 
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
+    await selectGrade(user);
+    await waitForPicker();
+    await openPicker(user);
 
-      // Initially collapsed
-      expect(screen.queryByTestId(`student-1-${firstKey}-yes`)).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("student-search-listbox")).queryByText("Alice Student")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("student-checkbox-2"));
+    expect(within(screen.getByTestId("student-search-listbox")).queryByText("Bob Learner")).not.toBeInTheDocument();
 
-      // Click to expand
-      await user.click(screen.getByTestId("student-header-1"));
-      expect(screen.getByTestId(`student-1-${firstKey}-yes`)).toBeInTheDocument();
-
-      // Click to collapse
-      await user.click(screen.getByTestId("student-header-1"));
-      expect(screen.queryByTestId(`student-1-${firstKey}-yes`)).not.toBeInTheDocument();
-    });
-
-    it("multiple sections can be open simultaneously", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{
-            students: [
-              buildStudentEntry(1, "Alice Student"),
-              buildStudentEntry(2, "Bob Learner"),
-            ],
-          }}
-        />
-      );
-
-      await user.click(screen.getByTestId("student-header-1"));
-      await user.click(screen.getByTestId("student-header-2"));
-
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
-      expect(screen.getByTestId(`student-1-${firstKey}-yes`)).toBeInTheDocument();
-      expect(screen.getByTestId(`student-2-${firstKey}-yes`)).toBeInTheDocument();
-    });
-
-    it("collapsing preserves data", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{
-            students: [buildStudentEntry(1, "Alice Student", 11, true)],
-          }}
-        />
-      );
-
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
-
-      // Expand, verify, collapse, re-expand, verify again
-      await user.click(screen.getByTestId("student-header-1"));
-      expect(screen.getByTestId(`student-1-${firstKey}-yes`)).toBeChecked();
-
-      await user.click(screen.getByTestId("student-header-1"));
-      await user.click(screen.getByTestId("student-header-1"));
-
-      expect(screen.getByTestId(`student-1-${firstKey}-yes`)).toBeChecked();
-    });
+    await user.click(screen.getByRole("button", { name: "Remove Bob Learner" }));
+    await openPicker(user);
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("Bob Learner")).toBeInTheDocument();
   });
 
-  describe("editing + removing", () => {
-    it("answer change updates data and progress", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{ students: [buildStudentEntry(1, "Alice Student")] }}
-        />
-      );
+  it("deleting an entry releases its students back to the picker", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialData={{ entries: [buildEntry("entry-1", [{ id: 1, name: "Alice Student" }])] }} />);
 
-      await user.click(screen.getByTestId("student-header-1"));
+    await user.click(screen.getByTestId("entry-header-entry-1"));
+    await user.click(screen.getByTestId("remove-entry-entry-1"));
+    expect(screen.queryByTestId("entry-section-entry-1")).not.toBeInTheDocument();
 
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
-      await user.click(screen.getByTestId(`student-1-${firstKey}-yes`));
-
-      expect(screen.getByTestId(`student-1-${firstKey}-yes`)).toBeChecked();
-      expect(screen.getByTestId("student-progress-1")).toHaveTextContent("1/2");
-    });
-
-    it("remove button removes student entry", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{
-            students: [
-              buildStudentEntry(1, "Alice Student"),
-              buildStudentEntry(2, "Bob Learner"),
-            ],
-          }}
-        />
-      );
-
-      await user.click(screen.getByTestId("student-header-1"));
-      await user.click(screen.getByTestId("remove-student-1"));
-
-      expect(screen.queryByTestId("student-section-1")).not.toBeInTheDocument();
-      expect(screen.getByTestId("student-section-2")).toBeInTheDocument();
-    });
-
-    it("removed student reappears in dropdown", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{
-            students: [
-              buildStudentEntry(1, "Alice Student"),
-              buildStudentEntry(2, "Bob Learner"),
-            ],
-          }}
-        />
-      );
-
-      // Select grade to trigger fetch and show search input
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
-
-      // Open dropdown — Alice should NOT be listed (she's recorded)
-      await openStudentSearch(user);
-      const listbox = screen.getByTestId("student-search-listbox");
-      expect(within(listbox).queryByText("Alice Student")).not.toBeInTheDocument();
-
-      // Close dropdown, remove Alice
-      await user.keyboard("{Escape}");
-      await user.click(screen.getByTestId("student-header-1"));
-      await user.click(screen.getByTestId("remove-student-1"));
-
-      // Re-open dropdown — Alice should be back
-      await openStudentSearch(user);
-      const listboxAfter = screen.getByTestId("student-search-listbox");
-      expect(within(listboxAfter).getByText("Alice Student")).toBeInTheDocument();
-    });
+    await selectGrade(user);
+    await waitForPicker();
+    await openPicker(user);
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("Alice Student")).toBeInTheDocument();
   });
 
-  describe("progress bar", () => {
-    it("shows student count when students are recorded", () => {
-      render(
-        <Harness
-          initialData={{
-            students: [
-              buildStudentEntry(1, "Alice Student"),
-              buildStudentEntry(2, "Bob Learner"),
-            ],
-          }}
-        />
-      );
+  it("updates entry-level answers, remarks, and progress", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialData={{ entries: [buildEntry("entry-1", [{ id: 1, name: "Alice Student" }])] }} />);
 
-      const progress = screen.getByTestId("individual-student-progress");
-      expect(progress).toHaveTextContent("Students: 2");
-    });
+    await user.click(screen.getByTestId("entry-header-entry-1"));
+    const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
 
-    it("does not show progress bar when no students recorded", () => {
-      render(<Harness initialData={{}} />);
+    await user.click(screen.getByTestId(`entry-entry-1-${firstKey}-yes`));
+    expect(screen.getByTestId("entry-progress-entry-1")).toHaveTextContent("1/2");
 
-      expect(screen.queryByTestId("individual-student-progress")).not.toBeInTheDocument();
-    });
+    await user.click(screen.getAllByText("Add remark")[0]);
+    const textarea = screen.getByTestId(`entry-entry-1-${firstKey}-remark`);
+    await user.type(textarea, "Needs support");
+    expect(textarea).toHaveValue("Needs support");
   });
 
-  describe("disabled / read-only mode", () => {
-    it("no grade filter, add, or remove controls in disabled mode", () => {
-      render(
-        <Harness
-          disabled
-          initialData={{
-            students: [buildStudentEntry(1, "Alice Student", 11, true)],
-          }}
-        />
-      );
+  it("renders stacked names with overflow count in the accordion header", () => {
+    render(
+      <Harness
+        initialData={{
+          entries: [
+            buildEntry("entry-1", [
+              { id: 1, name: "Alice" },
+              { id: 2, name: "Bob" },
+              { id: 3, name: "Carol" },
+              { id: 4, name: "Dev" },
+              { id: 5, name: "Esha" },
+              { id: 6, name: "Farah" },
+            ]),
+          ],
+        }}
+      />
+    );
 
-      expect(screen.queryByTestId("student-grade-filter")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("add-student-select")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("remove-student-1")).not.toBeInTheDocument();
-    });
-
-    it("sections are collapsed by default and expandable to static text", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          disabled
-          initialData={{
-            students: [buildStudentEntry(1, "Alice Student", 11, true)],
-          }}
-        />
-      );
-
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
-
-      // Collapsed — no radios visible
-      expect(screen.queryByTestId(`student-1-${firstKey}-yes`)).not.toBeInTheDocument();
-
-      // Expand — shows static text, not radios
-      await user.click(screen.getByTestId("student-header-1"));
-
-      // Should show question label
-      const questionLabel = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.sections[0].questions[0].label;
-      expect(screen.getByText(questionLabel)).toBeInTheDocument();
-
-      // Should NOT have radio inputs
-      expect(screen.queryByTestId(`student-1-${firstKey}-yes`)).not.toBeInTheDocument();
-
-      // Should display "Yes" for answered questions (all true)
-      const yesTexts = screen.getAllByText("Yes");
-      expect(yesTexts.length).toBe(2);
-    });
+    const names = screen.getByTestId("entry-student-names-entry-1");
+    expect(names).toHaveTextContent("Alice");
+    expect(names).toHaveTextContent("Esha");
+    expect(names).toHaveTextContent("+1 more");
+    expect(names).not.toHaveTextContent("Farah");
   });
 
-  describe("remark interaction", () => {
-    it("Add remark toggle reveals remark textarea and typing updates value", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{ students: [buildStudentEntry(1, "Alice Student")] }}
-        />
-      );
+  it("renders read-only grouped entries with one Q/A set and no edit controls", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        disabled
+        initialData={{
+          entries: [buildEntry("entry-1", [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }], true)],
+        }}
+      />
+    );
 
-      await user.click(screen.getByTestId("student-header-1"));
+    expect(screen.queryByTestId("student-grade-filter")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("add-student-select")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("remove-entry-entry-1")).not.toBeInTheDocument();
 
-      const firstKey = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys[0];
+    await user.click(screen.getByTestId("entry-header-entry-1"));
 
-      // No remark textarea yet
-      expect(screen.queryByTestId(`student-1-${firstKey}-remark`)).not.toBeInTheDocument();
-
-      // Click "Add remark"
-      const addRemarkButtons = screen.getAllByText("Add remark");
-      await user.click(addRemarkButtons[0]);
-
-      const textarea = screen.getByTestId(`student-1-${firstKey}-remark`) as HTMLTextAreaElement;
-      await user.type(textarea, "Test remark");
-
-      expect(textarea.value).toBe("Test remark");
-    });
+    expect(screen.getByTestId("entry-header-entry-1")).toHaveTextContent("Alice");
+    expect(screen.getByTestId("entry-header-entry-1")).toHaveTextContent("Bob");
+    expect(screen.queryByTestId("entry-entry-1-oh_teaching_concern-yes")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Yes")).toHaveLength(2);
   });
 
-  describe("edge cases", () => {
-    it("student in data but not in fetched list still shows with name from data", async () => {
-      const user = userEvent.setup();
-      render(
-        <Harness
-          initialData={{
-            students: [buildStudentEntry(999, "Unknown Student", 11)],
-          }}
-        />
-      );
+  it("ignores stale student fetch responses when grade changes quickly", async () => {
+    const first = deferredFetch([{ id: 10, full_name: "Old Grade Student", student_id: "OLD", grade: 11 }]);
+    const second = deferredFetch([{ id: 20, full_name: "New Grade Student", student_id: "NEW", grade: 12 }]);
+    mockFetch = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    vi.stubGlobal("fetch", mockFetch);
+    const user = userEvent.setup();
+    render(<Harness />);
 
-      // Select grade to trigger fetch
-      await selectGrade(user, "11");
-      await waitFor(() => {
-        expect(screen.getByTestId("add-student-select")).toBeInTheDocument();
-      });
+    await selectGrade(user, "11");
+    await selectGrade(user, "12");
 
-      // Section shows with name from data
-      expect(screen.getByTestId("student-section-999")).toBeInTheDocument();
-      expect(screen.getByTestId("student-header-999")).toHaveTextContent("Unknown Student");
+    await act(async () => {
+      second.resolve();
+      await second.promise;
     });
+    await waitForPicker();
+    await openPicker(user);
+    expect(within(screen.getByTestId("student-search-listbox")).getByText("New Grade Student")).toBeInTheDocument();
 
-    it("empty data shows no student sections and no progress bar", () => {
-      render(<Harness initialData={{}} />);
-
-      expect(screen.queryByTestId(/^student-section-/)).not.toBeInTheDocument();
-      expect(screen.queryByTestId("individual-student-progress")).not.toBeInTheDocument();
+    await act(async () => {
+      first.resolve();
+      await first.promise;
     });
+    expect(within(screen.getByTestId("student-search-listbox")).queryByText("Old Grade Student")).not.toBeInTheDocument();
+  });
+
+  it("shows no entries or progress for empty canonical data", () => {
+    render(<Harness initialData={{ entries: [] }} />);
+
+    expect(screen.queryByTestId("individual-student-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/^entry-section-/)).not.toBeInTheDocument();
   });
 });
