@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Student Enrollment CRUD UI for Avanti Fellows - a Next.js 16 application that allows school administrators to view and manage student enrollments. Features dual authentication (Google OAuth + school passcodes) with permission-based access control.
 
-PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), an individual student interaction per-student checklist (2 binary questions with grade filter and student dropdown), and a school staff interaction checklist (2 binary questions, no teacher/student/grade selection).
+PM school-visit flows include per-action tracking with GPS, a completed classroom-observation rubric implementation (v1, 19 scored params, max score 45), an AF team interaction checklist (9 binary questions with multiselect teacher dropdown), an individual AF teacher interaction per-teacher checklist (13 binary questions with attendance gating), a principal interaction checklist (7 binary questions, no teacher selection), a group student interaction checklist (4 binary questions with grade selection), an individual student interaction per-entry checklist (2 binary questions with grade filter and multi-select student picker), and a school staff interaction checklist (2 binary questions, no teacher/student/grade selection).
 
 ## Development Commands
 
@@ -147,12 +147,18 @@ Visit tables:
 - Form component: `src/components/visits/GroupStudentDiscussionForm.tsx`
 
 ### PM Visits: Individual Student Interaction (v1)
-- Per-student 2-question binary checklist with grade filter and student dropdown across 1 section — no attendance gating
-- Payload: `{ students: [{ id, name, grade, questions: { [key]: { answer: boolean|null, remark?: string } } }] }`
-- Grade filter fetches students from `/api/pm/students?school_code=X&grade=N`
+- Per-entry 2-question binary checklist with grade filter and multi-select student picker across 1 section — no attendance gating
+- Payload: `{ entries: [{ id, grade, students: [{ id, name }], questions: { [key]: { answer: boolean|null, remark?: string } } }] }`
+- Entry ID is any non-empty string unique within the action; the client uses `crypto.randomUUID()`
+- Grade is stored at `entries[].grade`; student sub-objects only store `entries[].students[].id/name`
+- Grade filter fetches students from `/api/pm/students?school_code=X&grade=N`; the picker supports fuzzy search, checkbox selection, removable chips, and explicit "Add Entry"
+- Stats format: `{ entryCount: number | null, studentCount: number }`; action cards show `Entries: X` plus `Students: Y` for entries shape and only `Students: Y` for legacy shape
+- Dual-shape window: legacy `{ students: [...] }` payloads are accepted, canonicalized by `canonicalizeIndividualStudentDiscussionData()`, and saved back as entries on PATCH
+- Legacy in-progress actions trigger an initial auto-save after form bootstrap so generated entry IDs persist
 - 1 section: Operational Health (2 questions) — 2 total
 - Question keys: `oh_teaching_concern`, `oh_additional_support`
-- Validation: lenient for in_progress (partial OK), strict for completed/end (≥1 student, each with valid id/name/grade + all 2 questions answered)
+- Validation: lenient for in_progress (partial OK; `{}` and `{ entries: [] }` valid; entry IDs and student uniqueness enforced), strict for completed/end (≥1 entry, valid entry id, grade 11 or 12, ≥1 student per entry, all 2 questions answered)
+- Payloads containing both top-level `students` and `entries` are rejected
 - No 'all students recorded' DB check (unlike individual teacher END)
 - Config/validation: `src/lib/individual-student-discussion.ts`; shared student utils: `src/lib/student-utils.ts`
 - Form component: `src/components/visits/IndividualStudentDiscussionForm.tsx`

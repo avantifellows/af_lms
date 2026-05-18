@@ -307,15 +307,195 @@ export function buildCompleteIndividualStudentDiscussionData(): Record<string, u
     questions[key] = { answer: true };
   }
   return {
-    students: [
+    entries: [
       {
-        id: 1,
-        name: "Test Student",
         grade: 11,
+        id: "e2e-individual-student-entry-1",
+        students: [{ id: 1, name: "Test Student" }],
         questions,
       },
     ],
   };
+}
+
+export interface SeededIndividualStudent {
+  id: number;
+  name: string;
+  studentId: string;
+  grade: 11 | 12;
+}
+
+/**
+ * Seed deterministic students for Individual Student Interaction E2E tests.
+ *
+ * The `/api/pm/students` route resolves students through:
+ * school -> group(type='school') -> group_user -> user -> student
+ * plus a current grade enrollment in `enrollment_record`.
+ */
+export async function seedStudentsForTest(
+  pool: Pool,
+  schoolCode: string
+): Promise<SeededIndividualStudent[]> {
+  const schoolResult = await pool.query<{ id: number }>(
+    `SELECT id FROM school WHERE code = $1`,
+    [schoolCode]
+  );
+  if (schoolResult.rows.length === 0) {
+    throw new Error(`School not found for code ${schoolCode}`);
+  }
+  const schoolId = Number(schoolResult.rows[0].id);
+
+  const gradeRows = await pool.query<{ id: number; number: 11 | 12 }>(
+    `SELECT id, number
+     FROM grade
+     WHERE number IN (11, 12)`
+  );
+  const gradeIds = new Map(
+    gradeRows.rows.map((row) => [Number(row.number) as 11 | 12, Number(row.id)])
+  );
+  for (const grade of [11, 12] as const) {
+    if (!gradeIds.has(grade)) {
+      throw new Error(`Grade ${grade} row is missing in the test database`);
+    }
+  }
+
+  const schoolGroupResult = await pool.query<{ id: number }>(
+    `WITH existing AS (
+       SELECT id FROM "group" WHERE type = 'school' AND child_id = $1 LIMIT 1
+     ),
+     inserted AS (
+       INSERT INTO "group" (type, child_id, inserted_at, updated_at)
+       SELECT 'school', $1, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM existing)
+       RETURNING id
+     )
+     SELECT id FROM inserted
+     UNION ALL
+     SELECT id FROM existing
+     LIMIT 1`,
+    [schoolId]
+  );
+  const schoolGroupId = Number(schoolGroupResult.rows[0].id);
+
+  await pool.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS e2e_student_student_id_unique_idx
+     ON student (student_id)
+     WHERE student_id LIKE 'E2E-ISD-%'`
+  );
+
+  const students = [
+    { email: "e2e-isd-student-11-a@test.local", first: "Asha", last: "Grade Eleven", studentId: "E2E-ISD-11-A", grade: 11 },
+    { email: "e2e-isd-student-11-b@test.local", first: "Bina", last: "Grade Eleven", studentId: "E2E-ISD-11-B", grade: 11 },
+    { email: "e2e-isd-student-12-a@test.local", first: "Charu", last: "Grade Twelve", studentId: "E2E-ISD-12-A", grade: 12 },
+    { email: "e2e-isd-student-12-b@test.local", first: "Dev", last: "Grade Twelve", studentId: "E2E-ISD-12-B", grade: 12 },
+  ] as const;
+
+  const seeded: SeededIndividualStudent[] = [];
+
+  for (const student of students) {
+    const gradeId = gradeIds.get(student.grade)!;
+
+    await pool.query(
+      `INSERT INTO "group" (type, child_id, inserted_at, updated_at)
+       SELECT 'grade', $1, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM "group" WHERE type = 'grade' AND child_id = $1
+       )`,
+      [gradeId]
+    );
+
+    const userResult = await pool.query<{ id: number }>(
+      `WITH updated AS (
+         UPDATE "user"
+         SET first_name = $1,
+             last_name = $2,
+             email = $3,
+             role = 'student',
+             updated_at = (NOW() AT TIME ZONE 'UTC')
+         WHERE email = $3
+         RETURNING id
+       ),
+       inserted AS (
+         INSERT INTO "user" (
+           first_name, last_name, email, role, inserted_at, updated_at
+         )
+         SELECT $1, $2, $3, 'student', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+         WHERE NOT EXISTS (SELECT 1 FROM updated)
+         RETURNING id
+       )
+       SELECT id FROM updated
+       UNION ALL
+       SELECT id FROM inserted
+       LIMIT 1`,
+      [student.first, student.last, student.email]
+    );
+    const userId = Number(userResult.rows[0].id);
+
+    await pool.query(
+      `INSERT INTO student (
+         student_id, user_id, grade_id, status, inserted_at, updated_at
+       )
+       VALUES (
+         $1, $2, $3, 'active', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       )
+       ON CONFLICT (student_id) WHERE student_id LIKE 'E2E-ISD-%'
+       DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         grade_id = EXCLUDED.grade_id,
+         status = 'active',
+         updated_at = (NOW() AT TIME ZONE 'UTC')`,
+      [student.studentId, userId, gradeId]
+    );
+
+    await pool.query(
+      `INSERT INTO group_user (group_id, user_id, inserted_at, updated_at)
+       SELECT $1, $2, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM group_user WHERE group_id = $1 AND user_id = $2
+       )`,
+      [schoolGroupId, userId]
+    );
+
+    await pool.query(
+      `UPDATE enrollment_record
+       SET is_current = false,
+           updated_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE user_id = $1
+         AND group_type = 'grade'
+         AND is_current = true
+         AND group_id <> $2`,
+      [userId, gradeId]
+    );
+
+    await pool.query(
+      `WITH updated AS (
+         UPDATE enrollment_record
+         SET is_current = true,
+             updated_at = (NOW() AT TIME ZONE 'UTC')
+         WHERE user_id = $1
+           AND group_type = 'grade'
+           AND group_id = $2
+         RETURNING id
+       )
+       INSERT INTO enrollment_record (
+         user_id, group_id, group_type, academic_year, is_current,
+         inserted_at, updated_at
+       )
+       SELECT $1, $2, 'grade', '2026-27', true,
+              (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM updated)`,
+      [userId, gradeId]
+    );
+
+    seeded.push({
+      id: userId,
+      name: `${student.first} ${student.last}`,
+      studentId: student.studentId,
+      grade: student.grade,
+    });
+  }
+
+  return seeded;
 }
 
 /**
