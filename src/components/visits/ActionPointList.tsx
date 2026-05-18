@@ -9,7 +9,6 @@ import { Modal } from "@/components/ui";
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CLASSROOM_OBSERVATION_RUBRIC } from "@/lib/classroom-observation-rubric";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
-import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 import { getAccurateLocation } from "@/lib/geolocation";
@@ -324,6 +323,7 @@ export function getGroupStudentDiscussionStats(
 }
 
 export interface IndividualStudentDiscussionStats {
+  entryCount: number | null;
   studentCount: number;
 }
 
@@ -334,12 +334,30 @@ export function getIndividualStudentDiscussionStats(
     return null;
   }
 
+  const entries = data.entries;
+  if (Array.isArray(entries)) {
+    const studentCount = entries.reduce((count, entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return count;
+      }
+
+      const students = (entry as Record<string, unknown>).students;
+      return count + (Array.isArray(students) ? students.length : 0);
+    }, 0);
+
+    if (entries.length === 0 && studentCount === 0) {
+      return null;
+    }
+
+    return { entryCount: entries.length, studentCount };
+  }
+
   const students = data.students;
   if (!Array.isArray(students) || students.length === 0) {
     return null;
   }
 
-  return { studentCount: students.length };
+  return { entryCount: null, studentCount: students.length };
 }
 
 export interface SchoolStaffInteractionStats {
@@ -796,6 +814,11 @@ export default function ActionPointList({
 
                 return (
                   <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`individual-student-stats-${action.id}`}>
+                    {stats.entryCount !== null && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Entries:</span> {stats.entryCount}
+                      </span>
+                    )}
                     <span className="text-text-secondary">
                       <span className="text-text-muted">Students:</span> {stats.studentCount}
                     </span>

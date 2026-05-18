@@ -1048,13 +1048,54 @@ describe("getGroupStudentDiscussionStats", () => {
 });
 
 describe("Individual Student Discussion stats on action cards", () => {
-  it("renders stats with student count for individual_student_discussion card", () => {
+  it("renders entry and student counts for entries-shape individual_student_discussion card", () => {
     render(
       <ActionPointList
         visitId={10}
         actions={[
           makeAction({
             id: 90,
+            action_type: "individual_student_discussion",
+            status: "in_progress",
+            started_at: "2026-03-18T09:00:00.000Z",
+            data: {
+              entries: [
+                {
+                  id: "entry-1",
+                  grade: 11,
+                  students: [
+                    { id: 1, name: "Alice" },
+                    { id: 2, name: "Bob" },
+                  ],
+                  questions: {},
+                },
+                {
+                  id: "entry-2",
+                  grade: 12,
+                  students: [{ id: 3, name: "Charlie" }],
+                  questions: {},
+                },
+              ],
+            },
+          }),
+        ]}
+      />
+    );
+
+    const statsEl = screen.getByTestId("individual-student-stats-90");
+    expect(statsEl).toHaveTextContent("Entries:");
+    expect(statsEl).toHaveTextContent("2");
+    expect(statsEl).toHaveTextContent("Students:");
+    expect(statsEl).toHaveTextContent("3");
+  });
+
+  it("renders only student count for legacy individual_student_discussion card", () => {
+    render(
+      <ActionPointList
+        visitId={10}
+        actions={[
+          makeAction({
+            id: 93,
             action_type: "individual_student_discussion",
             status: "in_progress",
             started_at: "2026-03-18T09:00:00.000Z",
@@ -1069,7 +1110,8 @@ describe("Individual Student Discussion stats on action cards", () => {
       />
     );
 
-    const statsEl = screen.getByTestId("individual-student-stats-90");
+    const statsEl = screen.getByTestId("individual-student-stats-93");
+    expect(statsEl).not.toHaveTextContent("Entries:");
     expect(statsEl).toHaveTextContent("Students:");
     expect(statsEl).toHaveTextContent("2");
   });
@@ -1115,7 +1157,30 @@ describe("Individual Student Discussion stats on action cards", () => {
 });
 
 describe("getIndividualStudentDiscussionStats", () => {
-  it("returns correct student count", () => {
+  it("returns entry and student counts for entries shape", () => {
+    const result = getIndividualStudentDiscussionStats({
+      entries: [
+        {
+          id: "entry-1",
+          grade: 11,
+          students: [
+            { id: 1, name: "Alice" },
+            { id: 2, name: "Bob" },
+          ],
+          questions: {},
+        },
+        {
+          id: "entry-2",
+          grade: 12,
+          students: [{ id: 3, name: "Charlie" }],
+          questions: {},
+        },
+      ],
+    });
+    expect(result).toEqual({ entryCount: 2, studentCount: 3 });
+  });
+
+  it("returns null entry count for legacy shape", () => {
     const result = getIndividualStudentDiscussionStats({
       students: [
         { id: 1, name: "Alice", grade: 11, questions: {} },
@@ -1123,7 +1188,7 @@ describe("getIndividualStudentDiscussionStats", () => {
         { id: 3, name: "Charlie", grade: 11, questions: {} },
       ],
     });
-    expect(result).toEqual({ studentCount: 3 });
+    expect(result).toEqual({ entryCount: null, studentCount: 3 });
   });
 
   it("returns null for undefined data", () => {
