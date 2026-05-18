@@ -573,6 +573,49 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     });
   });
 
+  it("does not inspect individual student discussion data when completing a visit", async () => {
+    setupPmEdit();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 201,
+          data: buildValidClassroomData(),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 401 }]) // completed af_team_interaction
+      .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
+      .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
+      .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
+      .mockResolvedValueOnce([{ id: 801, data: { entries: [{ invalid: true }] } }]) // status-only check
+      .mockResolvedValueOnce([{ id: 901 }]) // completed school_staff_interaction
+      .mockResolvedValueOnce([
+        {
+          id: 10,
+          status: "completed",
+          completed_at: "2026-02-19T12:35:00.000Z",
+        },
+      ]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      visit: {
+        id: 10,
+        status: "completed",
+        completed_at: "2026-02-19T12:35:00.000Z",
+      },
+    });
+
+    const [individualStudentQueryText] = mockQuery.mock.calls[7] as [string, unknown[]];
+    expect(individualStudentQueryText).toContain("action_type = 'individual_student_discussion'");
+    expect(individualStudentQueryText).toContain("status = 'completed'");
+    expect(individualStudentQueryText).toContain("SELECT a.id");
+    expect(individualStudentQueryText).not.toContain("a.data");
+  });
+
   it("short-circuits on first missing action type (classroom checked first)", async () => {
     setupPmEdit();
     // No classroom observation → error about classroom, never checks AF team or individual teacher

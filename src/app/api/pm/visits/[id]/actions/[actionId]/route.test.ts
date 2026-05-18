@@ -139,6 +139,22 @@ function buildValidIndividualStudentDiscussionData() {
   };
 }
 
+function buildValidIndividualStudentDiscussionEntriesData() {
+  const questions = Object.fromEntries(
+    INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    entries: [
+      {
+        id: "entry-1",
+        grade: 11,
+        students: [{ id: 1, name: "Student A" }],
+        questions,
+      },
+    ],
+  };
+}
+
 function buildValidSchoolStaffInteractionData() {
   const questions = Object.fromEntries(
     SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
@@ -1243,6 +1259,140 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ action: updated });
+  });
+
+  it("canonicalizes legacy individual student discussion data before storing and returning it", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_student_discussion" };
+    const payload = buildValidIndividualStudentDiscussionData();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockImplementationOnce(async (_queryText, queryParams) => {
+        const stored = JSON.parse((queryParams as unknown[])[2] as string);
+        return [{ ...action, data: stored }];
+      });
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.data).toEqual({
+      entries: [
+        {
+          id: expect.any(String),
+          grade: 11,
+          students: [{ id: 1, name: "Student A" }],
+          questions: payload.students[0].questions,
+        },
+      ],
+    });
+    const [, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(JSON.parse(updateParams[2] as string)).toEqual(json.action.data);
+  });
+
+  it("stores entries-shaped individual student discussion data as-is", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_student_discussion" };
+    const payload = buildValidIndividualStudentDiscussionEntriesData();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockImplementationOnce(async (_queryText, queryParams) => {
+        const stored = JSON.parse((queryParams as unknown[])[2] as string);
+        return [{ ...action, data: stored }];
+      });
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: { ...action, data: payload } });
+    const [, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(JSON.parse(updateParams[2] as string)).toEqual(payload);
+  });
+
+  it("returns 422 when individual student discussion payload contains both students and entries", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_student_discussion" };
+    const payload = {
+      ...buildValidIndividualStudentDiscussionData(),
+      ...buildValidIndividualStudentDiscussionEntriesData(),
+    };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Invalid individual student discussion data",
+      details: ["Payload cannot contain both students and entries"],
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("canonicalizes and strict-validates legacy individual student discussion data on completed actions", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetPermission.mockResolvedValue({
+      ...PM_PERM,
+      email: "admin@avantifellows.org",
+      role: "admin",
+      level: 2,
+      regions: ["North"],
+      school_codes: null,
+    } as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    const action = {
+      ...BASE_ACTION_ROW,
+      action_type: "individual_student_discussion",
+      status: "completed",
+    };
+    const payload = buildValidIndividualStudentDiscussionData();
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other@avantifellows.org" }])
+      .mockResolvedValueOnce([action])
+      .mockImplementationOnce(async (_queryText, queryParams) => {
+        const stored = JSON.parse((queryParams as unknown[])[2] as string);
+        return [{ ...action, data: stored }];
+      });
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.data).toEqual({
+      entries: [
+        {
+          id: expect.any(String),
+          grade: 11,
+          students: [{ id: 1, name: "Student A" }],
+          questions: payload.students[0].questions,
+        },
+      ],
+    });
+    const [, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(JSON.parse(updateParams[2] as string)).toEqual(json.action.data);
   });
 
   it("returns 422 for individual student discussion with unknown top-level keys (lenient)", async () => {

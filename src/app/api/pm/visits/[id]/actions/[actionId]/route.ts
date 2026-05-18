@@ -19,6 +19,7 @@ import {
   validateGroupStudentDiscussionSave,
 } from "@/lib/group-student-discussion";
 import {
+  canonicalizeIndividualStudentDiscussionData,
   validateIndividualStudentDiscussionComplete,
   validateIndividualStudentDiscussionSave,
 } from "@/lib/individual-student-discussion";
@@ -197,6 +198,8 @@ export async function PATCH(
     return apiError(400, "data must be an object");
   }
 
+  let dataToStore = data;
+
   if (action.action_type === "classroom_observation") {
     const validation =
       action.status === "completed"
@@ -253,10 +256,27 @@ export async function PATCH(
   }
 
   if (action.action_type === "individual_student_discussion") {
-    const validation =
+    try {
+      dataToStore = canonicalizeIndividualStudentDiscussionData(data);
+    } catch (error) {
+      return apiError(422, "Invalid individual student discussion data", [
+        error instanceof Error ? error.message : "Invalid individual student discussion data",
+      ]);
+    }
+
+    const inputValidation =
       action.status === "completed"
         ? validateIndividualStudentDiscussionComplete(data)
         : validateIndividualStudentDiscussionSave(data);
+
+    if (!inputValidation.valid) {
+      return apiError(422, "Invalid individual student discussion data", inputValidation.errors);
+    }
+
+    const validation =
+      action.status === "completed"
+        ? validateIndividualStudentDiscussionComplete(dataToStore)
+        : validateIndividualStudentDiscussionSave(dataToStore);
 
     if (!validation.valid) {
       return apiError(422, "Invalid individual student discussion data", validation.errors);
@@ -284,7 +304,7 @@ export async function PATCH(
      RETURNING id, visit_id, action_type, status, data,
                started_at, ended_at, start_accuracy, end_accuracy,
                inserted_at, updated_at`,
-    [id, actionId, JSON.stringify(data)]
+    [id, actionId, JSON.stringify(dataToStore)]
   );
 
   if (updated.length === 0) {
