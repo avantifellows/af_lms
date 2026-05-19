@@ -57,7 +57,7 @@ export const INDIVIDUAL_STUDENT_DISCUSSION_CONFIG: IndividualStudentDiscussionCo
   allQuestionKeys: sections.flatMap((s) => s.questions.map((q) => q.key)),
 };
 
-export const ALLOWED_TOP_LEVEL_KEYS = new Set(["entries", "students"]);
+export const ALLOWED_TOP_LEVEL_KEYS = new Set(["entries"]);
 
 const questionKeyToLabel = new Map<string, string>(
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => {
@@ -74,21 +74,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function createEntryId(): string {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID !== "function") {
-    throw new Error("crypto.randomUUID is unavailable");
-  }
-  return randomUUID.call(globalThis.crypto);
-}
-
-function normalizeQuestions(value: unknown): Record<string, unknown> {
-  return isPlainObject(value) ? value : {};
-}
-
-export function isLegacyIndividualStudentDiscussionData(data: unknown): boolean {
-  return isPlainObject(data) && "students" in data && !("entries" in data);
-}
 
 export function getEntriesFromData(data: unknown): IndividualStudentDiscussionEntry[] {
   if (!isPlainObject(data) || !Array.isArray(data.entries)) {
@@ -115,69 +100,6 @@ export function getEntriesFromData(data: unknown): IndividualStudentDiscussionEn
         student.name !== ""
     );
   });
-}
-
-export function canonicalizeIndividualStudentDiscussionData(data: unknown): Record<string, unknown> {
-  if (!isPlainObject(data)) {
-    return { entries: [] };
-  }
-
-  if ("students" in data && "entries" in data) {
-    throw new Error("Payload cannot contain both students and entries");
-  }
-
-  if ("entries" in data) {
-    const entries = Array.isArray(data.entries) ? data.entries : [];
-    return {
-      entries: entries
-        .filter(isPlainObject)
-        .map((entry) => ({
-          id: typeof entry.id === "string" && entry.id !== "" ? entry.id : createEntryId(),
-          grade: entry.grade,
-          students: entry.students,
-          questions: normalizeQuestions(entry.questions),
-        })),
-    };
-  }
-
-  if (!Array.isArray(data.students)) {
-    return { entries: [] };
-  }
-
-  const seenStudentIds = new Set<number>();
-  const entries = data.students.flatMap((student) => {
-    if (!isPlainObject(student)) {
-      return [];
-    }
-
-    const id = student.id;
-    if (
-      typeof id !== "number" ||
-      !Number.isInteger(id) ||
-      id <= 0 ||
-      seenStudentIds.has(id)
-    ) {
-      return [];
-    }
-
-    seenStudentIds.add(id);
-
-    return [
-      {
-        id: createEntryId(),
-        grade: student.grade,
-        students: [
-          {
-            id,
-            name: typeof student.name === "string" ? student.name : "",
-          },
-        ],
-        questions: normalizeQuestions(student.questions),
-      },
-    ];
-  });
-
-  return { entries };
 }
 
 function isValidGrade(value: unknown): value is ValidGrade {
@@ -318,31 +240,12 @@ function validateEntries(entries: unknown, strict: boolean): string[] {
   return errors;
 }
 
-function getCanonicalEntriesForValidation(payload: Record<string, unknown>): {
+function getEntriesForValidation(payload: Record<string, unknown>): {
   entries?: unknown;
   errors: string[];
 } {
-  if ("students" in payload && "entries" in payload) {
-    return {
-      errors: ["Payload cannot contain both students and entries"],
-    };
-  }
-
   if ("entries" in payload) {
     return { entries: payload.entries, errors: [] };
-  }
-
-  if ("students" in payload) {
-    try {
-      return {
-        entries: canonicalizeIndividualStudentDiscussionData(payload).entries,
-        errors: [],
-      };
-    } catch (error) {
-      return {
-        errors: [error instanceof Error ? error.message : "Invalid individual student discussion payload"],
-      };
-    }
   }
 
   return { entries: undefined, errors: [] };
@@ -363,7 +266,7 @@ export function validateIndividualStudentDiscussionSave(data: unknown): Validati
     errors.push(`Unknown field: ${key}`);
   }
 
-  const canonical = getCanonicalEntriesForValidation(payload);
+  const canonical = getEntriesForValidation(payload);
   errors.push(...canonical.errors);
 
   if (canonical.entries !== undefined) {
@@ -388,7 +291,7 @@ export function validateIndividualStudentDiscussionComplete(data: unknown): Vali
     errors.push(`Unknown field: ${key}`);
   }
 
-  const canonical = getCanonicalEntriesForValidation(payload);
+  const canonical = getEntriesForValidation(payload);
   errors.push(...canonical.errors);
 
   if (canonical.entries === undefined) {

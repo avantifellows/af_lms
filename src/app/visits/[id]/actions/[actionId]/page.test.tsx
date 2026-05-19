@@ -1412,14 +1412,14 @@ describe("VisitActionDetailPage", () => {
     });
   });
 
-  it("bootstraps invalid individual student discussion data to { entries: [] } when canonicalization fails", async () => {
+  it("bootstraps null/missing individual student discussion data to { entries: [] }", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
       .mockResolvedValueOnce([
         makeAction({
           action_type: "individual_student_discussion",
-          data: { students: [], entries: [] },
+          data: null,
         }),
       ]);
 
@@ -1450,170 +1450,6 @@ describe("VisitActionDetailPage", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
     expect(body.data).toEqual({ entries: [] });
-  });
-
-  it("auto-saves bootstrapped legacy individual student discussion data with stable entry ids", async () => {
-    const randomUUID = vi.fn()
-      .mockReturnValueOnce("entry-1")
-      .mockReturnValueOnce("entry-2");
-    vi.stubGlobal("crypto", { randomUUID });
-    setupPmAuth();
-    const legacyData = {
-      students: [
-        {
-          id: 1,
-          name: "Test Student",
-          grade: 11,
-          questions: {
-            oh_teaching_concern: { answer: true, remark: "Concern" },
-          },
-        },
-        {
-          id: 2,
-          name: "Second Student",
-          grade: 11,
-          questions: {
-            oh_additional_support: { answer: false },
-          },
-        },
-      ],
-    };
-    mockQuery
-      .mockResolvedValueOnce([makeVisit()])
-      .mockResolvedValueOnce([
-        makeAction({
-          action_type: "individual_student_discussion",
-          data: legacyData,
-        }),
-      ]);
-
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            action: makeAction({
-              action_type: "individual_student_discussion",
-              data: {
-                entries: [
-                  {
-                    id: "entry-1",
-                    grade: 11,
-                    students: [{ id: 1, name: "Test Student" }],
-                    questions: { oh_teaching_concern: { answer: true, remark: "Concern" } },
-                  },
-                  {
-                    id: "entry-2",
-                    grade: 11,
-                    students: [{ id: 2, name: "Second Student" }],
-                    questions: { oh_additional_support: { answer: false } },
-                  },
-                ],
-              },
-            }),
-          }),
-      })
-    ) as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
-    const jsx = await VisitActionDetailPage(pageProps());
-    render(jsx);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    }, { timeout: 3000 });
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
-    expect(body.data).toEqual({
-      entries: [
-        {
-          id: "entry-1",
-          grade: 11,
-          students: [{ id: 1, name: "Test Student" }],
-          questions: { oh_teaching_concern: { answer: true, remark: "Concern" } },
-        },
-        {
-          id: "entry-2",
-          grade: 11,
-          students: [{ id: 2, name: "Second Student" }],
-          questions: { oh_additional_support: { answer: false } },
-        },
-      ],
-    });
-    expect(randomUUID).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not passively upgrade completed legacy individual student discussion actions", async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("entry-1") });
-    setupPmAuth();
-    mockQuery
-      .mockResolvedValueOnce([makeVisit()])
-      .mockResolvedValueOnce([
-        makeAction({
-          action_type: "individual_student_discussion",
-          status: "completed",
-          data: {
-            students: [
-              {
-                id: 1,
-                name: "Test Student",
-                grade: 11,
-                questions: {},
-              },
-            ],
-          },
-        }),
-      ]);
-
-    const fetchMock = vi.fn() as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
-    const jsx = await VisitActionDetailPage(pageProps());
-    render(jsx);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2500);
-    });
-
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("does not passively upgrade completed legacy individual student discussion for admins", async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("entry-1") });
-    setupAdminAuth();
-    mockQuery
-      .mockResolvedValueOnce([makeVisit({ pm_email: "other@avantifellows.org" })])
-      .mockResolvedValueOnce([
-        makeAction({
-          action_type: "individual_student_discussion",
-          status: "completed",
-          data: {
-            students: [
-              {
-                id: 1,
-                name: "Test Student",
-                grade: 11,
-                questions: {},
-              },
-            ],
-          },
-        }),
-      ]);
-
-    const fetchMock = vi.fn() as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
-    const jsx = await VisitActionDetailPage(pageProps());
-    render(jsx);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2500);
-    });
-
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("auto-saves group student discussion data before calling /end", async () => {

@@ -180,7 +180,7 @@ function buildValidIndividualStudentDiscussionData() {
     INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
   );
   return {
-    students: [{ id: 1, name: "Student A", grade: 11, questions }],
+    entries: [{ id: "entry-1", grade: 11, students: [{ id: 1, name: "Student A" }], questions }],
   };
 }
 
@@ -1248,8 +1248,8 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     setupPmEdit();
     const validData = buildValidIndividualStudentDiscussionData();
     const incompleteData = {
-      students: [
-        { id: 1, name: "Student 1", grade: 11, questions: {} },
+      entries: [
+        { id: "entry-1", grade: 11, students: [{ id: 1, name: "Student 1" }], questions: {} },
       ],
     };
     mockQuery

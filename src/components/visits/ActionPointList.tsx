@@ -352,12 +352,7 @@ export function getIndividualStudentDiscussionStats(
     return { entryCount: entries.length, studentCount };
   }
 
-  const students = data.students;
-  if (!Array.isArray(students) || students.length === 0) {
-    return null;
-  }
-
-  return { entryCount: null, studentCount: students.length };
+  return null;
 }
 
 export interface SchoolStaffInteractionStats {

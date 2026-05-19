@@ -19,7 +19,6 @@ import {
   validateGroupStudentDiscussionSave,
 } from "@/lib/group-student-discussion";
 import {
-  canonicalizeIndividualStudentDiscussionData,
   validateIndividualStudentDiscussionComplete,
   validateIndividualStudentDiscussionSave,
 } from "@/lib/individual-student-discussion";
@@ -265,13 +264,7 @@ export async function PATCH(
       return apiError(422, "Invalid individual student discussion data", validation.errors);
     }
 
-    try {
-      dataToStore = canonicalizeIndividualStudentDiscussionData(data);
-    } catch (error) {
-      return apiError(422, "Invalid individual student discussion data", [
-        error instanceof Error ? error.message : "Invalid individual student discussion data",
-      ]);
-    }
+    dataToStore = data as Record<string, unknown>;
   }
 
   if (action.action_type === "school_staff_interaction") {

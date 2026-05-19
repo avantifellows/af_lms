@@ -1089,7 +1089,7 @@ describe("Individual Student Discussion stats on action cards", () => {
     expect(statsEl).toHaveTextContent("3");
   });
 
-  it("renders only student count for legacy individual_student_discussion card", () => {
+  it("shows nothing for data without entries key", () => {
     render(
       <ActionPointList
         visitId={10}
@@ -1099,21 +1099,13 @@ describe("Individual Student Discussion stats on action cards", () => {
             action_type: "individual_student_discussion",
             status: "in_progress",
             started_at: "2026-03-18T09:00:00.000Z",
-            data: {
-              students: [
-                { id: 1, name: "Alice", grade: 11, questions: {} },
-                { id: 2, name: "Bob", grade: 12, questions: {} },
-              ],
-            },
+            data: { something: "else" },
           }),
         ]}
       />
     );
 
-    const statsEl = screen.getByTestId("individual-student-stats-93");
-    expect(statsEl).not.toHaveTextContent("Entries:");
-    expect(statsEl).toHaveTextContent("Students:");
-    expect(statsEl).toHaveTextContent("2");
+    expect(screen.queryByTestId("individual-student-stats-93")).not.toBeInTheDocument();
   });
 
   it("shows nothing when data is empty/undefined", () => {
@@ -1180,27 +1172,13 @@ describe("getIndividualStudentDiscussionStats", () => {
     expect(result).toEqual({ entryCount: 2, studentCount: 3 });
   });
 
-  it("returns null entry count for legacy shape", () => {
-    const result = getIndividualStudentDiscussionStats({
-      students: [
-        { id: 1, name: "Alice", grade: 11, questions: {} },
-        { id: 2, name: "Bob", grade: 12, questions: {} },
-        { id: 3, name: "Charlie", grade: 11, questions: {} },
-      ],
-    });
-    expect(result).toEqual({ entryCount: null, studentCount: 3 });
-  });
-
   it("returns null for undefined data", () => {
     expect(getIndividualStudentDiscussionStats(undefined)).toBeNull();
   });
 
-  it("returns null for empty students array", () => {
-    expect(getIndividualStudentDiscussionStats({ students: [] })).toBeNull();
-  });
-
-  it("returns null for data without students key", () => {
+  it("returns null for data without entries key", () => {
     expect(getIndividualStudentDiscussionStats({})).toBeNull();
+    expect(getIndividualStudentDiscussionStats({ students: [] })).toBeNull();
   });
 });
 

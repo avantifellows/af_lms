@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { useAutoSave, type AutoSaveStatus } from "@/hooks/use-auto-save";
 
@@ -16,9 +16,7 @@ import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
 import {
-  canonicalizeIndividualStudentDiscussionData,
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG,
-  isLegacyIndividualStudentDiscussionData,
 } from "@/lib/individual-student-discussion";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
@@ -490,11 +488,10 @@ function sanitizeIndividualStudentDiscussionPayload(data: unknown): Record<strin
 }
 
 function bootstrapIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
-  try {
-    return canonicalizeIndividualStudentDiscussionData(data);
-  } catch {
-    return { entries: [] };
+  if (data && typeof data === "object" && !Array.isArray(data) && "entries" in data) {
+    return data as Record<string, unknown>;
   }
+  return { entries: [] };
 }
 
 function sanitizeSchoolStaffInteractionPayload(data: unknown): Record<string, unknown> {
@@ -772,17 +769,6 @@ export default function ActionDetailForm({
       setAction((prev) => ({ ...prev, ...updatedAction } as ActionRecord));
     },
   });
-
-  useEffect(() => {
-    if (
-      action.action_type === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE &&
-      action.status === "in_progress" &&
-      isLegacyIndividualStudentDiscussionData(initialAction.data)
-    ) {
-      markSynced(initialAction.data);
-      setFormData((prev) => ({ ...prev }));
-    }
-  }, [action.action_type, action.status, initialAction.data, markSynced]);
 
   async function persistActionData(dataToPersist: Record<string, unknown>) {
     const response = await fetch(`/api/pm/visits/${visitId}/actions/${action.id}`, {
