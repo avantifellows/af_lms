@@ -423,15 +423,16 @@ export default function IndividualStudentDiscussionForm({
             />
           )}
 
-          <button
-            type="button"
-            onClick={handleAddEntry}
-            disabled={selectedGrade === null || pendingStudentIds.length === 0}
-            className="min-h-[44px] border-2 border-accent px-4 py-2 text-sm font-semibold text-accent disabled:cursor-not-allowed disabled:border-border disabled:text-text-muted hover:bg-hover-bg"
-            data-testid="add-individual-student-entry"
-          >
-            Add Entry
-          </button>
+          {selectedGrade !== null && pendingStudentIds.length > 0 && (
+            <button
+              type="button"
+              onClick={handleAddEntry}
+              className="min-h-[44px] border-2 border-accent px-4 py-2 text-sm font-semibold text-accent hover:bg-hover-bg"
+              data-testid="add-individual-student-entry"
+            >
+              Add Entry
+            </button>
+          )}
           </div>
 
           {pendingStudents.length > 0 && (

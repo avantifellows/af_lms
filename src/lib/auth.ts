@@ -8,7 +8,7 @@ import { getSchoolByPasscode } from "./permissions";
 // Only used when NODE_ENV !== "production".
 export const DEV_LOGIN_PERSONAS = {
   admin: { email: "pritam@avantifellows.org", name: "Dev Admin" },
-  program_manager: { email: "svishal081995@gmail.com", name: "Dev PM" },
+  program_manager: { email: "deepansh.mathur96@gmail.com", name: "Dev PM" },
   teacher: { email: "sanghamitrapatil06@gmail.com", name: "Dev Teacher" },
   read_only: { email: "lokesh@avantifellows.org", name: "Dev Read-Only" },
 } as const;
@@ -84,6 +84,7 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: "/",
+    signOut: "/signout",
   },
   session: {
     strategy: "jwt",

@@ -140,7 +140,7 @@ describe("IndividualStudentDiscussionForm", () => {
     render(<Harness schoolCode="SCH999" />);
 
     expect(screen.getByTestId("add-student-select")).toBeDisabled();
-    expect(screen.getByTestId("add-individual-student-entry")).toBeDisabled();
+    expect(screen.queryByTestId("add-individual-student-entry")).not.toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
 
     await selectGrade(user, "11");
