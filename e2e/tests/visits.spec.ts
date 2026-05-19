@@ -9,8 +9,10 @@ import {
   buildCompleteSchoolStaffInteractionData,
   getTestPool,
   seedIndividualTeacherTestTeachers,
+  seedStudentsForTest,
   seedTestVisit,
   seedVisitAction,
+  type SeededIndividualStudent,
 } from "../helpers/db";
 import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
@@ -23,6 +25,7 @@ import type { Pool } from "pg";
 let pool: Pool;
 let schoolCode: string;
 let seededTeachers: { id: number; name: string }[];
+let seededStudents: SeededIndividualStudent[];
 
 async function setGoodGps(page: Page) {
   await page.context().grantPermissions(["geolocation"]);
@@ -167,31 +170,123 @@ async function fillGroupStudentDiscussionForm(page: Page) {
   await expect(page.getByTestId("group-student-discussion-progress")).toContainText("Answered: 4/4");
 }
 
-async function fillIndividualStudentDiscussionForm(page: Page) {
-  // Select grade 11 from the grade filter
+function individualStudentQuestionAnswers(answer = true) {
+  return Object.fromEntries(
+    INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [
+      key,
+      { answer },
+    ])
+  );
+}
+
+function individualStudentEntriesData(
+  entries: Array<{
+    id: string;
+    grade: 11 | 12;
+    students: Array<{ id: number; name: string }>;
+    answer?: boolean;
+  }>
+) {
+  return {
+    entries: entries.map((entry) => ({
+      id: entry.id,
+      grade: entry.grade,
+      students: entry.students,
+      questions: individualStudentQuestionAnswers(entry.answer ?? true),
+    })),
+  };
+}
+
+function legacyIndividualStudentData(
+  students: Array<{ id: number; name: string; grade: 11 | 12 }>
+) {
+  return {
+    students: students.map((student) => ({
+      ...student,
+      questions: individualStudentQuestionAnswers(true),
+    })),
+  };
+}
+
+async function waitForStudentsForGrade(
+  page: Page,
+  grade: 11 | 12,
+  options: { expectSeededOption?: boolean } = {}
+) {
+  const expectSeededOption = options.expectSeededOption ?? true;
   const gradeFilter = page.getByTestId("student-grade-filter");
   await expect(gradeFilter).toBeVisible();
-  await gradeFilter.selectOption("11");
+  await gradeFilter.selectOption(String(grade));
 
-  // Wait for students to load and select the first available student
-  const addSelect = page.getByTestId("add-student-select");
-  await expect(addSelect).toBeVisible({ timeout: 10_000 });
-  const options = addSelect.locator("option:not([disabled])");
-  await expect(options.first()).toBeAttached({ timeout: 10_000 });
-  await addSelect.selectOption({ index: 1 });
+  const picker = page.getByTestId("add-student-select");
+  await expect(picker).toBeVisible({ timeout: 10_000 });
+  await picker.click();
 
-  // The new student section should auto-expand
-  const studentSections = page.locator('[data-testid^="student-section-"]');
-  await expect(studentSections).toHaveCount(1);
-
-  // Get the student ID from the section's data-testid
-  const sectionTestId = await studentSections.first().getAttribute("data-testid");
-  const studentId = sectionTestId!.replace("student-section-", "");
-
-  // Answer all 2 questions with Yes
-  for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
-    await page.getByTestId(`student-${studentId}-${key}-yes`).check();
+  if (!expectSeededOption) {
+    await expect(page.getByTestId("student-search-listbox")).toBeVisible({
+      timeout: 10_000,
+    });
+    return;
   }
+
+  const gradeStudent = seededStudents.find((student) => student.grade === grade);
+  if (!gradeStudent) throw new Error(`No seeded grade ${grade} student`);
+  await expect(page.getByTestId(`student-option-${gradeStudent.id}`)).toBeVisible({
+    timeout: 10_000,
+  });
+}
+
+async function selectPendingStudent(page: Page, student: SeededIndividualStudent) {
+  const picker = page.getByTestId("add-student-select");
+  await picker.click();
+  await picker.fill(student.name);
+  await expect(page.getByTestId(`student-option-${student.id}`)).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.getByTestId(`student-checkbox-${student.id}`).dispatchEvent("click");
+  await expect(page.getByTestId(`pending-student-chip-${student.id}`)).toContainText(
+    student.name
+  );
+}
+
+async function addIndividualStudentEntry(
+  page: Page,
+  grade: 11 | 12,
+  students: SeededIndividualStudent[]
+): Promise<string> {
+  await waitForStudentsForGrade(page, grade);
+  for (const student of students) {
+    await selectPendingStudent(page, student);
+  }
+
+  await page.getByTestId("add-individual-student-entry").click();
+
+  const newestEntry = page.locator('[data-testid^="entry-section-"]').last();
+  await expect(newestEntry).toBeVisible();
+  const testId = await newestEntry.getAttribute("data-testid");
+  if (!testId) throw new Error("Entry section did not expose a test id");
+  return testId.replace("entry-section-", "");
+}
+
+async function answerIndividualStudentEntryQuestions(page: Page, entryId: string) {
+  for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    await page.getByTestId(`entry-${entryId}-${key}-yes`).check();
+  }
+}
+
+async function fillIndividualStudentDiscussionForm(page: Page) {
+  const student = seededStudents.find((s) => s.grade === 11);
+  if (!student) throw new Error("No seeded grade 11 student");
+  const entryId = await addIndividualStudentEntry(page, 11, [student]);
+  await answerIndividualStudentEntryQuestions(page, entryId);
+}
+
+async function getVisitActionData(actionId: number | string) {
+  const rows = await pool.query<{ data: Record<string, unknown>; status: string }>(
+    `SELECT data, status FROM lms_pm_school_visit_actions WHERE id = $1`,
+    [actionId]
+  );
+  return rows.rows[0];
 }
 
 async function fillSchoolStaffInteractionForm(page: Page) {
@@ -236,6 +331,7 @@ test.beforeAll(async () => {
 
   // Seed individual teacher test teachers (3 deterministic teachers)
   seededTeachers = await seedIndividualTeacherTestTeachers(pool, schoolCode);
+  seededStudents = await seedStudentsForTest(pool, schoolCode);
 });
 
 test.afterAll(async () => {
@@ -1475,10 +1571,11 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     );
     const individualRow = individualRows.rows[0];
     expect(individualRow?.status).toBe("completed");
-    const students = individualRow?.data?.students as Array<Record<string, unknown>>;
-    expect(Array.isArray(students)).toBe(true);
-    expect(students.length).toBeGreaterThanOrEqual(1);
-    expect(students[0]?.grade).toBe(11);
+    const entries = individualRow?.data?.entries as Array<Record<string, unknown>>;
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    expect(entries[0]?.grade).toBe(11);
+    expect(Array.isArray(entries[0]?.students)).toBe(true);
 
     // Navigate back and verify both completed action cards visible
     await pmPage.getByRole("link", { name: "Back to Visit" }).click();
@@ -1596,5 +1693,227 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await pmPage.waitForURL(`/visits/${visitId}`);
     const refreshedCard = pmPage.getByTestId(`action-card-${actionId}`);
     await expect(refreshedCard.getByTestId(`school-staff-interaction-stats-${actionId}`)).toContainText("2/2 (100%)");
+  });
+
+  test("individual-student-entries-flow-supports-grouped-solo-multi-grade-and-card-stats", async ({
+    pmPage,
+  }) => {
+    const grade11 = seededStudents.filter((student) => student.grade === 11);
+    const grade12 = seededStudents.filter((student) => student.grade === 12);
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "in_progress",
+      data: { entries: [] },
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
+
+    await waitForStudentsForGrade(pmPage, 11);
+    await selectPendingStudent(pmPage, grade11[0]);
+    await expect(pmPage.getByTestId("student-option-" + grade11[0].id)).toHaveCount(0);
+    await pmPage.getByTestId("student-grade-filter").selectOption("12");
+    await expect(pmPage.getByTestId(`pending-student-chip-${grade11[0].id}`)).toHaveCount(0);
+
+    const deletedEntryId = await addIndividualStudentEntry(pmPage, 11, [grade11[0]]);
+    await pmPage.getByTestId(`remove-entry-${deletedEntryId}`).click();
+    await waitForStudentsForGrade(pmPage, 11);
+    await expect(pmPage.getByTestId(`student-option-${grade11[0].id}`)).toBeVisible();
+
+    const groupedEntryId = await addIndividualStudentEntry(pmPage, 11, grade11.slice(0, 2));
+    await expect(pmPage.getByTestId("individual-student-progress")).toContainText(
+      "Entries: 1 | Students: 2"
+    );
+    await waitForStudentsForGrade(pmPage, 11, { expectSeededOption: false });
+    await expect(pmPage.getByTestId(`student-option-${grade11[0].id}`)).toHaveCount(0);
+
+    const soloEntryId = await addIndividualStudentEntry(pmPage, 12, [grade12[0]]);
+    await expect(pmPage.getByTestId("individual-student-progress")).toContainText(
+      "Entries: 2 | Students: 3"
+    );
+    await expect(pmPage.getByTestId(`entry-grade-badge-${groupedEntryId}`)).toContainText(
+      "Grade 11"
+    );
+    await expect(pmPage.getByTestId(`entry-grade-badge-${soloEntryId}`)).toContainText(
+      "Grade 12"
+    );
+
+    await answerIndividualStudentEntryQuestions(pmPage, groupedEntryId);
+    await answerIndividualStudentEntryQuestions(pmPage, soloEntryId);
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+
+    const actionRow = await getVisitActionData(actionId);
+    expect(actionRow.status).toBe("completed");
+    const entries = actionRow.data.entries as Array<{
+      grade: number;
+      students: unknown[];
+      questions: Record<string, { answer: boolean }>;
+    }>;
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.grade)).toEqual([11, 12]);
+    expect(entries[0].students).toHaveLength(2);
+    expect(entries[1].students).toHaveLength(1);
+    for (const entry of entries) {
+      for (const key of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+        expect(entry.questions[key]?.answer).toBe(true);
+      }
+    }
+
+    await pmPage.getByRole("link", { name: "Back to Visit" }).click();
+    await pmPage.waitForURL(`/visits/${visitId}`);
+    await expect(
+      pmPage.getByTestId(`individual-student-stats-${actionId}`)
+    ).toContainText("Entries: 2");
+    await expect(
+      pmPage.getByTestId(`individual-student-stats-${actionId}`)
+    ).toContainText("Students: 3");
+  });
+
+  test("individual-student-read-only-entry-shows-one-question-set-for-grouped-students", async ({
+    programAdminPage,
+  }) => {
+    const grade11 = seededStudents.filter((student) => student.grade === 11);
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: individualStudentEntriesData([
+        {
+          id: "readonly-grouped-entry",
+          grade: 11,
+          students: grade11.slice(0, 2).map((student) => ({
+            id: student.id,
+            name: student.name,
+          })),
+        },
+      ]),
+    });
+
+    await programAdminPage.goto(`/visits/${visitId}/actions/${actionId}`);
+    await expect(
+      programAdminPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+    await expect(
+      programAdminPage.getByTestId("entry-student-names-readonly-grouped-entry")
+    ).toContainText(grade11[0].name);
+    await expect(
+      programAdminPage.getByTestId("entry-student-names-readonly-grouped-entry")
+    ).toContainText(grade11[1].name);
+
+    await programAdminPage.getByTestId("entry-header-readonly-grouped-entry").click();
+    for (const question of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.sections[0].questions) {
+      await expect(programAdminPage.getByText(question.label)).toHaveCount(1);
+    }
+  });
+
+  test("individual-student-passively-upgrades-legacy-shape-on-open", async ({ pmPage }) => {
+    const student = seededStudents.find((s) => s.grade === 11)!;
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "in_progress",
+      data: legacyIndividualStudentData([
+        { id: student.id, name: student.name, grade: 11 },
+      ]),
+    });
+
+    await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
+    await expect(pmPage.getByText(student.name)).toBeVisible();
+
+    await expect
+      .poll(
+        async () => {
+          const row = await getVisitActionData(actionId);
+          return {
+            hasEntries: Array.isArray(row.data.entries),
+            hasLegacyStudents: Array.isArray(row.data.students),
+          };
+        },
+        { timeout: 12_000 }
+      )
+      .toEqual({ hasEntries: true, hasLegacyStudents: false });
+  });
+
+  test("individual-student-active-dual-shape-upgrade-adds-grouped-entry-and-completes", async ({
+    pmPage,
+  }) => {
+    const grade11 = seededStudents.filter((student) => student.grade === 11);
+    const grade12 = seededStudents.filter((student) => student.grade === 12);
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "in_progress",
+      data: legacyIndividualStudentData([
+        { id: grade11[0].id, name: grade11[0].name, grade: 11 },
+      ]),
+    });
+
+    await setGoodGps(pmPage);
+    await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
+    const groupedEntryId = await addIndividualStudentEntry(pmPage, 12, grade12.slice(0, 2));
+    await answerIndividualStudentEntryQuestions(pmPage, groupedEntryId);
+
+    await pmPage.getByRole("button", { name: "End Action" }).click();
+    await expect(
+      pmPage.getByText("Completed actions are read-only for your role.")
+    ).toBeVisible();
+
+    const row = await getVisitActionData(actionId);
+    expect(row.status).toBe("completed");
+    expect(Array.isArray(row.data.students)).toBe(false);
+    const entries = row.data.entries as Array<{ grade: number; students: unknown[] }>;
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.students.length)).toEqual([1, 2]);
+    expect(entries.map((entry) => entry.grade)).toEqual([11, 12]);
+  });
+
+  test("individual-student-action-card-displays-entry-and-student-counts", async ({
+    pmPage,
+  }) => {
+    const grade11 = seededStudents.filter((student) => student.grade === 11);
+    const grade12 = seededStudents.filter((student) => student.grade === 12);
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "completed",
+      data: individualStudentEntriesData([
+        {
+          id: "card-grade-11",
+          grade: 11,
+          students: grade11.slice(0, 2).map((student) => ({
+            id: student.id,
+            name: student.name,
+          })),
+        },
+        {
+          id: "card-grade-12",
+          grade: 12,
+          students: [{ id: grade12[0].id, name: grade12[0].name }],
+        },
+      ]),
+    });
+
+    await pmPage.goto(`/visits/${visitId}`);
+    const stats = pmPage.getByTestId(`individual-student-stats-${actionId}`);
+    await expect(stats).toContainText("Entries: 2");
+    await expect(stats).toContainText("Students: 3");
+  });
+
+  test("passcode-user-is-redirected-from-individual-student-action-detail", async ({
+    passcodePage,
+  }) => {
+    const { visitId } = await seedTestVisit(pool, schoolCode);
+    const { actionId } = await seedVisitAction(pool, visitId, {
+      actionType: "individual_student_discussion",
+      status: "in_progress",
+      data: { entries: [] },
+    });
+
+    await passcodePage.goto(`/visits/${visitId}/actions/${actionId}`);
+    await passcodePage.waitForURL("/school/70705");
   });
 });

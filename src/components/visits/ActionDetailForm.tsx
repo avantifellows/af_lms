@@ -15,7 +15,9 @@ import SchoolStaffInteractionForm from "@/components/visits/SchoolStaffInteracti
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "@/lib/group-student-discussion";
 import { INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG } from "@/lib/individual-af-teacher-interaction";
-import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "@/lib/individual-student-discussion";
+import {
+  INDIVIDUAL_STUDENT_DISCUSSION_CONFIG,
+} from "@/lib/individual-student-discussion";
 import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 import {
@@ -425,26 +427,37 @@ function bootstrapGroupStudentDiscussionPayload(data: unknown): Record<string, u
 
 function sanitizeIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
   if (!isPlainObject(data)) {
-    return { students: [] };
+    return { entries: [] };
   }
 
-  const students: Array<Record<string, unknown>> = [];
-  if (Array.isArray(data.students)) {
-    for (const entry of data.students) {
+  const entries: Array<Record<string, unknown>> = [];
+  if (Array.isArray(data.entries)) {
+    for (const entry of data.entries) {
       if (
         !isPlainObject(entry) ||
-        typeof entry.id !== "number" ||
-        !Number.isFinite(entry.id) ||
-        typeof entry.name !== "string"
+        typeof entry.id !== "string"
       ) {
         continue;
       }
 
       const sanitizedEntry: Record<string, unknown> = {
         id: entry.id,
-        name: entry.name,
         grade: typeof entry.grade === "number" ? entry.grade : null,
       };
+
+      const students: Array<Record<string, unknown>> = [];
+      if (Array.isArray(entry.students)) {
+        for (const student of entry.students) {
+          if (
+            isPlainObject(student) &&
+            typeof student.id === "number" &&
+            Number.isFinite(student.id) &&
+            typeof student.name === "string"
+          ) {
+            students.push({ id: student.id, name: student.name });
+          }
+        }
+      }
 
       const questions: Record<string, unknown> = {};
       if (isPlainObject(entry.questions)) {
@@ -465,19 +478,20 @@ function sanitizeIndividualStudentDiscussionPayload(data: unknown): Record<strin
         }
       }
 
+      sanitizedEntry.students = students;
       sanitizedEntry.questions = questions;
-      students.push(sanitizedEntry);
+      entries.push(sanitizedEntry);
     }
   }
 
-  return { students };
+  return { entries };
 }
 
 function bootstrapIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
-  if (!isPlainObject(data)) {
-    return { students: [] };
+  if (data && typeof data === "object" && !Array.isArray(data) && "entries" in data) {
+    return data as Record<string, unknown>;
   }
-  return sanitizeIndividualStudentDiscussionPayload(data);
+  return { entries: [] };
 }
 
 function sanitizeSchoolStaffInteractionPayload(data: unknown): Record<string, unknown> {
@@ -708,10 +722,9 @@ export default function ActionDetailForm({
   isAdmin,
   schoolCode,
 }: ActionDetailFormProps) {
-  const [action, setAction] = useState<ActionRecord>(() => normalizeActionForState(initialAction));
-  const [formData, setFormData] = useState<Record<string, unknown>>(() =>
-    normalizeFormDataForAction(initialAction.action_type, initialAction.data)
-  );
+  const normalizedInitialAction = useMemo(() => normalizeActionForState(initialAction), [initialAction]);
+  const [action, setAction] = useState<ActionRecord>(() => normalizedInitialAction);
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => normalizedInitialAction.data);
   const [state, setState] = useState<FormState>("idle");
   const [error, setError] = useState<StructuredError | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -885,7 +898,7 @@ export default function ActionDetailForm({
             : action.action_type === INDIVIDUAL_TEACHER_ACTION_TYPE
               ? "Please complete all required fields and record all teachers before ending this interaction."
               : action.action_type === INDIVIDUAL_STUDENT_DISCUSSION_ACTION_TYPE
-                ? "Please complete all required fields and add at least one student before ending this interaction."
+                ? "Please complete all required fields and add at least one entry before ending this interaction."
                 : "Please complete all required fields before ending this interaction.";
           setError({
             message: endErrorMessage,

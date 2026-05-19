@@ -40,6 +40,10 @@ _Avoid_: Task, activity, checklist
 One of seven fixed types: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, `individual_student_discussion`, `school_staff_interaction`.
 _Avoid_: Category, kind
 
+**Entry** (Individual Student Interaction):
+A single interaction record within an `individual_student_discussion` action. Contains one or more students (all same grade) and one shared set of questions. A solo interaction is an entry with one student; a grouped interaction is an entry with multiple students.
+_Avoid_: Group (overloaded — `group` is a DB table and `group_student_discussion` is a different action type)
+
 **Soft Delete**:
 Setting `deleted_at` timestamp instead of removing the row. Used for actions and (issue #35) visits.
 _Avoid_: Archive, deactivate

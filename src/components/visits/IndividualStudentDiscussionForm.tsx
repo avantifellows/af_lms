@@ -6,11 +6,14 @@ import { fuzzyMatch } from "@/lib/fuzzy-match";
 import {
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG,
   VALID_GRADES,
-  type IndividualStudentEntry,
+  getEntriesFromData,
+  type IndividualStudentDiscussionEntry,
+  type IndividualStudentRef,
+  type ValidGrade,
 } from "@/lib/individual-student-discussion";
 import { getStudentDisplayName, type Student } from "@/lib/student-utils";
 import { isPlainObject } from "@/lib/visit-form-utils";
-import { FormSection, RadioPair, RemarkField, Select, StickyProgressBar } from "@/components/ui";
+import { FormSection, RadioPair, Select, StickyProgressBar } from "@/components/ui";
 
 interface IndividualStudentDiscussionFormProps {
   data: Record<string, unknown>;
@@ -19,17 +22,7 @@ interface IndividualStudentDiscussionFormProps {
   schoolCode: string;
 }
 
-function getStudentEntriesFromData(data: Record<string, unknown>): IndividualStudentEntry[] {
-  if (!Array.isArray(data.students)) return [];
-  return data.students.filter(
-    (s): s is IndividualStudentEntry =>
-      isPlainObject(s) &&
-      typeof s.id === "number" &&
-      typeof s.name === "string"
-  );
-}
-
-function getQuestionProgress(entry: IndividualStudentEntry): string {
+function getQuestionProgress(entry: IndividualStudentDiscussionEntry): string {
   const total = INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length;
   let answered = 0;
   const questions = entry.questions ?? {};
@@ -40,14 +33,36 @@ function getQuestionProgress(entry: IndividualStudentEntry): string {
   return `${answered}/${total}`;
 }
 
-/* -- Searchable student combobox ----------------------------------------- */
+function getStudentCount(entries: IndividualStudentDiscussionEntry[]): number {
+  return entries.reduce((total, entry) => total + entry.students.length, 0);
+}
+
+function getStackedStudentNames(students: IndividualStudentRef[]): string[] {
+  const visible = students.slice(0, 5).map((student) => student.name || `Student #${student.id}`);
+  const hiddenCount = students.length - visible.length;
+  return hiddenCount > 0 ? [...visible, `+${hiddenCount} more`] : visible;
+}
+
+function parseGrade(value: string): ValidGrade | null {
+  const grade = Number(value);
+  return (VALID_GRADES as readonly number[]).includes(grade) ? (grade as ValidGrade) : null;
+}
+
+/* -- Searchable multi-select picker -------------------------------------- */
 
 interface SearchableStudentSelectProps {
   students: Student[];
-  onSelect: (id: number) => void;
+  disabled: boolean;
+  onToggle: (id: number) => void;
+  emptyMessage: string;
 }
 
-function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelectProps) {
+function SearchableStudentSelect({
+  students,
+  disabled,
+  onToggle,
+  emptyMessage,
+}: SearchableStudentSelectProps) {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
@@ -59,9 +74,19 @@ function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelect
     return students.filter(
       (s) =>
         fuzzyMatch(query, getStudentDisplayName(s)) ||
-        fuzzyMatch(query, s.student_id)
+        (s.student_id !== null && fuzzyMatch(query, s.student_id))
     );
   }, [students, query]);
+
+  useEffect(() => {
+    setHighlightIndex(-1);
+  }, [filtered]);
+
+  useEffect(() => {
+    if (highlightIndex < 0 || !listRef.current) return;
+    const item = listRef.current.children[highlightIndex] as HTMLElement | undefined;
+    if (typeof item?.scrollIntoView === "function") item.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex]);
 
   // Close on outside click
   useEffect(() => {
@@ -74,52 +99,34 @@ function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelect
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
-  // Scroll highlighted item into view
-  useEffect(() => {
-    if (highlightIndex >= 0 && listRef.current) {
-      const items = listRef.current.children;
-      if (items[highlightIndex]) {
-        (items[highlightIndex] as HTMLElement).scrollIntoView?.({ block: "nearest" });
-      }
-    }
-  }, [highlightIndex]);
-
-  function selectStudent(id: number) {
-    onSelect(id);
-    setQuery("");
-    setIsOpen(false);
-    setHighlightIndex(-1);
-  }
-
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (!isOpen) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        setIsOpen(true);
-        setHighlightIndex(0);
-        e.preventDefault();
-      }
+    if (e.key === "Escape") {
+      setIsOpen(false);
       return;
     }
 
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        setHighlightIndex((prev) => (prev < filtered.length - 1 ? prev + 1 : prev));
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
-        break;
-      case "Enter":
-        e.preventDefault();
-        if (highlightIndex >= 0 && highlightIndex < filtered.length) {
-          selectStudent(Number(filtered[highlightIndex].id));
-        }
-        break;
-      case "Escape":
-        setIsOpen(false);
-        setHighlightIndex(-1);
-        break;
+    if (!isOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      setIsOpen(true);
+      setHighlightIndex(0);
+      e.preventDefault();
+      return;
+    }
+
+    if (!isOpen || filtered.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev + 1) % filtered.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev <= 0 ? filtered.length - 1 : prev - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightIndex >= 0 && highlightIndex < filtered.length) {
+        onToggle(Number(filtered[highlightIndex].id));
+        setQuery("");
+        setIsOpen(true);
+      }
     }
   }
 
@@ -131,49 +138,56 @@ function SearchableStudentSelect({ students, onSelect }: SearchableStudentSelect
         onChange={(e) => {
           setQuery(e.target.value);
           setIsOpen(true);
-          setHighlightIndex(-1);
         }}
-        onFocus={() => setIsOpen(true)}
-        onClick={() => setIsOpen(true)}
+        onFocus={() => !disabled && setIsOpen(true)}
+        onClick={() => !disabled && setIsOpen(true)}
         onKeyDown={handleKeyDown}
-        placeholder="Search students..."
+        placeholder={disabled ? "Select grade first" : "Search students..."}
         className="border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none w-56"
         data-testid="add-student-select"
         role="combobox"
         aria-expanded={isOpen}
-        aria-autocomplete="list"
         aria-controls="student-search-listbox"
+        aria-activedescendant={highlightIndex >= 0 && filtered[highlightIndex] ? `student-opt-${filtered[highlightIndex].id}` : undefined}
         autoComplete="off"
+        disabled={disabled}
       />
-      {isOpen && (
+      {isOpen && !disabled && (
         <ul
           ref={listRef}
           id="student-search-listbox"
-          role="listbox"
           data-testid="student-search-listbox"
+          role="listbox"
           className="absolute z-20 mt-1 max-h-48 w-full overflow-auto border-2 border-border bg-bg-card shadow-md"
         >
           {filtered.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-text-muted" role="option" aria-selected={false}>
-              No matches
+            <li className="px-3 py-2 text-sm text-text-muted">
+              {query.trim() === "" ? emptyMessage : "No matches"}
             </li>
           ) : (
-            filtered.map((s, idx) => (
+            filtered.map((s, index) => (
               <li
                 key={s.id}
-                role="option"
-                aria-selected={highlightIndex === idx}
+                id={`student-opt-${s.id}`}
                 data-testid={`student-option-${s.id}`}
-                className={`cursor-pointer px-3 py-2 text-sm ${
-                  highlightIndex === idx ? "bg-accent/10 text-accent" : "text-text-primary hover:bg-bg-card-alt"
-                }`}
-                onMouseEnter={() => setHighlightIndex(idx)}
-                onMouseDown={(e) => {
-                  e.preventDefault(); // prevent input blur before click registers
-                  selectStudent(Number(s.id));
-                }}
+                role="option"
+                aria-selected={index === highlightIndex}
+                className={`px-3 py-2 text-sm text-text-primary hover:bg-bg-card-alt${index === highlightIndex ? " bg-bg-card-alt" : ""}`}
               >
-                {getStudentDisplayName(s)}
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    tabIndex={-1}
+                    data-testid={`student-checkbox-${s.id}`}
+                    onChange={() => {
+                      onToggle(Number(s.id));
+                      setQuery("");
+                      setIsOpen(true);
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                  />
+                  <span>{getStudentDisplayName(s)}</span>
+                </label>
               </li>
             ))
           )}
@@ -192,8 +206,9 @@ export default function IndividualStudentDiscussionForm({
   const [availableStudents, setAvailableStudents] = useState<Student[]>([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState<string | null>(null);
-  const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
+  const [selectedGrade, setSelectedGrade] = useState<ValidGrade | null>(null);
+  const [pendingStudentIds, setPendingStudentIds] = useState<number[]>([]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [revealedRemarks, setRevealedRemarks] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -227,15 +242,30 @@ export default function IndividualStudentDiscussionForm({
     return () => { cancelled = true; };
   }, [schoolCode, selectedGrade]);
 
-  const recordedStudents = getStudentEntriesFromData(data);
+  const entries = getEntriesFromData(data);
   const recordedStudentIds = useMemo(
-    () => new Set(recordedStudents.map((s) => s.id)),
-    [recordedStudents]
+    () => new Set(entries.flatMap((entry) => entry.students.map((student) => student.id))),
+    [entries]
+  );
+  const pendingStudentIdSet = useMemo(
+    () => new Set(pendingStudentIds),
+    [pendingStudentIds]
   );
 
   const remainingStudents = useMemo(
-    () => availableStudents.filter((s) => !recordedStudentIds.has(Number(s.id))),
-    [availableStudents, recordedStudentIds]
+    () =>
+      availableStudents.filter(
+        (s) => !recordedStudentIds.has(Number(s.id)) && !pendingStudentIdSet.has(Number(s.id))
+      ),
+    [availableStudents, pendingStudentIdSet, recordedStudentIds]
+  );
+
+  const pendingStudents = useMemo(
+    () =>
+      pendingStudentIds
+        .map((id) => availableStudents.find((student) => Number(student.id) === id))
+        .filter((student): student is Student => student !== undefined),
+    [availableStudents, pendingStudentIds]
   );
 
   const availableStudentsRef = useRef(availableStudents);
@@ -244,7 +274,7 @@ export default function IndividualStudentDiscussionForm({
   const selectedGradeRef = useRef(selectedGrade);
   selectedGradeRef.current = selectedGrade;
 
-  const toggleSection = useCallback((id: number) => {
+  const toggleSection = useCallback((id: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -253,38 +283,60 @@ export default function IndividualStudentDiscussionForm({
     });
   }, []);
 
-  const handleAddStudent = useCallback(
-    (studentId: number) => {
-      const student = availableStudentsRef.current.find((s) => Number(s.id) === studentId);
-      if (!student) return;
-      const name = getStudentDisplayName(student);
-      const grade = selectedGradeRef.current;
+  const handleTogglePendingStudent = useCallback((studentId: number) => {
+    setPendingStudentIds((current) =>
+      current.includes(studentId)
+        ? current.filter((id) => id !== studentId)
+        : [...current, studentId]
+    );
+  }, []);
 
+  const handleRemovePendingStudent = useCallback((studentId: number) => {
+    setPendingStudentIds((current) => current.filter((id) => id !== studentId));
+  }, []);
+
+  const handleAddEntry = useCallback(
+    () => {
+      const grade = selectedGradeRef.current;
+      if (grade === null || pendingStudentIds.length === 0) return;
+
+      const selectedStudents = pendingStudentIds
+        .map((id) => availableStudentsRef.current.find((student) => Number(student.id) === id))
+        .filter((student): student is Student => student !== undefined);
+      if (selectedStudents.length === 0) return;
+
+      const entryId = globalThis.crypto.randomUUID();
+      const students: IndividualStudentRef[] = selectedStudents.map((student) => ({
+        id: Number(student.id),
+        name: getStudentDisplayName(student),
+      }));
+
+      setPendingStudentIds([]);
       setData((current) => {
-        const entries = getStudentEntriesFromData(current);
-        const newEntry: IndividualStudentEntry = {
-          id: Number(student.id),
-          name,
-          grade: grade ?? 11,
+        const currentEntries = getEntriesFromData(current);
+        const newEntry: IndividualStudentDiscussionEntry = {
+          id: entryId,
+          grade,
+          students,
           questions: {},
         };
-        return { ...current, students: [...entries, newEntry] };
+        return { ...current, entries: [...currentEntries, newEntry] };
       });
 
-      setExpandedIds((prev) => new Set(prev).add(Number(student.id)));
+      setExpandedIds((prev) => new Set(prev).add(entryId));
     },
-    [setData]
+    [pendingStudentIds, setData]
   );
 
-  const handleRemoveStudent = useCallback(
-    (studentId: number) => {
+  const handleRemoveEntry = useCallback(
+    (entryId: string) => {
       setData((current) => {
-        const entries = getStudentEntriesFromData(current);
-        return { ...current, students: entries.filter((s) => s.id !== studentId) };
+        const currentEntries = getEntriesFromData(current);
+        return { ...current, entries: currentEntries.filter((entry) => entry.id !== entryId) };
       });
       setExpandedIds((prev) => {
         const next = new Set(prev);
-        next.delete(studentId);
+        next.delete(entryId);
         return next;
       });
     },
@@ -292,19 +344,19 @@ export default function IndividualStudentDiscussionForm({
   );
 
   const handleAnswerChange = useCallback(
-    (studentId: number, questionKey: string, answer: boolean) => {
+    (entryId: string, questionKey: string, answer: boolean) => {
       setData((current) => {
-        const entries = getStudentEntriesFromData(current);
+        const currentEntries = getEntriesFromData(current);
         return {
           ...current,
-          students: entries.map((s) => {
-            if (s.id !== studentId) return s;
-            const questions = { ...s.questions };
+          entries: currentEntries.map((entry) => {
+            if (entry.id !== entryId) return entry;
+            const questions = { ...entry.questions };
             const existing = isPlainObject(questions[questionKey])
               ? { ...(questions[questionKey] as Record<string, unknown>) }
               : {};
             questions[questionKey] = { ...existing, answer } as { answer: boolean | null; remark?: string };
-            return { ...s, questions };
+            return { ...entry, questions };
           }),
         };
       });
@@ -313,19 +365,19 @@ export default function IndividualStudentDiscussionForm({
   );
 
   const handleRemarkChange = useCallback(
-    (studentId: number, questionKey: string, remark: string) => {
+    (entryId: string, questionKey: string, remark: string) => {
       setData((current) => {
-        const entries = getStudentEntriesFromData(current);
+        const currentEntries = getEntriesFromData(current);
         return {
           ...current,
-          students: entries.map((s) => {
-            if (s.id !== studentId) return s;
-            const questions = { ...s.questions };
+          entries: currentEntries.map((entry) => {
+            if (entry.id !== entryId) return entry;
+            const questions = { ...entry.questions };
             const existing = isPlainObject(questions[questionKey])
               ? { ...(questions[questionKey] as Record<string, unknown>) }
               : {};
             questions[questionKey] = { ...existing, remark } as { answer: boolean | null; remark?: string };
-            return { ...s, questions };
+            return { ...entry, questions };
           }),
         };
       });
@@ -335,9 +387,10 @@ export default function IndividualStudentDiscussionForm({
 
   return (
     <div className="space-y-4" data-testid="action-renderer-individual_student_discussion">
-      {/* Grade filter + Student select */}
+      {/* Grade filter + pending student selection */}
       {!disabled && (
-        <FormSection spacing="" className="flex flex-wrap items-end gap-3">
+        <FormSection spacing="" className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-sm font-semibold text-text-primary uppercase mb-2">
               Grade
@@ -345,8 +398,8 @@ export default function IndividualStudentDiscussionForm({
             <Select
               value={selectedGrade ?? ""}
               onChange={(e) => {
-                const val = Number(e.target.value);
-                setSelectedGrade(val || null);
+                setSelectedGrade(parseGrade(e.target.value));
+                setPendingStudentIds([]);
               }}
               data-testid="student-grade-filter"
             >
@@ -361,11 +414,47 @@ export default function IndividualStudentDiscussionForm({
             </Select>
           </div>
 
-          {selectedGrade !== null && !studentsLoading && !studentsError && remainingStudents.length > 0 && (
+          {!studentsLoading && !studentsError && (
             <SearchableStudentSelect
               students={remainingStudents}
-              onSelect={handleAddStudent}
+              disabled={selectedGrade === null}
+              onToggle={handleTogglePendingStudent}
+              emptyMessage="No students in this grade"
             />
+          )}
+
+          {selectedGrade !== null && pendingStudentIds.length > 0 && (
+            <button
+              type="button"
+              onClick={handleAddEntry}
+              className="min-h-[44px] border-2 border-accent px-4 py-2 text-sm font-semibold text-accent hover:bg-hover-bg"
+              data-testid="add-individual-student-entry"
+            >
+              Add Entry
+            </button>
+          )}
+          </div>
+
+          {pendingStudents.length > 0 && (
+            <div className="flex flex-wrap gap-2" data-testid="pending-student-chips">
+              {pendingStudents.map((student) => (
+                <span
+                  key={student.id}
+                  className="inline-flex items-center gap-2 border border-border bg-bg-card-alt px-2 py-1 text-sm text-text-primary"
+                  data-testid={`pending-student-chip-${student.id}`}
+                >
+                  {getStudentDisplayName(student)}
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePendingStudent(Number(student.id))}
+                    className="text-text-muted hover:text-danger"
+                    aria-label={`Remove ${getStudentDisplayName(student)}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
           )}
         </FormSection>
       )}
@@ -384,48 +473,58 @@ export default function IndividualStudentDiscussionForm({
       )}
 
       {/* Progress bar */}
-      {recordedStudents.length > 0 && (
+      {entries.length > 0 && (
         <StickyProgressBar
           data-testid="individual-student-progress"
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-primary">
             <span className="font-mono font-bold text-accent">
-              Students: {recordedStudents.length}
+              Entries: {entries.length} | Students: {getStudentCount(entries)}
             </span>
           </div>
         </StickyProgressBar>
       )}
 
-      {/* Student sections */}
-      {recordedStudents.map((entry) => {
+      {/* Entry sections */}
+      {entries.map((entry) => {
         const isExpanded = expandedIds.has(entry.id);
         const progress = getQuestionProgress(entry);
+        const stackedNames = getStackedStudentNames(entry.students);
 
         return (
           <div
             key={entry.id}
             className="border border-border"
-            data-testid={`student-section-${entry.id}`}
+            data-testid={`entry-section-${entry.id}`}
           >
             {/* Header — always visible */}
             <button
               type="button"
               onClick={() => toggleSection(entry.id)}
               className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-bg-card-alt"
-              data-testid={`student-header-${entry.id}`}
+              data-testid={`entry-header-${entry.id}`}
             >
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-text-primary">
-                  {entry.name || `Student #${entry.id}`}
+              <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+                <span
+                  className="flex min-w-0 flex-col text-sm font-semibold text-text-primary"
+                  data-testid={`entry-student-names-${entry.id}`}
+                >
+                  {stackedNames.map((name, index) => (
+                    <span key={`${entry.id}-${index}`} className="truncate">
+                      {name}
+                    </span>
+                  ))}
                 </span>
+                <span className="flex shrink-0 items-center gap-3">
                 <span
                   className="rounded-full px-2 py-0.5 text-xs font-medium bg-hover-bg text-accent-hover"
-                  data-testid={`student-grade-badge-${entry.id}`}
+                  data-testid={`entry-grade-badge-${entry.id}`}
                 >
                   Grade {entry.grade}
                 </span>
-                <span className="text-xs text-text-muted" data-testid={`student-progress-${entry.id}`}>
+                <span className="text-xs text-text-muted" data-testid={`entry-progress-${entry.id}`}>
                   {progress}
+                </span>
                 </span>
               </div>
               <span className="text-text-muted">
@@ -481,8 +580,8 @@ export default function IndividualStudentDiscussionForm({
                                   name={`student-${entry.id}-${question.key}`}
                                   value={answer}
                                   onChange={(val) => handleAnswerChange(entry.id, question.key, val)}
-                                  yesTestId={`student-${entry.id}-${question.key}-yes`}
-                                  noTestId={`student-${entry.id}-${question.key}-no`}
+                                  yesTestId={`entry-${entry.id}-${question.key}-yes`}
+                                  noTestId={`entry-${entry.id}-${question.key}-no`}
                                 />
                               </fieldset>
 
@@ -507,7 +606,7 @@ export default function IndividualStudentDiscussionForm({
                                     onChange={(e) => handleRemarkChange(entry.id, question.key, e.target.value)}
                                     placeholder="Optional remark"
                                     className="w-full border-2 border-border px-3 py-2 text-sm focus:border-accent focus:outline-none"
-                                    data-testid={`student-${entry.id}-${question.key}-remark`}
+                                    data-testid={`entry-${entry.id}-${question.key}-remark`}
                                   />
                                 </label>
                               )}
@@ -520,11 +619,11 @@ export default function IndividualStudentDiscussionForm({
                     {/* Remove button */}
                     <button
                       type="button"
-                      onClick={() => handleRemoveStudent(entry.id)}
+                      onClick={() => handleRemoveEntry(entry.id)}
                       className="text-sm font-medium text-danger underline hover:text-danger/80"
-                      data-testid={`remove-student-${entry.id}`}
+                      data-testid={`remove-entry-${entry.id}`}
                     >
-                      Remove Student
+                      Delete Entry
                     </button>
                   </>
                 )}

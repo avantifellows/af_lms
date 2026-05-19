@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import { CURRENT_RUBRIC_VERSION } from "@/lib/classroom-observation-rubric";
@@ -137,6 +137,7 @@ describe("VisitActionDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
     // Default fetch mock for teacher API (ClassroomObservationForm fetches teachers on mount)
     vi.stubGlobal(
       "fetch",
@@ -145,6 +146,10 @@ describe("VisitActionDetailPage", () => {
         json: () => Promise.resolve({ teachers: [] }),
       })
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("loads the classroom observation renderer for classroom_observation actions", async () => {
@@ -1270,7 +1275,7 @@ describe("VisitActionDetailPage", () => {
       .mockResolvedValueOnce([
         makeAction({
           action_type: "individual_student_discussion",
-          data: { students: [] },
+          data: { entries: [] },
         }),
       ]);
 
@@ -1281,7 +1286,7 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getAllByTestId("action-renderer-individual_student_discussion")).toHaveLength(2);
   });
 
-  it("bootstraps null individual student discussion data to { students: [] }", async () => {
+  it("bootstraps null individual student discussion data to { entries: [] }", async () => {
     setupPmAuth();
     mockQuery
       .mockResolvedValueOnce([makeVisit()])
@@ -1299,7 +1304,7 @@ describe("VisitActionDetailPage", () => {
           Promise.resolve({
             action: makeAction({
               action_type: "individual_student_discussion",
-              data: { students: [] },
+              data: { entries: [] },
             }),
           }),
       })
@@ -1321,7 +1326,130 @@ describe("VisitActionDetailPage", () => {
     expect(init.method).toBe("PATCH");
 
     const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
-    expect(body.data).toEqual({ students: [] });
+    expect(body.data).toEqual({ entries: [] });
+  });
+
+  it("sanitizes individual student discussion entries without converting legacy shape", async () => {
+    setupPmAuth();
+    const dirtyEntriesData = {
+      entries: [
+        {
+          id: "entry-1",
+          grade: 11,
+          unknown: "drop",
+          students: [
+            { id: 1, name: "Test Student", grade: 11, extra: "drop" },
+            { id: "bad", name: "Bad Student", grade: 11 },
+          ],
+          questions: {
+            oh_teaching_concern: { answer: true, remark: "Needs support", extra: "drop" },
+            oh_additional_support: { answer: null },
+            unknown_question: { answer: true },
+          },
+        },
+      ],
+      extraTopLevel: "drop",
+    };
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: dirtyEntriesData,
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "individual_student_discussion",
+              data: {
+                entries: [
+                  {
+                    id: "entry-1",
+                    grade: 11,
+                    students: [{ id: 1, name: "Test Student" }],
+                    questions: {
+                      oh_teaching_concern: { answer: true, remark: "Needs support" },
+                      oh_additional_support: { answer: null },
+                    },
+                  },
+                ],
+              },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({
+      entries: [
+        {
+          id: "entry-1",
+          grade: 11,
+          students: [{ id: 1, name: "Test Student" }],
+          questions: {
+            oh_teaching_concern: { answer: true, remark: "Needs support" },
+            oh_additional_support: { answer: null },
+          },
+        },
+      ],
+    });
+  });
+
+  it("bootstraps null/missing individual student discussion data to { entries: [] }", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([
+        makeAction({
+          action_type: "individual_student_discussion",
+          data: null,
+        }),
+      ]);
+
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            action: makeAction({
+              action_type: "individual_student_discussion",
+              data: { entries: [] },
+            }),
+          }),
+      })
+    ) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
+    await user.click(screen.getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { data: Record<string, unknown> };
+    expect(body.data).toEqual({ entries: [] });
   });
 
   it("auto-saves group student discussion data before calling /end", async () => {
@@ -1396,14 +1524,14 @@ describe("VisitActionDetailPage", () => {
     expect(endInit.method).toBe("POST");
   });
 
-  it("shows individual student /end 422 guidance with type-specific message mentioning add at least one student", async () => {
+  it("shows individual student /end 422 guidance with type-specific message mentioning add at least one entry", async () => {
     setupPmAuth();
     const individualStudentData = {
-      students: [
+      entries: [
         {
-          id: 1,
-          name: "Test Student",
+          id: "entry-1",
           grade: 11,
+          students: [{ id: 1, name: "Test Student" }],
           questions: Object.fromEntries(
             INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
           ),
@@ -1460,7 +1588,7 @@ describe("VisitActionDetailPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("Please complete all required fields and add at least one student before ending this interaction.")
+        screen.getByText("Please complete all required fields and add at least one entry before ending this interaction.")
       ).toBeInTheDocument();
     });
 

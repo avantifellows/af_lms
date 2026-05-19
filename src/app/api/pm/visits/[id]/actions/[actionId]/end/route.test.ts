@@ -180,7 +180,23 @@ function buildValidIndividualStudentDiscussionData() {
     INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
   );
   return {
-    students: [{ id: 1, name: "Student A", grade: 11, questions }],
+    entries: [{ id: "entry-1", grade: 11, students: [{ id: 1, name: "Student A" }], questions }],
+  };
+}
+
+function buildValidIndividualStudentDiscussionEntriesData() {
+  const questions = Object.fromEntries(
+    INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
+  );
+  return {
+    entries: [
+      {
+        id: "entry-1",
+        grade: 11,
+        students: [{ id: 1, name: "Student A" }],
+        questions,
+      },
+    ],
   };
 }
 
@@ -1190,12 +1206,50 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     expect(json.action.action_type).toBe("individual_student_discussion");
   });
 
+  it("ends individual student discussion with entries-shaped data without updating the data column", async () => {
+    setupPmEdit();
+    const isdData = buildValidIndividualStudentDiscussionEntriesData();
+    const completedISDAction = {
+      ...COMPLETED_ACTION,
+      action_type: "individual_student_discussion",
+      data: isdData,
+    };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_student_discussion",
+          data: isdData,
+        },
+      ])
+      .mockResolvedValueOnce([completedISDAction]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.status).toBe("completed");
+    expect(json.action.data).toEqual(isdData);
+
+    const queryTexts = mockQuery.mock.calls.map(([queryText]) => queryText as string);
+    const updateQueryText = queryTexts[2];
+    expect(updateQueryText).toContain("UPDATE lms_pm_school_visit_actions");
+    expect(updateQueryText).not.toContain("data =");
+    expect(queryTexts.join("\n")).not.toContain("user_permission");
+  });
+
   it("concurrent fallback validates individual student discussion data", async () => {
     setupPmEdit();
     const validData = buildValidIndividualStudentDiscussionData();
     const incompleteData = {
-      students: [
-        { id: 1, name: "Student 1", grade: 11, questions: {} },
+      entries: [
+        { id: "entry-1", grade: 11, students: [{ id: 1, name: "Student 1" }], questions: {} },
       ],
     };
     mockQuery

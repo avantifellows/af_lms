@@ -190,7 +190,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <header className="bg-white shadow">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
             <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-            <div className="text-sm text-gray-500">{session.user.email}</div>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-500">{session.user.email}</span>
+              <a href="/api/auth/signout" className="text-sm font-bold text-red-600 hover:text-red-500">Sign out</a>
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -213,7 +216,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <header className="bg-white shadow">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
             <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-            <div className="text-sm text-gray-500">{session.user.email}</div>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-500">{session.user.email}</span>
+              <a href="/api/auth/signout" className="text-sm font-bold text-red-600 hover:text-red-500">Sign out</a>
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">

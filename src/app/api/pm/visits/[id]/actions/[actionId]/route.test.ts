@@ -130,12 +130,19 @@ function buildValidGroupStudentDiscussionData() {
   return { grade: 11, questions };
 }
 
-function buildValidIndividualStudentDiscussionData() {
+function buildValidIndividualStudentDiscussionEntriesData() {
   const questions = Object.fromEntries(
     INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
   );
   return {
-    students: [{ id: 1, name: "Student A", grade: 11, questions }],
+    entries: [
+      {
+        id: "entry-1",
+        grade: 11,
+        students: [{ id: 1, name: "Student A" }],
+        questions,
+      },
+    ],
   };
 }
 
@@ -1245,6 +1252,31 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ action: updated });
   });
 
+  it("stores entries-shaped individual student discussion data as-is", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "individual_student_discussion" };
+    const payload = buildValidIndividualStudentDiscussionEntriesData();
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockImplementationOnce(async (_queryText, queryParams) => {
+        const stored = JSON.parse((queryParams as unknown[])[2] as string);
+        return [{ ...action, data: stored }];
+      });
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: { ...action, data: payload } });
+    const [, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(JSON.parse(updateParams[2] as string)).toEqual(payload);
+  });
+
   it("returns 422 for individual student discussion with unknown top-level keys (lenient)", async () => {
     setupPmView();
     mockQuery
@@ -1292,7 +1324,7 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     const json = await res.json();
     expect(json.error).toBe("Invalid individual student discussion data");
     expect(json.details).toEqual(
-      expect.arrayContaining([expect.stringContaining("At least one student")])
+      expect.arrayContaining([expect.stringContaining("At least one entry")])
     );
   });
 
