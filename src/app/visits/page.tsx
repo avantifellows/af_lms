@@ -10,7 +10,7 @@ import {
 } from "@/lib/visits-policy";
 import Link from "next/link";
 import DeleteVisitButton from "@/components/visits/DeleteVisitButton";
-import { Card, Input, Select, FormLabel, Button } from "@/components/ui";
+import { Card } from "@/components/ui";
 
 interface Visit {
   id: number;
@@ -143,18 +143,16 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
   }
 
   const filters = normalizeVisitFilters(rawSearchParams);
-  const isScopedRole = permission.role === "admin" || permission.role === "program_admin";
   const scopedFilters: VisitFilters = {
     schoolCode: filters.schoolCode,
     status: filters.status,
-    pmEmail: isScopedRole ? filters.pmEmail : undefined,
   };
 
   const visits = await getVisits(session.user.email, permission, scopedFilters);
 
   const inProgress = visits.filter((v) => v.status === "in_progress");
   const completed = visits.filter((v) => v.status === "completed");
-  const canDeleteVisits = permission.role === "program_manager" || permission.role === "admin";
+  const canDeleteVisits = permission.role === "program_manager";
 
   return (
     <div className="min-h-screen bg-bg">
@@ -173,14 +171,6 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
             </nav>
           </div>
           <div className="flex items-center gap-4">
-            {permission.role === "admin" && (
-              <Link
-                href="/admin"
-                className="text-sm font-bold text-accent hover:text-accent-hover uppercase"
-              >
-                Admin
-              </Link>
-            )}
             <span className="text-sm text-text-muted font-mono hidden sm:inline">{session.user.email}</span>
             <Link
               href="/api/auth/signout"
@@ -199,67 +189,6 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
             {visits.length} total ({inProgress.length} in progress)
           </div>
         </div>
-
-        {isScopedRole && (
-          <form method="get">
-          <Card elevation="sm" className="mb-6 p-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <FormLabel htmlFor="school_code">
-                  School Code
-                </FormLabel>
-                <Input
-                  id="school_code"
-                  name="school_code"
-                  defaultValue={scopedFilters.schoolCode || ""}
-                  placeholder="e.g. 70705"
-                />
-              </div>
-              <div>
-                <FormLabel htmlFor="status">
-                  Status
-                </FormLabel>
-                <Select
-                  id="status"
-                  name="status"
-                  defaultValue={scopedFilters.status || ""}
-                >
-                  <option value="">All</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                </Select>
-              </div>
-              <div>
-                <FormLabel htmlFor="pm_email">
-                  PM Email
-                </FormLabel>
-                <Input
-                  id="pm_email"
-                  name="pm_email"
-                  type="email"
-                  defaultValue={scopedFilters.pmEmail || ""}
-                  placeholder="pm@avantifellows.org"
-                />
-              </div>
-              <div className="flex items-end gap-2 sm:col-span-1">
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="flex-1 sm:flex-none uppercase tracking-wide"
-                >
-                  Apply
-                </Button>
-                <Link
-                  href="/visits"
-                  className="inline-flex items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-bold uppercase tracking-wide text-text-secondary shadow-sm hover:bg-hover-bg active:bg-bg-card-alt min-h-[36px] py-1.5 flex-1 sm:flex-none"
-                >
-                  Reset
-                </Link>
-              </div>
-            </div>
-          </Card>
-          </form>
-        )}
 
         {/* In Progress Section */}
         {inProgress.length > 0 && (

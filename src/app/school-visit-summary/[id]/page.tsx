@@ -163,11 +163,13 @@ function statsChips(actionType: string, stats: unknown): string[] {
   }
   if (actionType === "individual_student_discussion") {
     const avgAnswered = formatNumber(stats.avgAnswered);
-    return [
-      `Entries ${stats.entryCount}`,
-      `Students ${stats.studentCount}`,
-      `Avg answered ${avgAnswered ?? "-"}/${stats.totalQuestions}`,
-    ];
+    const chips: string[] = [];
+    if (stats.entryCount !== null) {
+      chips.push(`Entries ${stats.entryCount}`);
+    }
+    chips.push(`Students ${stats.studentCount}`);
+    chips.push(`Avg answered ${avgAnswered ?? "-"}/${stats.totalQuestions}`);
+    return chips;
   }
   if (actionType === "school_staff_interaction") {
     return [`Answered ${stats.answeredCount}/${stats.totalQuestions}`];
@@ -227,7 +229,7 @@ async function getVisitSummaryDetail(id: string, actorEmail: string, permission:
   }
 
   const visits = await query<VisitSummaryDetail>(
-    `SELECT v.*, s.name AS school_name, s.code AS school_code, up.full_name AS pm_name
+    `SELECT v.*, s.name AS school_name, up.full_name AS pm_name
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
@@ -421,6 +423,10 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
       redirect("/visits");
     }
     redirect("/dashboard");
+  }
+
+  if (!/^\d+$/.test(id)) {
+    notFound();
   }
 
   const { visit, actions } = await getVisitSummaryDetail(id, session.user.email, permission);

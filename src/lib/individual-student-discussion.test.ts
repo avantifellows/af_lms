@@ -341,9 +341,15 @@ describe("individual student discussion summary extractors", () => {
     });
   });
 
-  it("returns empty remarks and null stats for legacy students shape", () => {
+  it("returns student-only stats for legacy students shape and empty for null/undefined", () => {
     expect(extractRemarks({ students: [{ id: 1, name: "Alice" }] })).toEqual([]);
-    expect(computeInlineStats({ students: [{ id: 1, name: "Alice" }] })).toBeNull();
+    expect(computeInlineStats({ students: [{ id: 1, name: "Alice" }] })).toEqual({
+      entryCount: null,
+      studentCount: 1,
+      avgAnswered: null,
+      totalQuestions: 2,
+    });
+    expect(computeInlineStats({ students: [] })).toBeNull();
     expect(extractRemarks(null)).toEqual([]);
     expect(computeInlineStats(undefined)).toBeNull();
   });

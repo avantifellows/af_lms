@@ -44,6 +44,7 @@ export default function VisitSummaryFilterBar({
   const router = useRouter();
   const pathname = usePathname();
   const debounceRef = useRef<number | null>(null);
+  const pendingUpdatesRef = useRef<Record<string, string | undefined>>({});
   const [selectedSchools, setSelectedSchools] = useState(() => parseListParam(currentParams.schools));
   const [selectedPms, setSelectedPms] = useState(() => parseListParam(currentParams.pms));
   const [status, setStatus] = useState(currentParams.status || "");
@@ -63,19 +64,24 @@ export default function VisitSummaryFilterBar({
   const missingPms = selectedPms.filter((email) => !pmOptionEmails.has(email));
 
   function replaceWith(updates: Record<string, string | undefined>) {
+    Object.assign(pendingUpdatesRef.current, updates);
+
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
 
     debounceRef.current = window.setTimeout(() => {
+      const merged = pendingUpdatesRef.current;
+      pendingUpdatesRef.current = {};
+
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(currentParams)) {
-        if (value && !(key in updates)) {
+        if (value && !(key in merged)) {
           params.set(key, value);
         }
       }
       params.set("page", "1");
-      for (const [key, value] of Object.entries(updates)) {
+      for (const [key, value] of Object.entries(merged)) {
         if (value) {
           params.set(key, value);
         } else {

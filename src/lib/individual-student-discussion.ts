@@ -359,30 +359,43 @@ export function extractRemarks(data: unknown): RemarkEntry[] {
 }
 
 export function computeInlineStats(data: unknown): {
-  entryCount: number;
+  entryCount: number | null;
   studentCount: number;
   avgAnswered: number | null;
   totalQuestions: number;
 } | null {
-  if (!isPlainObject(data) || !Array.isArray(data.entries)) {
+  if (!isPlainObject(data)) {
     return null;
   }
 
-  const entries = getEntriesFromData(data);
-  if (entries.length === 0) {
-    return null;
+  if (Array.isArray(data.entries)) {
+    const entries = getEntriesFromData(data);
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const answeredSum = entries.reduce(
+      (sum, entry) => sum + answeredCountForQuestions(entry.questions),
+      0
+    );
+    const studentCount = entries.reduce((sum, entry) => sum + entry.students.length, 0);
+
+    return {
+      entryCount: entries.length,
+      studentCount,
+      avgAnswered: answeredSum / entries.length,
+      totalQuestions: INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length,
+    };
   }
 
-  const answeredSum = entries.reduce(
-    (sum, entry) => sum + answeredCountForQuestions(entry.questions),
-    0
-  );
-  const studentCount = entries.reduce((sum, entry) => sum + entry.students.length, 0);
+  if (Array.isArray(data.students) && data.students.length > 0) {
+    return {
+      entryCount: null,
+      studentCount: data.students.length,
+      avgAnswered: null,
+      totalQuestions: INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length,
+    };
+  }
 
-  return {
-    entryCount: entries.length,
-    studentCount,
-    avgAnswered: answeredSum / entries.length,
-    totalQuestions: INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length,
-  };
+  return null;
 }
