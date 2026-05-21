@@ -38,6 +38,7 @@ interface ActionDetail {
 
 interface PageProps {
   params: Promise<{ id: string; actionId: string }>;
+  searchParams: Promise<{ from?: string }>;
 }
 
 async function getActionDetail(visitId: string, actionId: string): Promise<ActionDetail> {
@@ -71,13 +72,17 @@ async function getActionDetail(visitId: string, actionId: string): Promise<Actio
   };
 }
 
-function notFoundState(title: string, description: string) {
+function backLinkLabel(backHref: string) {
+  return backHref === "/school-visit-summary" ? "← Back to Visit Summary" : "← Back to Visits";
+}
+
+function notFoundState(title: string, description: string, backHref = "/visits") {
   return (
     <main className="min-h-screen bg-bg">
       <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
         <div className="mb-4">
-          <Link href="/visits" className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
-            &larr; Back to Visits
+          <Link href={backHref} className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
+            {backLinkLabel(backHref)}
           </Link>
         </div>
         <div className="border border-danger/20 bg-danger-bg p-4" role="alert">
@@ -89,13 +94,13 @@ function notFoundState(title: string, description: string) {
   );
 }
 
-function forbiddenState() {
+function forbiddenState(backHref = "/visits") {
   return (
     <main className="min-h-screen bg-bg">
       <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
         <div className="mb-4">
-          <Link href="/visits" className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
-            &larr; Back to Visits
+          <Link href={backHref} className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
+            {backLinkLabel(backHref)}
           </Link>
         </div>
         <div className="border border-warning-border bg-warning-bg p-4" role="alert">
@@ -106,8 +111,11 @@ function forbiddenState() {
   );
 }
 
-export default async function VisitActionDetailPage({ params }: PageProps) {
+export default async function VisitActionDetailPage({ params, searchParams }: PageProps) {
   const { id, actionId } = await params;
+  const { from } = await searchParams;
+  const backToSummary = from === "summary";
+  const fallbackBackHref = backToSummary ? "/school-visit-summary" : "/visits";
   const session = await getServerSession(authOptions);
 
   if (!session) {
@@ -136,7 +144,7 @@ export default async function VisitActionDetailPage({ params }: PageProps) {
 
   const detail = await getActionDetail(id, actionId);
   if (!detail.visit) {
-    return notFoundState("Visit not found", "The requested visit does not exist.");
+    return notFoundState("Visit not found", "The requested visit does not exist.", fallbackBackHref);
   }
 
   const actor = buildVisitsActor(session.user.email, permission);
@@ -147,11 +155,11 @@ export default async function VisitActionDetailPage({ params }: PageProps) {
   });
 
   if (!canView) {
-    return forbiddenState();
+    return forbiddenState(fallbackBackHref);
   }
 
   if (!detail.action) {
-    return notFoundState("Action not found", "This action may have been deleted.");
+    return notFoundState("Action not found", "This action may have been deleted.", fallbackBackHref);
   }
 
   const canWrite = canEditVisit(actor, {
@@ -164,8 +172,11 @@ export default async function VisitActionDetailPage({ params }: PageProps) {
     <main className="min-h-screen bg-bg">
       <div className="px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 py-6 md:py-8">
         <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 md:-mx-16 lg:-mx-32 xl:-mx-64 2xl:-mx-96 px-4 sm:px-6 md:px-16 lg:px-32 xl:px-64 2xl:px-96 bg-bg py-3 mb-1">
-          <Link href={`/visits/${detail.visit.id}`} className="text-sm text-accent hover:text-accent-hover font-semibold uppercase">
-            &larr; Back to Visit
+          <Link
+            href={backToSummary ? `/school-visit-summary/${id}` : `/visits/${detail.visit.id}`}
+            className="text-sm text-accent hover:text-accent-hover font-semibold uppercase"
+          >
+            {backToSummary ? "← Back to Visit Summary" : "← Back to Visit"}
           </Link>
         </div>
 

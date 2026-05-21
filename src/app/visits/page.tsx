@@ -138,6 +138,10 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
     redirect("/dashboard");
   }
 
+  if (permission.role === "admin" || permission.role === "program_admin") {
+    redirect("/school-visit-summary");
+  }
+
   const filters = normalizeVisitFilters(rawSearchParams);
   const isScopedRole = permission.role === "admin" || permission.role === "program_admin";
   const scopedFilters: VisitFilters = {
@@ -162,15 +166,9 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
             <nav className="flex gap-4">
               <Link
                 href="/dashboard"
-                className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
-              >
-                Schools
-              </Link>
-              <Link
-                href="/visits"
                 className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1"
               >
-                Visits
+                Schools
               </Link>
             </nav>
           </div>
