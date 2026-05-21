@@ -48,6 +48,14 @@ _Avoid_: Group (overloaded — `group` is a DB table and `group_student_discussi
 Setting `deleted_at` timestamp instead of removing the row. Used for actions and (issue #35) visits.
 _Avoid_: Archive, deactivate
 
+**School Visit Summary**:
+An admin-facing read-only dashboard for reviewing all visits across schools. Two pages: a filterable list view (`/school-visit-summary`) and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
+_Avoid_: Visit dashboard, visit report, visit overview
+
+**Remark**:
+A freeform text note attached to a question answer within an action's JSONB `data` payload. Used as "visit notes" on the summary detail page.
+_Avoid_: Note, comment (these imply a separate entity; remarks live inside action data)
+
 ### Roles & Access
 
 **PM (Program Manager)**:
