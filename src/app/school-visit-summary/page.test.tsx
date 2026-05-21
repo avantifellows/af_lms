@@ -19,7 +19,11 @@ const {
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
+vi.mock("next/navigation", () => ({
+  redirect: mockRedirect,
+  usePathname: () => "/school-visit-summary",
+  useRouter: () => ({ replace: vi.fn() }),
+}));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
   getFeatureAccess: mockGetFeatureAccess,
@@ -159,14 +163,20 @@ function setupSummaryQueries({
   stats = aggregateStats,
   visits = [summaryVisit],
   actions = summaryActionRows,
+  schoolOptions = [{ code: "SC001", name: "Test School" }],
+  pmOptions = [{ email: "pm@avantifellows.org", name: "Program Manager" }],
 }: {
   stats?: typeof aggregateStats | typeof emptyAggregateStats;
   visits?: Array<typeof summaryVisit>;
   actions?: Array<{ visit_id: number; action_type: string; status: string }>;
+  schoolOptions?: Array<{ code: string; name: string }>;
+  pmOptions?: Array<{ email: string; name: string | null }>;
 } = {}) {
   mockQuery
     .mockResolvedValueOnce([stats])
     .mockResolvedValueOnce(visits)
+    .mockResolvedValueOnce(schoolOptions)
+    .mockResolvedValueOnce(pmOptions)
     .mockResolvedValueOnce(actions);
 }
 
@@ -275,12 +285,15 @@ describe("SchoolVisitSummaryPage", () => {
         if (sql.includes("LIMIT")) {
           return visitsPromise;
         }
+        if (sql.includes("SELECT DISTINCT")) {
+          return Promise.resolve([]);
+        }
         return Promise.resolve(summaryActionRows);
       });
 
       const pagePromise = SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
 
-      await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(4));
       expect(mockQuery.mock.calls[0][0]).toContain("WITH action_completion");
       expect(mockQuery.mock.calls[1][0]).toContain("LIMIT");
 
@@ -288,8 +301,8 @@ describe("SchoolVisitSummaryPage", () => {
       resolveVisits([summaryVisit]);
       await pagePromise;
 
-      expect(mockQuery.mock.calls[2][0]).toContain("WHERE visit_id = ANY($1)");
-      expect(mockQuery.mock.calls[2][0]).toContain("deleted_at IS NULL");
+      expect(mockQuery.mock.calls[4][0]).toContain("WHERE visit_id = ANY($1)");
+      expect(mockQuery.mock.calls[4][0]).toContain("deleted_at IS NULL");
     });
 
     it("uses known action types and numeric division in the aggregate stats query", async () => {
@@ -309,6 +322,138 @@ describe("SchoolVisitSummaryPage", () => {
         "school_staff_interaction",
       ]));
       expect(params[1]).toBe(7);
+    });
+  });
+
+  describe("filters", () => {
+    it("applies the status filter to aggregate stats and paginated visits", async () => {
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({ status: "completed" }),
+      });
+
+      const [statsSql, statsParams] = mockQuery.mock.calls[0];
+      const [visitsSql, visitsParams] = mockQuery.mock.calls[1];
+      expect(statsSql).toContain("v.status = $3");
+      expect(statsParams).toEqual([
+        expect.any(Array),
+        7,
+        "completed",
+      ]);
+      expect(visitsSql).toContain("v.status = $1");
+      expect(visitsParams).toEqual(["completed", 20, 0]);
+    });
+
+    it("parses multi-select schools and PMs plus inclusive manual date filters", async () => {
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({
+          schools: "SC001,,SC002",
+          pms: "PM@Example.org, other@example.org",
+          from: "2026-05-01",
+          to: "2026-05-31",
+        }),
+      });
+
+      const [visitsSql, visitsParams] = mockQuery.mock.calls[1];
+      expect(visitsSql).toContain("v.school_code = ANY($1)");
+      expect(visitsSql).toContain("LOWER(v.pm_email) = ANY($2)");
+      expect(visitsSql).toContain("v.visit_date >= $3");
+      expect(visitsSql).toContain("v.visit_date <= $4");
+      expect(visitsParams).toEqual([
+        ["SC001", "SC002"],
+        ["pm@example.org", "other@example.org"],
+        "2026-05-01",
+        "2026-05-31",
+        20,
+        0,
+      ]);
+    });
+
+    it("uses date presets instead of manual dates and re-anchors them to today in IST", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-21T20:00:00.000Z"));
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({
+          preset: "7d",
+          from: "2026-01-01",
+          to: "2026-01-31",
+        }),
+      });
+
+      const [visitsSql, visitsParams] = mockQuery.mock.calls[1];
+      expect(visitsSql).toContain("v.visit_date >= $1");
+      expect(visitsSql).toContain("v.visit_date <= $2");
+      expect(visitsParams).toEqual(["2026-05-16", "2026-05-22", 20, 0]);
+    });
+
+    it("handles from dates after to dates as an empty result predicate", async () => {
+      setupAuth();
+      setupSummaryQueries({ stats: emptyAggregateStats, visits: [], actions: [] });
+
+      const jsx = await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({ from: "2026-06-01", to: "2026-05-01" }),
+      });
+      render(jsx);
+
+      const [visitsSql] = mockQuery.mock.calls[1];
+      expect(visitsSql).toContain("1 = 0");
+      expect(screen.getByText("No visits match your filters")).toBeInTheDocument();
+    });
+
+    it("queries cascading school and PM dropdown options excluding only their own filter", async () => {
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({
+          schools: "SC001",
+          pms: "pm@example.org",
+          status: "completed",
+        }),
+      });
+
+      const schoolOptionsCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes("SELECT DISTINCT v.school_code"));
+      const pmOptionsCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes("SELECT DISTINCT LOWER(v.pm_email)"));
+
+      expect(schoolOptionsCall).toBeDefined();
+      expect(schoolOptionsCall?.[0]).not.toContain("v.school_code = ANY");
+      expect(schoolOptionsCall?.[0]).toContain("LOWER(v.pm_email) = ANY");
+      expect(schoolOptionsCall?.[0]).toContain("v.status = $2");
+      expect(schoolOptionsCall?.[1]).toEqual([["pm@example.org"], "completed"]);
+
+      expect(pmOptionsCall).toBeDefined();
+      expect(pmOptionsCall?.[0]).toContain("v.school_code = ANY");
+      expect(pmOptionsCall?.[0]).not.toContain("LOWER(v.pm_email) = ANY");
+      expect(pmOptionsCall?.[0]).toContain("v.status = $2");
+      expect(pmOptionsCall?.[1]).toEqual([["SC001"], "completed"]);
+    });
+
+    it("filters action-completion buckets with known action types and includes zero-action visits for none", async () => {
+      setupAuth();
+      setupSummaryQueries();
+
+      await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({ bucket: "none" }),
+      });
+
+      const [visitsSql, visitsParams] = mockQuery.mock.calls[1];
+      expect(visitsSql).toContain("LEFT JOIN (");
+      expect(visitsSql).toContain("COUNT(DISTINCT action_type) FILTER (WHERE action_type = ANY($1::text[])) AS touched_types");
+      expect(visitsSql).toContain("COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY($1::text[]) THEN action_type END) AS completed_types");
+      expect(visitsSql).toContain("COALESCE(action_agg.touched_types, 0) = 0");
+      expect(visitsParams).toEqual([
+        expect.arrayContaining(["classroom_observation", "school_staff_interaction"]),
+        20,
+        0,
+      ]);
     });
   });
 
@@ -354,6 +499,25 @@ describe("SchoolVisitSummaryPage", () => {
       );
     });
 
+    it("preserves active filters when building sort links", async () => {
+      setupAuth();
+      setupSummaryQueries({ stats: { ...aggregateStats, total_visits: "25" } });
+
+      const jsx = await SchoolVisitSummaryPage({
+        searchParams: Promise.resolve({ status: "completed", schools: "SC001", sort: "school_name", dir: "asc", page: "2" }),
+      });
+      render(jsx);
+
+      const schoolSortLink = screen
+        .getAllByRole("link", { name: /school/i })
+        .find((link) => link.getAttribute("href")?.includes("sort=school_name"));
+
+      expect(schoolSortLink).toHaveAttribute(
+        "href",
+        "/school-visit-summary?status=completed&schools=SC001&sort=school_name&dir=desc"
+      );
+    });
+
     it("rejects SQL injection in sort params by falling back to the safe default", async () => {
       setupAuth();
       setupSummaryQueries();
@@ -374,6 +538,8 @@ describe("SchoolVisitSummaryPage", () => {
       mockQuery
         .mockResolvedValueOnce([{ ...aggregateStats, total_visits: "25" }])
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([summaryVisit])
         .mockResolvedValueOnce(summaryActionRows);
 
@@ -382,7 +548,7 @@ describe("SchoolVisitSummaryPage", () => {
 
       expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
       expect(mockQuery.mock.calls[1][1]).toEqual([20, 19960]);
-      expect(mockQuery.mock.calls[2][1]).toEqual([20, 20]);
+      expect(mockQuery.mock.calls[4][1]).toEqual([20, 20]);
     });
   });
 
@@ -419,7 +585,7 @@ describe("SchoolVisitSummaryPage", () => {
       const jsx = await SchoolVisitSummaryPage({ searchParams: Promise.resolve({}) });
       render(jsx);
 
-      expect(screen.getByText("No visits found")).toBeInTheDocument();
+      expect(screen.getByText("No visits match your filters")).toBeInTheDocument();
       expect(screen.getByText("Avg Completion")).toBeInTheDocument();
       expect(screen.getByText("—")).toBeInTheDocument();
       expect(screen.queryByRole("table")).not.toBeInTheDocument();

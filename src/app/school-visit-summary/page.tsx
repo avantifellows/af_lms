@@ -4,12 +4,14 @@ import { redirect } from "next/navigation";
 
 import StatCard from "@/components/StatCard";
 import GpsMapLink from "@/components/visits/GpsMapLink";
+import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission, type UserPermission } from "@/lib/permissions";
 import { ACTION_TYPE_VALUES, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
 import {
+  resolvePresetDateRange,
   rollupActionTypes,
   type ActionTypeRollupStatus,
 } from "@/lib/visit-summary";
@@ -72,10 +74,22 @@ interface VisitActionSummary {
   completionPercent: number | null;
 }
 
+interface SchoolFilterOption {
+  code: string;
+  name: string;
+}
+
+interface PmFilterOption {
+  email: string;
+  name: string | null;
+}
+
 interface SummaryResult {
   visits: SummaryVisit[];
   stats: SummaryStats;
   actionSummaries: Map<number, VisitActionSummary>;
+  schoolOptions: SchoolFilterOption[];
+  pmOptions: PmFilterOption[];
   totalCount: number;
   currentPage: number;
   totalPages: number;
@@ -88,11 +102,33 @@ interface PageProps {
     sort?: string;
     dir?: string;
     page?: string;
+    schools?: string;
+    pms?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+    preset?: string;
+    bucket?: string;
   }>;
 }
 
 type SortKey = "visit_date" | "school_name" | "pm_email" | "status" | "inserted_at" | "completed_at";
 type SortDirection = "asc" | "desc";
+type VisitSummaryStatusFilter = "in_progress" | "completed";
+type FilterExclusion = "schools" | "pms";
+type ActionCompletionBucketFilter = "none" | "partial" | "all_present" | "all_complete";
+type SummarySearchParams = Record<string, string | undefined>;
+
+interface VisitSummaryFilters {
+  schools: string[];
+  pms: string[];
+  status?: VisitSummaryStatusFilter;
+  from?: string;
+  to?: string;
+  preset?: string;
+  bucket?: ActionCompletionBucketFilter;
+  forceEmpty: boolean;
+}
 
 const SORT_COLUMNS: Record<SortKey, { sql: string; defaultDir: SortDirection }> = {
   visit_date: { sql: "v.visit_date", defaultDir: "desc" },
@@ -119,6 +155,50 @@ function normalizeSort(sortParam?: string, dirParam?: string): { sort: SortKey; 
 function normalizePage(pageParam?: string): number {
   const parsed = Number.parseInt(pageParam || "1", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function parseListFilter(value: string | undefined, transform: (item: string) => string = (item) => item): string[] {
+  return (value || "")
+    .split(",")
+    .map((item) => transform(item.trim()))
+    .filter(Boolean);
+}
+
+function isDateString(value: string | undefined): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function normalizeFilters(searchParams: {
+  schools?: string;
+  pms?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  preset?: string;
+  bucket?: string;
+}): VisitSummaryFilters {
+  const presetRange = resolvePresetDateRange(searchParams.preset, new Date());
+  const manualFrom = isDateString(searchParams.from) ? searchParams.from : undefined;
+  const manualTo = isDateString(searchParams.to) ? searchParams.to : undefined;
+  const from = presetRange?.from ?? manualFrom;
+  const to = presetRange?.to ?? manualTo;
+
+  return {
+    schools: parseListFilter(searchParams.schools),
+    pms: parseListFilter(searchParams.pms, (item) => item.toLowerCase()),
+    status: searchParams.status === "in_progress" || searchParams.status === "completed"
+      ? searchParams.status
+      : undefined,
+    from,
+    to,
+    preset: presetRange || searchParams.preset === "all" ? searchParams.preset : undefined,
+    bucket: isActionCompletionBucket(searchParams.bucket) ? searchParams.bucket : undefined,
+    forceEmpty: Boolean(from && to && from > to),
+  };
+}
+
+function isActionCompletionBucket(value: string | undefined): value is ActionCompletionBucketFilter {
+  return value === "none" || value === "partial" || value === "all_present" || value === "all_complete";
 }
 
 function formatDate(value: string): string {
@@ -184,14 +264,78 @@ function formatDuration(visit: SummaryVisit, now = new Date()): string {
 function buildWhereClause(
   permission: UserPermission,
   actorEmail: string,
-  startIndex = 1
-): { whereSql: string; params: unknown[] } {
+  filters: VisitSummaryFilters = {},
+  startIndex = 1,
+  exclude?: FilterExclusion
+): { whereSql: string; joinSql: string; params: unknown[] } {
   const actor = buildVisitsActor(actorEmail, permission);
   const predicates = ["v.deleted_at IS NULL"];
+  const joins: string[] = [];
   const params: unknown[] = [];
+  let nextIndex = startIndex;
+
+  if (filters.forceEmpty) {
+    predicates.push("1 = 0");
+  }
+
+  if (exclude !== "schools" && filters.schools.length > 0) {
+    predicates.push(`v.school_code = ANY($${nextIndex})`);
+    params.push(filters.schools);
+    nextIndex += 1;
+  }
+
+  if (exclude !== "pms" && filters.pms.length > 0) {
+    predicates.push(`LOWER(v.pm_email) = ANY($${nextIndex})`);
+    params.push(filters.pms);
+    nextIndex += 1;
+  }
+
+  if (filters.status) {
+    predicates.push(`v.status = $${nextIndex}`);
+    params.push(filters.status);
+    nextIndex += 1;
+  }
+
+  if (filters.from) {
+    predicates.push(`v.visit_date >= $${nextIndex}`);
+    params.push(filters.from);
+    nextIndex += 1;
+  }
+
+  if (filters.to) {
+    predicates.push(`v.visit_date <= $${nextIndex}`);
+    params.push(filters.to);
+    nextIndex += 1;
+  }
+
+  if (filters.bucket) {
+    const knownTypesIndex = nextIndex;
+    joins.push(
+      `LEFT JOIN (
+        SELECT visit_id,
+               COUNT(DISTINCT action_type) FILTER (WHERE action_type = ANY($${knownTypesIndex}::text[])) AS touched_types,
+               COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY($${knownTypesIndex}::text[]) THEN action_type END) AS completed_types
+        FROM lms_pm_school_visit_actions
+        WHERE deleted_at IS NULL
+        GROUP BY visit_id
+      ) AS action_agg ON action_agg.visit_id = v.id`
+    );
+    params.push(ACTION_TYPE_VALUES);
+    nextIndex += 1;
+
+    if (filters.bucket === "none") {
+      predicates.push("COALESCE(action_agg.touched_types, 0) = 0");
+    } else if (filters.bucket === "partial") {
+      predicates.push(`COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${ACTION_TYPE_VALUES.length}`);
+    } else if (filters.bucket === "all_present") {
+      predicates.push(`COALESCE(action_agg.touched_types, 0) = ${ACTION_TYPE_VALUES.length} AND COALESCE(action_agg.completed_types, 0) < ${ACTION_TYPE_VALUES.length}`);
+    } else {
+      predicates.push(`COALESCE(action_agg.completed_types, 0) = ${ACTION_TYPE_VALUES.length}`);
+    }
+  }
 
   const scope = buildVisitScopePredicate(actor, {
-    startIndex,
+    startIndex: nextIndex,
     schoolCodeColumn: "v.school_code",
     schoolRegionColumn: "s.region",
   });
@@ -203,6 +347,7 @@ function buildWhereClause(
 
   return {
     whereSql: predicates.join(" AND "),
+    joinSql: joins.join("\n"),
     params,
   };
 }
@@ -231,9 +376,10 @@ function parseNullableNumber(value: string | number | null | undefined): number 
 
 async function getSummaryStats(
   actorEmail: string,
-  permission: UserPermission
+  permission: UserPermission,
+  filters: VisitSummaryFilters
 ): Promise<SummaryStats> {
-  const { whereSql, params } = buildWhereClause(permission, actorEmail, 3);
+  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 3);
   const rows = await query<SummaryStatsRow>(
     `WITH action_completion AS (
        SELECT a.visit_id,
@@ -255,6 +401,7 @@ async function getSummaryStats(
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      LEFT JOIN action_completion ac ON ac.visit_id = v.id
+     ${joinSql}
      WHERE ${whereSql}`,
     [ACTION_TYPE_VALUES, ACTION_TYPE_VALUES.length, ...params]
   );
@@ -273,11 +420,12 @@ async function getSummaryStats(
 async function getPaginatedVisits(
   actorEmail: string,
   permission: UserPermission,
+  filters: VisitSummaryFilters,
   sort: SortKey,
   dir: SortDirection,
   page: number
 ): Promise<SummaryVisit[]> {
-  const { whereSql, params } = buildWhereClause(permission, actorEmail);
+  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters);
   const offset = (page - 1) * VISITS_PER_PAGE;
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -290,10 +438,48 @@ async function getPaginatedVisits(
      FROM lms_pm_school_visits v
      LEFT JOIN school s ON s.code = v.school_code
      LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
+     ${joinSql}
      WHERE ${whereSql}
      ORDER BY ${buildOrderClause(sort, dir)}
      LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
     [...params, VISITS_PER_PAGE, offset]
+  );
+}
+
+async function getSchoolFilterOptions(
+  actorEmail: string,
+  permission: UserPermission,
+  filters: VisitSummaryFilters
+): Promise<SchoolFilterOption[]> {
+  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 1, "schools");
+
+  return query<SchoolFilterOption>(
+    `SELECT DISTINCT v.school_code AS code, COALESCE(s.name, v.school_code) AS name
+     FROM lms_pm_school_visits v
+     LEFT JOIN school s ON s.code = v.school_code
+     ${joinSql}
+     WHERE ${whereSql}
+     ORDER BY name ASC, code ASC`,
+    params
+  );
+}
+
+async function getPmFilterOptions(
+  actorEmail: string,
+  permission: UserPermission,
+  filters: VisitSummaryFilters
+): Promise<PmFilterOption[]> {
+  const { whereSql, joinSql, params } = buildWhereClause(permission, actorEmail, filters, 1, "pms");
+
+  return query<PmFilterOption>(
+    `SELECT DISTINCT LOWER(v.pm_email) AS email, up.full_name AS name
+     FROM lms_pm_school_visits v
+     LEFT JOIN school s ON s.code = v.school_code
+     LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
+     ${joinSql}
+     WHERE ${whereSql}
+     ORDER BY name ASC NULLS LAST, email ASC`,
+    params
   );
 }
 
@@ -347,31 +533,68 @@ function buildActionSummaryMap(visits: SummaryVisit[], actions: VisitActionRow[]
 async function getSummaryVisits(
   actorEmail: string,
   permission: UserPermission,
-  searchParams: { sort?: string; dir?: string; page?: string }
+  searchParams: {
+    sort?: string;
+    dir?: string;
+    page?: string;
+    schools?: string;
+    pms?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+    preset?: string;
+    bucket?: string;
+  }
 ): Promise<SummaryResult> {
   const { sort, dir } = normalizeSort(searchParams.sort, searchParams.dir);
+  const filters = normalizeFilters(searchParams);
   const requestedPage = normalizePage(searchParams.page);
-  const [stats, initialVisits] = await Promise.all([
-    getSummaryStats(actorEmail, permission),
-    getPaginatedVisits(actorEmail, permission, sort, dir, requestedPage),
+  const [stats, initialVisits, schoolOptions, pmOptions] = await Promise.all([
+    getSummaryStats(actorEmail, permission, filters),
+    getPaginatedVisits(actorEmail, permission, filters, sort, dir, requestedPage),
+    getSchoolFilterOptions(actorEmail, permission, filters),
+    getPmFilterOptions(actorEmail, permission, filters),
   ]);
   const totalCount = stats.totalVisits;
   const totalPages = Math.max(1, Math.ceil(totalCount / VISITS_PER_PAGE));
   const currentPage = Math.min(requestedPage, totalPages);
   const visits = totalCount > 0 && currentPage !== requestedPage
-    ? await getPaginatedVisits(actorEmail, permission, sort, dir, currentPage)
+    ? await getPaginatedVisits(actorEmail, permission, filters, sort, dir, currentPage)
     : initialVisits;
   const actionRows = await getActionRowsForVisits(visits.map((visit) => visit.id));
   const actionSummaries = buildActionSummaryMap(visits, actionRows);
 
-  return { visits, stats, actionSummaries, totalCount, currentPage, totalPages, sort, dir };
+  return {
+    visits,
+    stats,
+    actionSummaries,
+    schoolOptions,
+    pmOptions,
+    totalCount,
+    currentPage,
+    totalPages,
+    sort,
+    dir,
+  };
 }
 
-function sortHref(column: SortKey, currentSort: SortKey, currentDir: SortDirection): string {
+function sortHref(
+  column: SortKey,
+  currentSort: SortKey,
+  currentDir: SortDirection,
+  currentParams: SummarySearchParams
+): string {
   const dir = column === currentSort
     ? currentDir === "asc" ? "desc" : "asc"
     : SORT_COLUMNS[column].defaultDir;
-  const params = new URLSearchParams({ sort: column, dir });
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(currentParams)) {
+    if (value && key !== "sort" && key !== "dir" && key !== "page") {
+      params.set(key, value);
+    }
+  }
+  params.set("sort", column);
+  params.set("dir", dir);
   return `/school-visit-summary?${params.toString()}`;
 }
 
@@ -379,18 +602,20 @@ function SortHeader({
   column,
   currentSort,
   currentDir,
+  currentParams,
   children,
 }: {
   column: SortKey;
   currentSort: SortKey;
   currentDir: SortDirection;
+  currentParams: SummarySearchParams;
   children: React.ReactNode;
 }) {
   const active = column === currentSort;
 
   return (
     <Link
-      href={sortHref(column, currentSort, currentDir)}
+      href={sortHref(column, currentSort, currentDir, currentParams)}
       className="inline-flex items-center gap-1 hover:text-text-primary"
     >
       {children}
@@ -404,18 +629,27 @@ function PaginationControls({
   totalPages,
   sort,
   dir,
+  currentParams,
 }: {
   currentPage: number;
   totalPages: number;
   sort: SortKey;
   dir: SortDirection;
+  currentParams: SummarySearchParams;
 }) {
   if (totalPages <= 1) {
     return null;
   }
 
   const hrefFor = (page: number) => {
-    const params = new URLSearchParams({ sort, dir });
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(currentParams)) {
+      if (value && key !== "page") {
+        params.set(key, value);
+      }
+    }
+    params.set("sort", sort);
+    params.set("dir", dir);
     if (page > 1) {
       params.set("page", String(page));
     }
@@ -506,11 +740,13 @@ function VisitDesktopTable({
   actionSummaries,
   sort,
   dir,
+  currentParams,
 }: {
   visits: SummaryVisit[];
   actionSummaries: Map<number, VisitActionSummary>;
   sort: SortKey;
   dir: SortDirection;
+  currentParams: SummarySearchParams;
 }) {
   return (
     <Card elevation="sm" className="hidden overflow-x-auto sm:block">
@@ -518,22 +754,22 @@ function VisitDesktopTable({
         <thead className="border-b-2 border-border-accent bg-bg-card-alt">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              <SortHeader column="school_name" currentSort={sort} currentDir={dir}>School</SortHeader>
+              <SortHeader column="school_name" currentSort={sort} currentDir={dir} currentParams={currentParams}>School</SortHeader>
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              <SortHeader column="pm_email" currentSort={sort} currentDir={dir}>PM</SortHeader>
+              <SortHeader column="pm_email" currentSort={sort} currentDir={dir} currentParams={currentParams}>PM</SortHeader>
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              <SortHeader column="visit_date" currentSort={sort} currentDir={dir}>Visit Date</SortHeader>
+              <SortHeader column="visit_date" currentSort={sort} currentDir={dir} currentParams={currentParams}>Visit Date</SortHeader>
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              <SortHeader column="status" currentSort={sort} currentDir={dir}>Status</SortHeader>
+              <SortHeader column="status" currentSort={sort} currentDir={dir} currentParams={currentParams}>Status</SortHeader>
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              <SortHeader column="inserted_at" currentSort={sort} currentDir={dir}>Started At</SortHeader>
+              <SortHeader column="inserted_at" currentSort={sort} currentDir={dir} currentParams={currentParams}>Started At</SortHeader>
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
-              <SortHeader column="completed_at" currentSort={sort} currentDir={dir}>Completed At</SortHeader>
+              <SortHeader column="completed_at" currentSort={sort} currentDir={dir} currentParams={currentParams}>Completed At</SortHeader>
             </th>
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
               Duration
@@ -657,7 +893,18 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     redirect("/dashboard");
   }
 
-  const { visits, stats, actionSummaries, totalCount, currentPage, totalPages, sort, dir } = await getSummaryVisits(
+  const {
+    visits,
+    stats,
+    actionSummaries,
+    schoolOptions,
+    pmOptions,
+    totalCount,
+    currentPage,
+    totalPages,
+    sort,
+    dir,
+  } = await getSummaryVisits(
     session.user.email,
     permission,
     rawSearchParams
@@ -717,9 +964,15 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
 
         <StatCards stats={stats} />
 
+        <VisitSummaryFilterBar
+          schoolOptions={schoolOptions}
+          pmOptions={pmOptions}
+          currentParams={rawSearchParams}
+        />
+
         {visits.length === 0 ? (
           <div className="py-12 text-center">
-            <div className="text-text-muted uppercase tracking-wide">No visits found</div>
+            <div className="text-text-muted uppercase tracking-wide">No visits match your filters</div>
           </div>
         ) : (
           <>
@@ -738,6 +991,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
               actionSummaries={actionSummaries}
               sort={sort}
               dir={dir}
+              currentParams={rawSearchParams}
             />
 
             <PaginationControls
@@ -745,6 +999,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
               totalPages={totalPages}
               sort={sort}
               dir={dir}
+              currentParams={rawSearchParams}
             />
           </>
         )}
