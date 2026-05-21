@@ -1,3 +1,5 @@
+import type { RemarkEntry } from "./visit-summary";
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -183,4 +185,58 @@ export function validateGroupStudentDiscussionComplete(data: unknown): Validatio
   errors.push(...validateQuestions(payload.questions, true));
 
   return { valid: errors.length === 0, errors };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+export function extractRemarks(data: unknown): RemarkEntry[] {
+  if (!isPlainObject(data) || !isPlainObject(data.questions)) {
+    return [];
+  }
+
+  const remarks: RemarkEntry[] = [];
+  for (const section of GROUP_STUDENT_DISCUSSION_CONFIG.sections) {
+    for (const question of section.questions) {
+      const answer = data.questions[question.key];
+      if (!isPlainObject(answer)) {
+        continue;
+      }
+      const text = nonEmptyString(answer.remark);
+      if (text) {
+        remarks.push({ label: question.label, text });
+      }
+    }
+  }
+  return remarks;
+}
+
+export function computeInlineStats(data: unknown): {
+  grade: number | null;
+  answeredCount: number;
+  totalQuestions: number;
+} | null {
+  if (!isPlainObject(data)) {
+    return null;
+  }
+
+  const questions = isPlainObject(data.questions) ? data.questions : {};
+  let answeredCount = 0;
+  for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
+    const answer = questions[key];
+    if (isPlainObject(answer) && typeof answer.answer === "boolean") {
+      answeredCount += 1;
+    }
+  }
+
+  return {
+    grade: typeof data.grade === "number" ? data.grade : null,
+    answeredCount,
+    totalQuestions: GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length,
+  };
 }

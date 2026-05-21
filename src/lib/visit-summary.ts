@@ -1,4 +1,32 @@
 import { ACTION_TYPE_VALUES, isActionType, type ActionType } from "./visit-actions";
+import {
+  computeInlineStats as computeAFTeamInlineStats,
+  extractRemarks as extractAFTeamRemarks,
+} from "./af-team-interaction";
+import {
+  computeInlineStats as computeClassroomInlineStats,
+  extractRemarks as extractClassroomRemarks,
+} from "./classroom-observation-rubric";
+import {
+  computeInlineStats as computeGroupStudentInlineStats,
+  extractRemarks as extractGroupStudentRemarks,
+} from "./group-student-discussion";
+import {
+  computeInlineStats as computeIndividualTeacherInlineStats,
+  extractRemarks as extractIndividualTeacherRemarks,
+} from "./individual-af-teacher-interaction";
+import {
+  computeInlineStats as computeIndividualStudentInlineStats,
+  extractRemarks as extractIndividualStudentRemarks,
+} from "./individual-student-discussion";
+import {
+  computeInlineStats as computePrincipalInlineStats,
+  extractRemarks as extractPrincipalRemarks,
+} from "./principal-interaction";
+import {
+  computeInlineStats as computeSchoolStaffInlineStats,
+  extractRemarks as extractSchoolStaffRemarks,
+} from "./school-staff-interaction";
 
 export type RemarkEntry = { label: string; text: string };
 
@@ -90,6 +118,48 @@ export function resolvePresetDateRange(
   const from = addDays(to, -(PRESET_DAYS[preset] - 1));
 
   return { from, to };
+}
+
+export function dispatchExtractRemarks(actionType: string, data: unknown): RemarkEntry[] {
+  switch (actionType) {
+    case "classroom_observation":
+      return extractClassroomRemarks(data);
+    case "af_team_interaction":
+      return extractAFTeamRemarks(data);
+    case "individual_af_teacher_interaction":
+      return extractIndividualTeacherRemarks(data);
+    case "principal_interaction":
+      return extractPrincipalRemarks(data);
+    case "group_student_discussion":
+      return extractGroupStudentRemarks(data);
+    case "individual_student_discussion":
+      return extractIndividualStudentRemarks(data);
+    case "school_staff_interaction":
+      return extractSchoolStaffRemarks(data);
+    default:
+      return [];
+  }
+}
+
+export function dispatchComputeInlineStats(actionType: string, data: unknown): unknown {
+  switch (actionType) {
+    case "classroom_observation":
+      return computeClassroomInlineStats(data);
+    case "af_team_interaction":
+      return computeAFTeamInlineStats(data);
+    case "individual_af_teacher_interaction":
+      return computeIndividualTeacherInlineStats(data);
+    case "principal_interaction":
+      return computePrincipalInlineStats(data);
+    case "group_student_discussion":
+      return computeGroupStudentInlineStats(data);
+    case "individual_student_discussion":
+      return computeIndividualStudentInlineStats(data);
+    case "school_staff_interaction":
+      return computeSchoolStaffInlineStats(data);
+    default:
+      return null;
+  }
 }
 
 function isRollupStatus(value: string): value is ActionTypeRollupStatus {

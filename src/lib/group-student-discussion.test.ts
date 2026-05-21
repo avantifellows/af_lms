@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   GROUP_STUDENT_DISCUSSION_CONFIG,
+  computeInlineStats,
+  extractRemarks,
   validateGroupStudentDiscussionSave,
   validateGroupStudentDiscussionComplete,
 } from "./group-student-discussion";
@@ -286,5 +288,32 @@ describe("validateGroupStudentDiscussionComplete (strict)", () => {
     const result = validateGroupStudentDiscussionComplete(payload);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("grade is required and must be 11 or 12");
+  });
+});
+
+describe("group student discussion summary extractors", () => {
+  it("extracts question remarks and computes grade/answered stats", () => {
+    const data = {
+      grade: 12,
+      questions: {
+        gc_interacted: { answer: true, remark: "Students shared concerns" },
+        gc_program_updates: { answer: false },
+        gc_direction: { answer: null, remark: "" },
+      },
+    };
+
+    expect(extractRemarks(data)).toEqual([
+      { label: "Have you interacted with the students?", text: "Students shared concerns" },
+    ]);
+    expect(computeInlineStats(data)).toEqual({
+      grade: 12,
+      answeredCount: 2,
+      totalQuestions: 4,
+    });
+  });
+
+  it("handles null data gracefully", () => {
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });

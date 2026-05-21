@@ -4,7 +4,9 @@ import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
   VALID_GRADES,
+  computeInlineStats,
   computeTotalScore,
+  extractRemarks,
   validateClassroomObservationComplete,
   validateClassroomObservationSave,
 } from "./classroom-observation-rubric";
@@ -35,6 +37,52 @@ describe("classroom-observation-rubric config", () => {
       const optionScores = parameter.options.map((option) => option.score);
       expect(optionScores).toContain(parameter.maxScore);
     }
+  });
+});
+
+describe("classroom observation summary extractors", () => {
+  it("extracts plural param remarks and observer summaries while computing score stats", () => {
+    const data = {
+      params: {
+        teacher_on_time: { score: 1, remarks: "Started exactly on time" },
+        recall_test: { score: 2, remark: "singular field ignored" },
+        gender_sensitivity: { score: 3, remarks: "   " },
+      },
+      observer_summary_strengths: "Strong student engagement",
+      observer_summary_improvements: "Needs tighter closure",
+    };
+
+    expect(extractRemarks(data)).toEqual([
+      {
+        label: "Teacher started the class on time",
+        text: "Started exactly on time",
+      },
+      {
+        label: "Observer Summary (Strengths)",
+        text: "Strong student engagement",
+      },
+      {
+        label: "Observer Summary (Points of Improvement)",
+        text: "Needs tighter closure",
+      },
+    ]);
+    expect(computeInlineStats(data)).toEqual({
+      totalScore: 6,
+      maxScore: 45,
+      remarkCount: 1,
+    });
+  });
+
+  it("handles missing params and null data gracefully", () => {
+    expect(extractRemarks({
+      observer_summary_strengths: "Legacy strength",
+      observer_summary_improvements: "",
+    })).toEqual([
+      { label: "Observer Summary (Strengths)", text: "Legacy strength" },
+    ]);
+    expect(computeInlineStats({ observer_summary_strengths: "Legacy strength" })).toBeNull();
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });
 

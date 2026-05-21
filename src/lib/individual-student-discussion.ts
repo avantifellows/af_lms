@@ -1,3 +1,5 @@
+import type { RemarkEntry } from "./visit-summary";
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -301,4 +303,86 @@ export function validateIndividualStudentDiscussionComplete(data: unknown): Vali
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function answeredCountForQuestions(questions: unknown): number {
+  if (!isPlainObject(questions)) {
+    return 0;
+  }
+  return INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.filter((key) => {
+    const answer = questions[key];
+    return isPlainObject(answer) && typeof answer.answer === "boolean";
+  }).length;
+}
+
+function studentNames(students: unknown, fallback: string): string {
+  if (!Array.isArray(students)) {
+    return fallback;
+  }
+  const names = students
+    .map((student) => isPlainObject(student) ? nonEmptyString(student.name) : null)
+    .filter((name): name is string => Boolean(name));
+  return names.length > 0 ? names.join(", ") : fallback;
+}
+
+export function extractRemarks(data: unknown): RemarkEntry[] {
+  const entries = getEntriesFromData(data);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const remarks: RemarkEntry[] = [];
+  entries.forEach((entry, index) => {
+    const prefix = studentNames(entry.students, `Entry ${index + 1}`);
+    for (const section of INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.sections) {
+      for (const question of section.questions) {
+        const answer = entry.questions[question.key];
+        if (!isPlainObject(answer)) {
+          continue;
+        }
+        const text = nonEmptyString(answer.remark);
+        if (text) {
+          remarks.push({ label: `${prefix}: ${question.label}`, text });
+        }
+      }
+    }
+  });
+  return remarks;
+}
+
+export function computeInlineStats(data: unknown): {
+  entryCount: number;
+  studentCount: number;
+  avgAnswered: number | null;
+  totalQuestions: number;
+} | null {
+  if (!isPlainObject(data) || !Array.isArray(data.entries)) {
+    return null;
+  }
+
+  const entries = getEntriesFromData(data);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const answeredSum = entries.reduce(
+    (sum, entry) => sum + answeredCountForQuestions(entry.questions),
+    0
+  );
+  const studentCount = entries.reduce((sum, entry) => sum + entry.students.length, 0);
+
+  return {
+    entryCount: entries.length,
+    studentCount,
+    avgAnswered: answeredSum / entries.length,
+    totalQuestions: INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.length,
+  };
 }
