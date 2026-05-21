@@ -2,12 +2,17 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
+import StatCard from "@/components/StatCard";
 import GpsMapLink from "@/components/visits/GpsMapLink";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission, type UserPermission } from "@/lib/permissions";
-import { statusBadgeClass } from "@/lib/visit-actions";
+import { ACTION_TYPE_VALUES, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
+import {
+  rollupActionTypes,
+  type ActionTypeRollupStatus,
+} from "@/lib/visit-summary";
 import {
   buildVisitScopePredicate,
   buildVisitsActor,
@@ -34,8 +39,43 @@ interface SummaryVisit {
   end_accuracy: number | string | null;
 }
 
+interface SummaryStats {
+  totalVisits: number;
+  inProgressCount: number;
+  completedCount: number;
+  uniqueSchools: number;
+  uniquePms: number;
+  avgActionCompletion: number | null;
+}
+
+interface SummaryStatsRow {
+  total_visits: string | number | null;
+  in_progress_count: string | number | null;
+  completed_count: string | number | null;
+  unique_schools: string | number | null;
+  unique_pms: string | number | null;
+  avg_action_completion: string | number | null;
+}
+
+interface VisitActionRow {
+  visit_id: number | string;
+  action_type: string;
+  status: string;
+}
+
+interface VisitActionSummary {
+  totalActions: number;
+  completedActions: number;
+  completedTypes: number;
+  inProgressTypes: number;
+  notStartedTypes: number;
+  completionPercent: number | null;
+}
+
 interface SummaryResult {
   visits: SummaryVisit[];
+  stats: SummaryStats;
+  actionSummaries: Map<number, VisitActionSummary>;
   totalCount: number;
   currentPage: number;
   totalPages: number;
@@ -116,6 +156,13 @@ function formatStatus(status: string): string {
   return status;
 }
 
+function formatPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${Math.round(value)}%`;
+}
+
 function formatSchool(visit: SummaryVisit): string {
   return visit.school_name ? `${visit.school_name} (${visit.school_code})` : visit.school_code;
 }
@@ -136,14 +183,15 @@ function formatDuration(visit: SummaryVisit, now = new Date()): string {
 
 function buildWhereClause(
   permission: UserPermission,
-  actorEmail: string
+  actorEmail: string,
+  startIndex = 1
 ): { whereSql: string; params: unknown[] } {
   const actor = buildVisitsActor(actorEmail, permission);
   const predicates = ["v.deleted_at IS NULL"];
   const params: unknown[] = [];
 
   const scope = buildVisitScopePredicate(actor, {
-    startIndex: params.length + 1,
+    startIndex,
     schoolCodeColumn: "v.school_code",
     schoolRegionColumn: "s.region",
   });
@@ -166,6 +214,136 @@ function buildOrderClause(sort: SortKey, dir: SortDirection): string {
   return `${sortColumn} ${dir.toUpperCase()}${nullsClause}, v.id DESC`;
 }
 
+function parseCount(value: string | number | null | undefined): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  return Number.parseInt(value || "0", 10);
+}
+
+function parseNullableNumber(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const parsed = typeof value === "number" ? value : Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function getSummaryStats(
+  actorEmail: string,
+  permission: UserPermission
+): Promise<SummaryStats> {
+  const { whereSql, params } = buildWhereClause(permission, actorEmail, 3);
+  const rows = await query<SummaryStatsRow>(
+    `WITH action_completion AS (
+       SELECT a.visit_id,
+              COUNT(DISTINCT CASE
+                WHEN a.status = 'completed' AND a.action_type = ANY($1::text[])
+                THEN a.action_type
+              END) AS completed_types
+       FROM lms_pm_school_visit_actions a
+       WHERE a.deleted_at IS NULL
+       GROUP BY a.visit_id
+     )
+     SELECT COUNT(*) AS total_visits,
+            COUNT(*) FILTER (WHERE v.status = 'in_progress') AS in_progress_count,
+            COUNT(*) FILTER (WHERE v.status = 'completed') AS completed_count,
+            COUNT(DISTINCT v.school_code) AS unique_schools,
+            COUNT(DISTINCT LOWER(v.pm_email)) AS unique_pms,
+            100.0 * SUM(COALESCE(ac.completed_types, 0))::numeric
+              / NULLIF(COUNT(*) * $2, 0) AS avg_action_completion
+     FROM lms_pm_school_visits v
+     LEFT JOIN school s ON s.code = v.school_code
+     LEFT JOIN action_completion ac ON ac.visit_id = v.id
+     WHERE ${whereSql}`,
+    [ACTION_TYPE_VALUES, ACTION_TYPE_VALUES.length, ...params]
+  );
+
+  const row = rows[0];
+  return {
+    totalVisits: parseCount(row?.total_visits),
+    inProgressCount: parseCount(row?.in_progress_count),
+    completedCount: parseCount(row?.completed_count),
+    uniqueSchools: parseCount(row?.unique_schools),
+    uniquePms: parseCount(row?.unique_pms),
+    avgActionCompletion: parseNullableNumber(row?.avg_action_completion),
+  };
+}
+
+async function getPaginatedVisits(
+  actorEmail: string,
+  permission: UserPermission,
+  sort: SortKey,
+  dir: SortDirection,
+  page: number
+): Promise<SummaryVisit[]> {
+  const { whereSql, params } = buildWhereClause(permission, actorEmail);
+  const offset = (page - 1) * VISITS_PER_PAGE;
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+
+  return query<SummaryVisit>(
+    `SELECT v.id, v.school_code, s.name AS school_name, v.pm_email,
+            up.full_name AS pm_name, v.visit_date, v.status, v.inserted_at,
+            v.completed_at, v.start_lat, v.start_lng, v.start_accuracy,
+            v.end_lat, v.end_lng, v.end_accuracy
+     FROM lms_pm_school_visits v
+     LEFT JOIN school s ON s.code = v.school_code
+     LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
+     WHERE ${whereSql}
+     ORDER BY ${buildOrderClause(sort, dir)}
+     LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+    [...params, VISITS_PER_PAGE, offset]
+  );
+}
+
+async function getActionRowsForVisits(visitIds: number[]): Promise<VisitActionRow[]> {
+  if (visitIds.length === 0) {
+    return [];
+  }
+
+  return query<VisitActionRow>(
+    `SELECT visit_id, action_type, status
+     FROM lms_pm_school_visit_actions
+     WHERE visit_id = ANY($1) AND deleted_at IS NULL`,
+    [visitIds]
+  );
+}
+
+function summarizeActions(actions: VisitActionRow[]): VisitActionSummary {
+  const rollup = rollupActionTypes(actions);
+  const countStatuses = (statuses: ActionTypeRollupStatus[]) => ACTION_TYPE_VALUES.filter(
+    (actionType: ActionType) => statuses.includes(rollup[actionType])
+  ).length;
+  const completedTypes = countStatuses(["completed"]);
+  const totalActions = actions.length;
+
+  return {
+    totalActions,
+    completedActions: actions.filter((action) => action.status === "completed").length,
+    completedTypes,
+    inProgressTypes: countStatuses(["pending", "in_progress"]),
+    notStartedTypes: countStatuses(["not_started"]),
+    completionPercent: totalActions === 0
+      ? null
+      : (completedTypes / ACTION_TYPE_VALUES.length) * 100,
+  };
+}
+
+function buildActionSummaryMap(visits: SummaryVisit[], actions: VisitActionRow[]): Map<number, VisitActionSummary> {
+  const actionsByVisit = new Map<number, VisitActionRow[]>();
+
+  for (const action of actions) {
+    const visitId = Number(action.visit_id);
+    actionsByVisit.set(visitId, [...(actionsByVisit.get(visitId) || []), action]);
+  }
+
+  return new Map(visits.map((visit) => [
+    visit.id,
+    summarizeActions(actionsByVisit.get(visit.id) || []),
+  ]));
+}
+
 async function getSummaryVisits(
   actorEmail: string,
   permission: UserPermission,
@@ -173,39 +351,20 @@ async function getSummaryVisits(
 ): Promise<SummaryResult> {
   const { sort, dir } = normalizeSort(searchParams.sort, searchParams.dir);
   const requestedPage = normalizePage(searchParams.page);
-  const { whereSql, params } = buildWhereClause(permission, actorEmail);
-
-  const countRows = await query<{ total: string }>(
-    `SELECT COUNT(*) AS total
-     FROM lms_pm_school_visits v
-     LEFT JOIN school s ON s.code = v.school_code
-     WHERE ${whereSql}`,
-    params
-  );
-  const totalCount = Number.parseInt(countRows[0]?.total || "0", 10);
+  const [stats, initialVisits] = await Promise.all([
+    getSummaryStats(actorEmail, permission),
+    getPaginatedVisits(actorEmail, permission, sort, dir, requestedPage),
+  ]);
+  const totalCount = stats.totalVisits;
   const totalPages = Math.max(1, Math.ceil(totalCount / VISITS_PER_PAGE));
   const currentPage = Math.min(requestedPage, totalPages);
-  const offset = (currentPage - 1) * VISITS_PER_PAGE;
-  const limitIndex = params.length + 1;
-  const offsetIndex = params.length + 2;
+  const visits = totalCount > 0 && currentPage !== requestedPage
+    ? await getPaginatedVisits(actorEmail, permission, sort, dir, currentPage)
+    : initialVisits;
+  const actionRows = await getActionRowsForVisits(visits.map((visit) => visit.id));
+  const actionSummaries = buildActionSummaryMap(visits, actionRows);
 
-  const visits = totalCount === 0
-    ? []
-    : await query<SummaryVisit>(
-      `SELECT v.id, v.school_code, s.name AS school_name, v.pm_email,
-              up.full_name AS pm_name, v.visit_date, v.status, v.inserted_at,
-              v.completed_at, v.start_lat, v.start_lng, v.start_accuracy,
-              v.end_lat, v.end_lng, v.end_accuracy
-       FROM lms_pm_school_visits v
-       LEFT JOIN school s ON s.code = v.school_code
-       LEFT JOIN user_permission up ON LOWER(up.email) = LOWER(v.pm_email)
-       WHERE ${whereSql}
-       ORDER BY ${buildOrderClause(sort, dir)}
-       LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
-      [...params, VISITS_PER_PAGE, offset]
-    );
-
-  return { visits, totalCount, currentPage, totalPages, sort, dir };
+  return { visits, stats, actionSummaries, totalCount, currentPage, totalPages, sort, dir };
 }
 
 function sortHref(column: SortKey, currentSort: SortKey, currentDir: SortDirection): string {
@@ -288,7 +447,38 @@ function PaginationControls({
   );
 }
 
-function VisitMobileCard({ visit }: { visit: SummaryVisit }) {
+function formatActionCounts(summary: VisitActionSummary): string {
+  return `${summary.totalActions} total, ${summary.completedActions} completed`;
+}
+
+function formatActionTypeBreakdown(summary: VisitActionSummary): string {
+  return `${summary.completedTypes}/${ACTION_TYPE_VALUES.length} complete, ${summary.inProgressTypes}/${ACTION_TYPE_VALUES.length} in-progress, ${summary.notStartedTypes}/${ACTION_TYPE_VALUES.length} not started`;
+}
+
+function formatMobileActionSummary(summary: VisitActionSummary): string {
+  return `${summary.completedTypes}/${ACTION_TYPE_VALUES.length} complete`;
+}
+
+function StatCards({ stats }: { stats: SummaryStats }) {
+  return (
+    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <StatCard label="Total Visits" value={stats.totalVisits} size="sm" />
+      <StatCard label="In Progress" value={stats.inProgressCount} size="sm" />
+      <StatCard label="Completed" value={stats.completedCount} size="sm" />
+      <StatCard label="Unique Schools" value={stats.uniqueSchools} size="sm" />
+      <StatCard label="Unique PMs" value={stats.uniquePms} size="sm" />
+      <StatCard label="Avg Completion" value={formatPercent(stats.avgActionCompletion)} size="sm" />
+    </div>
+  );
+}
+
+function VisitMobileCard({
+  visit,
+  actionSummary,
+}: {
+  visit: SummaryVisit;
+  actionSummary: VisitActionSummary;
+}) {
   return (
     <Link href={`/school-visit-summary/${visit.id}`} aria-label="View visit">
       <Card elevation="sm" className="p-4">
@@ -304,6 +494,7 @@ function VisitMobileCard({ visit }: { visit: SummaryVisit }) {
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-text-muted">
           <span>{formatDate(visit.visit_date)}</span>
           <span>{formatDuration(visit)}</span>
+          <span>{formatMobileActionSummary(actionSummary)}</span>
         </div>
       </Card>
     </Link>
@@ -312,10 +503,12 @@ function VisitMobileCard({ visit }: { visit: SummaryVisit }) {
 
 function VisitDesktopTable({
   visits,
+  actionSummaries,
   sort,
   dir,
 }: {
   visits: SummaryVisit[];
+  actionSummaries: Map<number, VisitActionSummary>;
   sort: SortKey;
   dir: SortDirection;
 }) {
@@ -351,55 +544,77 @@ function VisitDesktopTable({
             <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
               End GPS
             </th>
+            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
+              Actions
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
+              Action %
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-muted">
+              Action Types
+            </th>
             <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-text-muted">
               Detail
             </th>
           </tr>
         </thead>
         <tbody className="bg-bg-card">
-          {visits.map((visit) => (
-            <tr key={visit.id} className="border-b border-border/40 hover:bg-hover-bg">
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-text-primary">
-                {formatSchool(visit)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm text-text-secondary">
-                <div>{formatPm(visit)}</div>
-                {visit.pm_name && <div className="text-xs text-text-muted">{visit.pm_email}</div>}
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {formatDate(visit.visit_date)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-4">
-                <span className={`inline-flex ${statusBadgeClass(visit.status)}`}>
-                  {formatStatus(visit.status)}
-                </span>
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {formatTimestamp(visit.inserted_at)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {formatTimestamp(visit.completed_at)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                {formatDuration(visit)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-4">
-                <GpsMapLink lat={visit.start_lat} lng={visit.start_lng} accuracy={visit.start_accuracy} />
-              </td>
-              <td className="whitespace-nowrap px-4 py-4">
-                <GpsMapLink lat={visit.end_lat} lng={visit.end_lng} accuracy={visit.end_accuracy} />
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-right text-sm">
-                <Link
-                  href={`/school-visit-summary/${visit.id}`}
-                  aria-label="View visit"
-                  className="font-bold uppercase text-accent hover:text-accent-hover"
-                >
-                  View
-                </Link>
-              </td>
-            </tr>
-          ))}
+          {visits.map((visit) => {
+            const actionSummary = actionSummaries.get(visit.id) || summarizeActions([]);
+
+            return (
+              <tr key={visit.id} className="border-b border-border/40 hover:bg-hover-bg">
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-text-primary">
+                  {formatSchool(visit)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm text-text-secondary">
+                  <div>{formatPm(visit)}</div>
+                  {visit.pm_name && <div className="text-xs text-text-muted">{visit.pm_email}</div>}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatDate(visit.visit_date)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4">
+                  <span className={`inline-flex ${statusBadgeClass(visit.status)}`}>
+                    {formatStatus(visit.status)}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatTimestamp(visit.inserted_at)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatTimestamp(visit.completed_at)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatDuration(visit)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4">
+                  <GpsMapLink lat={visit.start_lat} lng={visit.start_lng} accuracy={visit.start_accuracy} />
+                </td>
+                <td className="whitespace-nowrap px-4 py-4">
+                  <GpsMapLink lat={visit.end_lat} lng={visit.end_lng} accuracy={visit.end_accuracy} />
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatActionCounts(actionSummary)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatPercent(actionSummary.completionPercent)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
+                  {formatActionTypeBreakdown(actionSummary)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-4 text-right text-sm">
+                  <Link
+                    href={`/school-visit-summary/${visit.id}`}
+                    aria-label="View visit"
+                    className="font-bold uppercase text-accent hover:text-accent-hover"
+                  >
+                    View
+                  </Link>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </Card>
@@ -442,7 +657,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     redirect("/dashboard");
   }
 
-  const { visits, totalCount, currentPage, totalPages, sort, dir } = await getSummaryVisits(
+  const { visits, stats, actionSummaries, totalCount, currentPage, totalPages, sort, dir } = await getSummaryVisits(
     session.user.email,
     permission,
     rawSearchParams
@@ -500,6 +715,8 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
           </div>
         </div>
 
+        <StatCards stats={stats} />
+
         {visits.length === 0 ? (
           <div className="py-12 text-center">
             <div className="text-text-muted uppercase tracking-wide">No visits found</div>
@@ -508,11 +725,20 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
           <>
             <div className="space-y-3 sm:hidden">
               {visits.map((visit) => (
-                <VisitMobileCard key={visit.id} visit={visit} />
+                <VisitMobileCard
+                  key={visit.id}
+                  visit={visit}
+                  actionSummary={actionSummaries.get(visit.id) || summarizeActions([])}
+                />
               ))}
             </div>
 
-            <VisitDesktopTable visits={visits} sort={sort} dir={dir} />
+            <VisitDesktopTable
+              visits={visits}
+              actionSummaries={actionSummaries}
+              sort={sort}
+              dir={dir}
+            />
 
             <PaginationControls
               currentPage={currentPage}
