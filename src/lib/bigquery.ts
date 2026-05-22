@@ -5,6 +5,7 @@ import type {
   CumulativeALData,
   ProgressionTest,
   ProgressionEntry,
+  TestQuestionLevelRow,
 } from "@/types/quiz";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
@@ -47,6 +48,8 @@ export function getBigQueryClient(): BigQuery {
 
 const FACT_TABLE = "`avantifellows.production_dbt_final.fact_student_test_results_overall`";
 const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
+const FACT_QUESTION_LEVEL_TABLE =
+  "`avantifellows.production_dbt_final.fact_student_test_results_question_level`";
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
@@ -447,5 +450,98 @@ export async function getCumulativeALData(
   } catch (error) {
     console.error("Failed to fetch cumulative AL data:", error);
     return { students: [], tests: [] };
+  }
+}
+
+/**
+ * Per-question class-wide aggregates for a single test.
+ * Groups question-level fact rows by (chapter, question_id, position_index) and
+ * computes attempt rate, accuracy, and correct/wrong/skipped counts across the
+ * filtered student set.
+ */
+export async function getTestQuestionLevelData(
+  udise: string,
+  grade: number,
+  sessionId: string,
+  program?: string,
+  stream?: string
+): Promise<TestQuestionLevelRow[]> {
+  const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+
+  const params: Record<string, string | number> = { udise, grade, sessionId };
+  if (program) params.program = program;
+  if (stream) params.stream = stream;
+
+  const sql = `
+    SELECT
+      section AS subject,
+      chapter_name,
+      chapter_id,
+      question_id,
+      ANY_VALUE(question_position_index) AS position_index,
+      COUNT(*) AS total_students,
+      COUNTIF(is_answered = TRUE) AS attempted,
+      COUNTIF(is_correct = 1) AS correct,
+      COUNTIF(is_answered = TRUE AND is_correct = 0) AS wrong,
+      COUNTIF(is_answered = FALSE) AS skipped
+    FROM ${FACT_QUESTION_LEVEL_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND student_grade = @grade
+      AND session_id = @sessionId
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND question_id IS NOT NULL
+      ${programFilter}
+      ${streamFilter}
+    GROUP BY section, chapter_name, chapter_id, question_id
+    ORDER BY section, chapter_name, position_index
+  `;
+
+  interface RawRow {
+    subject: string | null;
+    chapter_name: string | null;
+    chapter_id: string | null;
+    question_id: string;
+    position_index: number | string | null;
+    total_students: number | string;
+    attempted: number | string;
+    correct: number | string;
+    wrong: number | string;
+    skipped: number | string;
+  }
+
+  const toInt = (v: number | string | null | undefined): number => {
+    if (v == null) return 0;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  try {
+    const [rows] = await client.query({ query: sql, params });
+    return (rows as RawRow[]).map((r) => {
+      const total = toInt(r.total_students);
+      const attempted = toInt(r.attempted);
+      const correct = toInt(r.correct);
+      return {
+        subject: r.subject || "",
+        chapter_name: r.chapter_name || "",
+        chapter_id: r.chapter_id || null,
+        question_id: r.question_id,
+        position_index:
+          r.position_index == null ? null : toInt(r.position_index),
+        total_students: total,
+        attempted,
+        correct,
+        wrong: toInt(r.wrong),
+        skipped: toInt(r.skipped),
+        attempt_rate: total > 0 ? Math.round((attempted / total) * 100) : 0,
+        accuracy:
+          attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
+      };
+    });
+  } catch (error) {
+    console.error("Failed to fetch question-level data:", error);
+    return [];
   }
 }

@@ -271,6 +271,109 @@ describe("getCumulativeALData", () => {
   });
 });
 
+describe("getTestQuestionLevelData", () => {
+  it("aggregates per-question and computes attempt_rate + accuracy", async () => {
+    const rows = [
+      {
+        subject: "Physics",
+        chapter_name: "Kinematics",
+        chapter_id: "chap-kin",
+        question_id: "q1",
+        position_index: 1,
+        total_students: 10,
+        attempted: 8,
+        correct: 6,
+        wrong: 2,
+        skipped: 2,
+      },
+      {
+        subject: "Physics",
+        chapter_name: "Kinematics",
+        chapter_id: "chap-kin",
+        question_id: "q2",
+        position_index: 2,
+        total_students: 10,
+        attempted: 5,
+        correct: 1,
+        wrong: 4,
+        skipped: 5,
+      },
+    ];
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+
+    const { getTestQuestionLevelData } = await import("./bigquery");
+    const result = await getTestQuestionLevelData("11223344", 11, "sess-1");
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      subject: "Physics",
+      chapter_name: "Kinematics",
+      chapter_id: "chap-kin",
+      question_id: "q1",
+      position_index: 1,
+      total_students: 10,
+      attempted: 8,
+      correct: 6,
+      wrong: 2,
+      skipped: 2,
+      attempt_rate: 80,
+      accuracy: 75,
+    });
+    expect(result[1].attempt_rate).toBe(50);
+    expect(result[1].accuracy).toBe(20);
+  });
+
+  it("handles zero attempts without dividing by zero", async () => {
+    const rows = [
+      {
+        subject: "Maths",
+        chapter_name: "Calculus",
+        question_id: "q1",
+        position_index: 1,
+        total_students: 5,
+        attempted: 0,
+        correct: 0,
+        wrong: 0,
+        skipped: 5,
+      },
+    ];
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+
+    const { getTestQuestionLevelData } = await import("./bigquery");
+    const result = await getTestQuestionLevelData("11223344", 11, "sess-1");
+
+    expect(result[0]).toMatchObject({ attempt_rate: 0, accuracy: 0 });
+  });
+
+  it("passes filters into the query and binds params", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getTestQuestionLevelData } = await import("./bigquery");
+    await getTestQuestionLevelData("11223344", 11, "sess-1", "JNV", "pcm");
+
+    const call = mocks.mockQueryFn.mock.calls[0][0];
+    expect(call.query).toContain("fact_student_test_results_question_level");
+    expect(call.query).toContain("session_id = @sessionId");
+    expect(call.query).toContain("student_program = @program");
+    expect(call.query).toContain("LOWER(student_stream) = @stream");
+    expect(call.params).toMatchObject({
+      udise: "11223344",
+      grade: 11,
+      sessionId: "sess-1",
+      program: "JNV",
+      stream: "pcm",
+    });
+  });
+
+  it("returns empty array on BQ error", async () => {
+    mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ down"));
+
+    const { getTestQuestionLevelData } = await import("./bigquery");
+    const result = await getTestQuestionLevelData("11223344", 11, "sess-1");
+    expect(result).toEqual([]);
+  });
+});
+
 describe("canonicalStream / streamDisplayLabel", () => {
   it("lowercases and trims stream values", async () => {
     const { canonicalStream } = await import("./bigquery");
