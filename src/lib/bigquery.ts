@@ -308,7 +308,9 @@ export async function getCumulativeALData(
       ANY_VALUE(test_name) AS test_name,
       MIN(start_date) AS start_date,
       ANY_VALUE(test_stream) AS test_stream,
-      ANY_VALUE(academic_level) AS academic_level
+      ANY_VALUE(academic_level) AS academic_level,
+      ANY_VALUE(marks_scored) AS marks_scored,
+      ANY_VALUE(max_marks_possible) AS max_marks_possible
     FROM ${FACT_TABLE}
     WHERE student_school_udise_code = @udise
       AND student_grade = @grade
@@ -335,7 +337,15 @@ export async function getCumulativeALData(
       start_date: string;
       test_stream: string | null;
       academic_level: string;
+      marks_scored: number | string | null;
+      max_marks_possible: number | string | null;
     }
+
+    const toNumOrNull = (v: number | string | null | undefined): number | null => {
+      if (v === null || v === undefined) return null;
+      const n = typeof v === "number" ? v : Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
 
     // Build the chronological test list (deduped by session_id).
     const testMap = new Map<string, ProgressionTest>();
@@ -377,6 +387,8 @@ export async function getCumulativeALData(
       existing.progression.push({
         session_id: r.session_id,
         academic_level: r.academic_level,
+        marks_scored: toNumOrNull(r.marks_scored),
+        max_marks_possible: toNumOrNull(r.max_marks_possible),
       });
       if (!existing.student_name && r.student_name) existing.student_name = r.student_name;
       if (!existing.student_stream && r.student_stream) existing.student_stream = r.student_stream;

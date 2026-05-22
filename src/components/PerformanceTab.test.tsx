@@ -150,8 +150,9 @@ describe("PerformanceTab", () => {
     expect(screen.getByText(/grade=11/)).toBeInTheDocument();
   });
 
-  it("shows grade selector when multiple grades exist", async () => {
-    vi.stubGlobal("fetch", mockGradesResponse([10, 11, 12], ["JNV CoE"]));
+  it("shows grade selector when multiple grades exist (and no Grade 12)", async () => {
+    // Use a grade list without 12 so the Grade-12 auto-default doesn't kick in.
+    vi.stubGlobal("fetch", mockGradesResponse([9, 10, 11], ["JNV CoE"]));
 
     render(<PerformanceTab schoolUdise="12345" />);
 
@@ -159,6 +160,18 @@ describe("PerformanceTab", () => {
       expect(screen.getByText("Select a grade to view performance data.")).toBeInTheDocument();
     });
     expect(screen.getByText("Select grade...")).toBeInTheDocument();
+  });
+
+  it("auto-selects Grade 12 when present in available grades", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([10, 11, 12], ["JNV CoE"]));
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    const calls = mockReplace.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((url) => url.includes("grade=12"))).toBe(true);
   });
 
   it("shows program tabs when multiple programs exist", async () => {
@@ -211,27 +224,26 @@ describe("PerformanceTab", () => {
     await waitFor(() => {
       expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
     });
-    expect(await screen.findByRole("button", { name: "Physics" })).toBeInTheDocument();
+    // Default tab is now Full Tests — subject pills should NOT be visible
+    expect(screen.queryByRole("button", { name: "Physics" })).not.toBeInTheDocument();
 
-    // Switch to Full Tests — subject pills should disappear
-    fireEvent.click(screen.getByRole("button", { name: "Full Tests" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Physics" })).not.toBeInTheDocument();
-    });
+    // Switch to Chapter Tests — subject pills should appear
+    fireEvent.click(screen.getByRole("button", { name: "Chapter Tests" }));
+    expect(await screen.findByRole("button", { name: "Physics" })).toBeInTheDocument();
   });
 
-  it("seeds testCategory from ?category=full and writes ?category= when toggled", async () => {
-    mockSearchParams = new URLSearchParams("category=full");
+  it("seeds testCategory from ?category=chapter and writes ?category= when toggled", async () => {
+    mockSearchParams = new URLSearchParams("category=chapter");
     vi.stubGlobal("fetch", mockGradesResponse([11], ["JNV CoE"]));
 
     render(<PerformanceTab schoolUdise="12345" />);
 
-    // Sub-tab is Full-only, so its presence proves we landed on Full
-    expect(await screen.findByRole("button", { name: "Cumulative" })).toBeInTheDocument();
+    // Subject pills only render on chapter — their presence proves we landed on Chapter Tests
+    expect(await screen.findByRole("button", { name: "Physics" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Chapter Tests" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full Tests" }));
     await waitFor(() => {
-      // Switching back to chapter should drop the category param
+      // Switching to full (the default) should drop the category param
       const calls = mockReplace.mock.calls.map((c) => c[0] as string);
       expect(calls.some((url) => !url.includes("category="))).toBe(true);
     });
@@ -246,13 +258,18 @@ describe("PerformanceTab", () => {
       expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
     });
 
-    // Sub-tab not visible on chapter
-    expect(screen.queryByRole("button", { name: "Cumulative" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Full Tests" }));
+    // Default category is Full Tests — sub-tab is visible from the start.
     expect(await screen.findByRole("button", { name: "Cumulative" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cumulative" }));
+    // Switching to Chapter Tests hides the sub-tab.
+    fireEvent.click(screen.getByRole("button", { name: "Chapter Tests" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cumulative" })).not.toBeInTheDocument();
+    });
+
+    // Switching back to Full Tests brings it back, and Cumulative swaps the view.
+    fireEvent.click(screen.getByRole("button", { name: "Full Tests" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cumulative" }));
     await waitFor(() => {
       expect(screen.getByTestId("cumulative-al-table")).toBeInTheDocument();
       expect(screen.queryByTestId("batch-overview")).not.toBeInTheDocument();

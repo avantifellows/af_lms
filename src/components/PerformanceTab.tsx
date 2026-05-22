@@ -55,7 +55,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     urlSession ? { sessionId: urlSession, testName: "" } : null
   );
   const [testCategory, setTestCategory] = useState<TestCategory>(
-    urlCategory === "full" ? "full" : "chapter"
+    urlCategory === "chapter" ? "chapter" : "full"
   );
   const [selectedStream, setSelectedStream] = useState<string | null>(urlStream);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(urlSubject);
@@ -101,8 +101,8 @@ export default function PerformanceTab({ schoolUdise }: Props) {
         else params.delete("view");
       }
       if (opts.category !== undefined) {
-        // Default category is "chapter" — only encode in URL when it diverges
-        if (opts.category && opts.category !== "chapter") params.set("category", opts.category);
+        // Default category is "full" — only encode in URL when it diverges
+        if (opts.category && opts.category !== "full") params.set("category", opts.category);
         else params.delete("category");
       }
       router.replace(`?${params.toString()}`, { scroll: false });
@@ -132,10 +132,14 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           setSelectedProgram(data.programs[0]);
         }
 
-        // Auto-select single grade
-        if (data.grades.length === 1 && selectedGrade !== data.grades[0]) {
-          setSelectedGrade(data.grades[0]);
-          updateUrl({ grade: data.grades[0] });
+        // Auto-select grade on first load (no URL param). Prefer 12 when
+        // available; otherwise fall back to the only grade if there's just one.
+        if (selectedGrade == null) {
+          const preferred = data.grades.includes(12) ? 12 : (data.grades.length === 1 ? data.grades[0] : null);
+          if (preferred != null) {
+            setSelectedGrade(preferred);
+            updateUrl({ grade: preferred });
+          }
         }
       })
       .catch((err) => {

@@ -44,6 +44,8 @@ export interface ProgressionTest {
 export interface ProgressionEntry {
   session_id: string;
   academic_level: string;
+  marks_scored: number | null;
+  max_marks_possible: number | null;
 }
 
 export interface CumulativeALRow {
