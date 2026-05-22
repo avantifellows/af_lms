@@ -10,7 +10,7 @@ import {
   canAccessSchoolSync,
   hasMultipleSchools,
 } from "@/lib/permissions";
-import StudentTable, { Grade } from "@/components/StudentTable";
+import { type Grade } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
@@ -21,9 +21,8 @@ import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-import EnrollmentStatsCards, {
-  type ProgramStats,
-} from "@/components/enrollment/EnrollmentStatsCards";
+import { type ProgramStats } from "@/components/enrollment/EnrollmentStatsCards";
+import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 import { PROGRAM_ID_TO_LABEL, PROGRAM_IDS } from "@/lib/permissions";
 
 const ALL_PROGRAM_IDS: number[] = [
@@ -390,15 +389,14 @@ export default async function SchoolPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Per-program enrollment stats */}
-      <EnrollmentStatsCards programs={programStatsList} />
-
-      <StudentTable
-        students={activeStudents}
+      {/* Per-program enrollment stats + student table (both filtered by selected program) */}
+      <EnrollmentTabContent
+        programs={programStatsList}
+        activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
         userProgramIds={permission?.program_ids ?? null}
-        isPasscodeUser={isPasscodeUser}
+        isPasscodeUser={!!isPasscodeUser}
         isAdmin={permission?.role === "admin"}
         grades={grades}
         batches={batches}

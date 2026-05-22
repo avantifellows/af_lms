@@ -14,6 +14,9 @@ export interface ProgramStats {
 
 interface Props {
   programs: ProgramStats[];
+  /** Controlled selection. When provided, internal state is bypassed. */
+  selectedId?: number;
+  onSelect?: (programId: number) => void;
 }
 
 function Pill({ label, count }: { label: string; count: number }) {
@@ -62,15 +65,25 @@ function StatRow({
   );
 }
 
-export default function EnrollmentStatsCards({ programs }: Props) {
-  const [selectedId, setSelectedId] = useState<number | null>(
+export default function EnrollmentStatsCards({
+  programs,
+  selectedId: controlledId,
+  onSelect,
+}: Props) {
+  const [internalId, setInternalId] = useState<number | null>(
     programs[0]?.id ?? null
   );
 
   if (programs.length === 0) return null;
 
+  const selectedId = controlledId ?? internalId;
   const selected =
     programs.find((p) => p.id === selectedId) ?? programs[0];
+
+  const handleSelect = (id: number) => {
+    if (onSelect) onSelect(id);
+    if (controlledId === undefined) setInternalId(id);
+  };
 
   const showTabs = programs.length > 1;
 
@@ -87,7 +100,7 @@ export default function EnrollmentStatsCards({ programs }: Props) {
           {programs.map((p) => (
             <button
               key={p.id}
-              onClick={() => setSelectedId(p.id)}
+              onClick={() => handleSelect(p.id)}
               className={`px-3 md:px-4 py-1.5 md:py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg transition-colors ${
                 selected.id === p.id
                   ? "bg-accent text-text-on-accent shadow-sm"
