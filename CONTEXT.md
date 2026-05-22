@@ -48,6 +48,16 @@ _Avoid_: Group (overloaded — `group` is a DB table and `group_student_discussi
 Setting `deleted_at` timestamp instead of removing the row. Used for actions and (issue #35) visits.
 _Avoid_: Archive, deactivate
 
+### Staff
+
+**Staff**:
+AF employees assigned to a school — teachers, program managers, and others. Sourced from the external Centres API, not from the LMS database.
+_Avoid_: Teachers & Staff, AF Team (tab label is "Staff")
+
+**Centres API**:
+External service (`centres.avantifellows.org`) that provides staff assignments per school. Queried by `school.name`. Returns staff grouped by program (CoE / Nodal) and role (teachers / program_managers / others).
+_Avoid_: Budget API (legacy name from when it lived under `budget.avantifellows.org`)
+
 ### Roles & Access
 
 **PM (Program Manager)**:
@@ -69,6 +79,7 @@ _Avoid_: Access tier, role level
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
+- A **School** has many **Staff** (via **Centres API**, keyed by `school.name`)
 - A **School** has many **Batches**
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
