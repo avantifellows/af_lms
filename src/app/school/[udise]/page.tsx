@@ -9,8 +9,10 @@ import {
   getFeatureAccess,
   canAccessSchoolSync,
   hasMultipleSchools,
+  PROGRAM_IDS,
+  PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
-import { type Grade } from "@/components/StudentTable";
+import { type Grade, type Student } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
@@ -19,72 +21,9 @@ import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
-import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-import { type ProgramStats } from "@/components/enrollment/EnrollmentStatsCards";
+import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
-import { PROGRAM_ID_TO_LABEL, PROGRAM_IDS } from "@/lib/permissions";
-
-const ALL_PROGRAM_IDS: number[] = [
-  PROGRAM_IDS.COE,
-  PROGRAM_IDS.NODAL,
-  PROGRAM_IDS.NVS,
-];
-
-function buildProgramStats(
-  students: { program_id: number | null; grade: number | null; gender: string | null; category: string | null }[],
-  programId: number,
-): ProgramStats {
-  const scoped = students.filter((s) => Number(s.program_id) === programId);
-
-  const gradeMap = new Map<number, number>();
-  const genderMap = new Map<string, number>();
-  const categoryMap = new Map<string, number>();
-  for (const s of scoped) {
-    if (s.grade != null) gradeMap.set(s.grade, (gradeMap.get(s.grade) || 0) + 1);
-    const g = s.gender?.trim() || "Unspecified";
-    genderMap.set(g, (genderMap.get(g) || 0) + 1);
-    const c = s.category?.trim() || "Unspecified";
-    categoryMap.set(c, (categoryMap.get(c) || 0) + 1);
-  }
-
-  return {
-    id: programId,
-    label: PROGRAM_ID_TO_LABEL[programId] || `Program ${programId}`,
-    total: scoped.length,
-    byGrade: [...gradeMap.entries()]
-      .map(([grade, count]) => ({ grade, count }))
-      .sort((a, b) => a.grade - b.grade),
-    byGender: [...genderMap.entries()]
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count),
-    byCategory: [...categoryMap.entries()]
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count),
-  };
-}
-
-interface Student {
-  group_user_id: string;
-  user_id: string;
-  student_pk_id: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  email: string | null;
-  date_of_birth: string | null;
-  student_id: string | null;
-  apaar_id: string | null;
-  category: string | null;
-  stream: string | null;
-  gender: string | null;
-  program_name: string | null;
-  program_id: number | null;
-  grade: number | null;
-  grade_id: string | null;
-  status: string | null;
-  updated_at: string | null;
-}
 
 interface School {
   id: string;
@@ -132,7 +71,7 @@ async function getBatchesWithMetadata(): Promise<Batch[]> {
      JOIN "group" g ON g.child_id = b.id AND g.type = 'batch'
      WHERE b.metadata IS NOT NULL AND b.program_id = $1
      ORDER BY b.name`,
-    [JNV_NVS_PROGRAM_ID]
+    [PROGRAM_IDS.NVS]
   );
   return batches;
 }
@@ -347,9 +286,10 @@ export default async function SchoolPage({ params }: PageProps) {
   // Admins + passcode users see every program present at the school; everyone
   // else sees the intersection of their assigned program_ids with what's here.
   const isAdmin = permission?.role === "admin";
-  const visibleProgramIds = isPasscodeUser || isAdmin
-    ? ALL_PROGRAM_IDS.filter((id) => programsWithStudents.has(id))
-    : (permission?.program_ids || []).filter((id) => programsWithStudents.has(id));
+  const visibleProgramIds = (isPasscodeUser || isAdmin
+    ? PROGRAM_IDS_ORDERED
+    : permission?.program_ids ?? []
+  ).filter((id) => programsWithStudents.has(id));
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
     buildProgramStats(activeStudents, id)
@@ -396,8 +336,8 @@ export default async function SchoolPage({ params }: PageProps) {
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
         userProgramIds={permission?.program_ids ?? null}
-        isPasscodeUser={!!isPasscodeUser}
-        isAdmin={permission?.role === "admin"}
+        isPasscodeUser={isPasscodeUser ?? false}
+        isAdmin={isAdmin}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}

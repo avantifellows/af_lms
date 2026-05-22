@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
@@ -46,7 +46,6 @@ vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
 }));
-vi.mock("@/lib/constants", () => ({ JNV_NVS_PROGRAM_ID: 64 }));
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -819,12 +818,20 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    // CoE comes first in ALL_PROGRAM_IDS order — its card is the default view.
+    // CoE comes first in PROGRAM_IDS_ORDERED — its card is the default view
+    // and the count excludes the NVS student.
     expect(screen.getByText("JNV CoE Students")).toBeInTheDocument();
     expect(screen.queryByText("JNV NVS Students")).not.toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
     // The tab buttons for both programs are present.
     expect(screen.getByRole("button", { name: "JNV CoE" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "JNV NVS" })).toBeInTheDocument();
+
+    // Switching to NVS shows the NVS count (1) — confirms cross-program exclusion.
+    fireEvent.click(screen.getByRole("button", { name: "JNV NVS" }));
+    expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+    expect(screen.queryByText("JNV CoE Students")).not.toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
   });
 
   it("handles students with null grade in program counts", async () => {
@@ -1115,7 +1122,7 @@ describe("SchoolPage (server component)", () => {
     expect(studentQuery![1]).toEqual(["school-42"]);
   });
 
-  it("queries batches with JNV_NVS_PROGRAM_ID", async () => {
+  it("queries batches with PROGRAM_IDS.NVS", async () => {
     setupAdminDefaults();
 
     await renderPage();
@@ -1126,7 +1133,7 @@ describe("SchoolPage (server component)", () => {
         typeof call[0] === "string" && call[0].includes("FROM batch b")
     );
     expect(batchQuery).toBeDefined();
-    expect(batchQuery![1]).toEqual([64]); // JNV_NVS_PROGRAM_ID
+    expect(batchQuery![1]).toEqual([64]); // PROGRAM_IDS.NVS
   });
 
   // --- Mentorship tab content ---

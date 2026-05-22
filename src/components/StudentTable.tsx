@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input } from "@/components/ui";
 
-interface Student {
+export interface Student {
   group_user_id: string;
   user_id: string;
   student_pk_id: string | null;
