@@ -124,6 +124,10 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       JOIN batch b ON g_batch.child_id = b.id
       JOIN program p ON b.program_id = p.id
       WHERE gu_batch.user_id = u.id
+      -- Deterministic tiebreaker for students in multiple program batches:
+      -- prefer CoE → Nodal → NVS (matches PROGRAM_IDS_ORDERED). Interim until
+      -- a primary_batch field lands; see PR #58 discussion.
+      ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
       LIMIT 1
     ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1
