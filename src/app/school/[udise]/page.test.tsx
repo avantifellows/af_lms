@@ -772,7 +772,7 @@ describe("SchoolPage (server component)", () => {
 
   // --- Student data ---
 
-  it("renders NVS student stats with grade breakdown", async () => {
+  it("renders selected-program student stats with grade breakdown", async () => {
     const students = [
       makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
       makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "active" }),
@@ -784,25 +784,15 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    // Total NVS stat card
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 3"
-    );
-    // Grade breakdown stat cards
-    expect(screen.getByTestId("stat-card-Grade 11")).toHaveTextContent(
-      "Grade 11: 2"
-    );
-    expect(screen.getByTestId("stat-card-Grade 12")).toHaveTextContent(
-      "Grade 12: 1"
-    );
-    // Grade stat cards should be small size
-    expect(screen.getByTestId("stat-card-Grade 11")).toHaveAttribute(
-      "data-size",
-      "sm"
-    );
+    // Only NVS has students; its card is selected by default.
+    expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("3");
+    // Grade pills
+    expect(screen.getByText("Grade 11")).toBeInTheDocument();
+    expect(screen.getByText("Grade 12")).toBeInTheDocument();
   });
 
-  it("excludes dropout students from NVS counts", async () => {
+  it("excludes dropout students from program counts", async () => {
     const students = [
       makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
       makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "dropout" }),
@@ -813,13 +803,12 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    // Only 1 active NVS student
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 1"
-    );
+    expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+    // 1 active NVS student
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
   });
 
-  it("excludes non-NVS students from NVS counts", async () => {
+  it("renders one program's stats at a time when multiple programs are present", async () => {
     const students = [
       makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
       makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 1, status: "active" }),
@@ -830,12 +819,15 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 1"
-    );
+    // CoE comes first in ALL_PROGRAM_IDS order — its card is the default view.
+    expect(screen.getByText("JNV CoE Students")).toBeInTheDocument();
+    expect(screen.queryByText("JNV NVS Students")).not.toBeInTheDocument();
+    // The tab buttons for both programs are present.
+    expect(screen.getByRole("button", { name: "JNV CoE" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "JNV NVS" })).toBeInTheDocument();
   });
 
-  it("handles students with null grade in NVS counts", async () => {
+  it("handles students with null grade in program counts", async () => {
     const students = [
       makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: null, program_id: 64, status: "active" }),
       makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "active" }),
@@ -846,16 +838,11 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    // Total NVS includes both (2 NVS students), but grade breakdown only shows grade 11
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 2"
-    );
-    expect(screen.getByTestId("stat-card-Grade 11")).toHaveTextContent(
-      "Grade 11: 1"
-    );
-    expect(
-      screen.queryByTestId("stat-card-Grade null")
-    ).not.toBeInTheDocument();
+    // Total counts both NVS students; grade pill only appears for grade 11.
+    expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("2");
+    expect(screen.getByText("Grade 11")).toBeInTheDocument();
+    expect(screen.queryByText("Grade null")).not.toBeInTheDocument();
   });
 
   // --- StudentTable props ---
@@ -1209,9 +1196,11 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    expect(screen.getByTestId("stat-card-Total NVS")).toHaveTextContent(
-      "Total NVS: 0"
-    );
+    // No students → no programs visible → no program cards rendered.
+    expect(screen.queryByText("JNV CoE Students")).not.toBeInTheDocument();
+    expect(screen.queryByText("JNV Nodal Students")).not.toBeInTheDocument();
+    expect(screen.queryByText("JNV NVS Students")).not.toBeInTheDocument();
+
     expect(screen.getByTestId("student-table")).toBeInTheDocument();
     const table = screen.getByTestId("student-table");
     const props = JSON.parse(table.getAttribute("data-props") || "{}");

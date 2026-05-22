@@ -13,7 +13,6 @@ import {
 import StudentTable, { Grade } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
-import StatCard from "@/components/StatCard";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
@@ -22,6 +21,49 @@ import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
+import EnrollmentStatsCards, {
+  type ProgramStats,
+} from "@/components/enrollment/EnrollmentStatsCards";
+import { PROGRAM_ID_TO_LABEL, PROGRAM_IDS } from "@/lib/permissions";
+
+const ALL_PROGRAM_IDS: number[] = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.NODAL,
+  PROGRAM_IDS.NVS,
+];
+
+function buildProgramStats(
+  students: { program_id: number | null; grade: number | null; gender: string | null; category: string | null }[],
+  programId: number,
+): ProgramStats {
+  const scoped = students.filter((s) => Number(s.program_id) === programId);
+
+  const gradeMap = new Map<number, number>();
+  const genderMap = new Map<string, number>();
+  const categoryMap = new Map<string, number>();
+  for (const s of scoped) {
+    if (s.grade != null) gradeMap.set(s.grade, (gradeMap.get(s.grade) || 0) + 1);
+    const g = s.gender?.trim() || "Unspecified";
+    genderMap.set(g, (genderMap.get(g) || 0) + 1);
+    const c = s.category?.trim() || "Unspecified";
+    categoryMap.set(c, (categoryMap.get(c) || 0) + 1);
+  }
+
+  return {
+    id: programId,
+    label: PROGRAM_ID_TO_LABEL[programId] || `Program ${programId}`,
+    total: scoped.length,
+    byGrade: [...gradeMap.entries()]
+      .map(([grade, count]) => ({ grade, count }))
+      .sort((a, b) => a.grade - b.grade),
+    byGender: [...genderMap.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count),
+    byCategory: [...categoryMap.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count),
+  };
+}
 
 interface Student {
   group_user_id: string;
@@ -295,25 +337,24 @@ export default async function SchoolPage({ params }: PageProps) {
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
 
-  // Calculate NVS student counts by grade
-  const nvsStudents = activeStudents.filter(
-    (s) => Number(s.program_id) === JNV_NVS_PROGRAM_ID
+  // Programs that have at least one active student at this school
+  const programsWithStudents = new Set(
+    activeStudents
+      .map((s) => (s.program_id != null ? Number(s.program_id) : null))
+      .filter((v): v is number => v != null)
   );
-  const totalNVSCount = nvsStudents.length;
 
-  // Group by grade
-  const gradeCounts = nvsStudents.reduce((acc, student) => {
-    const grade = student.grade;
-    if (grade !== null) {
-      acc[grade] = (acc[grade] || 0) + 1;
-    }
-    return acc;
-  }, {} as Record<number, number>);
+  // Programs the user is allowed to see for the enrollment cards.
+  // Admins + passcode users see every program present at the school; everyone
+  // else sees the intersection of their assigned program_ids with what's here.
+  const isAdmin = permission?.role === "admin";
+  const visibleProgramIds = isPasscodeUser || isAdmin
+    ? ALL_PROGRAM_IDS.filter((id) => programsWithStudents.has(id))
+    : (permission?.program_ids || []).filter((id) => programsWithStudents.has(id));
 
-  // Sort grades and create array
-  const gradeCountsArray = Object.entries(gradeCounts)
-    .map(([grade, count]) => ({ grade: parseInt(grade), count }))
-    .sort((a, b) => a.grade - b.grade);
+  const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
+    buildProgramStats(activeStudents, id)
+  );
 
   // Check if user has access to multiple schools (to show/hide back arrow)
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
@@ -349,16 +390,8 @@ export default async function SchoolPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* NVS Student Stats */}
-      <Card elevation="md" className="p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <StatCard label="Total NVS" value={totalNVSCount} />
-          {gradeCountsArray.map((gc) => (
-            <StatCard key={gc.grade} label={`Grade ${gc.grade}`} value={gc.count} size="sm" />
-          ))}
-        </div>
-      </Card>
+      {/* Per-program enrollment stats */}
+      <EnrollmentStatsCards programs={programStatsList} />
 
       <StudentTable
         students={activeStudents}
