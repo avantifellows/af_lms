@@ -98,7 +98,13 @@ const teacherPermission = {
   program_ids: [1],
 };
 
-const summaryVisit = {
+const summaryVisit: {
+  id: number; school_code: string; school_name: string; pm_email: string;
+  pm_name: string | null; visit_date: string; status: string;
+  inserted_at: string; completed_at: string | null;
+  start_lat: number; start_lng: number; start_accuracy: number;
+  end_lat: null; end_lng: null; end_accuracy: null;
+} = {
   id: 101,
   school_code: "SC001",
   school_name: "Test School",

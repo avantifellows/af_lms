@@ -264,7 +264,7 @@ function formatDuration(visit: SummaryVisit, now = new Date()): string {
 function buildWhereClause(
   permission: UserPermission,
   actorEmail: string,
-  filters: VisitSummaryFilters = {},
+  filters: VisitSummaryFilters = { schools: [], pms: [], forceEmpty: false },
   startIndex = 1,
   exclude?: FilterExclusion
 ): { whereSql: string; joinSql: string; params: unknown[] } {
