@@ -128,6 +128,9 @@ interface V2ChapterPerformance {
   percentage?: number | null;
   accuracy?: number | null;
   total_questions?: number | null;
+  num_correct?: number | null;
+  num_wrong?: number | null;
+  num_skipped?: number | null;
 }
 
 interface V2ReportHeader {
@@ -356,9 +359,9 @@ export async function getTestDeepDiveFromDynamo(
         const chTotal = toNum(c.total_questions);
         const chMax = toNum(c.max_marks_possible);
         const chMarks = toNum(c.marks_scored);
-        // v2 doesn't carry chapter-level attempt_rate; fall back to subject's.
-        // chapter-level skipped count isn't stored either, so we just reuse
-        // the subject's attempt rate here for the per-student view.
+        const chSkipped = toNum(c.num_skipped);
+        const chAttemptRate =
+          chTotal > 0 ? ((chTotal - chSkipped) / chTotal) * 100 : 0;
         const chPct = chMax > 0 ? (chMarks / chMax) * 100 : 0;
 
         const chKey = c.chapter_id || `${sectionKey}||${(c.chapter_name || "").toLowerCase()}`;
@@ -374,7 +377,7 @@ export async function getTestDeepDiveFromDynamo(
         };
         chEx.totalScore += chPct;
         chEx.totalAcc += toNum(c.accuracy);
-        chEx.totalAttempt += attemptRate;
+        chEx.totalAttempt += chAttemptRate;
         chEx.totalQ = Math.max(chEx.totalQ, chTotal);
         chEx.count += 1;
         chapterAggMap.set(chKey, chEx);
@@ -385,7 +388,7 @@ export async function getTestDeepDiveFromDynamo(
           marks_scored: chMarks,
           max_marks: chMax,
           accuracy: toNum(c.accuracy),
-          attempt_rate: attemptRate,
+          attempt_rate: chAttemptRate,
           total_questions: chTotal,
         };
       });

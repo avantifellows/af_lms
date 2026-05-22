@@ -96,6 +96,9 @@ function makeV2Doc(overrides: Record<string, unknown> = {}) {
         percentage: 80,
         accuracy: 80,
         total_questions: 5,
+        num_correct: 4,
+        num_wrong: 1,
+        num_skipped: 0,
       },
     ],
     ...overrides,
@@ -400,6 +403,58 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       });
       // Mean of (4/4=100%) and (0/4=0%) → 50%
       expect(result!.chapters[0].avg_score).toBe(50);
+    });
+
+    it("computes chapter attempt_rate from chapter-level num_skipped (not subject's)", async () => {
+      // Subject-level: 10 questions, 0 skipped → 100% attempt rate.
+      // Chapter Mechanics: 5 questions, 4 skipped → 20% attempt rate.
+      // Chapter Optics:    5 questions, 0 skipped → 100% attempt rate.
+      // Before the fix both chapters would show 100% (subject proxy).
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1",
+            user_id: "u1",
+            subject_performance: [
+              { subject: "Physics", percentage: 50, accuracy: 50, total_questions: 10, num_skipped: 0 },
+            ],
+            chapter_performance: [
+              {
+                chapter_name: "Mechanics",
+                chapter_id: "chap-mech",
+                subject: "Physics",
+                marks_scored: 1, max_marks_possible: 5, accuracy: 100,
+                total_questions: 5, num_skipped: 4, num_correct: 1, num_wrong: 0,
+              },
+              {
+                chapter_name: "Optics",
+                chapter_id: "chap-opt",
+                subject: "Physics",
+                marks_scored: 4, max_marks_possible: 5, accuracy: 80,
+                total_questions: 5, num_skipped: 0, num_correct: 4, num_wrong: 1,
+              },
+            ],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result).not.toBeNull();
+      const mech = result!.chapters.find((c) => c.chapter_id === "chap-mech")!;
+      const opt = result!.chapters.find((c) => c.chapter_id === "chap-opt")!;
+      expect(mech.attempt_rate).toBe(20);
+      expect(opt.attempt_rate).toBe(100);
+
+      // And the per-student chapter rows reflect the same.
+      const studentChapters = result!.students[0]!.subject_scores[0]!.chapters!;
+      const sMech = studentChapters.find((c) => c.chapter_name === "Mechanics")!;
+      const sOpt = studentChapters.find((c) => c.chapter_name === "Optics")!;
+      expect(sMech.attempt_rate).toBe(20);
+      expect(sOpt.attempt_rate).toBe(100);
     });
 
     it("falls back to subject+name grouping when chapter_id is missing", async () => {
