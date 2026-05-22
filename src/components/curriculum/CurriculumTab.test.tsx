@@ -15,6 +15,11 @@ const mockCalculateAllProgress = vi.fn<
 >();
 const mockGenerateSessionId = vi.fn();
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/lib/curriculum-helpers", () => ({
   loadSessions: (...args: unknown[]) => mockLoadSessions(...(args as [string])),
   saveSessions: (...args: unknown[]) => mockSaveSessions(...args),

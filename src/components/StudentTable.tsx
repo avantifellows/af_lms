@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input } from "@/components/ui";
 
@@ -323,8 +323,11 @@ export default function StudentTable({
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
-  const [activeTab, setActiveTab] = useState<"active" | "dropout">("active");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTabState] = useState<"active" | "dropout">(
+    searchParams.get("students") === "dropout" ? "dropout" : "active"
+  );
 
   // Per-row ownership check: combines feature-level canEdit with program ownership
   const canEditStudent = (student: Student): boolean => {
@@ -353,7 +356,13 @@ export default function StudentTable({
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
   const handleTabChange = (tab: "active" | "dropout") => {
-    setActiveTab(tab);
+    setActiveTabState(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "active") params.delete("students");
+    else params.set("students", tab);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+
     const targetStudents = tab === "active" ? students : dropoutStudents;
     const targetGrades = [...new Set(targetStudents.map((s) => s.grade).filter((g): g is number => g !== null))];
     if (selectedGrade !== "all" && !targetGrades.includes(parseInt(selectedGrade))) {

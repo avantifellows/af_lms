@@ -22,9 +22,10 @@ beforeEach(() => {
 
 const SCHOOL = { id: "1", code: "70705", name: "Test School", region: "North" };
 
-function makeRequest(grade?: string) {
+function makeRequest(grade?: string, extra: Record<string, string> = {}) {
   const url = new URL("http://localhost/api/quiz-analytics/1234/batch-overview");
   if (grade !== undefined) url.searchParams.set("grade", grade);
+  for (const [k, v] of Object.entries(extra)) url.searchParams.set(k, v);
   return new Request(url.toString());
 }
 
@@ -70,12 +71,13 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
     mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
     mockGetBatchOverview.mockResolvedValue({
       tests: [
-        { session_id: "s1", test_name: "Test 1", start_date: "2026-01-10", student_count: 20, stream_student_count: 20, test_format: "chapter", test_stream: null },
-        { session_id: "s2", test_name: "Test 2", start_date: "2026-01-20", student_count: 30, stream_student_count: 30, test_format: "full", test_stream: null },
-        { session_id: "s3", test_name: "Test 3", start_date: "2026-02-01", student_count: 25, stream_student_count: 25, test_format: null, test_stream: null },
+        { session_id: "s1", test_name: "Test 1", start_date: "2026-01-10", student_count: 20, stream_student_count: 20, test_format: "chapter", test_stream: null, subjects: ["Physics"] },
+        { session_id: "s2", test_name: "Test 2", start_date: "2026-01-20", student_count: 30, stream_student_count: 30, test_format: "full", test_stream: null, subjects: [] },
+        { session_id: "s3", test_name: "Test 3", start_date: "2026-02-01", student_count: 25, stream_student_count: 25, test_format: null, test_stream: null, subjects: [] },
       ],
       totalEnrolled: 40,
       enrolledByStream: {},
+      streams: ["pcm", "pcb"],
     });
 
     const res = await GET(makeRequest("10"), routeParams({ udise: "1234" }));
@@ -87,7 +89,16 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
     expect(json.summary.avg_participation).toBe(25);
     expect(json.tests).toHaveLength(3);
     expect(json.totalEnrolled).toBe(40);
-    expect(mockGetBatchOverview).toHaveBeenCalledWith("1234", 10, undefined);
+    expect(json.streams).toEqual(["pcm", "pcb"]);
+    expect(mockGetBatchOverview).toHaveBeenCalledWith("1234", 10, undefined, undefined);
+  });
+
+  it("forwards stream param (lowercased) to BQ helper", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    mockGetBatchOverview.mockResolvedValue({ tests: [], totalEnrolled: 0, enrolledByStream: {}, streams: [] });
+
+    await GET(makeRequest("10", { stream: "PCM", program: "JNV" }), routeParams({ udise: "1234" }));
+    expect(mockGetBatchOverview).toHaveBeenCalledWith("1234", 10, "JNV", "pcm");
   });
 
   it("returns zero avg_participation when no tests", async () => {
@@ -96,6 +107,7 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
       tests: [],
       totalEnrolled: 40,
       enrolledByStream: {},
+      streams: [],
     });
 
     const res = await GET(makeRequest("10"), routeParams({ udise: "1234" }));
@@ -110,9 +122,9 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
   it("returns test list and totalEnrolled", async () => {
     mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
     const tests = [
-      { session_id: "s1", test_name: "Midterm", start_date: "2026-01-15", student_count: 35, stream_student_count: 35, test_format: "full", test_stream: null },
+      { session_id: "s1", test_name: "Midterm", start_date: "2026-01-15", student_count: 35, stream_student_count: 35, test_format: "full", test_stream: null, subjects: [] },
     ];
-    mockGetBatchOverview.mockResolvedValue({ tests, totalEnrolled: 50, enrolledByStream: {} });
+    mockGetBatchOverview.mockResolvedValue({ tests, totalEnrolled: 50, enrolledByStream: {}, streams: [] });
 
     const res = await GET(makeRequest("11"), routeParams({ udise: "1234" }));
     expect(res.status).toBe(200);

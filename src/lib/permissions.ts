@@ -16,6 +16,14 @@ export const PROGRAM_IDS = {
   NVS: 64,
 } as const;
 
+// Maps program_ids to the BigQuery `student_program` label.
+// Keep in sync with AddUserModal's PROGRAMS list.
+export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
+  [PROGRAM_IDS.COE]: "JNV CoE",
+  [PROGRAM_IDS.NODAL]: "JNV Nodal",
+  [PROGRAM_IDS.NVS]: "JNV NVS",
+};
+
 // Feature types for permission checking
 export type Feature =
   | "students"

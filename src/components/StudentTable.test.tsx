@@ -6,8 +6,10 @@ import StudentTable, { Grade } from "./StudentTable";
 
 const mockRefresh = vi.fn();
 const mockPush = vi.fn();
+const mockReplace = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: vi.fn(() => ({ push: mockPush, refresh: mockRefresh })),
+  useRouter: vi.fn(() => ({ push: mockPush, refresh: mockRefresh, replace: mockReplace })),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
 vi.mock("./EditStudentModal", () => ({

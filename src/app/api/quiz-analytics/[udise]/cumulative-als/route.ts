@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
-import { getBatchOverviewData } from "@/lib/bigquery";
-import type { BatchSummary, BatchOverviewData } from "@/types/quiz";
+import { getCumulativeALData } from "@/lib/bigquery";
 
 export async function GET(
   request: Request,
@@ -24,33 +23,12 @@ export async function GET(
   try {
     const program = url.searchParams.get("program") || undefined;
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
-    const raw = await getBatchOverviewData(udise, grade, program, stream);
-
-    const tests = raw.tests;
-    const testsCount = tests.length;
-    const avgParticipation =
-      testsCount > 0
-        ? Math.round(tests.reduce((s, t) => s + t.student_count, 0) / testsCount)
-        : 0;
-
-    const summary: BatchSummary = {
-      tests_conducted: testsCount,
-      avg_participation: avgParticipation,
-    };
-
-    const response: BatchOverviewData = {
-      summary,
-      tests: raw.tests,
-      totalEnrolled: raw.totalEnrolled,
-      enrolledByStream: raw.enrolledByStream,
-      streams: raw.streams,
-    };
-
-    return NextResponse.json(response);
+    const data = await getCumulativeALData(udise, grade, program, stream);
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("Batch overview error:", error);
+    console.error("Cumulative AL error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch batch overview" },
+      { error: "Failed to fetch cumulative AL data" },
       { status: 500 }
     );
   }
