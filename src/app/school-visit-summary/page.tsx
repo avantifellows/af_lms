@@ -517,16 +517,16 @@ function summarizeActions(actions: VisitActionRow[]): VisitActionSummary {
 }
 
 function buildActionSummaryMap(visits: SummaryVisit[], actions: VisitActionRow[]): Map<number, VisitActionSummary> {
-  const actionsByVisit = new Map<number, VisitActionRow[]>();
+  const actionsByVisit = new Map<string, VisitActionRow[]>();
 
   for (const action of actions) {
-    const visitId = Number(action.visit_id);
+    const visitId = String(action.visit_id);
     actionsByVisit.set(visitId, [...(actionsByVisit.get(visitId) || []), action]);
   }
 
   return new Map(visits.map((visit) => [
     visit.id,
-    summarizeActions(actionsByVisit.get(visit.id) || []),
+    summarizeActions(actionsByVisit.get(String(visit.id)) || []),
   ]));
 }
 
