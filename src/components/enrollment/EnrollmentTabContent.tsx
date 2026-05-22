@@ -37,12 +37,12 @@ export default function EnrollmentTabContent({
   );
 
   const filteredActive = useMemo(() => {
-    if (selectedId == null) return activeStudents;
+    if (selectedId == null) return [];
     return activeStudents.filter((s) => Number(s.program_id) === selectedId);
   }, [activeStudents, selectedId]);
 
   const filteredDropouts = useMemo(() => {
-    if (selectedId == null) return dropoutStudents;
+    if (selectedId == null) return [];
     return dropoutStudents.filter((s) => Number(s.program_id) === selectedId);
   }, [dropoutStudents, selectedId]);
 
