@@ -9,7 +9,7 @@ import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission, type UserPermission } from "@/lib/permissions";
-import { ACTION_TYPE_VALUES, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
+import { ACTION_TYPES, ACTION_TYPE_VALUES, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
 import {
   resolvePresetDateRange,
   rollupActionTypes,
@@ -72,6 +72,7 @@ interface VisitActionSummary {
   inProgressTypes: number;
   notStartedTypes: number;
   completionPercent: number | null;
+  rollup: Record<ActionType, ActionTypeRollupStatus>;
 }
 
 interface SchoolFilterOption {
@@ -254,11 +255,15 @@ function formatPm(visit: SummaryVisit): string {
 function formatDuration(visit: SummaryVisit, now = new Date()): string {
   const start = new Date(visit.inserted_at).getTime();
   const end = visit.completed_at ? new Date(visit.completed_at).getTime() : now.getTime();
-  const minutes = Math.max(0, Math.floor((end - start) / 60000));
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
+  const totalMinutes = Math.max(0, Math.floor((end - start) / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
 
-  return `${hours}h ${remainingMinutes}m`;
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  return `${hours}h ${minutes}m`;
 }
 
 function buildWhereClause(
@@ -513,6 +518,7 @@ function summarizeActions(actions: VisitActionRow[]): VisitActionSummary {
     completionPercent: totalActions === 0
       ? null
       : (completedTypes / ACTION_TYPE_VALUES.length) * 100,
+    rollup,
   };
 }
 
@@ -685,8 +691,38 @@ function formatActionCounts(summary: VisitActionSummary): string {
   return `${summary.totalActions} total, ${summary.completedActions} completed`;
 }
 
-function formatActionTypeBreakdown(summary: VisitActionSummary): string {
-  return `${summary.completedTypes}/${ACTION_TYPE_VALUES.length} complete, ${summary.inProgressTypes}/${ACTION_TYPE_VALUES.length} in-progress, ${summary.notStartedTypes}/${ACTION_TYPE_VALUES.length} not started`;
+function ActionTypeBar({ summary }: { summary: VisitActionSummary }) {
+  const pct = summary.completionPercent !== null ? Math.round(summary.completionPercent) : 0;
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex h-5 w-28 rounded-sm border border-border/60">
+        {ACTION_TYPE_VALUES.map((actionType) => {
+          const status = summary.rollup[actionType];
+          const label = ACTION_TYPES[actionType];
+          const statusLabel = status.replace("_", " ");
+          const colorClass =
+            status === "completed"
+              ? "bg-success"
+              : status === "in_progress" || status === "pending"
+                ? "bg-brand-amber"
+                : "bg-gray-200";
+
+          return (
+            <span
+              key={actionType}
+              className={`group/seg relative flex-1 border-r border-border/30 last:border-r-0 ${colorClass} cursor-default hover:opacity-80`}
+            >
+              <span className="pointer-events-none invisible absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-all group-hover/seg:visible group-hover/seg:opacity-100">
+                {label}: {statusLabel}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      <span className="text-xs font-mono text-text-muted whitespace-nowrap">{pct}%</span>
+    </div>
+  );
 }
 
 function formatMobileActionSummary(summary: VisitActionSummary): string {
@@ -836,8 +872,8 @@ function VisitDesktopTable({
                 <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
                   {formatPercent(actionSummary.completionPercent)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-4 text-sm font-mono text-text-secondary">
-                  {formatActionTypeBreakdown(actionSummary)}
+                <td className="whitespace-nowrap px-4 py-4">
+                  <ActionTypeBar summary={actionSummary} />
                 </td>
                 <td className="whitespace-nowrap px-4 py-4 text-right text-sm">
                   <Link
@@ -913,7 +949,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
   return (
     <div className="min-h-screen bg-bg">
       <header className="border-b border-border bg-bg-card shadow-sm">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3 sm:gap-6">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -950,7 +986,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <main className="px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex flex-col gap-2 border-b-4 border-border-accent pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-xl font-bold uppercase tracking-tight text-text-primary sm:text-2xl">

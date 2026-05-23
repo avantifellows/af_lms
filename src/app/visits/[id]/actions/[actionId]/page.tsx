@@ -162,11 +162,13 @@ export default async function VisitActionDetailPage({ params, searchParams }: Pa
     return notFoundState("Action not found", "This action may have been deleted.", fallbackBackHref);
   }
 
-  const canWrite = canEditVisit(actor, {
-    pmEmail: detail.visit.pm_email,
-    schoolCode: detail.visit.school_code,
-    schoolRegion: detail.visit.school_region,
-  });
+  const canWrite = backToSummary
+    ? false
+    : canEditVisit(actor, {
+        pmEmail: detail.visit.pm_email,
+        schoolCode: detail.visit.school_code,
+        schoolRegion: detail.visit.school_region,
+      });
 
   return (
     <main className="min-h-screen bg-bg">
@@ -179,6 +181,12 @@ export default async function VisitActionDetailPage({ params, searchParams }: Pa
             {backToSummary ? "← Back to Visit Summary" : "← Back to Visit"}
           </Link>
         </div>
+
+        {backToSummary && (
+          <div className="mb-4 border border-border bg-bg-card-alt px-4 py-3 text-sm text-text-muted">
+            View-only mode — editing is not available from the summary view.
+          </div>
+        )}
 
         <ActionDetailForm
           visitId={detail.visit.id}

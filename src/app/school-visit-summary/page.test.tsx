@@ -575,8 +575,10 @@ describe("SchoolVisitSummaryPage", () => {
       expect(screen.getByText("Avg Completion")).toBeInTheDocument();
       expect(screen.getByText("43%")).toBeInTheDocument();
       expect(screen.getByText("4 total, 1 completed")).toBeInTheDocument();
-      expect(screen.getByText("14%")).toBeInTheDocument();
-      expect(screen.getByText("1/7 complete, 2/7 in-progress, 4/7 not started")).toBeInTheDocument();
+      expect(screen.getAllByText("14%").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Classroom Observation: completed").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("AF Team Interaction: pending").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Principal Interaction: in progress").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText("1/7 complete").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByRole("link", { name: "View visit" })[0]).toHaveAttribute(
         "href",

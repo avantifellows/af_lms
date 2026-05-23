@@ -90,11 +90,15 @@ function formatTimestamp(value: string | null): string {
 function formatDuration(startValue: string, endValue: string | null, now = new Date()): string {
   const start = new Date(startValue).getTime();
   const end = endValue ? new Date(endValue).getTime() : now.getTime();
-  const minutes = Math.max(0, Math.floor((end - start) / 60000));
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
+  const totalMinutes = Math.max(0, Math.floor((end - start) / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
 
-  return `${hours}h ${remainingMinutes}m`;
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  return `${hours}h ${minutes}m`;
 }
 
 function formatStatus(status: string): string {

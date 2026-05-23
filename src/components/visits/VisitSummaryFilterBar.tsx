@@ -110,14 +110,18 @@ export default function VisitSummaryFilterBar({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">Filters</h2>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled
-            title="Coming soon"
-            className="border border-border px-3 py-2 text-xs font-bold uppercase text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Download CSV
-          </button>
+          <span className="group relative">
+            <button
+              type="button"
+              disabled
+              className="border border-border px-3 py-2 text-xs font-bold uppercase text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Download CSV
+            </button>
+            <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-text-primary px-2 py-1 text-xs text-bg opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+              Coming soon
+            </span>
+          </span>
           <button
             type="button"
             onClick={clearFilters}
@@ -268,34 +272,34 @@ export default function VisitSummaryFilterBar({
               <option value="all">All dates</option>
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-              From
-              <input
-                type="date"
-                value={from}
-                onChange={(event) => {
-                  setFrom(event.target.value);
-                  setPreset("");
-                  replaceWith({ from: event.target.value || undefined, preset: undefined });
-                }}
-                className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-              />
-            </label>
-            <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
-              To
-              <input
-                type="date"
-                value={to}
-                onChange={(event) => {
-                  setTo(event.target.value);
-                  setPreset("");
-                  replaceWith({ to: event.target.value || undefined, preset: undefined });
-                }}
-                className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-              />
-            </label>
-          </div>
+          {!preset && (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
+                From
+                <input
+                  type="date"
+                  value={from}
+                  onChange={(event) => {
+                    setFrom(event.target.value);
+                    replaceWith({ from: event.target.value || undefined, preset: undefined });
+                  }}
+                  className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+                />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
+                To
+                <input
+                  type="date"
+                  value={to}
+                  onChange={(event) => {
+                    setTo(event.target.value);
+                    replaceWith({ to: event.target.value || undefined, preset: undefined });
+                  }}
+                  className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+                />
+              </label>
+            </div>
+          )}
         </div>
       </div>
     </section>

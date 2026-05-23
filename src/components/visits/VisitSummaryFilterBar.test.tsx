@@ -56,7 +56,7 @@ describe("VisitSummaryFilterBar", () => {
       <VisitSummaryFilterBar
         schoolOptions={[]}
         pmOptions={[]}
-        currentParams={{ preset: "7d", sort: "visit_date", dir: "desc" }}
+        currentParams={{ sort: "visit_date", dir: "desc" }}
       />
     );
 
@@ -67,6 +67,19 @@ describe("VisitSummaryFilterBar", () => {
       "/school-visit-summary?sort=visit_date&dir=desc&page=1&from=2026-05-01",
       { scroll: false }
     );
+  });
+
+  it("hides manual date inputs when a preset is selected", () => {
+    render(
+      <VisitSummaryFilterBar
+        schoolOptions={[]}
+        pmOptions={[]}
+        currentParams={{ preset: "7d" }}
+      />
+    );
+
+    expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("To")).not.toBeInTheDocument();
   });
 
   it("updates PM, status, and action-completion bucket params", () => {
@@ -135,7 +148,7 @@ describe("VisitSummaryFilterBar", () => {
 
     const csvButton = screen.getByRole("button", { name: "Download CSV" });
     expect(csvButton).toBeDisabled();
-    expect(csvButton).toHaveAttribute("title", "Coming soon");
+    expect(screen.getByText("Coming soon")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(mockReplace).toHaveBeenCalledWith(
