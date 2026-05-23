@@ -1,3 +1,5 @@
+import type { RemarkEntry } from "./visit-summary";
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -261,4 +263,96 @@ export function validateIndividualTeacherComplete(data: unknown): ValidationResu
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function getTeacherName(entry: Record<string, unknown>, index: number): string {
+  return typeof entry.name === "string" && entry.name.trim() !== ""
+    ? entry.name.trim()
+    : `Teacher ${index + 1}`;
+}
+
+function answeredCountForQuestions(questions: unknown): number {
+  if (!isPlainObject(questions)) {
+    return 0;
+  }
+  return INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.filter((key) => {
+    const answer = questions[key];
+    return isPlainObject(answer) && typeof answer.answer === "boolean";
+  }).length;
+}
+
+export function extractRemarks(data: unknown): RemarkEntry[] {
+  if (!isPlainObject(data) || !Array.isArray(data.teachers)) {
+    return [];
+  }
+
+  const remarks: RemarkEntry[] = [];
+  data.teachers.forEach((teacher, index) => {
+    if (!isPlainObject(teacher) || !isPlainObject(teacher.questions)) {
+      return;
+    }
+    const teacherName = getTeacherName(teacher, index);
+    for (const section of INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.sections) {
+      for (const question of section.questions) {
+        const answer = teacher.questions[question.key];
+        if (!isPlainObject(answer)) {
+          continue;
+        }
+        const text = nonEmptyString(answer.remark);
+        if (text) {
+          remarks.push({ label: `${teacherName}: ${question.label}`, text });
+        }
+      }
+    }
+  });
+  return remarks;
+}
+
+export function computeInlineStats(data: unknown): {
+  teacherCount: number;
+  presentCount: number;
+  onLeaveCount: number;
+  absentCount: number;
+  avgAnswered: number | null;
+  totalQuestions: number;
+} | null {
+  if (!isPlainObject(data) || !Array.isArray(data.teachers)) {
+    return null;
+  }
+
+  let presentCount = 0;
+  let onLeaveCount = 0;
+  let absentCount = 0;
+  let presentAnsweredSum = 0;
+
+  for (const teacher of data.teachers) {
+    if (!isPlainObject(teacher)) {
+      continue;
+    }
+    if (teacher.attendance === "present") {
+      presentCount += 1;
+      presentAnsweredSum += answeredCountForQuestions(teacher.questions);
+    } else if (teacher.attendance === "on_leave") {
+      onLeaveCount += 1;
+    } else if (teacher.attendance === "absent") {
+      absentCount += 1;
+    }
+  }
+
+  return {
+    teacherCount: data.teachers.length,
+    presentCount,
+    onLeaveCount,
+    absentCount,
+    avgAnswered: presentCount > 0 ? presentAnsweredSum / presentCount : null,
+    totalQuestions: INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.length,
+  };
 }

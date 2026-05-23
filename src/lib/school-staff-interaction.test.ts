@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   SCHOOL_STAFF_INTERACTION_CONFIG,
+  computeInlineStats,
+  extractRemarks,
   validateSchoolStaffInteractionSave,
   validateSchoolStaffInteractionComplete,
 } from "./school-staff-interaction";
@@ -208,5 +210,32 @@ describe("validateSchoolStaffInteractionComplete (strict)", () => {
     const result = validateSchoolStaffInteractionComplete(payload);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("Unknown field: extra");
+  });
+});
+
+describe("school staff interaction summary extractors", () => {
+  it("extracts question remarks and computes answered stats", () => {
+    const data = {
+      questions: {
+        gc_staff_concern: { answer: true, remark: "Staff requested lab support" },
+        gc_pertaining_issue: { answer: null, remark: "" },
+      },
+    };
+
+    expect(extractRemarks(data)).toEqual([
+      {
+        label: "Did any school staff raise any concern related to the program?",
+        text: "Staff requested lab support",
+      },
+    ]);
+    expect(computeInlineStats(data)).toEqual({
+      answeredCount: 1,
+      totalQuestions: 2,
+    });
+  });
+
+  it("handles null data gracefully", () => {
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });

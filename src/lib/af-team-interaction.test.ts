@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   AF_TEAM_INTERACTION_CONFIG,
+  computeInlineStats,
+  extractRemarks,
   validateAFTeamInteractionSave,
   validateAFTeamInteractionComplete,
 } from "./af-team-interaction";
@@ -239,5 +241,45 @@ describe("validateAFTeamInteractionComplete (strict)", () => {
     (payload.questions as Record<string, { answer: boolean }>).some_future_key = { answer: true };
     const result = validateAFTeamInteractionComplete(payload);
     expect(result.valid).toBe(true);
+  });
+});
+
+describe("AF team interaction summary extractors", () => {
+  it("extracts non-empty question remarks and computes answered/teacher stats", () => {
+    expect(
+      extractRemarks({
+        teachers: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
+        questions: {
+          op_class_duration: { answer: true, remark: "Classes are on schedule" },
+          op_centre_resources: { answer: false, remark: "   " },
+          sp_student_performance: { answer: null, remark: "Needs remedial plan" },
+        },
+      })
+    ).toEqual([
+      {
+        label: "Does the teacher get the required duration of classes?",
+        text: "Classes are on schedule",
+      },
+      {
+        label: "Are there concerns related to student performance?",
+        text: "Needs remedial plan",
+      },
+    ]);
+
+    expect(
+      computeInlineStats({
+        teachers: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
+        questions: {
+          op_class_duration: { answer: true },
+          op_centre_resources: { answer: false },
+          sp_student_performance: { answer: null },
+        },
+      })
+    ).toEqual({ answeredCount: 2, totalQuestions: 9, teacherCount: 2 });
+  });
+
+  it("handles null data gracefully", () => {
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });
