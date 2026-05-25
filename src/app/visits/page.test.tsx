@@ -55,6 +55,13 @@ const passcodeSession = {
   isPasscodeUser: true,
   schoolCode: "70705",
 };
+const passcodeSessionWithoutSchool = {
+  user: {},
+  isPasscodeUser: true,
+};
+const teacherSession = {
+  user: { email: "teacher@avantifellows.org" },
+};
 
 const programManagerPermission = {
   email: "pm@avantifellows.org",
@@ -74,6 +81,13 @@ const programAdminPermission = {
   role: "program_admin",
   regions: ["AHMEDABAD"],
   read_only: true,
+};
+const teacherPermission = {
+  email: "teacher@avantifellows.org",
+  level: 1,
+  role: "teacher",
+  school_codes: ["SC001"],
+  read_only: false,
 };
 
 function setupAuth(permission = programManagerPermission) {
@@ -153,6 +167,15 @@ describe("VisitsListPage (server component)", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("redirects passcode users without a school code to the dashboard", async () => {
+    mockGetServerSession.mockResolvedValue(passcodeSessionWithoutSchool);
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
+    expect(mockGetUserPermission).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it("redirects to /dashboard when permission is missing", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
     mockGetUserPermission.mockResolvedValue(null);
@@ -170,6 +193,61 @@ describe("VisitsListPage (server component)", () => {
     await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
     expect(mockGetFeatureAccess).toHaveBeenCalledWith(programManagerPermission, "visits");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("redirects admin users with visit access to the school visit summary", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    mockGetUserPermission.mockResolvedValue(adminPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow(
+      "REDIRECT:/school-visit-summary"
+    );
+    expect(mockRedirect).toHaveBeenCalledWith("/school-visit-summary");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("redirects program_admin users with visit access to the school visit summary", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "program-admin@avantifellows.org" },
+    });
+    mockGetUserPermission.mockResolvedValue(programAdminPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow(
+      "REDIRECT:/school-visit-summary"
+    );
+    expect(mockRedirect).toHaveBeenCalledWith("/school-visit-summary");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("redirects NVS-only program_admin users to the dashboard before summary routing", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "nvs-only@avantifellows.org" },
+    });
+    mockGetUserPermission.mockResolvedValue({
+      ...programAdminPermission,
+      email: "nvs-only@avantifellows.org",
+      program_ids: [64],
+    });
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
+    expect(mockRedirect).not.toHaveBeenCalledWith("/school-visit-summary");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("redirects teachers to the dashboard", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(teacherPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+
+    await expect(VisitsListPage({ searchParams: defaultSearchParams })).rejects.toThrow("REDIRECT:/dashboard");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
@@ -194,6 +272,17 @@ describe("VisitsListPage (server component)", () => {
     expect(deleteButtons).toHaveLength(2);
     expect(deleteButtons[0]).toHaveAttribute("data-visit-id", "1");
     expect(deleteButtons[0]).toHaveAttribute("data-mode", "list");
+  });
+
+  it("keeps Schools in the PM header and removes the Visits nav link", async () => {
+    setupAuth();
+    mockQuery.mockResolvedValue([inProgressVisit]);
+
+    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.getByRole("link", { name: "Schools" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
   });
 
   it("renders completed visits with View links and uses completed_at timestamp", async () => {
@@ -273,82 +362,4 @@ describe("VisitsListPage (server component)", () => {
     expect(params).toEqual(["pm@avantifellows.org"]);
   });
 
-  it("renders delete buttons for admin on in-progress visits", async () => {
-    setupAuth(adminPermission);
-    mockQuery.mockResolvedValue([inProgressVisit]);
-
-    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
-    render(jsx);
-
-    expect(screen.getAllByTestId("delete-visit-button")).toHaveLength(2);
-  });
-
-  it("does not render delete buttons for program_admin", async () => {
-    setupAuth(programAdminPermission);
-    mockQuery.mockResolvedValue([inProgressVisit]);
-
-    const jsx = await VisitsListPage({ searchParams: defaultSearchParams });
-    render(jsx);
-
-    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
-  });
-
-  it("shows scoped-role filters and maps admin filter query params", async () => {
-    setupAuth({
-      email: "admin@avantifellows.org",
-      level: 3,
-      role: "admin",
-      read_only: false,
-    });
-    mockQuery.mockResolvedValue([completedVisit]);
-
-    const jsx = await VisitsListPage({
-      searchParams: Promise.resolve({
-        school_code: "70705",
-        status: "completed",
-        pm_email: "pm2@avantifellows.org",
-      }),
-    });
-    render(jsx);
-
-    expect(screen.getByLabelText("School Code")).toHaveValue("70705");
-    expect(screen.getByLabelText("Status")).toHaveValue("completed");
-    expect(screen.getByLabelText("PM Email")).toHaveValue("pm2@avantifellows.org");
-
-    const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("LOWER(v.pm_email) = LOWER($1)");
-    expect(sql).toContain("v.school_code = $2");
-    expect(sql).toContain("v.status = $3");
-    expect(params).toEqual(["pm2@avantifellows.org", "70705", "completed"]);
-  });
-
-  it("shows scoped filters for program_admin and applies mandatory filter params with scope", async () => {
-    setupAuth({
-      email: "program-admin@avantifellows.org",
-      level: 2,
-      role: "program_admin",
-      regions: ["AHMEDABAD"],
-      read_only: false,
-    });
-    mockQuery.mockResolvedValue([completedVisit]);
-
-    const jsx = await VisitsListPage({
-      searchParams: Promise.resolve({
-        school_code: "70705",
-        status: "completed",
-        pm_email: "pm2@avantifellows.org",
-      }),
-    });
-    render(jsx);
-
-    expect(screen.getByLabelText("School Code")).toHaveValue("70705");
-    expect(screen.getByLabelText("Status")).toHaveValue("completed");
-    expect(screen.getByLabelText("PM Email")).toHaveValue("pm2@avantifellows.org");
-
-    const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("v.school_code = $2");
-    expect(sql).toContain("v.status = $3");
-    expect(sql).toContain("COALESCE(s.region, '') = ANY($4)");
-    expect(params).toEqual(["pm2@avantifellows.org", "70705", "completed", ["AHMEDABAD"]]);
-  });
 });

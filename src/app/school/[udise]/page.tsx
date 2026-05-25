@@ -9,41 +9,21 @@ import {
   getFeatureAccess,
   canAccessSchoolSync,
   hasMultipleSchools,
+  PROGRAM_IDS,
+  PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
-import StudentTable, { Grade } from "@/components/StudentTable";
+import { type Grade, type Student } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
-import StatCard from "@/components/StatCard";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
-import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-
-interface Student {
-  group_user_id: string;
-  user_id: string;
-  student_pk_id: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  email: string | null;
-  date_of_birth: string | null;
-  student_id: string | null;
-  apaar_id: string | null;
-  category: string | null;
-  stream: string | null;
-  gender: string | null;
-  program_name: string | null;
-  program_id: number | null;
-  grade: number | null;
-  grade_id: string | null;
-  status: string | null;
-  updated_at: string | null;
-}
+import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
+import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 
 interface School {
   id: string;
@@ -91,7 +71,7 @@ async function getBatchesWithMetadata(): Promise<Batch[]> {
      JOIN "group" g ON g.child_id = b.id AND g.type = 'batch'
      WHERE b.metadata IS NOT NULL AND b.program_id = $1
      ORDER BY b.name`,
-    [JNV_NVS_PROGRAM_ID]
+    [PROGRAM_IDS.NVS]
   );
   return batches;
 }
@@ -144,6 +124,10 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       JOIN batch b ON g_batch.child_id = b.id
       JOIN program p ON b.program_id = p.id
       WHERE gu_batch.user_id = u.id
+      -- Deterministic tiebreaker for students in multiple program batches:
+      -- prefer CoE → Nodal → NVS (matches PROGRAM_IDS_ORDERED). Interim until
+      -- a primary_batch field lands; see PR #58 discussion.
+      ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
       LIMIT 1
     ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1
@@ -295,25 +279,25 @@ export default async function SchoolPage({ params }: PageProps) {
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
 
-  // Calculate NVS student counts by grade
-  const nvsStudents = activeStudents.filter(
-    (s) => Number(s.program_id) === JNV_NVS_PROGRAM_ID
+  // Programs that have at least one active student at this school
+  const programsWithStudents = new Set(
+    activeStudents
+      .map((s) => (s.program_id != null ? Number(s.program_id) : null))
+      .filter((v): v is number => v != null)
   );
-  const totalNVSCount = nvsStudents.length;
 
-  // Group by grade
-  const gradeCounts = nvsStudents.reduce((acc, student) => {
-    const grade = student.grade;
-    if (grade !== null) {
-      acc[grade] = (acc[grade] || 0) + 1;
-    }
-    return acc;
-  }, {} as Record<number, number>);
+  // Programs the user is allowed to see for the enrollment cards.
+  // Admins + passcode users see every program present at the school; everyone
+  // else sees the intersection of their assigned program_ids with what's here.
+  const isAdmin = permission?.role === "admin";
+  const visibleProgramIds = (isPasscodeUser || isAdmin
+    ? PROGRAM_IDS_ORDERED
+    : permission?.program_ids ?? []
+  ).filter((id) => programsWithStudents.has(id));
 
-  // Sort grades and create array
-  const gradeCountsArray = Object.entries(gradeCounts)
-    .map(([grade, count]) => ({ grade: parseInt(grade), count }))
-    .sort((a, b) => a.grade - b.grade);
+  const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
+    buildProgramStats(activeStudents, id)
+  );
 
   // Check if user has access to multiple schools (to show/hide back arrow)
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
@@ -349,24 +333,15 @@ export default async function SchoolPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* NVS Student Stats */}
-      <Card elevation="md" className="p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">NVS Program Students</h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <StatCard label="Total NVS" value={totalNVSCount} />
-          {gradeCountsArray.map((gc) => (
-            <StatCard key={gc.grade} label={`Grade ${gc.grade}`} value={gc.count} size="sm" />
-          ))}
-        </div>
-      </Card>
-
-      <StudentTable
-        students={activeStudents}
+      {/* Per-program enrollment stats + student table (both filtered by selected program) */}
+      <EnrollmentTabContent
+        programs={programStatsList}
+        activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
         userProgramIds={permission?.program_ids ?? null}
-        isPasscodeUser={isPasscodeUser}
-        isAdmin={permission?.role === "admin"}
+        isPasscodeUser={isPasscodeUser ?? false}
+        isAdmin={isAdmin}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}

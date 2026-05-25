@@ -117,8 +117,11 @@ function makeAction(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function pageProps(id = "1", actionId = "101") {
-  return { params: Promise.resolve({ id, actionId }) };
+function pageProps(id = "1", actionId = "101", from?: string) {
+  return {
+    params: Promise.resolve({ id, actionId }),
+    searchParams: Promise.resolve(from ? { from } : {}),
+  };
 }
 
 function setupPmAuth() {
@@ -174,6 +177,77 @@ describe("VisitActionDetailPage", () => {
     expect(screen.getByText("Classroom Observation Details")).toBeInTheDocument();
     expect(screen.getByTestId("action-renderer-classroom_observation")).toBeInTheDocument();
     expect(screen.getByTestId("classroom-observation-form")).toBeInTheDocument();
+  });
+
+  it("links back to the summary detail page when opened from summary", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([makeAction()]);
+
+    const jsx = await VisitActionDetailPage(pageProps("1", "101", "summary"));
+    render(jsx);
+
+    const backLink = screen.getByRole("link", { name: /Back to Visit Summary/i });
+    expect(backLink).toHaveAttribute("href", "/school-visit-summary/1");
+  });
+
+  it("keeps the default visit breadcrumb when from is missing or invalid", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([makeVisit()])
+      .mockResolvedValueOnce([makeAction()]);
+
+    const jsx = await VisitActionDetailPage(pageProps("1", "101", "dashboard"));
+    render(jsx);
+
+    const backLink = screen.getByRole("link", { name: /Back to Visit$/i });
+    expect(backLink).toHaveAttribute("href", "/visits/1");
+    expect(screen.queryByRole("link", { name: /Back to Visit Summary/i })).not.toBeInTheDocument();
+  });
+
+  it("links visit-not-found summary traffic back to the summary list", async () => {
+    setupPmAuth();
+    mockQuery.mockResolvedValueOnce([]);
+
+    const jsx = await VisitActionDetailPage(pageProps("404", "101", "summary"));
+    render(jsx);
+
+    expect(screen.getByText("Visit not found")).toBeInTheDocument();
+    const backLink = screen.getByRole("link", { name: /Back to Visit Summary/i });
+    expect(backLink).toHaveAttribute("href", "/school-visit-summary");
+  });
+
+  it("links forbidden summary traffic back to the summary list", async () => {
+    setupPmAuth();
+    mockQuery
+      .mockResolvedValueOnce([
+        makeVisit({
+          school_code: "SC999",
+          school_region: "South",
+          pm_email: "other-pm@avantifellows.org",
+        }),
+      ])
+      .mockResolvedValueOnce([makeAction()]);
+
+    const jsx = await VisitActionDetailPage(pageProps("1", "101", "summary"));
+    render(jsx);
+
+    expect(screen.getByText("You do not have access to this action.")).toBeInTheDocument();
+    const backLink = screen.getByRole("link", { name: /Back to Visit Summary/i });
+    expect(backLink).toHaveAttribute("href", "/school-visit-summary");
+  });
+
+  it("links action-not-found summary traffic back to the summary list", async () => {
+    setupPmAuth();
+    mockQuery.mockResolvedValueOnce([makeVisit()]).mockResolvedValueOnce([]);
+
+    const jsx = await VisitActionDetailPage(pageProps("1", "999", "summary"));
+    render(jsx);
+
+    expect(screen.getByText("Action not found")).toBeInTheDocument();
+    const backLink = screen.getByRole("link", { name: /Back to Visit Summary/i });
+    expect(backLink).toHaveAttribute("href", "/school-visit-summary");
   });
 
   it("shows unsupported classroom rubric warning and hides save/end actions", async () => {
