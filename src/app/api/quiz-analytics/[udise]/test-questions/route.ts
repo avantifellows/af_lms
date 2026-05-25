@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
-import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
+import { getTestQuestionLevelData } from "@/lib/bigquery";
 
 export async function GET(
   request: Request,
@@ -28,27 +28,18 @@ export async function GET(
   try {
     const program = url.searchParams.get("program") || undefined;
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
-    const data = await getTestDeepDiveFromDynamo(
-      auth.school.id,
-      auth.school.name,
+    const questions = await getTestQuestionLevelData(
+      udise,
       grade,
       sessionId,
       program,
       stream
     );
-
-    if (!data) {
-      return NextResponse.json(
-        { error: "No results available for this test yet. Please check back in a few hours." },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(data);
+    return NextResponse.json({ questions });
   } catch (error) {
-    console.error("Test deep dive error:", error);
+    console.error("Test questions error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch test deep dive data" },
+      { error: "Failed to fetch question-level data" },
       { status: 500 }
     );
   }

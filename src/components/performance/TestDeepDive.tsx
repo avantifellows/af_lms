@@ -104,7 +104,14 @@ export default function TestDeepDive({
           </div>
 
           <SubjectAnalysisSection subjects={data.subjects} />
-          <ChapterAnalysisSection chapters={data.chapters} />
+          <ChapterAnalysisSection
+            chapters={data.chapters}
+            schoolUdise={schoolUdise}
+            grade={grade}
+            sessionId={sessionId}
+            program={program}
+            stream={stream}
+          />
           <StudentResultsTable students={data.students} />
         </>
       )}

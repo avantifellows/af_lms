@@ -91,6 +91,10 @@ export interface SubjectAnalysisRow {
 export interface ChapterAnalysisRow {
   subject: string;
   chapter_name: string;
+  // Stable join key shared with fact_student_test_results_question_level (BQ).
+  // Populated by the v2 reports flow; null if upstream chapter_tagging lookup
+  // missed and only a raw chapter_name was available.
+  chapter_id: string | null;
   avg_score: number;
   accuracy: number;
   attempt_rate: number;
@@ -134,4 +138,26 @@ export interface TestDeepDiveData {
   subjects: SubjectAnalysisRow[];
   chapters: ChapterAnalysisRow[];
   students: StudentDeepDiveRow[];
+}
+
+// --- Question-level types ---
+
+// One row per question across the class for a given test.
+export interface TestQuestionLevelRow {
+  subject: string;
+  chapter_name: string;
+  chapter_id: string | null;
+  question_id: string;
+  position_index: number | null;
+  total_students: number;
+  attempted: number;
+  correct: number;
+  wrong: number;
+  skipped: number;
+  attempt_rate: number; // percentage 0-100
+  accuracy: number; // percentage 0-100 (of attempters)
+}
+
+export interface TestQuestionLevelData {
+  questions: TestQuestionLevelRow[];
 }
