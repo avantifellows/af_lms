@@ -87,13 +87,11 @@ describe("getAvailableGrades", () => {
     );
   });
 
-  it("returns empty array on error", async () => {
+  it("propagates BQ errors to the caller", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 
     const { getAvailableGrades } = await import("./bigquery");
-    const result = await getAvailableGrades("11223344");
-
-    expect(result).toEqual([]);
+    await expect(getAvailableGrades("11223344")).rejects.toThrow("BQ error");
   });
 });
 
@@ -152,13 +150,11 @@ describe("getBatchOverviewData", () => {
     expect(calls[0][0].query).toContain("LOWER(student_stream) = @stream");
   });
 
-  it("returns empty on error", async () => {
+  it("propagates BQ errors to the caller", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 
     const { getBatchOverviewData } = await import("./bigquery");
-    const result = await getBatchOverviewData("11223344", 10);
-
-    expect(result).toEqual({ tests: [], totalEnrolled: null, enrolledByStream: {}, streams: [] });
+    await expect(getBatchOverviewData("11223344", 10)).rejects.toThrow("BQ error");
   });
 
   it("returns null totalEnrolled when no enrollment rows", async () => {
@@ -261,13 +257,11 @@ describe("getCumulativeALData", () => {
     expect(call.params).toMatchObject({ stream: "pcm", program: "JNV", grade: 11 });
   });
 
-  it("returns empty students + tests on error", async () => {
+  it("propagates BQ errors to the caller", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ error"));
 
     const { getCumulativeALData } = await import("./bigquery");
-    const result = await getCumulativeALData("11223344", 11);
-
-    expect(result).toEqual({ students: [], tests: [] });
+    await expect(getCumulativeALData("11223344", 11)).rejects.toThrow("BQ error");
   });
 });
 
@@ -365,12 +359,13 @@ describe("getTestQuestionLevelData", () => {
     });
   });
 
-  it("returns empty array on BQ error", async () => {
+  it("propagates BQ errors to the caller", async () => {
     mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ down"));
 
     const { getTestQuestionLevelData } = await import("./bigquery");
-    const result = await getTestQuestionLevelData("11223344", 11, "sess-1");
-    expect(result).toEqual([]);
+    await expect(
+      getTestQuestionLevelData("11223344", 11, "sess-1")
+    ).rejects.toThrow("BQ down");
   });
 });
 

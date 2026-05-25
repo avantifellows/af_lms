@@ -101,50 +101,40 @@ export function streamDisplayLabel(canonical: string): string {
  * Get distinct programs that have quiz data for a school.
  */
 export async function getAvailablePrograms(udise: string): Promise<string[]> {
-  try {
-    const client = getBigQueryClient();
-    const query = `
-      SELECT DISTINCT student_program
-      FROM ${FACT_TABLE}
-      WHERE student_school_udise_code = @udise
-        AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
-        AND LOWER(section) = 'overall'
-        AND student_program IS NOT NULL
-      ORDER BY student_program
-    `;
-    const [rows] = await client.query({ query, params: { udise } });
-    return rows.map((r: { student_program: string }) => r.student_program);
-  } catch (error) {
-    console.error("Failed to fetch available programs:", error);
-    return [];
-  }
+  const client = getBigQueryClient();
+  const query = `
+    SELECT DISTINCT student_program
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND LOWER(section) = 'overall'
+      AND student_program IS NOT NULL
+    ORDER BY student_program
+  `;
+  const [rows] = await client.query({ query, params: { udise } });
+  return rows.map((r: { student_program: string }) => r.student_program);
 }
 
 /**
  * Get distinct grades that have quiz data for a school + program.
  */
 export async function getAvailableGrades(udise: string, program?: string): Promise<number[]> {
-  try {
-    const client = getBigQueryClient();
-    const programFilter = program ? `AND student_program = @program` : "";
-    const query = `
-      SELECT DISTINCT student_grade
-      FROM ${FACT_TABLE}
-      WHERE student_school_udise_code = @udise
-        AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
-        AND LOWER(section) = 'overall'
-        AND student_grade IS NOT NULL
-        ${programFilter}
-      ORDER BY student_grade
-    `;
-    const params: Record<string, string | number> = { udise };
-    if (program) params.program = program;
-    const [rows] = await client.query({ query, params });
-    return rows.map((r: { student_grade: number }) => r.student_grade);
-  } catch (error) {
-    console.error("Failed to fetch available grades:", error);
-    return [];
-  }
+  const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const query = `
+    SELECT DISTINCT student_grade
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND LOWER(section) = 'overall'
+      AND student_grade IS NOT NULL
+      ${programFilter}
+    ORDER BY student_grade
+  `;
+  const params: Record<string, string | number> = { udise };
+  if (program) params.program = program;
+  const [rows] = await client.query({ query, params });
+  return rows.map((r: { student_grade: number }) => r.student_grade);
 }
 
 interface BatchOverviewRaw {
@@ -206,60 +196,55 @@ export async function getBatchOverviewData(
     GROUP BY student_stream
   `;
 
-  try {
-    const [testRows, enrolledRows] = await Promise.all([
-      client.query({ query: testListQuery, params }),
-      client.query({ query: enrolledQuery, params }),
-    ]);
+  const [testRows, enrolledRows] = await Promise.all([
+    client.query({ query: testListQuery, params }),
+    client.query({ query: enrolledQuery, params }),
+  ]);
 
-    interface RawTestRow {
-      session_id: string;
-      test_name: string;
-      start_date: string;
-      student_count: number;
-      stream_student_count: number;
-      test_format: string | null;
-      test_stream: string | null;
-      sections: string[] | null;
-    }
-
-    const tests: TestTrendPoint[] = (testRows[0] as RawTestRow[]).map((r) => {
-      const subjectSections = (r.sections || []).filter(
-        (s) => s && s.toLowerCase() !== "overall"
-      );
-      return {
-        session_id: r.session_id,
-        test_name: r.test_name,
-        start_date: r.start_date,
-        student_count: r.student_count,
-        stream_student_count: r.stream_student_count,
-        test_format: r.test_format,
-        test_stream: r.test_stream,
-        subjects: subjectSections,
-      };
-    });
-
-    const streamRows = enrolledRows[0] as { stream: string; total: number }[];
-    const enrolledByStream: Record<string, number> = {};
-    const streamsSet = new Set<string>();
-    let totalEnrolled = 0;
-    for (const row of streamRows) {
-      enrolledByStream[row.stream] = row.total;
-      totalEnrolled += row.total;
-      const c = canonicalStream(row.stream);
-      if (c) streamsSet.add(c);
-    }
-
-    return {
-      tests,
-      totalEnrolled: totalEnrolled || null,
-      enrolledByStream,
-      streams: [...streamsSet].sort(),
-    };
-  } catch (error) {
-    console.error("Failed to fetch batch overview data:", error);
-    return { tests: [], totalEnrolled: null, enrolledByStream: {}, streams: [] };
+  interface RawTestRow {
+    session_id: string;
+    test_name: string;
+    start_date: string;
+    student_count: number;
+    stream_student_count: number;
+    test_format: string | null;
+    test_stream: string | null;
+    sections: string[] | null;
   }
+
+  const tests: TestTrendPoint[] = (testRows[0] as RawTestRow[]).map((r) => {
+    const subjectSections = (r.sections || []).filter(
+      (s) => s && s.toLowerCase() !== "overall"
+    );
+    return {
+      session_id: r.session_id,
+      test_name: r.test_name,
+      start_date: r.start_date,
+      student_count: r.student_count,
+      stream_student_count: r.stream_student_count,
+      test_format: r.test_format,
+      test_stream: r.test_stream,
+      subjects: subjectSections,
+    };
+  });
+
+  const streamRows = enrolledRows[0] as { stream: string; total: number }[];
+  const enrolledByStream: Record<string, number> = {};
+  const streamsSet = new Set<string>();
+  let totalEnrolled = 0;
+  for (const row of streamRows) {
+    enrolledByStream[row.stream] = row.total;
+    totalEnrolled += row.total;
+    const c = canonicalStream(row.stream);
+    if (c) streamsSet.add(c);
+  }
+
+  return {
+    tests,
+    totalEnrolled: totalEnrolled || null,
+    enrolledByStream,
+    streams: [...streamsSet].sort(),
+  };
 }
 
 // Unified AL rank — M and B are stream-specific parallel scales.
@@ -329,128 +314,123 @@ export async function getCumulativeALData(
     ORDER BY start_date ASC
   `;
 
-  try {
-    const [rows] = await client.query({ query: sql, params });
-    interface AggRow {
-      student_id: string;
-      student_name: string | null;
-      student_stream: string | null;
-      session_id: string;
-      test_name: string;
-      start_date: string;
-      test_stream: string | null;
-      academic_level: string;
-      marks_scored: number | string | null;
-      max_marks_possible: number | string | null;
-    }
-
-    const toNumOrNull = (v: number | string | null | undefined): number | null => {
-      if (v === null || v === undefined) return null;
-      const n = typeof v === "number" ? v : Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    // Build the chronological test list (deduped by session_id).
-    const testMap = new Map<string, ProgressionTest>();
-    const studentMap = new Map<
-      string,
-      {
-        student_id: string;
-        student_name: string;
-        student_stream: string | null;
-        al_counts: Record<string, number>;
-        progression: ProgressionEntry[];
-      }
-    >();
-
-    for (const r of rows as AggRow[]) {
-      // BigQuery DATE returns as { value: "..." } — normalise to string.
-      const startDate =
-        typeof r.start_date === "string"
-          ? r.start_date
-          : (r.start_date as { value?: string } | null)?.value || "";
-
-      if (!testMap.has(r.session_id)) {
-        testMap.set(r.session_id, {
-          session_id: r.session_id,
-          test_name: r.test_name,
-          start_date: startDate,
-          stream: canonicalStream(r.test_stream),
-        });
-      }
-
-      const existing = studentMap.get(r.student_id) || {
-        student_id: r.student_id,
-        student_name: r.student_name || r.student_id,
-        student_stream: r.student_stream,
-        al_counts: {} as Record<string, number>,
-        progression: [] as ProgressionEntry[],
-      };
-      existing.al_counts[r.academic_level] = (existing.al_counts[r.academic_level] || 0) + 1;
-      existing.progression.push({
-        session_id: r.session_id,
-        academic_level: r.academic_level,
-        marks_scored: toNumOrNull(r.marks_scored),
-        max_marks_possible: toNumOrNull(r.max_marks_possible),
-      });
-      if (!existing.student_name && r.student_name) existing.student_name = r.student_name;
-      if (!existing.student_stream && r.student_stream) existing.student_stream = r.student_stream;
-      studentMap.set(r.student_id, existing);
-    }
-
-    const tests = [...testMap.values()].sort((a, b) =>
-      a.start_date.localeCompare(b.start_date)
-    );
-    const sessionOrder = new Map(tests.map((t, idx) => [t.session_id, idx]));
-
-    const students: CumulativeALRow[] = [];
-    for (const v of studentMap.values()) {
-      let modeAl: string | null = null;
-      let modeCount = 0;
-      let modeRank = -1;
-      let total = 0;
-      for (const [al, count] of Object.entries(v.al_counts)) {
-        total += count;
-        const rank = alRank(al);
-        if (count > modeCount || (count === modeCount && rank > modeRank)) {
-          modeAl = al;
-          modeCount = count;
-          modeRank = rank;
-        }
-      }
-      // Sort each student's progression by the global chronological order.
-      v.progression.sort(
-        (a, b) =>
-          (sessionOrder.get(a.session_id) ?? 0) -
-          (sessionOrder.get(b.session_id) ?? 0)
-      );
-      const canonical = canonicalStream(v.student_stream);
-      students.push({
-        student_id: v.student_id,
-        student_name: v.student_name,
-        stream: canonical ? streamDisplayLabel(canonical) : null,
-        total_major_tests: total,
-        al_counts: v.al_counts,
-        mode_al: modeAl,
-        progression: v.progression,
-      });
-    }
-
-    // Sort students by mode AL rank desc, then by total tests desc, then name.
-    students.sort((a, b) => {
-      const ar = alRank(a.mode_al);
-      const br = alRank(b.mode_al);
-      if (ar !== br) return br - ar;
-      if (a.total_major_tests !== b.total_major_tests)
-        return b.total_major_tests - a.total_major_tests;
-      return a.student_name.localeCompare(b.student_name);
-    });
-
-    return { students, tests };
-  } catch (error) {
-    console.error("Failed to fetch cumulative AL data:", error);
-    return { students: [], tests: [] };
+  const [rows] = await client.query({ query: sql, params });
+  interface AggRow {
+    student_id: string;
+    student_name: string | null;
+    student_stream: string | null;
+    session_id: string;
+    test_name: string;
+    start_date: string;
+    test_stream: string | null;
+    academic_level: string;
+    marks_scored: number | string | null;
+    max_marks_possible: number | string | null;
   }
+
+  const toNumOrNull = (v: number | string | null | undefined): number | null => {
+    if (v === null || v === undefined) return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Build the chronological test list (deduped by session_id).
+  const testMap = new Map<string, ProgressionTest>();
+  const studentMap = new Map<
+    string,
+    {
+      student_id: string;
+      student_name: string;
+      student_stream: string | null;
+      al_counts: Record<string, number>;
+      progression: ProgressionEntry[];
+    }
+  >();
+
+  for (const r of rows as AggRow[]) {
+    // BigQuery DATE returns as { value: "..." } — normalise to string.
+    const startDate =
+      typeof r.start_date === "string"
+        ? r.start_date
+        : (r.start_date as { value?: string } | null)?.value || "";
+
+    if (!testMap.has(r.session_id)) {
+      testMap.set(r.session_id, {
+        session_id: r.session_id,
+        test_name: r.test_name,
+        start_date: startDate,
+        stream: canonicalStream(r.test_stream),
+      });
+    }
+
+    const existing = studentMap.get(r.student_id) || {
+      student_id: r.student_id,
+      student_name: r.student_name || r.student_id,
+      student_stream: r.student_stream,
+      al_counts: {} as Record<string, number>,
+      progression: [] as ProgressionEntry[],
+    };
+    existing.al_counts[r.academic_level] = (existing.al_counts[r.academic_level] || 0) + 1;
+    existing.progression.push({
+      session_id: r.session_id,
+      academic_level: r.academic_level,
+      marks_scored: toNumOrNull(r.marks_scored),
+      max_marks_possible: toNumOrNull(r.max_marks_possible),
+    });
+    if (!existing.student_name && r.student_name) existing.student_name = r.student_name;
+    if (!existing.student_stream && r.student_stream) existing.student_stream = r.student_stream;
+    studentMap.set(r.student_id, existing);
+  }
+
+  const tests = [...testMap.values()].sort((a, b) =>
+    a.start_date.localeCompare(b.start_date)
+  );
+  const sessionOrder = new Map(tests.map((t, idx) => [t.session_id, idx]));
+
+  const students: CumulativeALRow[] = [];
+  for (const v of studentMap.values()) {
+    let modeAl: string | null = null;
+    let modeCount = 0;
+    let modeRank = -1;
+    let total = 0;
+    for (const [al, count] of Object.entries(v.al_counts)) {
+      total += count;
+      const rank = alRank(al);
+      if (count > modeCount || (count === modeCount && rank > modeRank)) {
+        modeAl = al;
+        modeCount = count;
+        modeRank = rank;
+      }
+    }
+    // Sort each student's progression by the global chronological order.
+    v.progression.sort(
+      (a, b) =>
+        (sessionOrder.get(a.session_id) ?? 0) -
+        (sessionOrder.get(b.session_id) ?? 0)
+    );
+    const canonical = canonicalStream(v.student_stream);
+    students.push({
+      student_id: v.student_id,
+      student_name: v.student_name,
+      stream: canonical ? streamDisplayLabel(canonical) : null,
+      total_major_tests: total,
+      al_counts: v.al_counts,
+      mode_al: modeAl,
+      progression: v.progression,
+    });
+  }
+
+  // Sort students by mode AL rank desc, then by total tests desc, then name.
+  students.sort((a, b) => {
+    const ar = alRank(a.mode_al);
+    const br = alRank(b.mode_al);
+    if (ar !== br) return br - ar;
+    if (a.total_major_tests !== b.total_major_tests)
+      return b.total_major_tests - a.total_major_tests;
+    return a.student_name.localeCompare(b.student_name);
+  });
+
+  return { students, tests };
 }
 
 /**
@@ -517,31 +497,26 @@ export async function getTestQuestionLevelData(
     return Number.isFinite(n) ? n : 0;
   };
 
-  try {
-    const [rows] = await client.query({ query: sql, params });
-    return (rows as RawRow[]).map((r) => {
-      const total = toInt(r.total_students);
-      const attempted = toInt(r.attempted);
-      const correct = toInt(r.correct);
-      return {
-        subject: r.subject || "",
-        chapter_name: r.chapter_name || "",
-        chapter_id: r.chapter_id || null,
-        question_id: r.question_id,
-        position_index:
-          r.position_index == null ? null : toInt(r.position_index),
-        total_students: total,
-        attempted,
-        correct,
-        wrong: toInt(r.wrong),
-        skipped: toInt(r.skipped),
-        attempt_rate: total > 0 ? Math.round((attempted / total) * 100) : 0,
-        accuracy:
-          attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
-      };
-    });
-  } catch (error) {
-    console.error("Failed to fetch question-level data:", error);
-    return [];
-  }
+  const [rows] = await client.query({ query: sql, params });
+  return (rows as RawRow[]).map((r) => {
+    const total = toInt(r.total_students);
+    const attempted = toInt(r.attempted);
+    const correct = toInt(r.correct);
+    return {
+      subject: r.subject || "",
+      chapter_name: r.chapter_name || "",
+      chapter_id: r.chapter_id || null,
+      question_id: r.question_id,
+      position_index:
+        r.position_index == null ? null : toInt(r.position_index),
+      total_students: total,
+      attempted,
+      correct,
+      wrong: toInt(r.wrong),
+      skipped: toInt(r.skipped),
+      attempt_rate: total > 0 ? Math.round((attempted / total) * 100) : 0,
+      accuracy:
+        attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
+    };
+  });
 }
