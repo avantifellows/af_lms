@@ -16,6 +16,9 @@ export const PROGRAM_IDS = {
   NVS: 64,
 } as const;
 
+// Canonical display order for program IDs.
+export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
+
 // Maps program_ids to the BigQuery `student_program` label.
 // Keep in sync with AddUserModal's PROGRAMS list.
 export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
