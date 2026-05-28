@@ -82,7 +82,7 @@ Defined in `src/lib/permissions.ts`:
 - **Level 2**: Region-based access
 - **Level 1**: Specific school codes only
 - Admin status is determined by `role = "admin"`, not by level
-- Roles: `teacher`, `program_manager`, `program_admin` (read-only), `admin`
+- Roles: `teacher`, `program_manager`, `program_admin` (read-only for visits; edit for academic mentorship), `admin`
 
 ### Database Schema (External PostgreSQL)
 Core tables:

@@ -19,7 +19,9 @@ const mockQuery = vi.mocked(query);
 // Helper to build a permission object with defaults
 function makePermission(overrides: Partial<UserPermission> = {}): UserPermission {
   return {
+    id: 1,
     email: "test@example.com",
+    full_name: null,
     level: 1,
     role: "teacher",
     school_codes: ["70705"],
@@ -146,6 +148,21 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(true);
     });
 
+    it("gives teachers view-only access to academic mentorship", () => {
+      const perm = makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.COE] });
+      const result = getFeatureAccess(perm, "academic_mentorship");
+      expect(result.access).toBe("view");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(false);
+    });
+
+    it("gives program admins edit access to academic mentorship", () => {
+      const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.COE] });
+      const result = getFeatureAccess(perm, "academic_mentorship");
+      expect(result.access).toBe("edit");
+      expect(result.canEdit).toBe(true);
+    });
+
     it("gives PMs edit on visits", () => {
       const perm = makePermission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "visits");
@@ -216,6 +233,15 @@ describe("getFeatureAccess", () => {
         program_ids: [PROGRAM_IDS.NVS],
       });
       const result = getFeatureAccess(perm, "curriculum");
+      expect(result.access).toBe("none");
+    });
+
+    it("blocks NVS-only user from academic mentorship", () => {
+      const perm = makePermission({
+        role: "teacher",
+        program_ids: [PROGRAM_IDS.NVS],
+      });
+      const result = getFeatureAccess(perm, "academic_mentorship");
       expect(result.access).toBe("none");
     });
 
@@ -312,7 +338,9 @@ describe("getUserPermission", () => {
   it("returns permission object for valid email", async () => {
     mockQuery.mockResolvedValueOnce([
       {
+        id: 7,
         email: "pm@avantifellows.org",
+        full_name: "Program Manager",
         level: 3,
         role: "program_manager",
         school_codes: null,
@@ -324,7 +352,9 @@ describe("getUserPermission", () => {
 
     const result = await getUserPermission("pm@avantifellows.org");
     expect(result).toEqual({
+      id: 7,
       email: "pm@avantifellows.org",
+      full_name: "Program Manager",
       level: 3,
       role: "program_manager",
       school_codes: null,
@@ -343,7 +373,9 @@ describe("getUserPermission", () => {
   it("defaults role to 'teacher' when DB role is empty", async () => {
     mockQuery.mockResolvedValueOnce([
       {
+        id: 8,
         email: "user@example.com",
+        full_name: null,
         level: 1,
         role: "",
         school_codes: ["70705"],
@@ -360,7 +392,9 @@ describe("getUserPermission", () => {
   it("casts level to AccessLevel", async () => {
     mockQuery.mockResolvedValueOnce([
       {
+        id: 9,
         email: "admin@avantifellows.org",
+        full_name: "Admin User",
         level: 3,
         role: "admin",
         school_codes: null,

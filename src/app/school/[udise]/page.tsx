@@ -274,7 +274,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const studentsAccess = getFeatureAccess(permission, "students", opts);
   const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
-  const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
+  const academicMentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
 
@@ -378,9 +378,9 @@ export default async function SchoolPage({ params }: PageProps) {
     <PerformanceTab schoolUdise={school.udise_code || school.code} />
   );
 
-  const mentorshipContent = (
+  const academicMentorshipContent = (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-      <p className="text-gray-500">Mentorship data coming soon.</p>
+      <p className="text-gray-500">Academic Mentorship data coming soon.</p>
     </div>
   );
 
@@ -406,7 +406,7 @@ export default async function SchoolPage({ params }: PageProps) {
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
     ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
+    ...(academicMentorshipAccess.canView ? [{ id: "academic_mentorship", label: "Academic Mentorship", content: academicMentorshipContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 

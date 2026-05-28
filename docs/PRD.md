@@ -28,14 +28,14 @@ A centralized LMS platform offering:
 
 **Unified Curriculum & Co-Curricular Tracking**
 - Syllabus completion dashboards with slippage alerts
-- Centralized intervention planning including mentorship and workshops
+- Centralized intervention planning including academic mentorship and workshops
 
 **Real-Time Performance Analytics**
 - School and student-level test data
 - Subject-level metrics (scores, accuracy, attempt ratios)
 - Chapter and question-level insights
 - Risk identification systems
-- Mentorship engagement tracking
+- Academic mentorship engagement tracking
 
 **Student Data Lifecycle Management**
 - Enrollment, exam registration, results, and college admission tracking
@@ -54,9 +54,9 @@ A centralized LMS platform offering:
 | Major Test Analytics | Must Have | 5 | Unified test performance data |
 | Chapter Test Analytics | Must Have | 6 | Granular assessment insights |
 | Syllabus Progress | Must Have | 7 | Timeline-based completion tracking |
-| Student-Teacher Mapping | Must Have | 8 | Mentorship relationship management |
-| Student Profiles & Notes | Must Have | 9 | Consolidated mentorship documentation |
-| Mentorship Summary | Must Have | 10 | Conversation status tracking |
+| Student-Teacher Mapping | Must Have | 8 | Academic mentorship relationship management |
+| Student Profiles & Notes | Must Have | 9 | Consolidated academic mentorship documentation |
+| Academic Mentorship Summary | Must Have | 10 | Conversation status tracking |
 
 ---
 
@@ -64,13 +64,13 @@ A centralized LMS platform offering:
 
 ### Problem Statement
 
-Teachers manage test preparation, syllabus tracking, student analytics, mentorship documentation, and co-curricular activities across multiple disconnected platforms. Challenges include:
+Teachers manage test preparation, syllabus tracking, student analytics, academic mentorship documentation, and co-curricular activities across multiple disconnected platforms. Challenges include:
 
 - No unified class performance overview or student risk indicators
 - Manual syllabus progress documentation
 - Dependency on Program Managers for test session modifications
 - Limited visibility into underperforming students and demographic performance gaps
-- Fragmented mentorship tracking across separate systems
+- Fragmented academic mentorship tracking across separate systems
 - Delayed interventions due to information fragmentation
 
 ### Proposed Solution
@@ -93,10 +93,10 @@ A personalized LMS providing:
 **Student Lifecycle Data Management**
 - Access to enrollment, exam registrations, results, and college admission information
 
-**Structured Mentorship Module**
+**Structured Academic Mentorship Module**
 - Teacher-student mapping capabilities
 - Individual student profile access
-- Mentorship note documentation
+- Academic mentorship note documentation
 - Follow-up action tracking
 - Engagement frequency analytics
 
@@ -113,9 +113,9 @@ A personalized LMS providing:
 | Major Test Analytics | Must Have | 3 | Comprehensive test performance data |
 | Chapter Test Analytics | Must Have | 4 | Detailed assessment breakdowns |
 | Syllabus Progress | Must Have | 5 | Daily session tracking |
-| Student-Teacher Mapping | Must Have | 6 | Mentorship relationship setup |
-| Student Profiles & Notes | Must Have | 7 | Mentorship documentation access |
-| Mentorship Summary | Must Have | 8 | Conversation completion tracking |
+| Student-Teacher Mapping | Must Have | 6 | Academic mentorship relationship setup |
+| Student Profiles & Notes | Must Have | 7 | Academic mentorship documentation access |
+| Academic Mentorship Summary | Must Have | 8 | Conversation completion tracking |
 | Test Prep Resources | Good to Have | 9 | Centralized resource access |
 
 ### Future Requirements (Not Immediate)

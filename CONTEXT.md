@@ -59,7 +59,7 @@ Has scoped read/write access to all visits (same validation rules as PM). Determ
 _Avoid_: Superuser, root
 
 **Program Admin**:
-Read-only access to visits within their scope. Cannot create, edit, or delete.
+Read-only access to visits within their scope. Edit access for academic mentorship mappings.
 _Avoid_: Viewer, observer
 
 **Permission Level**:
@@ -114,5 +114,5 @@ _Avoid_: Remove, delete (implies hard delete)
 ## Flagged ambiguities
 
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
-- "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
+- "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only for visits. For academic mentorship, `program_admin` has edit access (subject to the `read_only` flag). The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).

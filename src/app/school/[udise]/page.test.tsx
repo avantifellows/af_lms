@@ -229,7 +229,9 @@ const makeStudent = (overrides = {}) => ({
 });
 
 const makePermission = (overrides = {}) => ({
+  id: 1,
   email: "user@avantifellows.org",
+  full_name: null,
   level: 3 as const,
   role: "admin" as const,
   school_codes: null,
@@ -627,7 +629,7 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-curriculum")).toBeInTheDocument();
     expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
     expect(screen.getByTestId("tab-quiz_sessions")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-academic_mentorship")).toBeInTheDocument();
     expect(screen.getByTestId("tab-visits")).toBeInTheDocument();
   });
 
@@ -645,7 +647,7 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-performance")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-academic_mentorship")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
   });
 
@@ -1142,16 +1144,16 @@ describe("SchoolPage (server component)", () => {
     expect(batchQuery![1]).toEqual([64]); // JNV_NVS_PROGRAM_ID
   });
 
-  // --- Mentorship tab content ---
+  // --- Academic Mentorship tab content ---
 
-  it("renders mentorship tab with coming soon message", async () => {
+  it("renders academic mentorship tab with coming soon message", async () => {
     setupAdminDefaults();
 
     await renderPage();
 
-    expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-academic_mentorship")).toBeInTheDocument();
     expect(
-      screen.getByText("Mentorship data coming soon.")
+      screen.getByText("Academic Mentorship data coming soon.")
     ).toBeInTheDocument();
   });
 

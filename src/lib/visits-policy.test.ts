@@ -13,7 +13,9 @@ import {
 
 function makePermission(overrides: Partial<UserPermission> = {}): UserPermission {
   return {
+    id: 1,
     email: "user@avantifellows.org",
+    full_name: null,
     level: 1,
     role: "program_manager",
     school_codes: ["70705"],

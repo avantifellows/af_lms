@@ -76,7 +76,7 @@ Google-authenticated users must have a row in `user_permission`:
 
 **Important product behavior:**
 - The app enforces “program assignment required” for Google users in key pages (e.g. `/dashboard`, `/school/[udise]`).
-- “NVS-only” users (program_ids = `[64]` without CoE/Nodal) are intentionally restricted from PM-type features (visits/curriculum/mentorship) and may be filtered to only NVS students.
+- “NVS-only” users (program_ids = `[64]` without CoE/Nodal) are intentionally restricted from PM-type features (visits/curriculum/academic_mentorship) and may be filtered to only NVS students.
 
 ---
 
@@ -131,7 +131,7 @@ Enrollment behaviors:
   - `canEdit` is true
 
 Tabs:
-- Tabs exist for Enrollment/Curriculum/Performance/Mentorship/Visits.
+- Tabs exist for Enrollment/Curriculum/Performance/Academic Mentorship/Visits.
 - **Currently, non-Enrollment tabs are only shown to level-4 admins** (`isAdmin()`).
 - Visits tab: "Start Visit" / "Start New Visit" buttons are gated by `canEdit` — hidden for read-only/view-only users (e.g. `program_admin`).
 

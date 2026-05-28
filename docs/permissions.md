@@ -27,7 +27,9 @@ Separating scope, capabilities, and ownership keeps each concern simple. A singl
 
 | Column | Type | Purpose |
 |--------|------|---------|
+| `id` | integer | Permission record identifier; used as mentor ID for academic mentorship |
 | `email` | varchar(255) | User identifier |
+| `full_name` | varchar/text | Display name, with email fallback when blank |
 | `role` | varchar(50) | `teacher`, `program_manager`, `program_admin`, or `admin` |
 | `level` | integer | 1=specific schools, 2=region, 3=all schools |
 | `school_codes` | text[] | Specific school codes (level 1) |
@@ -58,10 +60,11 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
   visits:        { teacher: "none",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
   curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
-  mentorship:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
+  academic_mentorship: { teacher: "view",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
   summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  quiz_sessions: { teacher: "edit",  program_manager: "view",  program_admin: "view",  admin: "view" },
 };
 ```
 
@@ -78,7 +81,7 @@ Certain features are restricted to users who have CoE or Nodal program access. U
 
 - visits
 - curriculum
-- mentorship
+- academic_mentorship
 - pm_dashboard
 - summary_stats
 
@@ -127,7 +130,7 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | `admin` | No (bypasses all checks) | Tech admins with full access |
 | `program_admin` | Yes | Scoped admin for a specific program (e.g., CoE lead) |
 | `program_manager` | Yes | PMs who do school visits, view curriculum |
-| `teacher` | Yes | School-level users who edit curriculum/mentorship |
+| `teacher` | Yes | School-level users who edit curriculum and view academic mentorship |
 
 ---
 
@@ -140,7 +143,8 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | students | edit | edit | edit | edit |
 | visits | none | edit | view | edit |
 | curriculum | edit | view | edit | edit |
-| mentorship | edit | view | edit | edit |
+| academic_mentorship | view | view | edit | edit |
+| quiz_sessions | edit | view | view | view |
 | performance | view | view | view | view |
 | summary_stats | none | view | view | view |
 | pm_dashboard | none | view | view | view |
@@ -152,7 +156,8 @@ The school page query fetches `program_id` per student via a LATERAL join.
 | students | edit | edit | edit | edit |
 | visits | none | none | none | edit |
 | curriculum | none | none | none | edit |
-| mentorship | none | none | none | edit |
+| academic_mentorship | none | none | none | edit |
+| quiz_sessions | none | none | none | view |
 | performance | view | view | view | view |
 | summary_stats | none | none | none | view |
 | pm_dashboard | none | none | none | view |
@@ -202,22 +207,22 @@ Additional rules:
 
 **CoE Admin** (`program_admin`, `program_ids: {1}`):
 - Sees all CoE schools (level 3)
-- Can edit students, curriculum, mentorship for CoE students
+- Can edit students, curriculum, and academic mentorship mappings for CoE students
 - Can view visits across all their schools (read-only, cannot create)
 - Can view summary stats and PM dashboard
 - Cannot edit NVS students at shared schools
 
 **CoE SPM** (`program_manager`, `program_ids: {1}`, `regions: {Pune}`):
 - Sees all schools in Pune region
-- Can edit CoE students, view curriculum/mentorship (read-only)
+- Can edit CoE students, view curriculum and academic mentorship (read-only)
 - Can create and edit visits, view summary stats
 
 **CoE Teacher** (`teacher`, `program_ids: {1}`, `school_codes: {70705}`):
 - Sees one school
-- Can edit CoE students, curriculum, mentorship at that school
+- Can edit CoE students and curriculum at that school; can view academic mentorship
 - No visits, PM dashboard, or summary stats
 
 **NVS PM** (`program_manager`, `program_ids: {64}`, `regions: {Jaipur}`):
 - Sees all schools in Jaipur region
 - At a shared school: sees all students, can only edit NVS students
-- Visits, curriculum, mentorship, PM dashboard, summary stats all hidden (NVS-gated)
+- Visits, curriculum, academic mentorship, PM dashboard, summary stats, and quiz sessions all hidden (NVS-gated)

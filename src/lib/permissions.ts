@@ -21,7 +21,7 @@ export type Feature =
   | "students"
   | "visits"
   | "curriculum"
-  | "mentorship"
+  | "academic_mentorship"
   | "performance"
   | "summary_stats"
   | "pm_dashboard"
@@ -35,7 +35,7 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
   visits:        { teacher: "none",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
   curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
-  mentorship:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
+  academic_mentorship: { teacher: "view",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
   summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
@@ -44,7 +44,7 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
 const NVS_GATED_FEATURES: Set<Feature> = new Set([
-  "visits", "curriculum", "mentorship", "pm_dashboard", "summary_stats", "quiz_sessions",
+  "visits", "curriculum", "academic_mentorship", "pm_dashboard", "summary_stats", "quiz_sessions",
 ]);
 
 export interface FeatureAccessResult {
@@ -123,7 +123,9 @@ export function ownsRecord(
 }
 
 export interface UserPermission {
+  id: number;
   email: string;
+  full_name: string | null;
   level: AccessLevel;
   role: UserRole;
   school_codes?: string[] | null;
@@ -157,7 +159,9 @@ export async function getUserPermission(
   email: string
 ): Promise<UserPermission | null> {
   const results = await query<{
+    id: number;
     email: string;
+    full_name: string | null;
     level: number;
     role: string;
     school_codes: string[] | null;
@@ -165,7 +169,7 @@ export async function getUserPermission(
     program_ids: number[] | null;
     read_only: boolean;
   }>(
-    `SELECT email, level, role, school_codes, regions, program_ids, read_only
+    `SELECT id, email, full_name, level, role, school_codes, regions, program_ids, read_only
      FROM user_permission
      WHERE LOWER(email) = LOWER($1)`,
     [email]
@@ -175,7 +179,9 @@ export async function getUserPermission(
 
   const row = results[0];
   return {
+    id: row.id,
     email: row.email,
+    full_name: row.full_name,
     level: row.level as AccessLevel,
     role: (row.role || "teacher") as UserRole,
     school_codes: row.school_codes,
