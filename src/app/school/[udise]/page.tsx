@@ -22,6 +22,7 @@ import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import { JNV_NVS_PROGRAM_ID } from "@/lib/constants";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
+import AcademicMentorshipTab from "@/components/AcademicMentorshipTab";
 
 interface Student {
   group_user_id: string;
@@ -379,9 +380,12 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const academicMentorshipContent = (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-      <p className="text-gray-500">Academic Mentorship data coming soon.</p>
-    </div>
+    <AcademicMentorshipTab
+      schoolCode={school.code}
+      canView={academicMentorshipAccess.canView}
+      canEdit={academicMentorshipAccess.canEdit}
+      role={permission?.role ?? ""}
+    />
   );
 
   const visitsContent = (

@@ -184,6 +184,31 @@ vi.mock("@/components/VisitsTab", () => ({
   ),
 }));
 
+vi.mock("@/components/AcademicMentorshipTab", () => ({
+  __esModule: true,
+  default: ({
+    schoolCode,
+    canView,
+    canEdit,
+    role,
+  }: {
+    schoolCode: string;
+    canView: boolean;
+    canEdit: boolean;
+    role: string;
+  }) => (
+    <div
+      data-testid="academic-mentorship-tab"
+      data-school-code={schoolCode}
+      data-can-view={String(canView)}
+      data-can-edit={String(canEdit)}
+      data-role={role}
+    >
+      AcademicMentorshipTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/EditStudentModal", () => ({
   __esModule: true,
   default: () => null,
@@ -1146,15 +1171,19 @@ describe("SchoolPage (server component)", () => {
 
   // --- Academic Mentorship tab content ---
 
-  it("renders academic mentorship tab with coming soon message", async () => {
+  it("renders academic mentorship tab component with correct props", async () => {
     setupAdminDefaults();
 
     await renderPage();
 
     expect(screen.getByTestId("tab-academic_mentorship")).toBeInTheDocument();
-    expect(
-      screen.getByText("Academic Mentorship data coming soon.")
-    ).toBeInTheDocument();
+    expect(screen.queryByText("Academic Mentorship data coming soon.")).not.toBeInTheDocument();
+
+    const tab = screen.getByTestId("academic-mentorship-tab");
+    expect(tab).toHaveAttribute("data-school-code", "70705");
+    expect(tab).toHaveAttribute("data-can-view", "true");
+    expect(tab).toHaveAttribute("data-can-edit", "true");
+    expect(tab).toHaveAttribute("data-role", "admin");
   });
 
   // --- level 2 region check with null school region ---
