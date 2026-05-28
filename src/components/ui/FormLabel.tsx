@@ -2,7 +2,7 @@
 
 import { LabelHTMLAttributes, forwardRef } from "react";
 
-interface FormLabelProps extends LabelHTMLAttributes<HTMLLabelElement> {}
+type FormLabelProps = LabelHTMLAttributes<HTMLLabelElement>;
 
 export const FormLabel = forwardRef<HTMLLabelElement, FormLabelProps>(
   ({ className = "", ...props }, ref) => {
