@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeftRight, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { getAcademicYearChoices } from "@/lib/academic-year";
@@ -19,6 +20,7 @@ interface AcademicMentorshipAdminProps {
 
 interface AcademicMentorshipMapping {
   id: number;
+  mentor_id?: number;
   mentor_name: string | null;
   mentee_name: string | null;
   mentee_grade: number | null;
@@ -42,6 +44,7 @@ interface MenteeOption {
 
 type LoadState = "idle" | "loading" | "loaded" | "error";
 type AddFormState = "idle" | "loading" | "ready" | "error";
+type ReassignFormState = "idle" | "loading" | "ready" | "error";
 
 function formatAssignedDate(value: string): string {
   const date = new Date(value);
@@ -74,6 +77,13 @@ export default function AcademicMentorshipAdmin({
   const [addError, setAddError] = useState("");
   const [addSuccess, setAddSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [unassignTarget, setUnassignTarget] = useState<AcademicMentorshipMapping | null>(null);
+  const [reassignTarget, setReassignTarget] = useState<AcademicMentorshipMapping | null>(null);
+  const [reassignMentorOptions, setReassignMentorOptions] = useState<MentorOption[]>([]);
+  const [selectedReassignMentorEmail, setSelectedReassignMentorEmail] = useState("");
+  const [reassignFormState, setReassignFormState] = useState<ReassignFormState>("idle");
+  const [actionError, setActionError] = useState("");
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
 
   useEffect(() => {
     if (!selectedSchoolCode || !selectedAcademicYear) {
@@ -158,10 +168,50 @@ export default function AcademicMentorshipAdmin({
     };
   }, [showAddForm, selectedSchoolCode, selectedAcademicYear]);
 
+  useEffect(() => {
+    if (!reassignTarget || !selectedSchoolCode) {
+      return;
+    }
+
+    let ignore = false;
+    setReassignFormState("loading");
+    setActionError("");
+    setSelectedReassignMentorEmail("");
+
+    const mentorParams = new URLSearchParams({ school_code: selectedSchoolCode });
+    fetch(`/api/academic-mentorship/eligible-mentors?${mentorParams.toString()}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Failed to load mentors");
+        return response.json() as Promise<{ mentors?: MentorOption[] }>;
+      })
+      .then((data) => {
+        if (ignore) return;
+        setReassignMentorOptions(
+          (data.mentors ?? []).filter((mentor) => mentor.id !== reassignTarget.mentor_id)
+        );
+        setReassignFormState("ready");
+      })
+      .catch(() => {
+        if (ignore) return;
+        setReassignMentorOptions([]);
+        setReassignFormState("error");
+        setActionError("Unable to load mentor options");
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [reassignTarget, selectedSchoolCode]);
+
   function handleSchoolChange(schoolCode: string) {
     setSelectedSchoolCode(schoolCode);
     setMappings([]);
     setLoadState(schoolCode ? "loading" : "idle");
+    setUnassignTarget(null);
+    setReassignTarget(null);
+    setActionError("");
     closeAddForm();
   }
 
@@ -169,6 +219,9 @@ export default function AcademicMentorshipAdmin({
     setSelectedAcademicYear(academicYear);
     setMappings([]);
     setLoadState(selectedSchoolCode && academicYear ? "loading" : "idle");
+    setUnassignTarget(null);
+    setReassignTarget(null);
+    setActionError("");
     closeAddForm();
   }
 
@@ -226,6 +279,75 @@ export default function AcademicMentorshipAdmin({
       setAddError(error instanceof Error ? error.message : "Unable to add mapping");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  function closeReassignModal() {
+    setReassignTarget(null);
+    setReassignMentorOptions([]);
+    setSelectedReassignMentorEmail("");
+    setReassignFormState("idle");
+    setActionError("");
+  }
+
+  async function handleConfirmUnassign() {
+    if (!unassignTarget || !selectedSchoolCode) return;
+
+    setActionError("");
+    setIsActionSubmitting(true);
+    try {
+      const params = new URLSearchParams({ school_code: selectedSchoolCode });
+      const response = await fetch(
+        `/api/academic-mentorship/${unassignTarget.id}?${params.toString()}`,
+        { method: "DELETE" }
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Unable to unassign mentee");
+      }
+
+      setUnassignTarget(null);
+      setAddSuccess("Mentee unassigned");
+      setLoadState("loading");
+      setReloadCount((count) => count + 1);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Unable to unassign mentee");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  }
+
+  async function handleConfirmReassign() {
+    if (!reassignTarget || !selectedSchoolCode || !selectedReassignMentorEmail) {
+      setActionError("Select a new mentor");
+      return;
+    }
+
+    setActionError("");
+    setIsActionSubmitting(true);
+    try {
+      const response = await fetch("/api/academic-mentorship/reassign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: selectedSchoolCode,
+          old_mapping_id: reassignTarget.id,
+          new_mentor_email: selectedReassignMentorEmail,
+        }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Unable to reassign mentee");
+      }
+
+      closeReassignModal();
+      setAddSuccess("Mapping reassigned");
+      setLoadState("loading");
+      setReloadCount((count) => count + 1);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Unable to reassign mentee");
+    } finally {
+      setIsActionSubmitting(false);
     }
   }
 
@@ -388,7 +510,7 @@ export default function AcademicMentorshipAdmin({
               <th className="w-32 px-4 py-3">Mentee Student ID</th>
               <th className="w-1/5 px-4 py-3">Created By</th>
               <th className="w-36 px-4 py-3">Assigned Date</th>
-              {canEdit ? <th className="w-24 px-4 py-3">Actions</th> : null}
+              {canEdit ? <th className="w-28 px-4 py-3">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -432,12 +554,149 @@ export default function AcademicMentorshipAdmin({
                 <td className="px-4 py-3 text-text-primary">
                   {formatAssignedDate(mapping.inserted_at)}
                 </td>
-                {canEdit ? <td className="px-4 py-3" aria-label="Mapping actions" /> : null}
+                {canEdit ? (
+                  <td className="px-4 py-3" aria-label="Mapping actions">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label={`Reassign ${mapping.mentee_name ?? "mentee"}`}
+                        title="Reassign"
+                        onClick={() => {
+                          setActionError("");
+                          setReassignTarget(mapping);
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-text-primary hover:bg-bg-card-alt focus:outline-none focus:ring-2 focus:ring-accent/40"
+                      >
+                        <ArrowLeftRight aria-hidden="true" className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Unassign ${mapping.mentee_name ?? "mentee"}`}
+                        title="Unassign"
+                        onClick={() => {
+                          setActionError("");
+                          setUnassignTarget(mapping);
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-danger hover:bg-danger/10 focus:outline-none focus:ring-2 focus:ring-danger/40"
+                      >
+                        <Trash2 aria-hidden="true" className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {unassignTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Unassign mentee"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+        >
+          <div className="w-full max-w-md rounded-lg border border-border bg-bg-card p-5 shadow-xl">
+            <h2 className="text-lg font-bold text-text-primary">Unassign mentee</h2>
+            <p className="mt-3 text-sm text-text-primary">
+              {`Unassign ${unassignTarget.mentee_name ?? "this mentee"} from ${
+                unassignTarget.mentor_name ?? "this mentor"
+              }?`}
+            </p>
+            {actionError ? (
+              <div className="mt-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+                {actionError}
+              </div>
+            ) : null}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setUnassignTarget(null);
+                  setActionError("");
+                }}
+                disabled={isActionSubmitting}
+                className="min-h-[40px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUnassign}
+                disabled={isActionSubmitting}
+                className="min-h-[40px] rounded-lg bg-danger px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isActionSubmitting ? "Unassigning..." : "Confirm Unassign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {reassignTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reassign mentee"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+        >
+          <div className="w-full max-w-md rounded-lg border border-border bg-bg-card p-5 shadow-xl">
+            <h2 className="text-lg font-bold text-text-primary">Reassign mentee</h2>
+            <p className="mt-3 text-sm text-text-primary">
+              {`Select a new mentor for ${reassignTarget.mentee_name ?? "this mentee"}.`}
+            </p>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                New mentor
+              </span>
+              <select
+                value={selectedReassignMentorEmail}
+                onChange={(event) => setSelectedReassignMentorEmail(event.target.value)}
+                disabled={reassignFormState !== "ready" || isActionSubmitting}
+                className="min-h-[44px] w-full rounded-lg border-2 border-border px-3 py-2.5 text-sm"
+              >
+                <option value="">Select a mentor</option>
+                {reassignMentorOptions.map((mentor) => (
+                  <option key={mentor.id} value={mentor.email}>
+                    {mentor.full_name?.trim() || mentor.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {reassignFormState === "loading" ? (
+              <div className="mt-3 text-sm text-text-muted">Loading mentors...</div>
+            ) : null}
+            {actionError ? (
+              <div className="mt-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+                {actionError}
+              </div>
+            ) : null}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeReassignModal}
+                disabled={isActionSubmitting}
+                className="min-h-[40px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReassign}
+                disabled={
+                  reassignFormState !== "ready" ||
+                  isActionSubmitting ||
+                  !selectedReassignMentorEmail
+                }
+                className="min-h-[40px] rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isActionSubmitting ? "Reassigning..." : "Reassign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

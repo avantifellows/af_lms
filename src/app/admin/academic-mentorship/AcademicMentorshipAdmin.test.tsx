@@ -274,4 +274,353 @@ describe("AcademicMentorshipAdmin", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Mentor")).toBeInTheDocument();
   });
+
+  it("opens an unassign confirmation dialog with the selected mentor and mentee names", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: [
+              {
+                id: 10,
+                mentor_id: 21,
+                mentor_name: "Anita Teacher",
+                mentee_name: "Ravi Kumar",
+                mentee_grade: 11,
+                mentee_student_id: "STU-101",
+                created_by: "admin@avantifellows.org",
+                inserted_at: "2026-05-01T08:30:00Z",
+              },
+            ],
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("Ravi Kumar");
+    await userEvent.click(screen.getByRole("button", { name: "Unassign Ravi Kumar" }));
+
+    expect(screen.getByRole("dialog", { name: "Unassign mentee" })).toBeInTheDocument();
+    expect(screen.getByText("Unassign Ravi Kumar from Anita Teacher?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm Unassign" })).toBeInTheDocument();
+  });
+
+  it("opens a reassign modal with eligible mentors excluding the current mentor", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: [
+              {
+                id: 10,
+                mentor_id: 21,
+                mentor_name: "Anita Teacher",
+                mentee_name: "Ravi Kumar",
+                mentee_grade: 11,
+                mentee_student_id: "STU-101",
+                created_by: "admin@avantifellows.org",
+                inserted_at: "2026-05-01T08:30:00Z",
+              },
+            ],
+          }),
+        };
+      }
+      if (url.startsWith("/api/academic-mentorship/eligible-mentors?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mentors: [
+              { id: 21, email: "anita@avantifellows.org", full_name: "Anita Teacher" },
+              { id: 22, email: "new@avantifellows.org", full_name: "New Mentor" },
+            ],
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("Ravi Kumar");
+    await userEvent.click(screen.getByRole("button", { name: "Reassign Ravi Kumar" }));
+
+    expect(await screen.findByRole("dialog", { name: "Reassign mentee" })).toBeInTheDocument();
+    expect(screen.getByLabelText("New mentor")).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Anita Teacher" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "New Mentor" })).toBeInTheDocument();
+  });
+
+  it("unassigns a mentee and refreshes the mapping table", async () => {
+    let unassigned = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: unassigned
+              ? []
+              : [
+                  {
+                    id: 10,
+                    mentor_id: 21,
+                    mentor_name: "Anita Teacher",
+                    mentee_name: "Ravi Kumar",
+                    mentee_grade: 11,
+                    mentee_student_id: "STU-101",
+                    created_by: "admin@avantifellows.org",
+                    inserted_at: "2026-05-01T08:30:00Z",
+                  },
+                ],
+          }),
+        };
+      }
+      if (url === "/api/academic-mentorship/10?school_code=SCH001" && init?.method === "DELETE") {
+        unassigned = true;
+        return { ok: true, json: async () => ({ mapping: { id: 10 } }) };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("Ravi Kumar");
+    await userEvent.click(screen.getByRole("button", { name: "Unassign Ravi Kumar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Unassign" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/academic-mentorship/10?school_code=SCH001",
+        { method: "DELETE" }
+      );
+    });
+    expect(await screen.findByText("Mentee unassigned")).toBeInTheDocument();
+    expect(await screen.findByText("No mappings found")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Unassign mentee" })).not.toBeInTheDocument();
+  });
+
+  it("shows an unassign API error inside the confirmation dialog", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: [
+              {
+                id: 10,
+                mentor_id: 21,
+                mentor_name: "Anita Teacher",
+                mentee_name: "Ravi Kumar",
+                mentee_grade: 11,
+                mentee_student_id: "STU-101",
+                created_by: "admin@avantifellows.org",
+                inserted_at: "2026-05-01T08:30:00Z",
+              },
+            ],
+          }),
+        };
+      }
+      if (url === "/api/academic-mentorship/10?school_code=SCH001" && init?.method === "DELETE") {
+        return {
+          ok: false,
+          json: async () => ({ error: "Mapping already unassigned" }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("Ravi Kumar");
+    await userEvent.click(screen.getByRole("button", { name: "Unassign Ravi Kumar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Unassign" }));
+
+    expect(await screen.findByText("Mapping already unassigned")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Unassign mentee" })).toBeInTheDocument();
+  });
+
+  it("reassigns a mentee and refreshes the mapping table", async () => {
+    let reassigned = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: [
+              {
+                id: reassigned ? 11 : 10,
+                mentor_id: reassigned ? 22 : 21,
+                mentor_name: reassigned ? "New Mentor" : "Anita Teacher",
+                mentee_name: "Ravi Kumar",
+                mentee_grade: 11,
+                mentee_student_id: "STU-101",
+                created_by: "admin@avantifellows.org",
+                inserted_at: "2026-05-01T08:30:00Z",
+              },
+            ],
+          }),
+        };
+      }
+      if (url.startsWith("/api/academic-mentorship/eligible-mentors?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mentors: [
+              { id: 21, email: "anita@avantifellows.org", full_name: "Anita Teacher" },
+              { id: 22, email: "new@avantifellows.org", full_name: "New Mentor" },
+            ],
+          }),
+        };
+      }
+      if (url === "/api/academic-mentorship/reassign" && init?.method === "POST") {
+        reassigned = true;
+        return { ok: true, json: async () => ({ mapping: { id: 11 } }) };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("Anita Teacher");
+    await userEvent.click(screen.getByRole("button", { name: "Reassign Ravi Kumar" }));
+    await userEvent.selectOptions(await screen.findByLabelText("New mentor"), "new@avantifellows.org");
+    await userEvent.click(screen.getByRole("button", { name: "Reassign" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/academic-mentorship/reassign",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "SCH001",
+            old_mapping_id: 10,
+            new_mentor_email: "new@avantifellows.org",
+          }),
+        })
+      );
+    });
+    expect(await screen.findByText("Mapping reassigned")).toBeInTheDocument();
+    expect(await screen.findByText("New Mentor")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Reassign mentee" })).not.toBeInTheDocument();
+  });
+
+  it("shows a reassign API conflict inside the modal", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: [
+              {
+                id: 10,
+                mentor_id: 21,
+                mentor_name: "Anita Teacher",
+                mentee_name: "Ravi Kumar",
+                mentee_grade: 11,
+                mentee_student_id: "STU-101",
+                created_by: "admin@avantifellows.org",
+                inserted_at: "2026-05-01T08:30:00Z",
+              },
+            ],
+          }),
+        };
+      }
+      if (url.startsWith("/api/academic-mentorship/eligible-mentors?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mentors: [
+              { id: 21, email: "anita@avantifellows.org", full_name: "Anita Teacher" },
+              { id: 22, email: "new@avantifellows.org", full_name: "New Mentor" },
+            ],
+          }),
+        };
+      }
+      if (url === "/api/academic-mentorship/reassign" && init?.method === "POST") {
+        return {
+          ok: false,
+          json: async () => ({
+            error: "This student already has an active mentor for this academic year",
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("Anita Teacher");
+    await userEvent.click(screen.getByRole("button", { name: "Reassign Ravi Kumar" }));
+    await userEvent.selectOptions(await screen.findByLabelText("New mentor"), "new@avantifellows.org");
+    await userEvent.click(screen.getByRole("button", { name: "Reassign" }));
+
+    expect(
+      await screen.findByText("This student already has an active mentor for this academic year")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Reassign mentee" })).toBeInTheDocument();
+  });
 });
