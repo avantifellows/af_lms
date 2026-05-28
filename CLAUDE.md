@@ -84,6 +84,16 @@ Defined in `src/lib/permissions.ts`:
 - Admin status is determined by `role = "admin"`, not by level
 - Roles: `teacher`, `program_manager`, `program_admin` (read-only for visits; edit for academic mentorship), `admin`
 
+### Academic Mentorship (v1)
+- Feature key is `academic_mentorship`; CoE/Nodal teachers and PMs have view access, program admins/admins have edit access, and NVS-only users are gated out.
+- Mentor IDs are `user_permission.id`; mentor display names use `user_permission.full_name` with email fallback. Mentee IDs are `user.id`.
+- Academic years use `src/lib/academic-year.ts` for IST-aware current-year calculation and `YYYY-YYYY` validation. Do not use `CURRENT_ACADEMIC_YEAR` for mentorship.
+- LMS routes under `src/app/api/academic-mentorship/**` enforce session auth, feature access, school-scope checks, and then proxy mapping writes/reads to db-service with `DB_SERVICE_URL` + `DB_SERVICE_TOKEN`.
+- The LMS enriches mapping responses locally from `user_permission`, `user`, `student`, `enrollment_record`, and `grade`; db-service remains the source of truth for mapping rows.
+- CSV upload parses client-side with `src/lib/csv-parser.ts`, validates server-side with `src/lib/mentorship-csv-validation.ts`, caps uploads at 500 rows, and sends all-or-nothing batches to db-service.
+- Admin UI lives at `/admin/academic-mentorship`; `canView` gates page access and `canEdit` gates add/upload/unassign/reassign controls. The school page tab is read-only and role-scoped by the API.
+- E2E tests use `e2e/helpers/mock-db-service.ts` on port 4567 to simulate db-service academic mentorship endpoints.
+
 ### Database Schema (External PostgreSQL)
 Core tables:
 - `school`: id, code, udise_code, name, district, state, region
