@@ -96,8 +96,214 @@ describe("AcademicMentorshipAdmin", () => {
 
     expect(screen.getByLabelText("Mutation controls")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Mapping" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload CSV" })).toBeInTheDocument();
     expect(screen.getByText("Actions")).toBeInTheDocument();
     expect(screen.getByRole("table")).toHaveClass("table-fixed");
+  });
+
+  it("disables CSV upload for non-current academic years", async () => {
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    const uploadButton = screen.getByRole("button", { name: "Upload CSV" });
+    expect(uploadButton).toBeEnabled();
+
+    await userEvent.selectOptions(screen.getByLabelText("Academic Year"), "2025-2026");
+
+    expect(uploadButton).toBeDisabled();
+    expect(uploadButton).toHaveAttribute(
+      "title",
+      "CSV upload only available for current academic year"
+    );
+  });
+
+  it("previews a CSV upload, submits required columns only, and refreshes on success", async () => {
+    let uploaded = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            mappings: uploaded
+              ? [
+                  {
+                    id: 100,
+                    mentor_name: "Mentor One",
+                    mentee_name: "Ravi Kumar",
+                    mentee_grade: 11,
+                    mentee_student_id: "STU-001",
+                    created_by: "admin@avantifellows.org",
+                    inserted_at: "2026-05-01T08:30:00Z",
+                  },
+                ]
+              : [],
+          }),
+        };
+      }
+      if (url === "/api/academic-mentorship/upload" && init?.method === "POST") {
+        uploaded = true;
+        return { ok: true, json: async () => ({ created: 1 }) };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("No mappings found");
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.upload(
+      screen.getByLabelText("CSV file"),
+      new File(
+        ["mentor_email,student_id,ignored\nmentor@avantifellows.org,STU-001,extra"],
+        "mappings.csv",
+        { type: "text/csv" }
+      )
+    );
+
+    expect(screen.getByRole("dialog", { name: "Upload CSV" })).toBeInTheDocument();
+    expect(screen.getByText("mentor@avantifellows.org")).toBeInTheDocument();
+    expect(screen.getByText("STU-001")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/academic-mentorship/upload",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "SCH001",
+            rows: [{ mentor_email: "mentor@avantifellows.org", student_id: "STU-001" }],
+          }),
+        })
+      );
+    });
+    expect(await screen.findByText("Uploaded 1 mappings")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Upload CSV" })).not.toBeInTheDocument();
+    expect(await screen.findByText("Ravi Kumar")).toBeInTheDocument();
+  });
+
+  it("shows a client-side error when required CSV columns are missing", async () => {
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.upload(
+      screen.getByLabelText("CSV file"),
+      new File(["mentor_email\nmentor@avantifellows.org"], "missing-column.csv", {
+        type: "text/csv",
+      })
+    );
+
+    expect(await screen.findByText("Missing required columns: student_id")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
+  });
+
+  it("displays all server-side CSV validation errors in the upload modal", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return { ok: true, json: async () => ({ mappings: [] }) };
+      }
+      if (url === "/api/academic-mentorship/upload" && init?.method === "POST") {
+        return {
+          ok: false,
+          json: async () => ({
+            errors: [
+              { row: 2, field: "mentor_email", message: "Mentor is not eligible at this school" },
+              { row: 3, field: "student_id", message: "Duplicate student_id in upload" },
+            ],
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("No mappings found");
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.upload(
+      screen.getByLabelText("CSV file"),
+      new File(["mentor_email,student_id\nmissing@avantifellows.org,STU-001"], "bad.csv", {
+        type: "text/csv",
+      })
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    expect(await screen.findByText("Mentor is not eligible at this school")).toBeInTheDocument();
+    expect(screen.getByText("Duplicate student_id in upload")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Upload CSV" })).toBeInTheDocument();
+  });
+
+  it("shows the db-service race condition message in the upload modal", async () => {
+    const raceMessage =
+      "One or more students were assigned by another user during upload. Refresh and retry.";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/academic-mentorship?")) {
+        return { ok: true, json: async () => ({ mappings: [] }) };
+      }
+      if (url === "/api/academic-mentorship/upload" && init?.method === "POST") {
+        return { ok: false, json: async () => ({ error: raceMessage }) };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("School"), "SCH001");
+    await screen.findByText("No mappings found");
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.upload(
+      screen.getByLabelText("CSV file"),
+      new File(["mentor_email,student_id\nmentor@avantifellows.org,STU-001"], "race.csv", {
+        type: "text/csv",
+      })
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    expect(await screen.findByText(raceMessage)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Upload CSV" })).toBeInTheDocument();
   });
 
   it("shows empty state when the selected school has no mappings", async () => {

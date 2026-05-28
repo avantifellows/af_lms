@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowLeftRight, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Trash2, Upload } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { getAcademicYearChoices } from "@/lib/academic-year";
+import { parseCsvText } from "@/lib/csv-parser";
 import type { UserRole } from "@/lib/permissions";
 
 interface SchoolOption {
@@ -46,6 +47,17 @@ type LoadState = "idle" | "loading" | "loaded" | "error";
 type AddFormState = "idle" | "loading" | "ready" | "error";
 type ReassignFormState = "idle" | "loading" | "ready" | "error";
 
+interface CsvUploadRow {
+  mentor_email: string;
+  student_id: string;
+}
+
+interface CsvUploadError {
+  row: number;
+  field: string;
+  message: string;
+}
+
 function formatAssignedDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -84,6 +96,13 @@ export default function AcademicMentorshipAdmin({
   const [reassignFormState, setReassignFormState] = useState<ReassignFormState>("idle");
   const [actionError, setActionError] = useState("");
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [csvRows, setCsvRows] = useState<CsvUploadRow[]>([]);
+  const [csvErrors, setCsvErrors] = useState<CsvUploadError[]>([]);
+  const [csvFileError, setCsvFileError] = useState("");
+  const [isUploadSubmitting, setIsUploadSubmitting] = useState(false);
+  const currentAcademicYear = academicYears[0] ?? "";
+  const csvUploadDisabled = selectedAcademicYear !== currentAcademicYear;
 
   useEffect(() => {
     if (!selectedSchoolCode || !selectedAcademicYear) {
@@ -290,6 +309,90 @@ export default function AcademicMentorshipAdmin({
     setActionError("");
   }
 
+  function closeUploadModal() {
+    setShowUploadModal(false);
+    setCsvRows([]);
+    setCsvErrors([]);
+    setCsvFileError("");
+    setIsUploadSubmitting(false);
+  }
+
+  async function handleCsvFileChange(file: File | null) {
+    setCsvRows([]);
+    setCsvErrors([]);
+    setCsvFileError("");
+    if (!file) return;
+
+    try {
+      const parsed = parseCsvText(await file.text());
+      const requiredColumns = ["mentor_email", "student_id"];
+      const missingColumns = requiredColumns.filter((column) => !parsed.headers.includes(column));
+      if (missingColumns.length > 0) {
+        setCsvFileError(`Missing required columns: ${missingColumns.join(", ")}`);
+        return;
+      }
+
+      setCsvRows(
+        parsed.rows.map((row) => ({
+          mentor_email: row.mentor_email ?? "",
+          student_id: row.student_id ?? "",
+        }))
+      );
+    } catch {
+      setCsvFileError("Unable to parse CSV file");
+    }
+  }
+
+  async function handleCsvUpload() {
+    setCsvErrors([]);
+    setCsvFileError("");
+
+    if (!selectedSchoolCode) {
+      setCsvFileError("Select a school before uploading CSV");
+      return;
+    }
+    if (csvRows.length === 0) {
+      setCsvFileError("Choose a CSV file with at least one row");
+      return;
+    }
+
+    setIsUploadSubmitting(true);
+    try {
+      const response = await fetch("/api/academic-mentorship/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: selectedSchoolCode,
+          rows: csvRows,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        created?: number;
+        mappings?: unknown[];
+        errors?: CsvUploadError[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        if (Array.isArray(data.errors)) {
+          setCsvErrors(data.errors);
+          return;
+        }
+        throw new Error(data.error || "Unable to upload CSV");
+      }
+
+      const uploadCount = data.created ?? data.mappings?.length ?? csvRows.length;
+      closeUploadModal();
+      setAddSuccess(`Uploaded ${uploadCount} mappings`);
+      setLoadState("loading");
+      setReloadCount((count) => count + 1);
+    } catch (error) {
+      setCsvFileError(error instanceof Error ? error.message : "Unable to upload CSV");
+    } finally {
+      setIsUploadSubmitting(false);
+    }
+  }
+
   async function handleConfirmUnassign() {
     if (!unassignTarget || !selectedSchoolCode) return;
 
@@ -398,7 +501,27 @@ export default function AcademicMentorshipAdmin({
           </label>
 
           {canEdit ? (
-            <div aria-label="Mutation controls" className="flex items-end justify-start md:justify-end">
+            <div
+              aria-label="Mutation controls"
+              className="flex flex-wrap items-end justify-start gap-2 md:justify-end"
+            >
+              <button
+                type="button"
+                disabled={csvUploadDisabled}
+                onClick={() => {
+                  setAddSuccess("");
+                  setShowUploadModal(true);
+                }}
+                title={
+                  csvUploadDisabled
+                    ? "CSV upload only available for current academic year"
+                    : "Upload CSV"
+                }
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border-2 border-border px-4 py-2 text-sm font-bold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Upload aria-hidden="true" className="h-4 w-4" />
+                Upload CSV
+              </button>
               <button
                 type="button"
                 onClick={openAddForm}
@@ -628,6 +751,112 @@ export default function AcademicMentorshipAdmin({
                 className="min-h-[40px] rounded-lg bg-danger px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isActionSubmitting ? "Unassigning..." : "Confirm Unassign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showUploadModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Upload CSV"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+        >
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border bg-bg-card p-5 shadow-xl">
+            <h2 className="text-lg font-bold text-text-primary">Upload CSV</h2>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                CSV file
+              </span>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(event) => {
+                  void handleCsvFileChange(event.target.files?.[0] ?? null);
+                }}
+                disabled={isUploadSubmitting}
+                className="block min-h-[44px] w-full rounded-lg border-2 border-border px-3 py-2 text-sm"
+              />
+            </label>
+
+            {csvFileError ? (
+              <div className="mt-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+                {csvFileError}
+              </div>
+            ) : null}
+
+            {csvRows.length > 0 ? (
+              <div className="mt-4 overflow-hidden rounded-lg border border-border">
+                <table className="min-w-full table-fixed divide-y divide-border text-sm">
+                  <thead className="bg-bg-card-alt text-left text-xs font-bold uppercase tracking-wide text-text-muted">
+                    <tr>
+                      <th className="w-1/2 px-4 py-3">Mentor Email</th>
+                      <th className="w-1/2 px-4 py-3">Student ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvRows.map((row, index) => (
+                      <tr key={`${row.mentor_email}-${row.student_id}-${index}`}>
+                        <td className="border-t border-border px-4 py-3 text-text-primary">
+                          {row.mentor_email || "-"}
+                        </td>
+                        <td className="border-t border-border px-4 py-3 font-mono text-text-primary">
+                          {row.student_id || "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {csvErrors.length > 0 ? (
+              <div className="mt-4 overflow-hidden rounded-lg border border-danger/30">
+                <table className="min-w-full table-fixed divide-y divide-danger/20 text-sm">
+                  <thead className="bg-danger/10 text-left text-xs font-bold uppercase tracking-wide text-danger">
+                    <tr>
+                      <th className="w-20 px-4 py-3">Row</th>
+                      <th className="w-40 px-4 py-3">Field</th>
+                      <th className="px-4 py-3">Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvErrors.map((error, index) => (
+                      <tr key={`${error.row}-${error.field}-${index}`}>
+                        <td className="border-t border-danger/20 px-4 py-3 text-text-primary">
+                          {error.row}
+                        </td>
+                        <td className="border-t border-danger/20 px-4 py-3 font-mono text-text-primary">
+                          {error.field}
+                        </td>
+                        <td className="border-t border-danger/20 px-4 py-3 text-danger">
+                          {error.message}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeUploadModal}
+                disabled={isUploadSubmitting}
+                className="min-h-[40px] rounded-lg border-2 border-border px-4 py-2 text-sm font-bold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCsvUpload}
+                disabled={isUploadSubmitting || csvRows.length === 0}
+                className="min-h-[40px] rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isUploadSubmitting ? "Uploading..." : "Upload"}
               </button>
             </div>
           </div>
