@@ -87,6 +87,14 @@ function request(url = "http://localhost/api/academic-mentorship?school_code=707
   return new NextRequest(url);
 }
 
+function postRequest(body: unknown) {
+  return new NextRequest("http://localhost/api/academic-mentorship", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 beforeEach(() => {
   mocks.mockGetServerSession.mockReset();
   mocks.mockGetUserPermission.mockReset();
@@ -314,6 +322,232 @@ describe("GET /api/academic-mentorship", () => {
     mocks.mockFetch.mockResolvedValue(jsonResponse({ error: "downstream" }, 500));
 
     const res = await GET(request());
+
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toEqual({
+      error: "Academic mentorship service unavailable",
+    });
+  });
+});
+
+describe("POST /api/academic-mentorship", () => {
+  it("returns 403 when school_code is outside the actor scope", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "admin", email: "admin@avantifellows.org" })
+    );
+    mocks.mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mocks.mockCanAccessSchool.mockResolvedValue(false);
+
+    const res = await POST(
+      postRequest({
+        school_code: "SCH999",
+        mentor_email: "mentor@avantifellows.org",
+        mentee_user_id: 1001,
+        academic_year: "2026-2027",
+      })
+    );
+
+    expect(res.status).toBe(403);
+    expect(mocks.mockQuery).not.toHaveBeenCalled();
+    expect(mocks.mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("creates a mapping with a case-insensitive mentor lookup and session creator email", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "admin", email: "admin@avantifellows.org" })
+    );
+    mocks.mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mocks.mockQuery
+      .mockResolvedValueOnce([
+        { id: 21, email: "mentor@avantifellows.org", full_name: "Mentor One" },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 1001,
+          selected_school_match_count: 1,
+          school_membership_count: 1,
+          is_dropout: null,
+        },
+      ]);
+    mocks.mockFetch.mockResolvedValue(
+      jsonResponse({
+        mapping: {
+          id: 99,
+          mentor_id: 21,
+          mentee_id: 1001,
+          academic_year: "2026-2027",
+          created_by: "admin@avantifellows.org",
+        },
+      })
+    );
+
+    const res = await POST(
+      postRequest({
+        school_code: "SCH001",
+        mentor_email: " Mentor@AvantiFellows.Org ",
+        mentee_user_id: 1001,
+        academic_year: "2026-2027",
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.mockCanAccessSchool).toHaveBeenCalledWith("admin@avantifellows.org", "SCH001");
+    expect(mocks.mockQuery.mock.calls[0]?.[0]).toContain("LOWER(email) = LOWER($1)");
+    expect(mocks.mockQuery.mock.calls[0]?.[0]).toContain("cardinality(school_codes) = 1");
+    expect(mocks.mockQuery.mock.calls[0]?.[1]).toEqual(["mentor@avantifellows.org", "SCH001"]);
+    expect(mocks.mockQuery.mock.calls[1]?.[0]).toContain("COUNT(DISTINCT all_schools.code)");
+    expect(mocks.mockFetch).toHaveBeenCalledWith(
+      "http://db-service.local/api/academic-mentorship-mapping",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-token",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          mentor_id: 21,
+          mentee_id: 1001,
+          academic_year: "2026-2027",
+          created_by: "admin@avantifellows.org",
+        }),
+      })
+    );
+    await expect(res.json()).resolves.toEqual({
+      mapping: {
+        id: 99,
+        mentor_id: 21,
+        mentee_id: 1001,
+        academic_year: "2026-2027",
+        created_by: "admin@avantifellows.org",
+      },
+    });
+  });
+
+  it("rejects a mentee with multiple school memberships", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "admin", email: "admin@avantifellows.org" })
+    );
+    mocks.mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mocks.mockQuery
+      .mockResolvedValueOnce([
+        { id: 21, email: "mentor@avantifellows.org", full_name: "Mentor One" },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 1001,
+          selected_school_match_count: 1,
+          school_membership_count: 2,
+          is_dropout: null,
+        },
+      ]);
+
+    const res = await POST(
+      postRequest({
+        school_code: "SCH001",
+        mentor_email: "mentor@avantifellows.org",
+        mentee_user_id: 1001,
+        academic_year: "2026-2027",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "Mentee has multiple school memberships",
+    });
+    expect(mocks.mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when db-service reports a duplicate active assignment", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "admin", email: "admin@avantifellows.org" })
+    );
+    mocks.mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mocks.mockQuery
+      .mockResolvedValueOnce([
+        { id: 21, email: "mentor@avantifellows.org", full_name: "Mentor One" },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 1001,
+          selected_school_match_count: 1,
+          school_membership_count: 1,
+          is_dropout: null,
+        },
+      ]);
+    mocks.mockFetch.mockResolvedValue(jsonResponse({ error: "unique violation" }, 409));
+
+    const res = await POST(
+      postRequest({
+        school_code: "SCH001",
+        mentor_email: "mentor@avantifellows.org",
+        mentee_user_id: 1001,
+        academic_year: "2026-2027",
+      })
+    );
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "This student already has an active mentor for this academic year",
+    });
+  });
+
+  it("returns 502 when db-service create fails", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "admin", email: "admin@avantifellows.org" })
+    );
+    mocks.mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mocks.mockQuery
+      .mockResolvedValueOnce([
+        { id: 21, email: "mentor@avantifellows.org", full_name: "Mentor One" },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 1001,
+          selected_school_match_count: 1,
+          school_membership_count: 1,
+          is_dropout: null,
+        },
+      ]);
+    mocks.mockFetch.mockResolvedValue(jsonResponse({ error: "downstream" }, 500));
+
+    const res = await POST(
+      postRequest({
+        school_code: "SCH001",
+        mentor_email: "mentor@avantifellows.org",
+        mentee_user_id: 1001,
+        academic_year: "2026-2027",
+      })
+    );
 
     expect(res.status).toBe(502);
     await expect(res.json()).resolves.toEqual({
