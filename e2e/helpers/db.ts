@@ -537,7 +537,7 @@ export async function seedIndividualTeacherTestTeachers(
        RETURNING id`,
       [t.email, schoolCode, t.name]
     );
-    results.push({ id: rows.rows[0].id, name: t.name });
+    results.push({ id: Number(rows.rows[0].id), name: t.name });
   }
 
   // Clean up any other teacher rows for this school that aren't our seeded teachers

@@ -124,7 +124,7 @@ async function getMenteesById(menteeIds: number[]): Promise<Map<number, MenteeRo
     [menteeIds]
   );
 
-  return new Map(rows.map((row) => [row.id, row]));
+  return new Map(rows.map((row) => [Number(row.id), row]));
 }
 
 async function resolveEligibleMentor(mentorEmail: string, schoolCode: string) {
@@ -231,7 +231,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const mentorById = new Map(mentors.map((mentor) => [mentor.id, mentor]));
+    const mentorById = new Map(mentors.map((mentor) => [Number(mentor.id), mentor]));
     const mappings = await fetchMappingsFromDbService(
       mentors.map((mentor) => mentor.id),
       academicYear

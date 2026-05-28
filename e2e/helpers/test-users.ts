@@ -8,6 +8,7 @@ export interface TestUser {
   school_codes: string[] | null;
   regions: string[] | null;
   read_only: boolean;
+  full_name?: string | null;
 }
 
 export const TEST_USERS = {
@@ -38,6 +39,15 @@ export const TEST_USERS = {
     regions: ["AHMEDABAD"],
     read_only: false,
   },
+  readOnlyProgramAdmin: {
+    email: "e2e-ro-program-admin@test.local",
+    level: 2,
+    role: "program_admin",
+    program_ids: [1, 2],
+    school_codes: null,
+    regions: ["AHMEDABAD"],
+    read_only: true,
+  },
   teacher: {
     email: "e2e-teacher@test.local",
     level: 1,
@@ -46,6 +56,16 @@ export const TEST_USERS = {
     school_codes: ["70705", "14042"], // Must match school codes in your dump
     regions: null,
     read_only: false,
+  },
+  mentorshipTeacher: {
+    email: "e2e-mentorship-teacher@test.local",
+    level: 1,
+    role: "teacher",
+    program_ids: [1],
+    school_codes: ["70705"],
+    regions: null,
+    read_only: false,
+    full_name: "E2E Mentorship Teacher",
   },
 } as const satisfies Record<string, TestUser>;
 
@@ -60,15 +80,16 @@ export async function insertTestUsers(pool: Pool): Promise<void> {
   try {
     for (const user of Object.values(TEST_USERS)) {
       await client.query(
-        `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only, full_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (email) DO UPDATE SET
            level = EXCLUDED.level,
            role = EXCLUDED.role,
            program_ids = EXCLUDED.program_ids,
            school_codes = EXCLUDED.school_codes,
            regions = EXCLUDED.regions,
-           read_only = EXCLUDED.read_only`,
+           read_only = EXCLUDED.read_only,
+           full_name = EXCLUDED.full_name`,
         [
           user.email,
           user.level,
@@ -77,6 +98,7 @@ export async function insertTestUsers(pool: Pool): Promise<void> {
           user.school_codes,
           user.regions,
           user.read_only,
+          "full_name" in user ? user.full_name : null,
         ]
       );
     }
