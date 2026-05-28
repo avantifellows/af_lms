@@ -41,6 +41,7 @@ function makeStudent(overrides: Partial<{
   first_name: string;
   last_name: string | null;
   gender: string | null;
+  stream: string | null;
 }> = {}) {
   return {
     user_id: "user-1",
@@ -49,682 +50,441 @@ function makeStudent(overrides: Partial<{
     first_name: "Alice",
     last_name: "Smith",
     gender: "female",
+    stream: null,
     ...overrides,
   };
 }
 
-function makeDynamoItem(overrides: Record<string, unknown> = {}) {
+// One v2 document (one per session × student).
+function makeV2Doc(overrides: Record<string, unknown> = {}) {
   return {
     session_id: "sess-1",
-    "user_id-section": "stu-1#Overall",
-    user_id: "stu-1",
-    section: "Overall",
-    marks_scored: 80,
-    max_marks_possible: 100,
-    percentage: 80,
-    accuracy: 75,
-    total_questions: 20,
-    num_correct: 15,
-    num_wrong: 3,
-    num_skipped: 2,
-    test_name: "Mid-Term Physics",
-    start_date: "2026-01-15",
+    user_id: "enrollment-u1",
+    student_id: "stu-1",
+    apaar_id: "apaar-1",
+    report_header: { test_name: "Mid-Term Physics", test_date: "2026-01-15" },
+    overall_performance: {
+      marks_scored: 80,
+      max_marks_possible: 100,
+      percentage: 80,
+      accuracy: 75,
+      num_correct: 15,
+      num_wrong: 3,
+      num_skipped: 2,
+      total_questions: 20,
+    },
+    subject_performance: [
+      {
+        subject: "Physics",
+        marks_scored: 30,
+        max_marks_possible: 40,
+        percentage: 75,
+        accuracy: 70,
+        num_correct: 7,
+        num_wrong: 2,
+        num_skipped: 1,
+        total_questions: 10,
+      },
+    ],
+    chapter_performance: [
+      {
+        chapter_name: "Mechanics",
+        chapter_id: "chap-mech",
+        subject: "Physics",
+        marks_scored: 8,
+        max_marks_possible: 10,
+        percentage: 80,
+        accuracy: 80,
+        total_questions: 5,
+        num_correct: 4,
+        num_wrong: 1,
+        num_skipped: 0,
+      },
+    ],
     ...overrides,
   };
-}
-
-function makeSubjectItem(section: string, overrides: Record<string, unknown> = {}) {
-  return makeDynamoItem({
-    "user_id-section": `stu-1#${section}`,
-    section,
-    marks_scored: 30,
-    max_marks_possible: 40,
-    percentage: 75,
-    accuracy: 70,
-    total_questions: 10,
-    num_correct: 7,
-    num_wrong: 2,
-    num_skipped: 1,
-    ...overrides,
-  });
 }
 
 // --- Tests ---
 
-describe("getTestDeepDiveFromDynamo", () => {
+describe("getTestDeepDiveFromDynamo (v2)", () => {
   async function importModule() {
     return import("./dynamodb");
   }
 
-  describe("getSchoolStudentIdentifiers (via integration)", () => {
-    it("calls query with correct SQL and params", async () => {
+  describe("Postgres roster lookup", () => {
+    it("issues the school+grade SQL with the right params", async () => {
       mocks.mockQuery.mockResolvedValueOnce([]);
 
       const { getTestDeepDiveFromDynamo } = await importModule();
-      await getTestDeepDiveFromDynamo("school-abc", 10, "sess-1");
+      await getTestDeepDiveFromDynamo("school-abc", "JNV Test", 10, "sess-1");
 
       expect(mocks.mockQuery).toHaveBeenCalledTimes(1);
       const [sql, params] = mocks.mockQuery.mock.calls[0];
-      expect(sql).toContain("SELECT DISTINCT");
-      expect(sql).toContain("u.id as user_id");
-      expect(sql).toContain("s.student_id");
-      expect(sql).toContain("s.apaar_id");
-      expect(sql).toContain("u.first_name");
-      expect(sql).toContain("u.last_name");
-      expect(sql).toContain("u.gender");
       expect(sql).toContain("g.type = 'school' AND g.child_id = $1");
       expect(sql).toContain("gr.number = $2");
+      expect(sql).toContain("s.status IS NULL OR s.status != 'dropout'");
       expect(params).toEqual(["school-abc", 10]);
     });
 
-    it("excludes dropout students in SQL filter", async () => {
+    it("returns null + skips DynamoDB when Postgres returns no students", async () => {
       mocks.mockQuery.mockResolvedValueOnce([]);
 
       const { getTestDeepDiveFromDynamo } = await importModule();
-      await getTestDeepDiveFromDynamo("school-abc", 10, "sess-1");
-
-      const [sql] = mocks.mockQuery.mock.calls[0];
-      expect(sql).toContain("s.status IS NULL OR s.status != 'dropout'");
-    });
-  });
-
-  describe("queryDynamoForStudent (via integration)", () => {
-    it("returns empty array for empty identifier (dedup removes it)", async () => {
-      // Student with only user_id (student_id=null, apaar_id=null)
-      const student = makeStudent({ student_id: null, apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-      // user_id query returns empty
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).toBeNull();
-    });
-
-    it("queries DynamoDB with correct params", async () => {
-      const student = makeStudent({ student_id: "stu-1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // student_id query
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-      // user_id query
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      const { QueryCommand } = await import("@aws-sdk/lib-dynamodb");
-      expect(QueryCommand).toHaveBeenCalledWith(
-        expect.objectContaining({
-          TableName: "student_quiz_reports",
-          KeyConditionExpression:
-            "session_id = :sid AND begins_with(#sk, :prefix)",
-          ExpressionAttributeNames: { "#sk": "user_id-section" },
-          ExpressionAttributeValues: {
-            ":sid": "sess-1",
-            ":prefix": "stu-1#",
-          },
-        })
-      );
-    });
-
-    it("returns empty array on DynamoDB error (graceful)", async () => {
-      const student = makeStudent();
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // All queries fail
-      mocks.mockSend.mockRejectedValue(new Error("DynamoDB timeout"));
-
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).toBeNull();
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
-    });
-  });
-
-  describe("getStudentReports (via integration)", () => {
-    it("returns match from student_id without querying other identifiers unnecessarily", async () => {
-      const student = makeStudent();
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overallItem = makeDynamoItem();
-      // student_id returns results
-      mocks.mockSend.mockResolvedValueOnce({ Items: [overallItem] });
-      // apaar_id returns results too (but shouldn't matter, first wins)
-      mocks.mockSend.mockResolvedValueOnce({ Items: [overallItem] });
-      // user_id
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      // Should succeed since student_id matched
-      expect(result).not.toBeNull();
-      expect(result!.students.length).toBe(1);
-    });
-
-    it("falls back to apaar_id when student_id returns empty", async () => {
-      const student = makeStudent();
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overallItem = makeDynamoItem();
-      // student_id -> empty
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-      // apaar_id -> match
-      mocks.mockSend.mockResolvedValueOnce({ Items: [overallItem] });
-      // user_id -> empty
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students.length).toBe(1);
-    });
-
-    it("deduplicates when student_id === user_id", async () => {
-      const student = makeStudent({ student_id: "user-1", user_id: "user-1" });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // Only 2 unique IDs: "user-1" and "apaar-1"
-      // user-1 query
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-      // apaar-1 query
-      mocks.mockSend.mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      // Should have called send only twice (2 unique IDs, not 3)
-      expect(mocks.mockSend).toHaveBeenCalledTimes(2);
-    });
-
-    it("returns null when no identifier matches", async () => {
-      const student = makeStudent();
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // All return empty
-      mocks.mockSend.mockResolvedValue({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("main transformation", () => {
-    it("returns null when no students found in Postgres", async () => {
-      mocks.mockQuery.mockResolvedValueOnce([]);
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
 
       expect(result).toBeNull();
       expect(mocks.mockSend).not.toHaveBeenCalled();
     });
+  });
 
-    it("returns null when no DynamoDB matches found", async () => {
+  describe("v2 DynamoDB read", () => {
+    it("queries the school_session_index GSI first with school + session", async () => {
       mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
-      mocks.mockSend.mockResolvedValue({ Items: [] });
+      // GSI returns the doc on first call → no fallback
+      mocks.mockSend.mockResolvedValueOnce({ Items: [makeV2Doc()] });
 
       const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
+      await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+
+      const { QueryCommand } = await import("@aws-sdk/lib-dynamodb");
+      expect(QueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: "student_quiz_reports_v2",
+          IndexName: "school_session_index",
+          KeyConditionExpression: "school = :school AND session_id = :sid",
+          ExpressionAttributeValues: { ":school": "JNV Test", ":sid": "sess-1" },
+        })
+      );
+      expect(mocks.mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to the session partition scan when the GSI returns empty", async () => {
+      const { QueryCommand } = await import("@aws-sdk/lib-dynamodb");
+      const qcMock = QueryCommand as unknown as { mock: { calls: unknown[][] } };
+      const callsBefore = qcMock.mock.calls.length;
+
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
+      // GSI → empty; fallback partition scan → returns the matching doc
+      mocks.mockSend
+        .mockResolvedValueOnce({ Items: [] })
+        .mockResolvedValueOnce({ Items: [makeV2Doc()] });
+
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      consoleWarn.mockRestore();
+
+      expect(result).not.toBeNull();
+      expect(mocks.mockSend).toHaveBeenCalledTimes(2);
+
+      // The two QueryCommand calls this test triggered.
+      const thisRunCalls = qcMock.mock.calls.slice(callsBefore);
+      expect(thisRunCalls).toHaveLength(2);
+      const [gsiCall, fallbackCall] = thisRunCalls.map(
+        (c) => c[0] as { IndexName?: string; KeyConditionExpression: string }
+      );
+      expect(gsiCall.IndexName).toBe("school_session_index");
+      expect(fallbackCall.IndexName).toBeUndefined();
+      expect(fallbackCall.KeyConditionExpression).toBe("session_id = :sid");
+    });
+
+    it("paginates with LastEvaluatedKey on the GSI", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
+      mocks.mockSend
+        .mockResolvedValueOnce({
+          Items: [makeV2Doc()],
+          LastEvaluatedKey: { school: "JNV Test", session_id: "sess-1", user_id: "x" },
+        })
+        .mockResolvedValueOnce({ Items: [] });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+
+      expect(mocks.mockSend).toHaveBeenCalledTimes(2);
+      expect(result).not.toBeNull();
+    });
+
+    it("returns null on DynamoDB error", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
+      // GSI throws → paginatedQuery swallows + returns []. Fallback then also
+      // runs; throw there too so the overall result is null.
+      mocks.mockSend
+        .mockRejectedValueOnce(new Error("DynamoDB timeout"))
+        .mockRejectedValueOnce(new Error("DynamoDB timeout"));
+
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      consoleError.mockRestore();
+      consoleWarn.mockRestore();
 
       expect(result).toBeNull();
     });
 
-    it("computes summary correctly (avg, min, max percentage)", async () => {
-      const student1 = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null, first_name: "Alice" });
-      const student2 = makeStudent({ user_id: "u2", student_id: "s2", apaar_id: null, first_name: "Bob" });
-      mocks.mockQuery.mockResolvedValueOnce([student1, student2]);
-
-      // student1: s1 -> match, u1 -> skip
+    it("returns null when both GSI and fallback come back empty", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([makeStudent()]);
       mocks.mockSend
-        .mockResolvedValueOnce({
-          Items: [makeDynamoItem({ percentage: 90, accuracy: 80, total_questions: 20, num_skipped: 2 })],
-        })
-        .mockResolvedValueOnce({ Items: [] }) // u1
-        // student2: s2 -> match, u2 -> skip
-        .mockResolvedValueOnce({
-          Items: [makeDynamoItem({ percentage: 70, accuracy: 60, total_questions: 20, num_skipped: 4 })],
-        })
-        .mockResolvedValueOnce({ Items: [] }); // u2
+        .mockResolvedValueOnce({ Items: [] }) // gsi
+        .mockResolvedValueOnce({ Items: [] }); // fallback
+
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      consoleWarn.mockRestore();
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("identifier matching", () => {
+    it("matches by student_id", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "stu-A", apaar_id: null, user_id: "u-A" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [makeV2Doc({ student_id: "stu-A", apaar_id: "", user_id: "irrelevant" })],
+      });
 
       const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result).not.toBeNull();
+      expect(result!.students.length).toBe(1);
+    });
 
+    it("matches by apaar_id when student_id misses", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "stu-A", apaar_id: "apaar-X", user_id: "u-A" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({ student_id: "different", apaar_id: "apaar-X", user_id: "different" }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result).not.toBeNull();
+      expect(result!.students.length).toBe(1);
+    });
+
+    it("ignores v2 docs whose identifiers are not in the roster", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "stu-A", apaar_id: null, user_id: "u-A" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({ student_id: "outsider", apaar_id: "", user_id: "ghost" }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("aggregations", () => {
+    it("computes summary (avg, min, max, accuracy) across students", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2", first_name: "Bob" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1",
+            user_id: "u1",
+            overall_performance: {
+              marks_scored: 90, max_marks_possible: 100, percentage: 90, accuracy: 80,
+              num_correct: 18, num_wrong: 0, num_skipped: 2, total_questions: 20,
+            },
+          }),
+          makeV2Doc({
+            student_id: "s2",
+            user_id: "u2",
+            overall_performance: {
+              marks_scored: 70, max_marks_possible: 100, percentage: 70, accuracy: 60,
+              num_correct: 14, num_wrong: 2, num_skipped: 4, total_questions: 20,
+            },
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
       expect(result).not.toBeNull();
       expect(result!.summary.students_appeared).toBe(2);
-      expect(result!.summary.avg_score).toBe(80); // (90+70)/2
+      expect(result!.summary.avg_score).toBe(80);
       expect(result!.summary.min_score).toBe(70);
       expect(result!.summary.max_score).toBe(90);
-      expect(result!.summary.avg_accuracy).toBe(70); // (80+60)/2
+      expect(result!.summary.avg_accuracy).toBe(70);
       expect(result!.summary.test_name).toBe("Mid-Term Physics");
       expect(result!.summary.start_date).toBe("2026-01-15");
     });
 
-    it("builds subject aggregation across students", async () => {
-      const student1 = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      const student2 = makeStudent({ user_id: "u2", student_id: "s2", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student1, student2]);
-
-      const overall1 = makeDynamoItem({ percentage: 80 });
-      const physics1 = makeSubjectItem("Physics", { percentage: 70, accuracy: 65 });
-
-      const overall2 = makeDynamoItem({ percentage: 60 });
-      const physics2 = makeSubjectItem("Physics", { percentage: 90, accuracy: 85 });
-
-      // s1 -> match
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall1, physics1] })
-        .mockResolvedValueOnce({ Items: [] }) // u1
-        // s2 -> match
-        .mockResolvedValueOnce({ Items: [overall2, physics2] })
-        .mockResolvedValueOnce({ Items: [] }); // u2
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.subjects.length).toBe(1);
-      expect(result!.subjects[0].subject).toBe("Physics");
-      expect(result!.subjects[0].avg_score).toBe(80); // (70+90)/2
-      expect(result!.subjects[0].avg_accuracy).toBe(75); // (65+85)/2
-    });
-
-    it("builds chapter aggregation from chapter_wise_data", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem();
-      const physicsItem = makeSubjectItem("Physics", {
-        chapter_wise_data: [
-          {
-            chapter_name: "Mechanics",
-            section: "Physics",
-            marks_scored: 8,
-            max_score: 10,
-            accuracy: 80,
-            attempt_percentage: 90,
-            total_questions: 5,
-          },
-          {
-            chapter_name: "Optics",
-            section: "Physics",
-            marks_scored: 6,
-            max_score: 10,
-            accuracy: 60,
-            attempt_percentage: 80,
-            total_questions: 5,
-          },
+    it("aggregates subjects across students", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            subject_performance: [
+              { subject: "Physics", percentage: 70, accuracy: 65, total_questions: 10, num_skipped: 1 },
+            ],
+          }),
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            subject_performance: [
+              { subject: "Physics", percentage: 90, accuracy: 85, total_questions: 10, num_skipped: 0 },
+            ],
+          }),
         ],
       });
 
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall, physicsItem] })
-        .mockResolvedValueOnce({ Items: [] }); // u1
-
       const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
       expect(result).not.toBeNull();
-      expect(result!.chapters.length).toBe(2);
-
-      // Sorted by subject then avg_score ascending
-      const optics = result!.chapters.find((c) => c.chapter_name === "Optics");
-      const mechanics = result!.chapters.find((c) => c.chapter_name === "Mechanics");
-
-      expect(optics).toBeDefined();
-      expect(optics!.avg_score).toBe(60); // 6/10 * 100
-      expect(optics!.accuracy).toBe(60);
-      expect(optics!.attempt_rate).toBe(80);
-      expect(optics!.questions).toBe(5);
-      expect(optics!.avg_time).toBeNull();
-
-      expect(mechanics).toBeDefined();
-      expect(mechanics!.avg_score).toBe(80); // 8/10 * 100
-      expect(mechanics!.subject).toBe("Physics");
-    });
-
-    it("computes attempt_rate from num_skipped/total_questions", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem({
-        total_questions: 20,
-        num_skipped: 5,
-        percentage: 75,
-      });
-      const physics = makeSubjectItem("Physics", {
-        total_questions: 10,
-        num_skipped: 3,
-      });
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall, physics] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-
-      // Overall attempt_rate: (20-5)/20 * 100 = 75
-      expect(result!.students[0].attempt_rate).toBe(75);
-
-      // Subject attempt_rate: (10-3)/10 * 100 = 70
-      expect(result!.students[0].subject_scores[0].attempt_rate).toBe(70);
-    });
-
-    it("skips students without overall section", async () => {
-      const student1 = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null, first_name: "Alice" });
-      const student2 = makeStudent({ user_id: "u2", student_id: "s2", apaar_id: null, first_name: "Bob" });
-      mocks.mockQuery.mockResolvedValueOnce([student1, student2]);
-
-      // student1: has overall
-      mocks.mockSend
-        .mockResolvedValueOnce({
-          Items: [makeDynamoItem({ percentage: 80 })],
-        })
-        .mockResolvedValueOnce({ Items: [] }) // u1
-        // student2: only has subject, no overall
-        .mockResolvedValueOnce({
-          Items: [makeSubjectItem("Physics")],
-        })
-        .mockResolvedValueOnce({ Items: [] }); // u2
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students.length).toBe(1);
-      expect(result!.students[0].student_name).toBe("Alice Smith");
-    });
-
-    it("returns null when all matched students lack overall section", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // Only subject items, no overall
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [makeSubjectItem("Physics")] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).toBeNull();
-    });
-
-    it("sorts students by percentage descending", async () => {
-      const student1 = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null, first_name: "Alice" });
-      const student2 = makeStudent({ user_id: "u2", student_id: "s2", apaar_id: null, first_name: "Bob" });
-      const student3 = makeStudent({ user_id: "u3", student_id: "s3", apaar_id: null, first_name: "Carol" });
-      mocks.mockQuery.mockResolvedValueOnce([student1, student2, student3]);
-
-      mocks.mockSend
-        // s1: 60%
-        .mockResolvedValueOnce({ Items: [makeDynamoItem({ percentage: 60 })] })
-        .mockResolvedValueOnce({ Items: [] })
-        // s2: 90%
-        .mockResolvedValueOnce({ Items: [makeDynamoItem({ percentage: 90 })] })
-        .mockResolvedValueOnce({ Items: [] })
-        // s3: 75%
-        .mockResolvedValueOnce({ Items: [makeDynamoItem({ percentage: 75 })] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students.map((s) => s.student_name)).toEqual([
-        "Bob Smith",
-        "Carol Smith",
-        "Alice Smith",
-      ]);
-      expect(result!.students.map((s) => s.percentage)).toEqual([90, 75, 60]);
-    });
-
-    it("builds student name from first_name + last_name", async () => {
-      const student = makeStudent({ first_name: "Priya", last_name: "Sharma" });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [makeDynamoItem()] })
-        .mockResolvedValueOnce({ Items: [] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students[0].student_name).toBe("Priya Sharma");
-    });
-
-    it("handles null last_name (first_name only)", async () => {
-      const student = makeStudent({ first_name: "Priya", last_name: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [makeDynamoItem()] })
-        .mockResolvedValueOnce({ Items: [] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students[0].student_name).toBe("Priya");
-    });
-
-    it("includes gender in student row", async () => {
-      const student = makeStudent({ gender: "male" });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [makeDynamoItem()] })
-        .mockResolvedValueOnce({ Items: [] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students[0].gender).toBe("male");
-    });
-
-    it("sorts subjects by avg_score ascending", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem();
-      const math = makeSubjectItem("Mathematics", { percentage: 90 });
-      const physics = makeSubjectItem("Physics", { percentage: 60 });
-      const chemistry = makeSubjectItem("Chemistry", { percentage: 75 });
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall, math, physics, chemistry] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.subjects.map((s) => s.subject)).toEqual([
-        "Physics",
-        "Chemistry",
-        "Mathematics",
-      ]);
-    });
-
-    it("sorts chapters by subject then avg_score ascending", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem();
-      const math = makeSubjectItem("Mathematics", {
-        chapter_wise_data: [
-          { chapter_name: "Algebra", section: "Mathematics", marks_scored: 9, max_score: 10, accuracy: 90, attempt_percentage: 100, total_questions: 5 },
-          { chapter_name: "Calculus", section: "Mathematics", marks_scored: 5, max_score: 10, accuracy: 50, attempt_percentage: 80, total_questions: 5 },
-        ],
-      });
-      const physics = makeSubjectItem("Physics", {
-        chapter_wise_data: [
-          { chapter_name: "Optics", section: "Physics", marks_scored: 7, max_score: 10, accuracy: 70, attempt_percentage: 90, total_questions: 5 },
-        ],
-      });
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall, math, physics] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      // Mathematics chapters sorted by score: Calculus(50) < Algebra(90)
-      // Physics chapters: Optics(70)
-      // Sorted by subject first: Mathematics before Physics
-      expect(result!.chapters.map((c) => c.chapter_name)).toEqual([
-        "Calculus",
-        "Algebra",
-        "Optics",
-      ]);
-    });
-
-    it("handles zero total_questions gracefully (attempt_rate = 0)", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem({ total_questions: 0, num_skipped: 0 });
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(result!.students[0].attempt_rate).toBe(0);
-    });
-
-    it("filters null student_id and apaar_id from identifier list", async () => {
-      const student = makeStudent({ student_id: null, apaar_id: null, user_id: "u1" });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // Only user_id should be queried (1 unique ID)
-      mocks.mockSend.mockResolvedValueOnce({ Items: [makeDynamoItem()] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      expect(mocks.mockSend).toHaveBeenCalledTimes(1);
-    });
-
-    it("populates student marks_scored and max_marks from overall item", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem({
-        marks_scored: 42,
-        max_marks_possible: 50,
-        percentage: 84,
-        accuracy: 88,
-      });
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      const s = result!.students[0];
-      expect(s.marks_scored).toBe(42);
-      expect(s.max_marks).toBe(50);
-      expect(s.percentage).toBe(84);
-      expect(s.accuracy).toBe(88);
-    });
-
-    it("builds subject_scores on each student row", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      const overall = makeDynamoItem();
-      const physics = makeSubjectItem("Physics", {
-        marks_scored: 25,
-        max_marks_possible: 30,
-        percentage: 83.3,
-        accuracy: 78,
-        total_questions: 10,
-        num_skipped: 2,
-      });
-
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: [overall, physics] })
-        .mockResolvedValueOnce({ Items: [] });
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      const scores = result!.students[0].subject_scores;
-      expect(scores.length).toBe(1);
-      expect(scores[0].subject).toBe("Physics");
-      expect(scores[0].marks_scored).toBe(25);
-      expect(scores[0].max_marks).toBe(30);
-      expect(scores[0].percentage).toBe(83.3);
-      expect(scores[0].accuracy).toBe(78);
-      expect(scores[0].attempt_rate).toBe(80); // (10-2)/10 * 100
-    });
-
-    it("aggregates subjects case-insensitively", async () => {
-      const student1 = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null, first_name: "Alice" });
-      const student2 = makeStudent({ user_id: "u2", student_id: "s2", apaar_id: null, first_name: "Bob" });
-      mocks.mockQuery.mockResolvedValueOnce([student1, student2]);
-
-      // Student 1 has "Physics", student 2 has "physics" (different casing)
-      mocks.mockSend
-        .mockResolvedValueOnce({
-          Items: [makeDynamoItem({ percentage: 80 }), makeSubjectItem("Physics", { percentage: 70 })],
-        })
-        .mockResolvedValueOnce({ Items: [] }) // u1
-        .mockResolvedValueOnce({
-          Items: [makeDynamoItem({ percentage: 60 }), makeSubjectItem("physics", { percentage: 50 })],
-        })
-        .mockResolvedValueOnce({ Items: [] }); // u2
-
-      const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
-
-      expect(result).not.toBeNull();
-      // Should produce 1 subject entry, not 2
       expect(result!.subjects).toHaveLength(1);
-      expect(result!.subjects[0].avg_score).toBe(60); // (70+50)/2
+      expect(result!.subjects[0]).toMatchObject({
+        subject: "Physics",
+        avg_score: 80,
+        avg_accuracy: 75,
+      });
     });
 
-    it("handles DynamoDB Items being undefined (treats as empty)", async () => {
-      const student = makeStudent({ user_id: "u1", student_id: "s1", apaar_id: null });
-      mocks.mockQuery.mockResolvedValueOnce([student]);
-
-      // Items is undefined rather than []
-      mocks.mockSend
-        .mockResolvedValueOnce({ Items: undefined })
-        .mockResolvedValueOnce({ Items: undefined });
+    it("groups chapter aggregates by chapter_id and surfaces it on the result", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2" }),
+      ]);
+      // Same chapter_id across both docs, but different chapter_name strings
+      // (this is exactly the v1 bug we're fixing: the rollup should still group).
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            chapter_performance: [
+              {
+                chapter_name: "11C3 - Periodic Table",
+                chapter_id: "chap-pt",
+                subject: "Chemistry",
+                marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 1,
+              },
+            ],
+            subject_performance: [{ subject: "Chemistry", percentage: 100, accuracy: 100, total_questions: 1, num_skipped: 0 }],
+          }),
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            chapter_performance: [
+              {
+                chapter_name: "Periodic Table",
+                chapter_id: "chap-pt",
+                subject: "Chemistry",
+                marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 1,
+              },
+            ],
+            subject_performance: [{ subject: "Chemistry", percentage: 0, accuracy: 0, total_questions: 1, num_skipped: 0 }],
+          }),
+        ],
+      });
 
       const { getTestDeepDiveFromDynamo } = await importModule();
-      const result = await getTestDeepDiveFromDynamo("school-1", 10, "sess-1");
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result).not.toBeNull();
+      expect(result!.chapters).toHaveLength(1);
+      expect(result!.chapters[0]).toMatchObject({
+        chapter_id: "chap-pt",
+        subject: "Chemistry",
+      });
+      // Mean of (4/4=100%) and (0/4=0%) → 50%
+      expect(result!.chapters[0].avg_score).toBe(50);
+    });
 
-      expect(result).toBeNull();
+    it("computes chapter attempt_rate from chapter-level num_skipped (not subject's)", async () => {
+      // Subject-level: 10 questions, 0 skipped → 100% attempt rate.
+      // Chapter Mechanics: 5 questions, 4 skipped → 20% attempt rate.
+      // Chapter Optics:    5 questions, 0 skipped → 100% attempt rate.
+      // Before the fix both chapters would show 100% (subject proxy).
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1",
+            user_id: "u1",
+            subject_performance: [
+              { subject: "Physics", percentage: 50, accuracy: 50, total_questions: 10, num_skipped: 0 },
+            ],
+            chapter_performance: [
+              {
+                chapter_name: "Mechanics",
+                chapter_id: "chap-mech",
+                subject: "Physics",
+                marks_scored: 1, max_marks_possible: 5, accuracy: 100,
+                total_questions: 5, num_skipped: 4, num_correct: 1, num_wrong: 0,
+              },
+              {
+                chapter_name: "Optics",
+                chapter_id: "chap-opt",
+                subject: "Physics",
+                marks_scored: 4, max_marks_possible: 5, accuracy: 80,
+                total_questions: 5, num_skipped: 0, num_correct: 4, num_wrong: 1,
+              },
+            ],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result).not.toBeNull();
+      const mech = result!.chapters.find((c) => c.chapter_id === "chap-mech")!;
+      const opt = result!.chapters.find((c) => c.chapter_id === "chap-opt")!;
+      expect(mech.attempt_rate).toBe(20);
+      expect(opt.attempt_rate).toBe(100);
+
+      // And the per-student chapter rows reflect the same.
+      const studentChapters = result!.students[0]!.subject_scores[0]!.chapters!;
+      const sMech = studentChapters.find((c) => c.chapter_name === "Mechanics")!;
+      const sOpt = studentChapters.find((c) => c.chapter_name === "Optics")!;
+      expect(sMech.attempt_rate).toBe(20);
+      expect(sOpt.attempt_rate).toBe(100);
+    });
+
+    it("falls back to subject+name grouping when chapter_id is missing", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            chapter_performance: [
+              {
+                chapter_name: "Mystery Chapter",
+                chapter_id: null,
+                subject: "Physics",
+                marks_scored: 2, max_marks_possible: 4, accuracy: 50, total_questions: 2,
+              },
+            ],
+            subject_performance: [{ subject: "Physics", percentage: 50, accuracy: 50, total_questions: 2, num_skipped: 0 }],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result!.chapters).toHaveLength(1);
+      expect(result!.chapters[0]).toMatchObject({
+        chapter_id: null,
+        chapter_name: "Mystery Chapter",
+      });
     });
   });
 });

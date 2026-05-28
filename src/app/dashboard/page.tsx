@@ -235,6 +235,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   const hasPMAccess = getFeatureAccess(permission, "pm_dashboard").canView;
+  const canViewVisitSummary =
+    (permission.role === "admin" || permission.role === "program_admin") &&
+    getFeatureAccess(permission, "visits").canView;
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
@@ -282,7 +285,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                       : `${totalCount} school(s)`}
               </p>
             </div>
-            {hasPMAccess && (
+            {(hasPMAccess || canViewVisitSummary) && (
               <nav className="flex gap-3 sm:gap-4">
                 <Link
                   href="/dashboard"
@@ -290,12 +293,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 >
                   Schools
                 </Link>
-                <Link
-                  href="/visits"
-                  className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
-                >
-                  Visits
-                </Link>
+                {canViewVisitSummary && (
+                  <Link
+                    href="/school-visit-summary"
+                    className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
+                  >
+                    Visit Summary
+                  </Link>
+                )}
               </nav>
             )}
           </div>

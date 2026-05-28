@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG,
+  computeInlineStats,
+  extractRemarks,
   validateIndividualTeacherSave,
   validateIndividualTeacherComplete,
   type IndividualTeacherEntry,
@@ -333,5 +335,56 @@ describe("validateIndividualTeacherComplete (strict)", () => {
     expect(
       result.errors.every((e) => !e.includes("oh_class_duration"))
     ).toBe(true);
+  });
+});
+
+describe("individual AF teacher summary extractors", () => {
+  it("prefixes remark labels with teacher names and handles mixed attendance stats", () => {
+    const data = {
+      teachers: [
+        {
+          id: 1,
+          name: "Alice",
+          attendance: "present",
+          questions: {
+            oh_class_duration: { answer: true, remark: "Teacher has full duration" },
+            st_grade11_syllabus: { answer: false },
+          },
+        },
+        {
+          id: 2,
+          name: "Bob",
+          attendance: "on_leave",
+          questions: {
+            oh_class_duration: { answer: true, remark: "Leave remark should still show" },
+          },
+        },
+        { id: 3, name: "Carol", attendance: "absent", questions: {} },
+      ],
+    };
+
+    expect(extractRemarks(data)).toEqual([
+      {
+        label: "Alice: Does the teacher get the required duration of classes?",
+        text: "Teacher has full duration",
+      },
+      {
+        label: "Bob: Does the teacher get the required duration of classes?",
+        text: "Leave remark should still show",
+      },
+    ]);
+    expect(computeInlineStats(data)).toEqual({
+      teacherCount: 3,
+      presentCount: 1,
+      onLeaveCount: 1,
+      absentCount: 1,
+      avgAnswered: 2,
+      totalQuestions: 13,
+    });
+  });
+
+  it("handles null data gracefully", () => {
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });

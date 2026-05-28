@@ -437,10 +437,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
   test("program-admin-does-not-see-delete-button", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
 
-    await programAdminPage.goto("/visits");
-    const row = visitTableRow(programAdminPage, visitId);
-    await expect(row).toBeVisible();
-    await expect(row.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await programAdminPage.goto("/school-visit-summary");
+    await expect(
+      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
+    ).toBeVisible();
+    await expect(
+      programAdminPage.locator(`a[href="/school-visit-summary/${visitId}"]`).filter({
+        visible: true,
+      })
+    ).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     await programAdminPage.goto(`/visits/${visitId}`);
     await expect(
@@ -895,9 +901,9 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "pending",
     });
 
-    await programAdminPage.goto("/visits");
+    await programAdminPage.goto("/school-visit-summary");
     await expect(
-      programAdminPage.getByRole("heading", { name: "All Visits" })
+      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
     ).toBeVisible();
 
     await programAdminPage.goto(`/visits/${visitId}`);

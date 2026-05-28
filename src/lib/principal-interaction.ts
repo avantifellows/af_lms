@@ -1,3 +1,5 @@
+import type { RemarkEntry } from "./visit-summary";
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -200,4 +202,55 @@ export function validatePrincipalInteractionComplete(data: unknown): ValidationR
   errors.push(...validateQuestions(payload.questions, true));
 
   return { valid: errors.length === 0, errors };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+export function extractRemarks(data: unknown): RemarkEntry[] {
+  if (!isPlainObject(data) || !isPlainObject(data.questions)) {
+    return [];
+  }
+
+  const remarks: RemarkEntry[] = [];
+  for (const section of PRINCIPAL_INTERACTION_CONFIG.sections) {
+    for (const question of section.questions) {
+      const answer = data.questions[question.key];
+      if (!isPlainObject(answer)) {
+        continue;
+      }
+      const text = nonEmptyString(answer.remark);
+      if (text) {
+        remarks.push({ label: question.label, text });
+      }
+    }
+  }
+  return remarks;
+}
+
+export function computeInlineStats(data: unknown): {
+  answeredCount: number;
+  totalQuestions: number;
+} | null {
+  if (!isPlainObject(data) || !isPlainObject(data.questions)) {
+    return null;
+  }
+
+  let answeredCount = 0;
+  for (const key of PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys) {
+    const answer = data.questions[key];
+    if (isPlainObject(answer) && typeof answer.answer === "boolean") {
+      answeredCount += 1;
+    }
+  }
+
+  return {
+    answeredCount,
+    totalQuestions: PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys.length,
+  };
 }

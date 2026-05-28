@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
@@ -17,7 +18,23 @@ interface Props {
 }
 
 export default function SchoolTabs({ tabs, defaultTab }: Props) {
-  const [activeTab, setActiveTab] = useState(defaultTab || tabs[0]?.id || "");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const fallback = defaultTab || tabs[0]?.id || "";
+  const urlTab = searchParams.get("tab");
+  // Seed the initial tab from ?tab= if it points to a visible tab; otherwise fall back.
+  const initial = urlTab && tabs.some((t) => t.id === urlTab) ? urlTab : fallback;
+  const [activeTab, setActiveTabState] = useState(initial);
+
+  const setActiveTab = (id: string) => {
+    setActiveTabState(id);
+    const params = new URLSearchParams(searchParams.toString());
+    if (id === fallback) params.delete("tab");
+    else params.set("tab", id);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  };
 
   const activeContent = tabs.find((t) => t.id === activeTab)?.content;
 

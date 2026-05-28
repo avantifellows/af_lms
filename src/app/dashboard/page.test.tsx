@@ -147,6 +147,25 @@ const adminPermission = {
   program_ids: [1, 2, 64],
 };
 
+const programAdminSession = {
+  user: { email: "program-admin@avantifellows.org" },
+};
+
+const programAdminPermission = {
+  email: "program-admin@avantifellows.org",
+  level: 2,
+  role: "program_admin",
+  school_codes: null,
+  regions: ["West"],
+  program_ids: [1, 2],
+};
+
+const nvsOnlyProgramAdminPermission = {
+  ...programAdminPermission,
+  email: "nvs-only@avantifellows.org",
+  program_ids: [64],
+};
+
 const pmPermission = {
   email: "pm@avantifellows.org",
   level: 3,
@@ -360,7 +379,7 @@ describe("DashboardPage (server component)", () => {
     mockGetUserPermission.mockResolvedValue(singleSchoolPermission);
     mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
-    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
     mockQuery
       .mockResolvedValueOnce([]) // schools
       .mockResolvedValueOnce([{ total: "0" }]); // count
@@ -445,14 +464,64 @@ describe("DashboardPage (server component)", () => {
 
   // --- PM nav links ---
 
-  it("shows Visits nav for PM users", async () => {
+  it("shows Visit Summary nav for admin users with visit access", async () => {
+    setupAdmin([], 0);
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    const summaryLink = screen.getByRole("link", { name: "Visit Summary" });
+    expect(summaryLink).toHaveAttribute("href", "/school-visit-summary");
+    expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
+  });
+
+  it("shows Visit Summary nav for program_admin users with visit access", async () => {
+    mockGetServerSession.mockResolvedValue(programAdminSession);
+    mockGetUserPermission.mockResolvedValue(programAdminPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: "0" }]).mockResolvedValueOnce([]);
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    const summaryLink = screen.getByRole("link", { name: "Visit Summary" });
+    expect(summaryLink).toHaveAttribute("href", "/school-visit-summary");
+    expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
+  });
+
+  it("does not show Visit Summary nav for NVS-only program_admin users", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "nvs-only@avantifellows.org" },
+    });
+    mockGetUserPermission.mockResolvedValue(nvsOnlyProgramAdminPermission);
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [64],
+      isNVSOnly: true,
+      hasCoEOrNodal: false,
+    });
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001", "SC002"]);
+    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: "0" }]);
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.queryByRole("link", { name: "Visit Summary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Schools in the PM nav and removes the Visits link", async () => {
     setupPM([], 0);
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    const visitsLink = screen.getByText("Visits");
-    expect(visitsLink.closest("a")).toHaveAttribute("href", "/visits");
+    expect(screen.getByRole("link", { name: "Schools" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Visit Summary" })).not.toBeInTheDocument();
   });
 
   it("does not show Visits nav for non-PM users", async () => {

@@ -112,7 +112,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     );
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "No results available for this test yet. Please check back in a few hours." });
-    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "s1", undefined);
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", "Test School", 10, "s1", undefined, undefined);
   });
 
   it("returns full TestDeepDiveData on success", async () => {
@@ -134,8 +134,8 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
         { subject: "Science", avg_score: 77, avg_accuracy: 0.8, avg_attempt_rate: 0.95, total_questions: 15 },
       ],
       chapters: [
-        { subject: "Math", chapter_name: "Algebra", avg_score: 70, accuracy: 0.72, attempt_rate: 0.88, questions: 10, avg_time: 45 },
-        { subject: "Science", chapter_name: "Physics", avg_score: 80, accuracy: 0.82, attempt_rate: 0.96, questions: 8, avg_time: null },
+        { subject: "Math", chapter_name: "Algebra", chapter_id: "chap-algebra", avg_score: 70, accuracy: 0.72, attempt_rate: 0.88, questions: 10, avg_time: 45 },
+        { subject: "Science", chapter_name: "Physics", chapter_id: "chap-physics", avg_score: 80, accuracy: 0.82, attempt_rate: 0.96, questions: 8, avg_time: null },
       ],
       students: [
         {
@@ -168,7 +168,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     expect(json.chapters).toHaveLength(2);
     expect(json.students).toHaveLength(1);
     expect(json.students[0].student_name).toBe("Alice");
-    expect(mockGetDeepDive).toHaveBeenCalledWith("42", 10, "sess-123", undefined);
+    expect(mockGetDeepDive).toHaveBeenCalledWith("42", "Test School", 10, "sess-123", undefined, undefined);
   });
 
   it("returns 500 when getTestDeepDiveFromDynamo throws", async () => {

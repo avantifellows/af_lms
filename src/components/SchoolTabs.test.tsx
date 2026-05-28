@@ -3,6 +3,20 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SchoolTabs, { VisitHistorySection } from "./SchoolTabs";
 
+const mockReplace = vi.fn();
+let mockSearchParams = new URLSearchParams();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    replace: (url: string) => {
+      mockReplace(url);
+      // Reflect the URL change so consumers re-read the new active tab on re-render.
+      const qs = url.startsWith("?") ? url.slice(1) : url.split("?")[1] || "";
+      mockSearchParams = new URLSearchParams(qs);
+    },
+  }),
+  useSearchParams: () => mockSearchParams,
+}));
+
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: any) => (
     <a href={href} {...rest}>
@@ -47,6 +61,29 @@ describe("SchoolTabs", () => {
 
     expect(screen.getByText("Visits Content")).toBeInTheDocument();
     expect(screen.queryByText("Students Content")).not.toBeInTheDocument();
+  });
+
+  it("seeds active tab from ?tab= query param when present and valid", () => {
+    mockSearchParams = new URLSearchParams("tab=info");
+    render(<SchoolTabs tabs={tabs} />);
+    expect(screen.getByText("Info Content")).toBeInTheDocument();
+    expect(screen.queryByText("Students Content")).not.toBeInTheDocument();
+    mockSearchParams = new URLSearchParams();
+  });
+
+  it("falls back to defaultTab when ?tab= points to a non-existent tab", () => {
+    mockSearchParams = new URLSearchParams("tab=ghost");
+    render(<SchoolTabs tabs={tabs} defaultTab="visits" />);
+    expect(screen.getByText("Visits Content")).toBeInTheDocument();
+    mockSearchParams = new URLSearchParams();
+  });
+
+  it("calls router.replace with ?tab= when switching tabs", async () => {
+    mockReplace.mockClear();
+    const user = userEvent.setup();
+    render(<SchoolTabs tabs={tabs} />);
+    await user.click(screen.getByText("Visits"));
+    expect(mockReplace).toHaveBeenCalledWith("?tab=visits");
   });
 
   it("applies active styling to the selected tab button", () => {

@@ -1,3 +1,5 @@
+import type { RemarkEntry } from "./visit-summary";
+
 export interface RubricOption {
   label: string;
   score: number;
@@ -560,4 +562,71 @@ export function validateClassroomObservationComplete(data: unknown): ValidationR
   errors.push(...validateParams(payload.params, rubric, true));
 
   return { valid: errors.length === 0, errors };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+export function extractRemarks(data: unknown): RemarkEntry[] {
+  if (!isPlainObject(data)) {
+    return [];
+  }
+
+  const remarks: RemarkEntry[] = [];
+  if (isPlainObject(data.params)) {
+    for (const parameter of CLASSROOM_OBSERVATION_RUBRIC.parameters) {
+      const param = data.params[parameter.key];
+      if (!isPlainObject(param)) {
+        continue;
+      }
+      const text = nonEmptyString(param.remarks);
+      if (text) {
+        remarks.push({ label: parameter.label, text });
+      }
+    }
+  }
+
+  const strengthText = nonEmptyString(data.observer_summary_strengths);
+  if (strengthText) {
+    remarks.push({ label: "Observer Summary (Strengths)", text: strengthText });
+  }
+
+  const improvementText = nonEmptyString(data.observer_summary_improvements);
+  if (improvementText) {
+    remarks.push({
+      label: "Observer Summary (Points of Improvement)",
+      text: improvementText,
+    });
+  }
+
+  return remarks;
+}
+
+export function computeInlineStats(data: unknown): {
+  totalScore: number;
+  maxScore: number;
+  remarkCount: number;
+} | null {
+  if (!isPlainObject(data) || !isPlainObject(data.params)) {
+    return null;
+  }
+
+  let remarkCount = 0;
+  for (const parameter of CLASSROOM_OBSERVATION_RUBRIC.parameters) {
+    const param = data.params[parameter.key];
+    if (isPlainObject(param) && nonEmptyString(param.remarks)) {
+      remarkCount += 1;
+    }
+  }
+
+  return {
+    totalScore: computeTotalScore(data.params as Record<string, ParamData | undefined>),
+    maxScore: CLASSROOM_OBSERVATION_RUBRIC.maxScore,
+    remarkCount,
+  };
 }

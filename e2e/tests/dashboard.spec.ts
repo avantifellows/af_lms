@@ -20,8 +20,9 @@ test.describe("Dashboard — PM", () => {
     await expect(pmPage.getByText("My Schools").first()).toBeVisible();
     // PM should NOT see Admin link
     await expect(pmPage.getByRole("link", { name: "Admin" })).not.toBeVisible();
-    // PM should see Visits nav
-    await expect(pmPage.getByRole("link", { name: "Visits" })).toBeVisible();
+    // Summary navigation is admin/program-admin only.
+    await expect(pmPage.getByRole("link", { name: "Schools" })).toBeVisible();
+    await expect(pmPage.getByRole("link", { name: "Visit Summary" })).toHaveCount(0);
   });
 });
 
