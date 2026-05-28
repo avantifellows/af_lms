@@ -3,9 +3,64 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { getAcademicYearChoices } from "@/lib/academic-year";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
+}
+
+interface UserDeletionRow {
+  email: string;
+  role: string | null;
+}
+
+interface DbServiceMappingResponse {
+  mappings?: unknown[];
+}
+
+function isPostgresError(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
+}
+
+async function countActiveMentorshipMappings(mentorId: string): Promise<number> {
+  const dbServiceUrl = process.env.DB_SERVICE_URL;
+  const dbServiceToken = process.env.DB_SERVICE_TOKEN;
+
+  if (!dbServiceUrl || !dbServiceToken) {
+    throw new Error("Missing db-service configuration");
+  }
+
+  let activeMappingCount = 0;
+  for (const academicYear of getAcademicYearChoices()) {
+    const params = new URLSearchParams({
+      mentor_ids: mentorId,
+      academic_year: academicYear,
+    });
+    const response = await fetch(
+      `${dbServiceUrl}/api/academic-mentorship-mapping?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${dbServiceToken}`,
+          accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("db-service academic mentorship mapping fetch failed");
+    }
+
+    const data = (await response.json()) as DbServiceMappingResponse;
+    activeMappingCount += data.mappings?.length ?? 0;
+  }
+
+  return activeMappingCount;
 }
 
 // DELETE /api/admin/users/[id] - Delete user
@@ -23,8 +78,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   }
 
   // Prevent deleting yourself
-  const userToDelete = await query<{ email: string }>(
-    `SELECT email FROM user_permission WHERE id = $1`,
+  const userToDelete = await query<UserDeletionRow>(
+    `SELECT email, role FROM user_permission WHERE id = $1`,
     [id]
   );
 
@@ -35,7 +90,40 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  await query(`DELETE FROM user_permission WHERE id = $1`, [id]);
+  if (userToDelete[0]?.role === "teacher") {
+    try {
+      const activeMappingCount = await countActiveMentorshipMappings(id);
+      if (activeMappingCount > 0) {
+        return NextResponse.json(
+          {
+            error: `Cannot delete teacher — ${activeMappingCount} active mentee assignment(s) exist. Unassign all mentees first.`,
+          },
+          { status: 409 }
+        );
+      }
+    } catch (error) {
+      console.error("Error verifying academic mentorship status:", error);
+      return NextResponse.json(
+        { error: "Cannot verify mentorship status — please try again later." },
+        { status: 503 }
+      );
+    }
+  }
+
+  try {
+    await query(`DELETE FROM user_permission WHERE id = $1`, [id]);
+  } catch (error) {
+    if (isPostgresError(error, "23503")) {
+      return NextResponse.json(
+        {
+          error:
+            "Cannot delete teacher — historical mentorship records exist. Contact an administrator to purge historical records before deletion.",
+        },
+        { status: 409 }
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ success: true });
 }
