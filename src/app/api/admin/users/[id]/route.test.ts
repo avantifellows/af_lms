@@ -247,6 +247,86 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(json.error).toContain("program");
   });
 
+  it("blocks role or school access changes for teachers with active academic mentorship mappings", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery.mockResolvedValueOnce([
+      {
+        email: "teacher@test.com",
+        role: "teacher",
+        level: 1,
+        school_codes: ["SCH001"],
+        regions: null,
+      },
+    ]);
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ mappings: [{ id: 10 }, { id: 11 }] }))
+      .mockResolvedValueOnce(Response.json({ mappings: [] }))
+      .mockResolvedValueOnce(Response.json({ mappings: [] }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: {
+        level: 1,
+        role: "teacher",
+        school_codes: ["SCH002"],
+        regions: null,
+        program_ids: [1],
+      },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Cannot update teacher — 2 active mentee assignment(s) exist. Unassign or reassign all mentees before changing role or school access.",
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows non-scope edits for teachers with active academic mentorship mappings", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "teacher@test.com",
+          role: "teacher",
+          level: 1,
+          school_codes: ["SCH001"],
+          regions: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { full_name: "Updated Teacher" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining("UPDATE user_permission"),
+      [
+        undefined,
+        undefined,
+        ["SCH001"],
+        null,
+        null,
+        undefined,
+        "Updated Teacher",
+        "5",
+      ]
+    );
+  });
+
   it("updates user successfully", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);

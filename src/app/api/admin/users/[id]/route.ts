@@ -12,6 +12,9 @@ interface RouteParams {
 interface UserDeletionRow {
   email: string;
   role: string | null;
+  level: number | null;
+  school_codes: string[] | null;
+  regions: string[] | null;
 }
 
 interface DbServiceMappingResponse {
@@ -25,6 +28,26 @@ function isPostgresError(error: unknown, code: string): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === code
   );
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.map(String) : null;
+}
+
+function arraysEqualIgnoringOrder(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((value, index) => value === sortedB[index]);
+}
+
+function hasOwn(body: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(body, key);
 }
 
 async function countActiveMentorshipMappings(mentorId: string): Promise<number> {
@@ -79,7 +102,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
   // Prevent deleting yourself
   const userToDelete = await query<UserDeletionRow>(
-    `SELECT email, role FROM user_permission WHERE id = $1`,
+    `SELECT email, role, level, school_codes, regions FROM user_permission WHERE id = $1`,
     [id]
   );
 
@@ -143,10 +166,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const body = await request.json();
+    const body = (await request.json()) as Record<string, unknown>;
     const { level, role, school_codes, regions, program_ids, read_only, full_name } = body;
 
-    if (level && (level < 1 || level > 3)) {
+    if (typeof level === "number" && (level < 1 || level > 3)) {
       return NextResponse.json(
         { error: "Level must be between 1 and 3" },
         { status: 400 }
@@ -164,7 +187,48 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
-    const userRole = role && validRoles.includes(role) ? role : undefined;
+    const userRole = typeof role === "string" && validRoles.includes(role) ? role : undefined;
+
+    const existingUsers = await query<UserDeletionRow>(
+      `SELECT email, role, level, school_codes, regions FROM user_permission WHERE id = $1`,
+      [id]
+    );
+    const existingUser = existingUsers[0];
+    const nextLevel = typeof level === "number" ? level : existingUser?.level ?? null;
+    const nextRole = userRole ?? existingUser?.role ?? null;
+    const nextSchoolCodes = hasOwn(body, "school_codes")
+      ? normalizeStringArray(school_codes)
+      : existingUser?.school_codes ?? null;
+    const nextRegions = hasOwn(body, "regions")
+      ? normalizeStringArray(regions)
+      : existingUser?.regions ?? null;
+
+    const changesMentorScope =
+      existingUser?.role === "teacher" &&
+      (nextRole !== existingUser.role ||
+        nextLevel !== existingUser.level ||
+        !arraysEqualIgnoringOrder(nextSchoolCodes, existingUser.school_codes) ||
+        !arraysEqualIgnoringOrder(nextRegions, existingUser.regions));
+
+    if (changesMentorScope) {
+      try {
+        const activeMappingCount = await countActiveMentorshipMappings(id);
+        if (activeMappingCount > 0) {
+          return NextResponse.json(
+            {
+              error: `Cannot update teacher — ${activeMappingCount} active mentee assignment(s) exist. Unassign or reassign all mentees before changing role or school access.`,
+            },
+            { status: 409 }
+          );
+        }
+      } catch (error) {
+        console.error("Error verifying academic mentorship status:", error);
+        return NextResponse.json(
+          { error: "Cannot verify mentorship status — please try again later." },
+          { status: 503 }
+        );
+      }
+    }
 
     await query(
       `UPDATE user_permission
@@ -177,7 +241,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
            full_name = $7,
            updated_at = NOW()
        WHERE id = $8`,
-      [level, userRole, school_codes || null, regions || null, program_ids || null, read_only, full_name ?? null, id]
+      [
+        level,
+        userRole,
+        nextSchoolCodes,
+        nextRegions,
+        program_ids || null,
+        read_only,
+        full_name ?? null,
+        id,
+      ]
     );
 
     return NextResponse.json({ success: true });

@@ -203,7 +203,10 @@ describe("DELETE /api/academic-mentorship/[id]", () => {
     const res = await DELETE(deleteRequest(), routeParams({ id: "10" }));
 
     expect(res.status).toBe(403);
-    expect(mocks.mockCanAccessSchool).not.toHaveBeenCalled();
+    expect(mocks.mockCanAccessSchool).toHaveBeenCalledWith(
+      "admin@avantifellows.org",
+      "SCH001"
+    );
     expect(mocks.mockFetch).toHaveBeenCalledTimes(1);
     await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
   });
@@ -212,24 +215,13 @@ describe("DELETE /api/academic-mentorship/[id]", () => {
     const { DELETE } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mocks.mockGetUserPermission.mockResolvedValue(makePermission());
-    mocks.mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        mapping: {
-          id: 10,
-          mentor_id: 21,
-          mentee_id: 1001,
-          academic_year: "2026-2027",
-          deleted_at: null,
-        },
-      })
-    );
-    mocks.mockQuery.mockResolvedValueOnce([{ school_codes: ["SCH001"] }]);
     mocks.mockCanAccessSchool.mockResolvedValue(false);
 
     const res = await DELETE(deleteRequest(), routeParams({ id: "10" }));
 
     expect(res.status).toBe(403);
-    expect(mocks.mockFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.mockFetch).not.toHaveBeenCalled();
+    expect(mocks.mockQuery).not.toHaveBeenCalled();
     await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
   });
 

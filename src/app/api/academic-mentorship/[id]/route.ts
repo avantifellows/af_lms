@@ -94,13 +94,14 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (!session?.user?.email) {
     return apiError(401, "Unauthorized");
   }
+  const actorEmail = session.user.email;
 
   const schoolCode = request.nextUrl.searchParams.get("school_code")?.trim();
   if (!schoolCode) {
     return apiError(400, "school_code is required");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getUserPermission(actorEmail);
   const access = getFeatureAccess(permission, "academic_mentorship", {
     isPasscodeUser: actorIsPasscodeUser(session),
   });
@@ -109,6 +110,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   try {
+    if (!(await canAccessSchool(actorEmail, schoolCode))) {
+      return apiError(403, "Forbidden");
+    }
+
     const { id } = await context.params;
     const mapping = await fetchMapping(id);
     if (!mapping || mapping.deleted_at) {
@@ -120,11 +125,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return apiError(403, "Forbidden");
     }
 
-    if (!(await canAccessSchool(session.user.email, schoolCode))) {
-      return apiError(403, "Forbidden");
-    }
-
-    const response = await deleteMappingInDbService(id, session.user.email);
+    const response = await deleteMappingInDbService(id, actorEmail);
     if (response.status === 404) {
       return apiError(404, "Mapping not found");
     }

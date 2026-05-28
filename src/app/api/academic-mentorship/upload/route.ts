@@ -144,6 +144,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return apiError(401, "Unauthorized");
   }
+  const createdBy = session.user.email;
 
   let body: {
     school_code?: unknown;
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
     return apiError(400, "Maximum 500 rows allowed");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getUserPermission(createdBy);
   const access = getFeatureAccess(permission, "academic_mentorship", {
     isPasscodeUser: actorIsPasscodeUser(session),
   });
@@ -176,7 +177,7 @@ export async function POST(request: NextRequest) {
     return apiError(403, "Forbidden");
   }
 
-  if (!(await canAccessSchool(session.user.email, schoolCode))) {
+  if (!(await canAccessSchool(createdBy, schoolCode))) {
     return apiError(403, "Forbidden");
   }
 
@@ -206,7 +207,7 @@ export async function POST(request: NextRequest) {
         mentor_id: row.mentor_id,
         mentee_id: row.mentee_id,
         academic_year: academicYear,
-        created_by: session.user.email,
+        created_by: createdBy,
       })),
     });
 

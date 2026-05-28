@@ -147,6 +147,7 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.email) {
     return apiError(401, "Unauthorized");
   }
+  const actorEmail = session.user.email;
 
   let body: {
     school_code?: unknown;
@@ -176,7 +177,7 @@ export async function POST(request: NextRequest) {
     return apiError(400, "new_mentor_email is required");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getUserPermission(actorEmail);
   const access = getFeatureAccess(permission, "academic_mentorship", {
     isPasscodeUser: actorIsPasscodeUser(session),
   });
@@ -185,6 +186,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    if (!(await canAccessSchool(actorEmail, schoolCode))) {
+      return apiError(403, "Forbidden");
+    }
+
     const mapping = await fetchMapping(oldMappingId);
     if (!mapping) {
       return apiError(404, "Mapping not found");
@@ -195,10 +200,6 @@ export async function POST(request: NextRequest) {
 
     const mentorSchoolCode = await getMentorSchoolCode(mapping.mentor_id);
     if (mentorSchoolCode !== schoolCode) {
-      return apiError(403, "Forbidden");
-    }
-
-    if (!(await canAccessSchool(session.user.email, schoolCode))) {
       return apiError(403, "Forbidden");
     }
 
@@ -215,7 +216,7 @@ export async function POST(request: NextRequest) {
     const response = await reassignMappingInDbService({
       old_mapping_id: oldMappingId,
       new_mentor_id: newMentor.id,
-      updated_by: session.user.email,
+      updated_by: actorEmail,
     });
     if (response.status === 409) {
       return apiError(409, "This student already has an active mentor for this academic year");
