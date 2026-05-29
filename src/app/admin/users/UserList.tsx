@@ -19,6 +19,13 @@ interface UserPermission {
 interface UserListProps {
   initialUsers: UserPermission[];
   regions: string[];
+  /**
+   * Map of school code → display name for every JNV school. Used to render the
+   * Access column as "Name (CODE)" instead of bare codes, and to label the
+   * selected-school chips in AddUserModal. Codes missing from the map fall
+   * back to the raw code (e.g. a school that's been deleted).
+   */
+  schoolCodeToName: Record<string, string>;
   currentUserEmail: string;
 }
 
@@ -54,7 +61,11 @@ const PROGRAM_LABELS: Record<number, string> = {
   64: "NVS",
 };
 
-export default function UserList({ initialUsers, regions, currentUserEmail }: UserListProps) {
+export default function UserList({ initialUsers, regions, schoolCodeToName, currentUserEmail }: UserListProps) {
+  const labelForSchool = (code: string) => {
+    const name = schoolCodeToName[code];
+    return name ? `${name} (${code})` : code;
+  };
   const [users, setUsers] = useState(initialUsers);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserPermission | null>(null);
@@ -191,8 +202,14 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
                     <span className="text-gray-400">All JNV schools</span>
                   ) : user.level === 2 ? (
                     <span>{user.regions?.join(", ") || "No regions assigned"}</span>
+                  ) : user.school_codes && user.school_codes.length > 0 ? (
+                    <div className="flex flex-col gap-0.5">
+                      {user.school_codes.map((code) => (
+                        <span key={code}>{labelForSchool(code)}</span>
+                      ))}
+                    </div>
                   ) : (
-                    <span>{user.school_codes?.join(", ") || "No schools assigned"}</span>
+                    <span>No schools assigned</span>
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-4 text-sm">
@@ -223,6 +240,7 @@ export default function UserList({ initialUsers, regions, currentUserEmail }: Us
         <AddUserModal
           user={editingUser}
           regions={regions}
+          schoolCodeToName={schoolCodeToName}
           onClose={() => {
             setShowAddModal(false);
             setEditingUser(null);
