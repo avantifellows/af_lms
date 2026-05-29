@@ -268,6 +268,96 @@ export async function isAdmin(email: string): Promise<boolean> {
   return permission?.role === "admin";
 }
 
+export interface StudentScope {
+  code: string;
+  region: string | null;
+  /**
+   * `program_id` of the student's current batch enrollment, or null if the
+   * student has no current batch (unassigned). Used by `canAccessStudent`'s
+   * `requireEdit` branch to enforce per-program ownership the same way the
+   * UI's per-row `canEditStudent` check does — a COE-only user shouldn't be
+   * able to mutate an NVS student's documents in a mixed school like JNV
+   * Adilabad even when school + role checks pass.
+   */
+  program_id: number | null;
+}
+
+// Look up a student's school (code + region) and current program by the
+// student primary key (db-service `student.id`). Returns null if the student
+// doesn't exist or has no school membership.
+export async function getStudentSchool(
+  studentPkId: number | string,
+): Promise<StudentScope | null> {
+  const rows = await query<StudentScope>(
+    `SELECT sch.code, sch.region, b.program_id
+     FROM student s
+     JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
+     JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
+     JOIN school sch ON sch.id = g_sch.child_id
+     LEFT JOIN enrollment_record er_batch
+       ON er_batch.user_id = s.user_id
+       AND er_batch.group_type = 'batch'
+       AND er_batch.is_current = true
+     LEFT JOIN "group" g_batch ON g_batch.id = er_batch.group_id AND g_batch.type = 'batch'
+     LEFT JOIN batch b ON b.id = g_batch.child_id
+     WHERE s.id = $1
+     LIMIT 1`,
+    [studentPkId],
+  );
+  return rows[0] ?? null;
+}
+
+// Permission gate for routes scoped to a single student. Honors both Google
+// users (via canAccessSchool against their user_permission row) and passcode
+// users (via session.schoolCode match).
+//
+// Pass `requireEdit: true` for write paths (upload, delete) — this additionally
+// requires the user's role + read_only flag to grant `canEdit` on the
+// `students` feature. Without it, a read_only program_admin could mutate
+// student documents via direct API calls even though the UI hides the buttons.
+export async function canAccessStudent(
+  session: {
+    user?: { email?: string | null } | null;
+    isPasscodeUser?: boolean;
+    schoolCode?: string;
+  } | null,
+  studentPkId: number | string,
+  options?: { requireEdit?: boolean },
+): Promise<boolean> {
+  if (!session) return false;
+  const school = await getStudentSchool(studentPkId);
+  if (!school) return false;
+
+  if (session.isPasscodeUser) {
+    // Passcode users have edit access on `students` per getFeatureAccess; the
+    // only check that matters is school match.
+    return session.schoolCode === school.code;
+  }
+
+  const email = session.user?.email;
+  if (!email) return false;
+  const permission = await getUserPermission(email);
+  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
+    // Level-2 region users may still match via the async fallback path that
+    // canAccessSchool does (querying school.region when not provided). We've
+    // already passed region in, so the sync check is sufficient here.
+    if (!permission || permission.level !== 2) return false;
+    const ok = await canAccessSchool(email, school.code, school.region || undefined);
+    if (!ok) return false;
+  }
+  if (options?.requireEdit) {
+    const { canEdit } = getFeatureAccess(permission, "students");
+    if (!canEdit) return false;
+    // Per-program ownership — mirrors the UI's per-row canEditStudent check.
+    // ownsRecord returns true for admins, true for null program_id
+    // (unassigned student), and true if the user's program_ids includes the
+    // student's program. Without this, a COE-only user could POST/DELETE
+    // documents for an NVS student in a mixed school.
+    if (!ownsRecord(permission, school.program_id)) return false;
+  }
+  return true;
+}
+
 // Synchronous helper to get program context from a permission object
 export function getProgramContextSync(
   permission: UserPermission | null
