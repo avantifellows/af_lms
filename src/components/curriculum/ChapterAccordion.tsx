@@ -66,6 +66,9 @@ export default function ChapterAccordion({
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
                   Last taught: {formatDate(chapterProgress?.lastTaughtDate || null)}
+                  {chapter.prescribedMinutes != null
+                    ? ` • Prescribed: ${formatDuration(chapter.prescribedMinutes)}`
+                    : ""}
                   {chapterProgress?.totalTimeMinutes
                     ? ` • Time: ${formatDuration(chapterProgress.totalTimeMinutes)}`
                     : ""}

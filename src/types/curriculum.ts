@@ -14,6 +14,9 @@ export interface Chapter {
   grade: number;
   subjectId: number;
   subjectName: string;
+  examTrack?: ExamTrack;
+  prescribedMinutes?: number;
+  coverageSequence?: number;
   topics: Topic[];
 }
 
@@ -40,8 +43,36 @@ export interface ChapterProgress {
   chapterCompletedDate: string | null; // when chapter was marked complete
 }
 
-export type SubjectName = "Physics" | "Chemistry" | "Maths";
+export type SubjectName = "Physics" | "Chemistry" | "Maths" | "Biology";
 export type GradeNumber = 11 | 12;
+export type ExamTrack = "jee_main" | "jee_advanced" | "neet";
+
+export interface CurriculumProgramOption {
+  id: number;
+  name: string;
+}
+
+export interface CurriculumGradeSubjectOption {
+  examTrack: ExamTrack;
+  grade: GradeNumber;
+  gradeId: number;
+  subject: SubjectName;
+  subjectId: number;
+}
+
+export interface CurriculumOptionsResponse {
+  programs: CurriculumProgramOption[];
+  examTracks: ExamTrack[];
+  gradeSubjects: CurriculumGradeSubjectOption[];
+  defaults: {
+    programId: number | null;
+    examTrack: ExamTrack | null;
+    grade: GradeNumber | null;
+    gradeId: number | null;
+    subject: SubjectName | null;
+    subjectId: number | null;
+  };
+}
 
 export interface CurriculumTrackerState {
   // Filters
@@ -72,6 +103,7 @@ export interface ChaptersApiResponse {
 export const SUBJECT_IDS: Record<SubjectName, number> = {
   Maths: 1,
   Chemistry: 2,
+  Biology: 3,
   Physics: 4,
 };
 

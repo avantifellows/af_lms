@@ -1,26 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
   Chapter,
-  TeachingSession,
   ChapterProgress,
-  SubjectName,
+  CurriculumGradeSubjectOption,
+  CurriculumOptionsResponse,
+  ExamTrack,
   GradeNumber,
+  SubjectName,
 } from "@/types/curriculum";
-import {
-  loadSessions,
-  saveSessions,
-  loadProgress,
-  saveProgress,
-  calculateAllProgress,
-  generateSessionId,
-} from "@/lib/curriculum-helpers";
-import ProgressSummary from "./ProgressSummary";
 import ChapterAccordion from "./ChapterAccordion";
-import SessionHistory from "./SessionHistory";
-import LogSessionModal from "./LogSessionModal";
 
 interface CurriculumTabProps {
   schoolCode: string;
@@ -28,86 +19,171 @@ interface CurriculumTabProps {
   canEdit: boolean;
 }
 
+function examTrackLabel(track: ExamTrack | null): string {
+  switch (track) {
+    case "jee_main":
+      return "JEE Main";
+    case "jee_advanced":
+      return "JEE Advanced";
+    case "neet":
+      return "NEET";
+    default:
+      return "Curriculum";
+  }
+}
+
+function selectFirstGradeSubject(
+  gradeSubjects: CurriculumGradeSubjectOption[],
+  examTrack: ExamTrack | null,
+  grade?: GradeNumber | null
+) {
+  return gradeSubjects.find(
+    (option) =>
+      option.examTrack === examTrack && (grade == null || option.grade === grade)
+  ) ?? null;
+}
+
 export default function CurriculumTab({
   schoolCode,
   schoolName,
   canEdit,
 }: CurriculumTabProps) {
-  // Filter state
-  const [selectedGrade, setSelectedGrade] = useState<GradeNumber>(11);
-  const [selectedSubject, setSelectedSubject] = useState<SubjectName>("Physics");
-
-  // Data state
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Progress state (school-scoped)
-  const [sessions, setSessions] = useState<TeachingSession[]>([]);
-  const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
-
-  // UI state
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const [options, setOptions] = useState<CurriculumOptionsResponse | null>(null);
+  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(null);
+  const [selectedExamTrack, setSelectedExamTrack] = useState<ExamTrack | null>(null);
+  const [selectedGrade, setSelectedGrade] = useState<GradeNumber | null>(null);
+  const [selectedSubject, setSelectedSubject] = useState<SubjectName | null>(null);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [progress] = useState<Record<number, ChapterProgress>>({});
+  const [isOptionsLoading, setIsOptionsLoading] = useState(true);
+  const [isChaptersLoading, setIsChaptersLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([]);
-  const [activeTab, setActiveTabState] = useState<"chapters" | "history">(
-    searchParams.get("curriculum") === "history" ? "history" : "chapters"
+  const [activeTab, setActiveTabState] = useState<"chapters" | "logs">(
+    searchParams.get("curriculum") === "logs" ||
+      searchParams.get("curriculum") === "history"
+      ? "logs"
+      : "chapters"
   );
-  const setActiveTab = (tab: "chapters" | "history") => {
-    setActiveTabState(tab);
-    const params = new URLSearchParams(searchParams.toString());
-    if (tab === "chapters") params.delete("curriculum");
-    else params.set("curriculum", tab);
-    const qs = params.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
-  };
-  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Load sessions and progress from localStorage on mount (school-scoped)
   useEffect(() => {
-    const storedSessions = loadSessions(schoolCode);
-    const storedProgress = loadProgress(schoolCode);
-    setSessions(storedSessions);
-    setProgress(storedProgress);
-  }, [schoolCode]);
+    let isCancelled = false;
 
-  // Fetch chapters when grade or subject changes
-  useEffect(() => {
-    async function fetchChapters() {
-      setIsLoading(true);
+    async function fetchOptions() {
+      setIsOptionsLoading(true);
       setError(null);
+      setChapters([]);
 
       try {
         const response = await fetch(
-          `/api/curriculum/chapters?grade=${selectedGrade}&subject=${selectedSubject}`
+          `/api/curriculum/options?school_code=${encodeURIComponent(schoolCode)}`
         );
+        if (!response.ok) {
+          throw new Error("Failed to fetch Curriculum options");
+        }
 
+        const data = (await response.json()) as CurriculumOptionsResponse;
+        if (isCancelled) return;
+
+        setOptions(data);
+        setSelectedProgramId(data.defaults.programId);
+        setSelectedExamTrack(data.defaults.examTrack);
+        setSelectedGrade(data.defaults.grade);
+        setSelectedSubject(data.defaults.subject);
+      } catch (err) {
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : "An error occurred");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsOptionsLoading(false);
+        }
+      }
+    }
+
+    fetchOptions();
+    return () => {
+      isCancelled = true;
+    };
+  }, [schoolCode]);
+
+  useEffect(() => {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      setChapters([]);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function fetchChapters() {
+      setIsChaptersLoading(true);
+      setError(null);
+
+      const params = new URLSearchParams({
+        school_code: schoolCode,
+        program_id: String(selectedProgramId),
+        exam_track: selectedExamTrack,
+        grade: String(selectedGrade),
+        subject: selectedSubject,
+      });
+
+      try {
+        const response = await fetch(`/api/curriculum/chapters?${params.toString()}`);
         if (!response.ok) {
           throw new Error("Failed to fetch chapters");
         }
-
-        const data = await response.json();
-        setChapters(data.chapters);
-
-        // Recalculate progress for new chapters
-        const storedProgress = loadProgress(schoolCode);
-        const newProgress = calculateAllProgress(
-          data.chapters,
-          sessions,
-          storedProgress
-        );
-        setProgress(newProgress);
+        const data = (await response.json()) as { chapters: Chapter[] };
+        if (!isCancelled) {
+          setChapters(data.chapters);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : "An error occurred");
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsChaptersLoading(false);
+        }
       }
     }
 
     fetchChapters();
-  }, [selectedGrade, selectedSubject, sessions, schoolCode]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
 
-  // Toggle chapter expansion
+  const gradeOptions = useMemo(() => {
+    if (!options || !selectedExamTrack) return [];
+    return Array.from(
+      new Map(
+        options.gradeSubjects
+          .filter((option) => option.examTrack === selectedExamTrack)
+          .map((option) => [option.grade, option])
+      ).values()
+    );
+  }, [options, selectedExamTrack]);
+
+  const subjectOptions = useMemo(() => {
+    if (!options || !selectedExamTrack || !selectedGrade) return [];
+    return options.gradeSubjects.filter(
+      (option) =>
+        option.examTrack === selectedExamTrack && option.grade === selectedGrade
+    );
+  }, [options, selectedExamTrack, selectedGrade]);
+
+  const setActiveTab = (tab: "chapters" | "logs") => {
+    setActiveTabState(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "chapters") params.delete("curriculum");
+    else params.set("curriculum", "logs");
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  };
+
   const toggleChapter = useCallback((chapterId: number) => {
     setExpandedChapterIds((prev) =>
       prev.includes(chapterId)
@@ -116,82 +192,38 @@ export default function CurriculumTab({
     );
   }, []);
 
-  // Save a new teaching session
-  const handleSaveSession = useCallback(
-    (date: string, durationMinutes: number, topicIds: number[], completedChapterIds: number[]) => {
-      if (!canEdit) return;
+  function handleExamTrackChange(track: ExamTrack) {
+    const first = selectFirstGradeSubject(options?.gradeSubjects ?? [], track);
+    setSelectedExamTrack(track);
+    setSelectedGrade(first?.grade ?? null);
+    setSelectedSubject(first?.subject ?? null);
+  }
 
-      // Build topic details for display
-      const topicDetails = topicIds.map((topicId) => {
-        for (const chapter of chapters) {
-          const topic = chapter.topics.find((t) => t.id === topicId);
-          if (topic) {
-            return {
-              topicId: topic.id,
-              topicName: topic.name,
-              chapterName: chapter.name,
-            };
-          }
-        }
-        return { topicId, topicName: "Unknown", chapterName: "Unknown" };
-      });
+  function handleGradeChange(grade: GradeNumber) {
+    const first = selectFirstGradeSubject(
+      options?.gradeSubjects ?? [],
+      selectedExamTrack,
+      grade
+    );
+    setSelectedGrade(grade);
+    setSelectedSubject(first?.subject ?? null);
+  }
 
-      const newSession: TeachingSession = {
-        id: generateSessionId(),
-        date,
-        durationMinutes,
-        topicIds,
-        topics: topicDetails,
-      };
-
-      setSessions((prev) => {
-        const updated = [newSession, ...prev];
-        saveSessions(schoolCode, updated);
-        return updated;
-      });
-
-      // Recalculate progress and mark completed chapters
-      setProgress((prev) => {
-        const updated = calculateAllProgress(chapters, [newSession, ...sessions], prev);
-
-        // Mark chapters as complete
-        for (const chapterId of completedChapterIds) {
-          if (updated[chapterId]) {
-            updated[chapterId] = {
-              ...updated[chapterId],
-              isChapterComplete: true,
-              chapterCompletedDate: date,
-            };
-          } else {
-            updated[chapterId] = {
-              chapterId,
-              completedTopicIds: [],
-              totalTimeMinutes: 0,
-              lastTaughtDate: null,
-              allTopicsCovered: false,
-              isChapterComplete: true,
-              chapterCompletedDate: date,
-            };
-          }
-        }
-
-        saveProgress(schoolCode, updated);
-        return updated;
-      });
-
-      setIsModalOpen(false);
-    },
-    [canEdit, chapters, sessions, schoolCode]
-  );
+  const hasEmptyConfig =
+    !isOptionsLoading &&
+    options != null &&
+    options.programs.length > 0 &&
+    options.examTracks.length === 0;
+  const hasNoPrograms =
+    !isOptionsLoading && options != null && options.programs.length === 0;
 
   return (
     <div>
-      {/* School Context Header */}
       <div className="mb-4 pb-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              JEE Curriculum Progress
+              {examTrackLabel(selectedExamTrack)} Curriculum Progress
             </h2>
             <p className="text-sm text-gray-500">{schoolName}</p>
           </div>
@@ -203,10 +235,53 @@ export default function CurriculumTab({
         </div>
       </div>
 
-      {/* Filters */}
       <div className="bg-gray-50 rounded-lg p-4 mb-6">
         <div className="flex flex-wrap gap-4 items-center">
-          {/* Grade Select */}
+          {options && options.programs.length > 1 && (
+            <div>
+              <label
+                htmlFor="curriculum-program"
+                className="block text-xs font-medium text-gray-700 mb-1"
+              >
+                Program
+              </label>
+              <select
+                id="curriculum-program"
+                value={selectedProgramId ?? ""}
+                onChange={(event) => setSelectedProgramId(Number(event.target.value))}
+                className="block w-36 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
+              >
+                {options.programs.map((program) => (
+                  <option key={program.id} value={program.id}>
+                    {program.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label
+              htmlFor="exam-track"
+              className="block text-xs font-medium text-gray-700 mb-1"
+            >
+              Exam Track
+            </label>
+            <select
+              id="exam-track"
+              value={selectedExamTrack ?? ""}
+              disabled={!options || options.examTracks.length === 0}
+              onChange={(event) => handleExamTrackChange(event.target.value as ExamTrack)}
+              className="block w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
+            >
+              {options?.examTracks.map((track) => (
+                <option key={track} value={track}>
+                  {examTrackLabel(track)}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label
               htmlFor="grade"
@@ -216,16 +291,21 @@ export default function CurriculumTab({
             </label>
             <select
               id="grade"
-              value={selectedGrade}
-              onChange={(e) => setSelectedGrade(parseInt(e.target.value) as GradeNumber)}
-              className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
+              value={selectedGrade ?? ""}
+              disabled={gradeOptions.length === 0}
+              onChange={(event) =>
+                handleGradeChange(Number(event.target.value) as GradeNumber)
+              }
+              className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              <option value={11}>11</option>
-              <option value={12}>12</option>
+              {gradeOptions.map((option) => (
+                <option key={option.grade} value={option.grade}>
+                  {option.grade}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Subject Select */}
           <div>
             <label
               htmlFor="subject"
@@ -235,86 +315,94 @@ export default function CurriculumTab({
             </label>
             <select
               id="subject"
-              value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value as SubjectName)}
-              className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
+              value={selectedSubject ?? ""}
+              disabled={subjectOptions.length === 0}
+              onChange={(event) => setSelectedSubject(event.target.value as SubjectName)}
+              className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              <option value="Physics">Physics</option>
-              <option value="Chemistry">Chemistry</option>
-              <option value="Maths">Maths</option>
+              {subjectOptions.map((option) => (
+                <option key={option.subject} value={option.subject}>
+                  {option.subject}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Log Session Button (only if canEdit) */}
           {canEdit && (
             <button
-              onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover transition-colors"
+              disabled
+              className="px-4 py-2 bg-gray-200 text-gray-500 text-sm font-medium rounded-md cursor-not-allowed"
             >
-              + Log Session
+              + Add Log
             </button>
           )}
         </div>
       </div>
 
-      {/* Progress Summary */}
-      <ProgressSummary chapters={chapters} progress={progress} />
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200 mb-4">
-        <nav className="flex space-x-8">
-          <button
-            onClick={() => setActiveTab("chapters")}
-            className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-              activeTab === "chapters"
-                ? "border-accent text-accent"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Chapters
-          </button>
-          <button
-            onClick={() => setActiveTab("history")}
-            className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-              activeTab === "history"
-                ? "border-accent text-accent"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            History
-          </button>
-        </nav>
-      </div>
-
-      {/* Content */}
-      {isLoading ? (
+      {isOptionsLoading ? (
         <div className="flex justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
         </div>
       ) : error ? (
         <div className="bg-red-50 text-red-700 p-4 rounded-lg">{error}</div>
-      ) : activeTab === "chapters" ? (
-        <ChapterAccordion
-          chapters={chapters}
-          progress={progress}
-          expandedChapterIds={expandedChapterIds}
-          onToggleChapter={toggleChapter}
-        />
+      ) : hasNoPrograms ? (
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+          No curriculum-enabled Programs are available for this school.
+        </div>
+      ) : hasEmptyConfig ? (
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+          No Curriculum configuration is available for this school.
+        </div>
       ) : (
-        <SessionHistory sessions={sessions} />
-      )}
+        <>
+          <div className="bg-amber-50 text-amber-800 p-3 rounded-lg mb-4 text-sm">
+            Backend Progress and Logs are not available yet for this scope.
+          </div>
 
-      {/* Log Session Modal */}
-      {isModalOpen && canEdit && (
-        <LogSessionModal
-          chapters={chapters}
-          progress={progress}
-          onClose={() => setIsModalOpen(false)}
-          onSave={handleSaveSession}
-        />
+          <div className="border-b border-gray-200 mb-4">
+            <nav className="flex space-x-8">
+              <button
+                onClick={() => setActiveTab("chapters")}
+                className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
+                  activeTab === "chapters"
+                    ? "border-accent text-accent"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Chapters
+              </button>
+              <button
+                onClick={() => setActiveTab("logs")}
+                className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
+                  activeTab === "logs"
+                    ? "border-accent text-accent"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Logs
+              </button>
+            </nav>
+          </div>
+
+          {isChaptersLoading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
+            </div>
+          ) : activeTab === "chapters" ? (
+            <ChapterAccordion
+              chapters={chapters}
+              progress={progress}
+              expandedChapterIds={expandedChapterIds}
+              onToggleChapter={toggleChapter}
+            />
+          ) : (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              Backend Logs are not available yet.
+            </div>
+          )}
+        </>
       )}
     </div>
   );

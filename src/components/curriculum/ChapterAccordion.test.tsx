@@ -219,6 +219,25 @@ describe("ChapterAccordion", () => {
     expect(mockFormatDuration).toHaveBeenCalledWith(90);
   });
 
+  it("displays prescribed minutes with the existing duration formatter", () => {
+    const chapters = [
+      makeChapter({ id: 1, name: "Kinematics", prescribedMinutes: 120 }),
+    ];
+    mockFormatDuration.mockReturnValue("2h");
+
+    render(
+      <ChapterAccordion
+        chapters={chapters}
+        progress={{}}
+        expandedChapterIds={[]}
+        onToggleChapter={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Prescribed: 2h/)).toBeInTheDocument();
+    expect(mockFormatDuration).toHaveBeenCalledWith(120);
+  });
+
   it("hides time when totalTimeMinutes is 0", () => {
     const chapters = [makeChapter({ id: 1, name: "Kinematics" })];
     const progress = {
