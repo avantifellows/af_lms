@@ -44,6 +44,10 @@ _Avoid_: Completed log, topic coverage
 A summary of covered topics, teaching time, and chapter completion for a school-program-grade-subject-exam-track selection.
 _Avoid_: Progress record, saved progress
 
+**Curriculum Summary**:
+A top-level read-only dashboard for reviewing curriculum progress across schools, grades, subjects, and exam tracks.
+_Avoid_: Curriculum tab, curriculum report, curriculum overview
+
 **Exam Track**:
 The exam-specific curriculum lens selected by a user, such as JEE Main, JEE Advanced, or NEET.
 _Avoid_: Stream, orientation
@@ -108,6 +112,9 @@ _Avoid_: Access tier, role level
 - An **LMS Curriculum Log** has many covered topics
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
+- **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
+- Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
+- **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - A chapter has one **LMS Chapter Exam Config** per configured exam track
 - **LMS Chapter Exam Config** is global per chapter and exam track, not scoped to a school or program
 - In v1, users select the **Exam Track** explicitly in Curriculum instead of deriving it from teacher, school, or program
