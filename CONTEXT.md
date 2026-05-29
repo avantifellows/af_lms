@@ -18,6 +18,10 @@ _Avoid_: Learner, pupil
 A grouping of students within a school for program delivery.
 _Avoid_: Cohort, section
 
+**Program**:
+An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
+_Avoid_: Course, stream
+
 **UDISE Code**:
 A unique government-issued identifier for a school.
 _Avoid_: School ID, school code (internally `school.code` is a separate field)
@@ -25,6 +29,20 @@ _Avoid_: School ID, school code (internally `school.code` is a separate field)
 **Passcode**:
 An 8-digit code granting single-school access without Google OAuth. Format: `{schoolCode}XXX`.
 _Avoid_: PIN, access code
+
+### Curriculum
+
+**LMS Curriculum Log**:
+A soft-deletable dated record of curriculum teaching at a school, with duration and covered topics.
+_Avoid_: Teaching Session, Session, Class Log
+
+**Chapter Completion**:
+The current state that a chapter is complete for a school and program.
+_Avoid_: Completed log, topic coverage
+
+**Curriculum Progress**:
+A summary of covered topics, teaching time, and chapter completion for a school-program-grade-subject selection.
+_Avoid_: Progress record, saved progress
 
 ### Visits & Actions
 
@@ -78,6 +96,11 @@ _Avoid_: Access tier, role level
 
 - A **School** has many **Students** (via `group` → `group_user`)
 - A **School** has many **Batches**
+- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**
+- An **LMS Curriculum Log** has many covered topics
+- **Chapter Completion** is stored independently from **LMS Curriculum Logs**
+- **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
+- Deleting an **LMS Curriculum Log** means soft deletion, so covered-topic and teaching-time progress ignores it without losing audit history
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
 - A **Visit** can only be completed when all 7 **Action Types** have at least one completed **Action**
