@@ -87,6 +87,11 @@ jobs:
           AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
           AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
           APP_ENV: ${{ secrets.APP_ENV }}
+          S3_DOCS_BUCKET: ${{ secrets.S3_DOCS_BUCKET }}
+          S3_DOCS_PREFIX: ${{ secrets.S3_DOCS_PREFIX }}
+          S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
+          S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
+          S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -110,6 +115,11 @@ jobs:
             --arg r "$AF_SECRET_ACCESS_KEY" \
             --arg s "$AF_TOPIC_ARN" \
             --arg t "$APP_ENV" \
+            --arg u "$S3_DOCS_BUCKET" \
+            --arg v "$S3_DOCS_PREFIX" \
+            --arg w "$S3_DOCS_REGION" \
+            --arg x "$S3_DOCS_ACCESS_KEY_ID" \
+            --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -130,7 +140,12 @@ jobs:
               AF_ACCESS_KEY_ID: $q,
               AF_SECRET_ACCESS_KEY: $r,
               AF_TOPIC_ARN: $s,
-              APP_ENV: $t
+              APP_ENV: $t,
+              S3_DOCS_BUCKET: $u,
+              S3_DOCS_PREFIX: $v,
+              S3_DOCS_REGION: $w,
+              S3_DOCS_ACCESS_KEY_ID: $x,
+              S3_DOCS_SECRET_ACCESS_KEY: $y
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -219,6 +234,11 @@ jobs:
           AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
           AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
           APP_ENV: ${{ secrets.APP_ENV }}
+          S3_DOCS_BUCKET: ${{ secrets.S3_DOCS_BUCKET }}
+          S3_DOCS_PREFIX: ${{ secrets.S3_DOCS_PREFIX }}
+          S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
+          S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
+          S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -242,6 +262,11 @@ jobs:
             --arg r "$AF_SECRET_ACCESS_KEY" \
             --arg s "$AF_TOPIC_ARN" \
             --arg t "$APP_ENV" \
+            --arg u "$S3_DOCS_BUCKET" \
+            --arg v "$S3_DOCS_PREFIX" \
+            --arg w "$S3_DOCS_REGION" \
+            --arg x "$S3_DOCS_ACCESS_KEY_ID" \
+            --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -262,7 +287,12 @@ jobs:
               AF_ACCESS_KEY_ID: $q,
               AF_SECRET_ACCESS_KEY: $r,
               AF_TOPIC_ARN: $s,
-              APP_ENV: $t
+              APP_ENV: $t,
+              S3_DOCS_BUCKET: $u,
+              S3_DOCS_PREFIX: $v,
+              S3_DOCS_REGION: $w,
+              S3_DOCS_ACCESS_KEY_ID: $x,
+              S3_DOCS_SECRET_ACCESS_KEY: $y
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -362,6 +392,11 @@ jobs:
           AF_SECRET_ACCESS_KEY: ${{ secrets.AF_SECRET_ACCESS_KEY }}
           AF_TOPIC_ARN: ${{ secrets.AF_TOPIC_ARN }}
           APP_ENV: ${{ secrets.APP_ENV }}
+          S3_DOCS_BUCKET: ${{ secrets.S3_DOCS_BUCKET }}
+          S3_DOCS_PREFIX: ${{ secrets.S3_DOCS_PREFIX }}
+          S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
+          S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
+          S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -384,6 +419,11 @@ jobs:
             --arg r "$AF_SECRET_ACCESS_KEY" \
             --arg s "$AF_TOPIC_ARN" \
             --arg t "$APP_ENV" \
+            --arg u "$S3_DOCS_BUCKET" \
+            --arg v "$S3_DOCS_PREFIX" \
+            --arg w "$S3_DOCS_REGION" \
+            --arg x "$S3_DOCS_ACCESS_KEY_ID" \
+            --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -404,7 +444,12 @@ jobs:
               AF_ACCESS_KEY_ID: $q,
               AF_SECRET_ACCESS_KEY: $r,
               AF_TOPIC_ARN: $s,
-              APP_ENV: $t
+              APP_ENV: $t,
+              S3_DOCS_BUCKET: $u,
+              S3_DOCS_PREFIX: $v,
+              S3_DOCS_REGION: $w,
+              S3_DOCS_ACCESS_KEY_ID: $x,
+              S3_DOCS_SECRET_ACCESS_KEY: $y
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
