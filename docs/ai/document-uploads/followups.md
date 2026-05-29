@@ -4,6 +4,35 @@ Risks and gotchas surfaced while implementing the document-uploads backend
 (branch `document-uploads`, 2026-05-29). Captured here for a future pass — none
 are blocking v1, but each will eventually matter.
 
+## Resolved in this PR (code-review fixes)
+
+Listed for traceability — these came from `/code-review` and were applied to
+the original feature commit:
+
+- **DELETE doc ownership check** — IDOR closed. DELETE now lists the
+  student's docs and verifies the docId belongs before forwarding to
+  db-service.
+- **Feature-edit access gate** — POST and DELETE now require
+  `canAccessStudent(..., { requireEdit: true })`, which honors
+  `permission.read_only` and the `getFeatureAccess(..., "students")` matrix.
+  Read-only program_admins can no longer mutate via direct API calls.
+- **listDocuments defense-in-depth** — also filters client-side on
+  `student_id` so a misbehaving upstream can't leak cross-student docs.
+- **Inline DocumentsList stale after modal upload** — wired
+  `documentsRefreshNonce` from StudentTable → StudentCard → DocumentsList.
+  EditStudentModal calls `onSave()` from upload + delete paths to bump it.
+- **UploadDocumentForm blob-URL leak + post-unmount setState** — replaced the
+  broken empty-deps useEffect with a `createdUrlsRef` Set + `isMountedRef`
+  guard.
+- **`res.json()` SyntaxError now becomes DbServiceError** instead of bubbling
+  as an unhandled 500.
+- **parseInt trailing-junk rejection** — all three document routes now use
+  `/^\d+$/` before `Number.parseInt`.
+- **`Number(student.student_pk_id)` NaN escape** — `EditStudentModal` and
+  `StudentTable` now reject non-numeric IDs cleanly.
+- **DocumentsList sort comparator** now returns 0 on ties (TimSort
+  antisymmetry).
+
 ## Priority 1 — should resolve before/around merge
 
 - [ ] **Confirm Amplify request-body limit.** AWS API Gateway caps synchronous
@@ -73,6 +102,83 @@ are blocking v1, but each will eventually matter.
       with `ok/status/json/text`. Today's code only uses those four; a
       future refactor that touches `headers` or `redirect` could silently
       lose test coverage.
+
+## Remaining code-review findings (deferred from this PR)
+
+These were surfaced by `/code-review` and judged safe to roll forward. Address
+on a follow-up sweep.
+
+### Correctness — open
+
+- [ ] **`extensionFor` runs outside the inner try/catch in `uploadDocumentPages`.**
+      Today this is latent (ALLOWED_PHOTO_MIMES and MIME_TO_EXTENSION are
+      aligned), but if someone adds a new MIME to the route's allowlist
+      without a matching `MIME_TO_EXTENSION` entry, page N's `extensionFor`
+      throws *after* pages 1..N-1 already PUT to S3. The bare Error isn't an
+      `S3UploadError`, so the route's catch falls to the generic else branch
+      and never calls `deleteDocumentObjects` on the already-uploaded keys —
+      orphans. Fix: either validate all extensions up front before the loop,
+      or wrap `extensionFor`/`buildKey` inside the inner try/catch so they
+      throw `S3UploadError(uploaded, err)`.
+- [ ] **`DocumentsList` has no AbortController / stale-request guard.** If
+      `studentId` changes mid-fetch and the older response arrives last, it
+      overwrites the new student's data. Same window applies to `setError`.
+      Fix: abort in cleanup and check `signal.aborted` before setState.
+- [ ] **PDF detection fails on `application/octet-stream`.** Mobile share-sheet
+      flows sometimes submit PDFs with that MIME; the route currently routes
+      them into the photos branch and returns a confusing "Unsupported MIME
+      type" error. Either accept an explicit `mode` form field from the
+      client, or magic-byte sniff (`%PDF-`).
+- [ ] **Two-phase write: `NextResponse.json` throw after `createDocument`
+      success → orphan row.** If the response-serialization step somehow
+      throws (rare — circular ref, BigInt without toJSON), the catch runs
+      `deleteDocumentObjects` while the db row exists, leaving the row
+      pointing at deleted S3 keys. Distinguish "createDocument failed
+      (cleanup S3)" from "response failed (don't cleanup)".
+
+### UX / policy — open
+
+- [ ] **Dropout students still get inline DocumentsList with delete buttons.**
+      Edit/Dropout buttons are explicitly hidden via `canEdit && !isDropout`,
+      but the expanded section unconditionally renders DocumentsList with
+      `canDelete={canEdit}`. If dropouts are meant to be append-only for the
+      historical record, this is a policy gap. Either add `!isDropout` to
+      `canDelete`, or pass a separate `isDropout` prop and disable delete
+      when true.
+
+### Cleanup / altitude — open
+
+- [ ] **`gateOrError` duplicated across three document routes.** Lift into
+      `src/lib/student-route-auth.ts` (or similar) and import from each route
+      so future changes to the 401/403/400 contract live in one place.
+- [ ] **Tab markup duplicated** between `UploadDocumentForm` and
+      `EditStudentModal`. Extract a shared `<Tabs>` component in
+      `src/components/ui/` and export it via the index.
+- [ ] **Limits duplicated client/server.** `MAX_PHOTOS`, `MAX_PHOTO_BYTES`,
+      `MAX_PDF_BYTES`, `PHOTO_MIMES` exist verbatim in both
+      `UploadDocumentForm.tsx` and `route.ts`. Hoist into
+      `src/lib/document-types.ts` (or a sibling `document-limits.ts`) and
+      import in both places.
+- [ ] **`student_pk_id: string | null` type drift.** Originates from a
+      numeric PG column but typed as string here, forcing `Number(...)`
+      coercion at every leaf consumer. Type it as `number | null` at the
+      boundary (the page-level query mapping) so leaf components don't carry
+      the coercion. Touched StudentTable + EditStudentModal in this PR; will
+      keep growing as more per-student features land.
+- [ ] **Viewer route calls `listDocuments` to find a single doc.** Each
+      page-link click pulls every doc for that student over HTTP. A
+      `getDocument(studentId, documentId)` proxy that hits db-service's
+      `/lms-student-document/:id` (or a column-projection endpoint) would be
+      cheaper.
+- [ ] **EditStudentModal Documents tab unmounts on switch back to Details.**
+      That re-mounts `DocumentsList` and re-fetches on every tab toggle. Lift
+      state into the modal or toggle visibility via CSS.
+- [ ] **`DbServiceError` mapping is too coarse** — non-404 → 502 swallows
+      validation errors. Surface 422 from db-service as 400 with the upstream
+      message so the client can show a useful error.
+- [ ] **`process.env` read on every API call** for `DB_SERVICE_URL`/`TOKEN`.
+      Memoize at module load with a single null-check throw — micro perf but
+      surfaces misconfig at boot rather than first request.
 
 ## Related, already-tracked
 

@@ -21,6 +21,10 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Reject trailing junk (e.g. "5abc" silently coercing to 5).
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(docId) || !/^\d+$/.test(n)) {
+    return NextResponse.json({ error: "Invalid id or page number" }, { status: 400 });
+  }
   const studentId = Number.parseInt(id, 10);
   const documentId = Number.parseInt(docId, 10);
   const pageNumber = Number.parseInt(n, 10);

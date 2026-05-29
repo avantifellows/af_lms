@@ -109,7 +109,14 @@ export default function EditStudentModal({
   // Bumped after a successful upload so DocumentsList refetches.
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
   const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
-  const studentPkId = student.student_pk_id ? Number(student.student_pk_id) : null;
+  // Reject NaN + non-numeric junk so the Documents tab disables cleanly
+  // instead of firing /api/students/NaN/documents.
+  const studentPkId = (() => {
+    const raw = student.student_pk_id;
+    if (!raw || !/^\d+$/.test(raw)) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
 
   // Check if stream or grade has changed
   const streamChanged = formData.stream !== originalStream && formData.stream !== "";
@@ -281,13 +288,23 @@ export default function EditStudentModal({
           <UploadDocumentForm
             studentId={studentPkId}
             studentName={studentName || "this student"}
-            onUploaded={() => setDocumentsRefresh((n) => n + 1)}
+            onUploaded={() => {
+              // Bump the modal's own list, and also tell the parent
+              // (StudentTable) so any inline DocumentsList visible elsewhere
+              // refetches.
+              setDocumentsRefresh((n) => n + 1);
+              onSave();
+            }}
           />
           <div>
             <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
               Uploaded Documents
             </h3>
-            <DocumentsList studentId={studentPkId} refreshNonce={documentsRefresh} />
+            <DocumentsList
+              studentId={studentPkId}
+              refreshNonce={documentsRefresh}
+              onChanged={onSave}
+            />
           </div>
         </div>
       ) : (

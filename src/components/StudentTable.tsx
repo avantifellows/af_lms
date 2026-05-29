@@ -87,11 +87,34 @@ interface StudentCardProps {
   canEdit: boolean;
   onEdit: () => void;
   onDropout: () => void;
+  /**
+   * Bumped by the parent when something outside this card may have changed
+   * the student's documents (e.g. an upload via EditStudentModal). Forwarded
+   * to the inline DocumentsList so it refetches.
+   */
+  documentsRefreshNonce?: number;
 }
 
-function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) {
+// Coerce a `string | null` PK into a safe positive integer; rejects NaN +
+// non-numeric junk so the Documents UI can disable cleanly instead of firing
+// /api/students/NaN/documents.
+function parseStudentPkId(raw: string | null): number | null {
+  if (!raw) return null;
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function StudentCard({
+  student,
+  canEdit,
+  onEdit,
+  onDropout,
+  documentsRefreshNonce,
+}: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = student.status === "dropout";
+  const studentPkId = parseStudentPkId(student.student_pk_id);
 
   return (
     <Card elevation="md" className="overflow-hidden">
@@ -196,14 +219,15 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
             </div>
           </div>
 
-          {student.student_pk_id && (
+          {studentPkId !== null && (
             <div className="mt-4 border-t border-border pt-3">
               <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents
               </h4>
               <DocumentsList
-                studentId={Number(student.student_pk_id)}
+                studentId={studentPkId}
                 canDelete={canEdit}
+                refreshNonce={documentsRefreshNonce}
               />
             </div>
           )}
@@ -336,6 +360,10 @@ export default function StudentTable({
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  // Bumped when something inside EditStudentModal (e.g. an upload or a
+  // delete) may have changed any open card's documents. Forwarded to each
+  // StudentCard so its inline DocumentsList refetches.
+  const [documentsRefresh, setDocumentsRefresh] = useState(0);
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTabState] = useState<"active" | "dropout">(
@@ -385,6 +413,7 @@ export default function StudentTable({
 
   const handleSave = () => {
     router.refresh();
+    setDocumentsRefresh((n) => n + 1);
   };
 
   const showTabs = dropoutStudents.length > 0;
@@ -465,6 +494,7 @@ export default function StudentTable({
               canEdit={canEditStudent(student)}
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
+              documentsRefreshNonce={documentsRefresh}
             />
           ))
         )}

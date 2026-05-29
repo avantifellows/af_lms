@@ -59,12 +59,43 @@ describe("listDocuments", () => {
 
   it("unwraps a { data: [...] } envelope", async () => {
     const fetchMock = mockFetchResponse({
-      jsonBody: { data: [{ id: 7 }] },
+      jsonBody: { data: [{ id: 7, student_id: 99 }] },
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const rows = await listDocuments(99);
-    expect(rows).toEqual([{ id: 7 }]);
+    expect(rows).toEqual([{ id: 7, student_id: 99 }]);
+  });
+
+  it("filters out rows that don't belong to the requested student (defense-in-depth)", async () => {
+    const fetchMock = mockFetchResponse({
+      jsonBody: [
+        { id: 1, student_id: 42, document_type: "wise_research_consent", pages: [], metadata: {}, uploaded_by: "x", deleted_at: null, inserted_at: "t", updated_at: "t" },
+        { id: 2, student_id: 99, document_type: "wise_research_consent", pages: [], metadata: {}, uploaded_by: "x", deleted_at: null, inserted_at: "t", updated_at: "t" },
+      ],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const rows = await listDocuments(42);
+    expect(rows.map((r) => r.id)).toEqual([1]);
+  });
+
+  it("throws DbServiceError on non-JSON 2xx body", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      void url;
+      void init;
+      return {
+        ok: true,
+        status: 200,
+        json: async (): Promise<unknown> => {
+          throw new SyntaxError("Unexpected end of JSON input");
+        },
+        text: async (): Promise<string> => "",
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listDocuments(1)).rejects.toBeInstanceOf(DbServiceError);
   });
 
   it("throws DbServiceError on non-2xx", async () => {

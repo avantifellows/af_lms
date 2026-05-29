@@ -31,15 +31,44 @@ function authorizedAdmin() {
   ]);
 }
 
-function mockDbServiceFetch(response: { ok: boolean; status: number; text?: string }) {
+// The DELETE route now does listDocuments(studentId) first to verify the doc
+// belongs to that student, then softDeleteDocument(docId). Both go through
+// fetch — sequence the responses.
+function mockListThenDelete(opts: {
+  listDocs?: Array<{ id: number; student_id: number; deleted_at?: string | null; pages?: unknown[] }>;
+  deleteResponse?: { ok: boolean; status: number; text?: string };
+}) {
+  const docs = opts.listDocs ?? [];
+  const del = opts.deleteResponse ?? { ok: true, status: 204 };
+  let call = 0;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     void url;
+    call += 1;
+    if (call === 1) {
+      // listDocuments GET
+      return {
+        ok: true,
+        status: 200,
+        json: async (): Promise<unknown> => docs.map((d) => ({
+          deleted_at: null,
+          pages: [],
+          metadata: {},
+          uploaded_by: "x",
+          inserted_at: "t",
+          updated_at: "t",
+          document_type: "wise_research_consent",
+          ...d,
+        })),
+        text: async (): Promise<string> => "",
+      };
+    }
+    // softDeleteDocument DELETE
     void init;
     return {
-      ok: response.ok,
-      status: response.status,
-      json: async () => null,
-      text: async () => response.text ?? "",
+      ok: del.ok,
+      status: del.status,
+      json: async (): Promise<unknown> => null,
+      text: async (): Promise<string> => del.text ?? "",
     };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -85,30 +114,64 @@ describe("DELETE /api/students/[id]/documents/[docId]", () => {
 
   it("happy path: returns 204 on successful soft-delete", async () => {
     authorizedAdmin();
-    const fetchMock = mockDbServiceFetch({ ok: true, status: 204 });
+    const fetchMock = mockListThenDelete({
+      listDocs: [{ id: 77, student_id: 1 }],
+    });
 
     const { DELETE } = await import("./route");
     const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
 
     expect(res.status).toBe(204);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const call = fetchMock.mock.calls[0];
-    expect(call[0]).toBe("https://db.test/api/lms-student-document/77");
-    expect((call[1] as RequestInit).method).toBe("DELETE");
+    // First call = list, second call = delete
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const deleteCall = fetchMock.mock.calls[1];
+    expect(deleteCall[0]).toBe("https://db.test/api/lms-student-document/77");
+    expect((deleteCall[1] as RequestInit).method).toBe("DELETE");
   });
 
-  it("returns 404 when db-service returns 404", async () => {
+  it("rejects cross-student docId — returns 404 instead of deleting another student's doc (IDOR fix)", async () => {
     authorizedAdmin();
-    mockDbServiceFetch({ ok: false, status: 404, text: "not found" });
+    // listDocuments(1) returns no rows for doc 77 (it belongs to student 999)
+    const fetchMock = mockListThenDelete({
+      listDocs: [{ id: 5, student_id: 1 }],
+    });
+
+    const { DELETE } = await import("./route");
+    const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
+    expect(res.status).toBe(404);
+    // Only the list fetch ran; we never reached softDeleteDocument.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when doc is soft-deleted", async () => {
+    authorizedAdmin();
+    mockListThenDelete({
+      listDocs: [{ id: 77, student_id: 1, deleted_at: "2026-05-29T00:00:00Z" }],
+    });
 
     const { DELETE } = await import("./route");
     const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
     expect(res.status).toBe(404);
   });
 
-  it("returns 502 when db-service returns 5xx", async () => {
+  it("returns 404 when db-service rejects the delete itself", async () => {
     authorizedAdmin();
-    mockDbServiceFetch({ ok: false, status: 500, text: "down" });
+    mockListThenDelete({
+      listDocs: [{ id: 77, student_id: 1 }],
+      deleteResponse: { ok: false, status: 404, text: "not found" },
+    });
+
+    const { DELETE } = await import("./route");
+    const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 502 when db-service returns 5xx on delete", async () => {
+    authorizedAdmin();
+    mockListThenDelete({
+      listDocs: [{ id: 77, student_id: 1 }],
+      deleteResponse: { ok: false, status: 500, text: "down" },
+    });
 
     const { DELETE } = await import("./route");
     const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));

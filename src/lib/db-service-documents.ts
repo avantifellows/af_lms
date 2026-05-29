@@ -64,10 +64,24 @@ export async function listDocuments(
       body,
     );
   }
-  const data = await res.json();
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch (err) {
+    throw new DbServiceError(
+      `listDocuments returned non-JSON body`,
+      res.status,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
   // db-service may return `{ data: [...] }` or a bare array depending on
   // controller convention. Accept both.
-  return Array.isArray(data) ? data : (data?.data ?? []);
+  const rows: LmsStudentDocumentRow[] = Array.isArray(data)
+    ? (data as LmsStudentDocumentRow[])
+    : ((data as { data?: LmsStudentDocumentRow[] } | null)?.data ?? []);
+  // Defense in depth: even if the upstream silently ignores the student_id
+  // filter, refuse to leak documents that belong to another student.
+  return rows.filter((d) => d.student_id === studentId);
 }
 
 export type CreateDocumentInput = Omit<
@@ -92,8 +106,20 @@ export async function createDocument(
       body,
     );
   }
-  const data = await res.json();
-  return data?.data ?? data;
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch (err) {
+    throw new DbServiceError(
+      `createDocument returned non-JSON body`,
+      res.status,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+  const row =
+    (data as { data?: LmsStudentDocumentRow } | null)?.data ??
+    (data as LmsStudentDocumentRow);
+  return row;
 }
 
 export async function softDeleteDocument(id: number): Promise<void> {

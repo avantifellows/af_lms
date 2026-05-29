@@ -12,12 +12,18 @@ interface DocumentsListProps {
    */
   refreshNonce?: number | string;
   canDelete?: boolean;
+  /**
+   * Called after a successful in-list delete. Parents can use this to refresh
+   * any sibling views (e.g. an inline list rendered elsewhere on the page).
+   */
+  onChanged?: () => void;
 }
 
 export function DocumentsList({
   studentId,
   refreshNonce,
   canDelete = true,
+  onChanged,
 }: DocumentsListProps) {
   const [docs, setDocs] = useState<LmsStudentDocumentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +42,12 @@ export function DocumentsList({
         return;
       }
       const data: LmsStudentDocumentRow[] = await res.json();
-      // Newest first. Server doesn't guarantee order.
-      data.sort((a, b) => (a.inserted_at < b.inserted_at ? 1 : -1));
+      // Newest first. Server doesn't guarantee order. Compare returns 0 on
+      // exact ties so TimSort's antisymmetry assumption holds.
+      data.sort((a, b) => {
+        if (a.inserted_at === b.inserted_at) return 0;
+        return a.inserted_at < b.inserted_at ? 1 : -1;
+      });
       setDocs(data);
     } catch (err) {
       console.error("DocumentsList fetch failed:", err);
@@ -62,8 +72,9 @@ export function DocumentsList({
       }
       // Optimistic refresh — refetch to stay in sync with anything else.
       await load();
+      onChanged?.();
     },
-    [studentId, load],
+    [studentId, load, onChanged],
   );
 
   if (loading && docs === null) {

@@ -52,19 +52,37 @@ export function UploadDocumentForm({
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  // Tracks every blob:* URL we created so we can revoke on unmount regardless
+  // of whether photos state has changed since. (An empty-deps closure over
+  // `photos` would freeze the value at first render, leaking everything added
+  // later.)
+  const createdUrlsRef = useRef<Set<string>>(new Set());
+  // Flipped to false on unmount so async resolutions don't setState after
+  // teardown.
+  const isMountedRef = useRef(true);
 
-  // Revoke object URLs on unmount so blob:* references don't leak.
   useEffect(() => {
+    isMountedRef.current = true;
+    // Snapshot the ref so the cleanup closure iterates whatever Set instance
+    // we set up on this mount (rather than a stale read of `.current` at
+    // cleanup time, per react-hooks/exhaustive-deps).
+    const created = createdUrlsRef.current;
     return () => {
-      for (const p of photos) URL.revokeObjectURL(p.previewUrl);
+      isMountedRef.current = false;
+      for (const url of created) {
+        URL.revokeObjectURL(url);
+      }
+      created.clear();
     };
-    // photos is intentionally not in the dep array: we want the closure to
-    // capture the latest set at unmount, not run on every change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function revokeUrl(url: string) {
+    URL.revokeObjectURL(url);
+    createdUrlsRef.current.delete(url);
+  }
+
   function resetForm() {
-    for (const p of photos) URL.revokeObjectURL(p.previewUrl);
+    for (const p of photos) revokeUrl(p.previewUrl);
     setPhotos([]);
     setPdf(null);
     setError(null);
@@ -98,6 +116,7 @@ export function UploadDocumentForm({
     try {
       const blob = await downscaleImage(file);
       const previewUrl = URL.createObjectURL(blob);
+      createdUrlsRef.current.add(previewUrl);
       setPhotos((prev) => [...prev, { id: crypto.randomUUID(), blob, previewUrl }]);
     } catch (err) {
       console.error("Downscale failed:", err);
@@ -128,7 +147,7 @@ export function UploadDocumentForm({
 
   function removePhoto(index: number) {
     setPhotos((prev) => {
-      URL.revokeObjectURL(prev[index].previewUrl);
+      revokeUrl(prev[index].previewUrl);
       return prev.filter((_, i) => i !== index);
     });
   }
@@ -164,18 +183,23 @@ export function UploadDocumentForm({
         method: "POST",
         body: fd,
       });
+      // Component may have unmounted while the upload was in flight; bail
+      // before touching state to avoid React warnings + stale UI updates.
+      if (!isMountedRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        if (!isMountedRef.current) return;
         setError(body?.error ?? `Upload failed (${res.status})`);
         return;
       }
       resetForm();
       onUploaded?.();
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error("Upload failed:", err);
       setError("Network error — please try again.");
     } finally {
-      setSubmitting(false);
+      if (isMountedRef.current) setSubmitting(false);
     }
   }
 

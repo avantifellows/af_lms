@@ -28,6 +28,9 @@ const ALLOWED_PHOTO_MIMES: ReadonlySet<string> = new Set([
 ]);
 
 function parseStudentId(raw: string): number | null {
+  // Require an exact integer match (`Number.parseInt` accepts trailing junk
+  // like "5abc" → 5, which would silently route to the wrong student).
+  if (!/^\d+$/.test(raw)) return null;
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n <= 0) return null;
   return n;
@@ -36,6 +39,7 @@ function parseStudentId(raw: string): number | null {
 async function gateOrError(
   session: Session | null,
   studentIdRaw: string,
+  options?: { requireEdit?: boolean },
 ): Promise<
   | { ok: true; studentId: number; session: Session }
   | { ok: false; response: NextResponse }
@@ -53,7 +57,7 @@ async function gateOrError(
       response: NextResponse.json({ error: "Invalid student id" }, { status: 400 }),
     };
   }
-  const allowed = await canAccessStudent(session, studentId);
+  const allowed = await canAccessStudent(session, studentId, options);
   if (!allowed) {
     return {
       ok: false,
@@ -133,7 +137,10 @@ export async function POST(
 ) {
   const { id } = await params;
   const session = await getServerSession(authOptions);
-  const gate = await gateOrError(session, id);
+  // POST is a write — require feature-level edit access on `students`. Without
+  // this, a read-only program_admin could upload via direct API call even
+  // though the UI hides the buttons.
+  const gate = await gateOrError(session, id, { requireEdit: true });
   if (!gate.ok) return gate.response;
   const { studentId } = gate;
 

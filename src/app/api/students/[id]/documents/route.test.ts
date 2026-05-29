@@ -49,6 +49,16 @@ function authorizedAdmin() {
   ]);
 }
 
+// A user with school access but read_only=true — feature matrix downgrades
+// `students` edit → view, so the requireEdit gate should reject them.
+function authorizedReadOnly() {
+  mockSession.mockResolvedValue(ADMIN_SESSION);
+  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West" }]);
+  mockQuery.mockResolvedValueOnce([
+    { email: "admin@avantifellows.org", level: 3, role: "program_admin", school_codes: null, regions: null, program_ids: [1], read_only: true },
+  ]);
+}
+
 interface MultipartPart {
   field: string;
   filename?: string;
@@ -165,6 +175,21 @@ describe("POST /api/students/[id]/documents", () => {
     const { POST } = await import("./route");
     const res = await POST(
       multipartRequest(({})),
+      routeParams({ id: "1" }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects read-only users with 403 even when they have school access (feature-edit gate)", async () => {
+    authorizedReadOnly();
+    const { POST } = await import("./route");
+    const res = await POST(
+      multipartRequest(
+        buildFormData({
+          documentType: "wise_research_consent",
+          files: [{ field: "page_1", mimeType: "image/jpeg", bytes: new Uint8Array([1]) }],
+        }),
+      ),
       routeParams({ id: "1" }),
     );
     expect(res.status).toBe(403);

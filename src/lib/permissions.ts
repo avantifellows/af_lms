@@ -290,6 +290,11 @@ export async function getStudentSchool(
 // Permission gate for routes scoped to a single student. Honors both Google
 // users (via canAccessSchool against their user_permission row) and passcode
 // users (via session.schoolCode match).
+//
+// Pass `requireEdit: true` for write paths (upload, delete) — this additionally
+// requires the user's role + read_only flag to grant `canEdit` on the
+// `students` feature. Without it, a read_only program_admin could mutate
+// student documents via direct API calls even though the UI hides the buttons.
 export async function canAccessStudent(
   session: {
     user?: { email?: string | null } | null;
@@ -297,18 +302,34 @@ export async function canAccessStudent(
     schoolCode?: string;
   } | null,
   studentPkId: number | string,
+  options?: { requireEdit?: boolean },
 ): Promise<boolean> {
   if (!session) return false;
   const school = await getStudentSchool(studentPkId);
   if (!school) return false;
 
   if (session.isPasscodeUser) {
+    // Passcode users have edit access on `students` per getFeatureAccess; the
+    // only check that matters is school match.
     return session.schoolCode === school.code;
   }
 
   const email = session.user?.email;
   if (!email) return false;
-  return canAccessSchool(email, school.code, school.region || undefined);
+  const permission = await getUserPermission(email);
+  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
+    // Level-2 region users may still match via the async fallback path that
+    // canAccessSchool does (querying school.region when not provided). We've
+    // already passed region in, so the sync check is sufficient here.
+    if (!permission || permission.level !== 2) return false;
+    const ok = await canAccessSchool(email, school.code, school.region || undefined);
+    if (!ok) return false;
+  }
+  if (options?.requireEdit) {
+    const { canEdit } = getFeatureAccess(permission, "students");
+    if (!canEdit) return false;
+  }
+  return true;
 }
 
 // Synchronous helper to get program context from a permission object
