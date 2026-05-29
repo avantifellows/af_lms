@@ -33,16 +33,24 @@ _Avoid_: PIN, access code
 ### Curriculum
 
 **LMS Curriculum Log**:
-A soft-deletable dated record of curriculum teaching at a school, with duration and covered topics.
+A soft-deletable dated record of curriculum teaching for a school, program, grade, subject, and exam track, with duration and covered topics.
 _Avoid_: Teaching Session, Session, Class Log
 
 **Chapter Completion**:
-The current state that a chapter is complete for a school and program.
+The current state that a chapter is complete for a school, program, and exam track.
 _Avoid_: Completed log, topic coverage
 
 **Curriculum Progress**:
-A summary of covered topics, teaching time, and chapter completion for a school-program-grade-subject selection.
+A summary of covered topics, teaching time, and chapter completion for a school-program-grade-subject-exam-track selection.
 _Avoid_: Progress record, saved progress
+
+**Exam Track**:
+The exam-specific curriculum lens selected by a user, such as JEE Main, JEE Advanced, or NEET.
+_Avoid_: Stream, orientation
+
+**LMS Chapter Exam Config**:
+An exam-track-specific configuration for a chapter that records whether it is in syllabus, the prescribed lecture time, and the coverage order.
+_Avoid_: Timemap, chapter requirement
 
 ### Visits & Actions
 
@@ -96,10 +104,15 @@ _Avoid_: Access tier, role level
 
 - A **School** has many **Students** (via `group` → `group_user`)
 - A **School** has many **Batches**
-- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**
+- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program** and **Exam Track**
 - An **LMS Curriculum Log** has many covered topics
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
+- A chapter has one **LMS Chapter Exam Config** per configured exam track
+- **LMS Chapter Exam Config** is global per chapter and exam track, not scoped to a school or program
+- In v1, users select the **Exam Track** explicitly in Curriculum instead of deriving it from teacher, school, or program
+- In Curriculum, **Exam Track** is selected before grade and subject; available subjects are filtered by the selected **Exam Track**
+- Curriculum chapter order follows **LMS Chapter Exam Config** coverage order before falling back to chapter code
 - Deleting an **LMS Curriculum Log** means soft deletion, so covered-topic and teaching-time progress ignores it without losing audit history
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
