@@ -64,7 +64,9 @@ export function DocumentCard({ doc, onDelete, canDelete = true }: DocumentCardPr
             </Badge>
           </div>
           <p className="mt-1 font-mono text-xs text-text-muted">
-            {formatDate(doc.inserted_at)} · {doc.uploaded_by}
+            <span>{formatDate(doc.inserted_at)}</span>
+            <span className="mx-1">·</span>
+            <span className="break-all">{doc.uploaded_by}</span>
           </p>
         </div>
         {canDelete && onDelete && (

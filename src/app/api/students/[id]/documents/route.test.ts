@@ -42,7 +42,7 @@ beforeEach(() => {
 function authorizedAdmin() {
   mockSession.mockResolvedValue(ADMIN_SESSION);
   // First query inside canAccessStudent: getStudentSchool
-  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West" }]);
+  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
   // Second query: getUserPermission (level-3 admin)
   mockQuery.mockResolvedValueOnce([
     { email: "admin@avantifellows.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
@@ -53,7 +53,7 @@ function authorizedAdmin() {
 // `students` edit → view, so the requireEdit gate should reject them.
 function authorizedReadOnly() {
   mockSession.mockResolvedValue(ADMIN_SESSION);
-  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West" }]);
+  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
   mockQuery.mockResolvedValueOnce([
     { email: "admin@avantifellows.org", level: 3, role: "program_admin", school_codes: null, regions: null, program_ids: [1], read_only: true },
   ]);
@@ -168,7 +168,7 @@ describe("POST /api/students/[id]/documents", () => {
   it("rejects when the user lacks school access (403)", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     // student-school lookup → school exists
-    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null }]);
+    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: null }]);
     // getUserPermission → empty (no permission row)
     mockQuery.mockResolvedValueOnce([]);
 
@@ -448,7 +448,7 @@ describe("POST /api/students/[id]/documents", () => {
   it("passcode user in matching school can upload (201)", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION);
     // getStudentSchool → matches passcode school
-    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null }]);
+    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: null }]);
     s3Mock.on(PutObjectCommand).resolves({});
     mockDbServiceFetch([{ ok: true, status: 201, body: { id: 1 } }]);
 
@@ -467,7 +467,7 @@ describe("POST /api/students/[id]/documents", () => {
 
   it("passcode user in a different school is blocked (403)", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION);
-    mockQuery.mockResolvedValueOnce([{ code: "99999", region: null }]);
+    mockQuery.mockResolvedValueOnce([{ code: "99999", region: null, program_id: null }]);
 
     const { POST } = await import("./route");
     const res = await POST(
@@ -526,7 +526,7 @@ describe("GET /api/students/[id]/documents", () => {
 
   it("returns 403 for users without school access", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null }]);
+    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: null }]);
     mockQuery.mockResolvedValueOnce([]); // no permission row
 
     const { GET } = await import("./route");

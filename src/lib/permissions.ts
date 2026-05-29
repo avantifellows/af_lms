@@ -268,18 +268,38 @@ export async function isAdmin(email: string): Promise<boolean> {
   return permission?.role === "admin";
 }
 
-// Look up a student's school (code + region) by the student primary key
-// (db-service `student.id`). Returns null if the student doesn't exist or has
-// no school membership.
+export interface StudentScope {
+  code: string;
+  region: string | null;
+  /**
+   * `program_id` of the student's current batch enrollment, or null if the
+   * student has no current batch (unassigned). Used by `canAccessStudent`'s
+   * `requireEdit` branch to enforce per-program ownership the same way the
+   * UI's per-row `canEditStudent` check does — a COE-only user shouldn't be
+   * able to mutate an NVS student's documents in a mixed school like JNV
+   * Adilabad even when school + role checks pass.
+   */
+  program_id: number | null;
+}
+
+// Look up a student's school (code + region) and current program by the
+// student primary key (db-service `student.id`). Returns null if the student
+// doesn't exist or has no school membership.
 export async function getStudentSchool(
   studentPkId: number | string,
-): Promise<{ code: string; region: string | null } | null> {
-  const rows = await query<{ code: string; region: string | null }>(
-    `SELECT sch.code, sch.region
+): Promise<StudentScope | null> {
+  const rows = await query<StudentScope>(
+    `SELECT sch.code, sch.region, b.program_id
      FROM student s
-     JOIN group_user gu ON gu.user_id = s.user_id
-     JOIN "group" g ON g.id = gu.group_id AND g.type = 'school'
-     JOIN school sch ON sch.id = g.child_id
+     JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
+     JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
+     JOIN school sch ON sch.id = g_sch.child_id
+     LEFT JOIN enrollment_record er_batch
+       ON er_batch.user_id = s.user_id
+       AND er_batch.group_type = 'batch'
+       AND er_batch.is_current = true
+     LEFT JOIN "group" g_batch ON g_batch.id = er_batch.group_id AND g_batch.type = 'batch'
+     LEFT JOIN batch b ON b.id = g_batch.child_id
      WHERE s.id = $1
      LIMIT 1`,
     [studentPkId],
@@ -328,6 +348,12 @@ export async function canAccessStudent(
   if (options?.requireEdit) {
     const { canEdit } = getFeatureAccess(permission, "students");
     if (!canEdit) return false;
+    // Per-program ownership — mirrors the UI's per-row canEditStudent check.
+    // ownsRecord returns true for admins, true for null program_id
+    // (unassigned student), and true if the user's program_ids includes the
+    // student's program. Without this, a COE-only user could POST/DELETE
+    // documents for an NVS student in a mixed school.
+    if (!ownsRecord(permission, school.program_id)) return false;
   }
   return true;
 }

@@ -25,7 +25,7 @@ beforeEach(() => {
 function authorizedAdmin() {
   mockSession.mockResolvedValue(ADMIN_SESSION);
   // canAccessStudent: getStudentSchool → admin permission
-  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West" }]);
+  mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
   mockQuery.mockResolvedValueOnce([
     { email: "admin@avantifellows.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
   ]);
@@ -91,7 +91,7 @@ describe("DELETE /api/students/[id]/documents/[docId]", () => {
 
   it("rejects when the user lacks school access (403)", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null }]);
+    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: null }]);
     mockQuery.mockResolvedValueOnce([]); // no permission row
     const { DELETE } = await import("./route");
     const res = await DELETE(deleteRequest(), routeParams({ id: "1", docId: "77" }));
