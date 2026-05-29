@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button } from "@/components/ui";
+import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
+import { DocumentsList } from "@/components/documents/DocumentsList";
 
 export interface Batch {
   id: number;
@@ -103,6 +105,11 @@ export default function EditStudentModal({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
+  // Bumped after a successful upload so DocumentsList refetches.
+  const [documentsRefresh, setDocumentsRefresh] = useState(0);
+  const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+  const studentPkId = student.student_pk_id ? Number(student.student_pk_id) : null;
 
   // Check if stream or grade has changed
   const streamChanged = formData.stream !== originalStream && formData.stream !== "";
@@ -239,6 +246,52 @@ export default function EditStudentModal({
         </Button>
       </div>
 
+      <div role="tablist" aria-label="Edit student sections" className="mb-4 flex border-b border-border">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "details"}
+          onClick={() => setActiveTab("details")}
+          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
+            activeTab === "details"
+              ? "border-b-2 border-accent text-text-primary"
+              : "text-text-muted hover:text-text-primary"
+          }`}
+        >
+          Details
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "documents"}
+          onClick={() => setActiveTab("documents")}
+          disabled={studentPkId === null}
+          className={`min-h-[48px] px-4 py-3 text-sm font-bold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            activeTab === "documents"
+              ? "border-b-2 border-accent text-text-primary"
+              : "text-text-muted hover:text-text-primary"
+          }`}
+        >
+          Documents
+        </button>
+      </div>
+
+      {activeTab === "documents" && studentPkId !== null ? (
+        <div className="space-y-6">
+          <UploadDocumentForm
+            studentId={studentPkId}
+            studentName={studentName || "this student"}
+            onUploaded={() => setDocumentsRefresh((n) => n + 1)}
+          />
+          <div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+              Uploaded Documents
+            </h3>
+            <DocumentsList studentId={studentPkId} refreshNonce={documentsRefresh} />
+          </div>
+        </div>
+      ) : (
+        <>
           {error && (
             <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
               {error}
@@ -470,6 +523,8 @@ export default function EditStudentModal({
             minute: "2-digit",
           })}
         </p>
+      )}
+        </>
       )}
     </Modal>
   );

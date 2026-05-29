@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input } from "@/components/ui";
+import { DocumentsList } from "@/components/documents/DocumentsList";
 
 export interface Student {
   group_user_id: string;
@@ -194,6 +195,18 @@ function StudentCard({ student, canEdit, onEdit, onDropout }: StudentCardProps) 
               <p className="text-gray-900 truncate">{student.email || "—"}</p>
             </div>
           </div>
+
+          {student.student_pk_id && (
+            <div className="mt-4 border-t border-border pt-3">
+              <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                Documents
+              </h4>
+              <DocumentsList
+                studentId={Number(student.student_pk_id)}
+                canDelete={canEdit}
+              />
+            </div>
+          )}
         </div>
       )}
     </Card>

@@ -268,6 +268,49 @@ export async function isAdmin(email: string): Promise<boolean> {
   return permission?.role === "admin";
 }
 
+// Look up a student's school (code + region) by the student primary key
+// (db-service `student.id`). Returns null if the student doesn't exist or has
+// no school membership.
+export async function getStudentSchool(
+  studentPkId: number | string,
+): Promise<{ code: string; region: string | null } | null> {
+  const rows = await query<{ code: string; region: string | null }>(
+    `SELECT sch.code, sch.region
+     FROM student s
+     JOIN group_user gu ON gu.user_id = s.user_id
+     JOIN "group" g ON g.id = gu.group_id AND g.type = 'school'
+     JOIN school sch ON sch.id = g.child_id
+     WHERE s.id = $1
+     LIMIT 1`,
+    [studentPkId],
+  );
+  return rows[0] ?? null;
+}
+
+// Permission gate for routes scoped to a single student. Honors both Google
+// users (via canAccessSchool against their user_permission row) and passcode
+// users (via session.schoolCode match).
+export async function canAccessStudent(
+  session: {
+    user?: { email?: string | null } | null;
+    isPasscodeUser?: boolean;
+    schoolCode?: string;
+  } | null,
+  studentPkId: number | string,
+): Promise<boolean> {
+  if (!session) return false;
+  const school = await getStudentSchool(studentPkId);
+  if (!school) return false;
+
+  if (session.isPasscodeUser) {
+    return session.schoolCode === school.code;
+  }
+
+  const email = session.user?.email;
+  if (!email) return false;
+  return canAccessSchool(email, school.code, school.region || undefined);
+}
+
 // Synchronous helper to get program context from a permission object
 export function getProgramContextSync(
   permission: UserPermission | null
