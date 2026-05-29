@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   Chapter,
   TeachingSession,
@@ -46,8 +47,20 @@ export default function CurriculumTab({
   const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
 
   // UI state
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([]);
-  const [activeTab, setActiveTab] = useState<"chapters" | "history">("chapters");
+  const [activeTab, setActiveTabState] = useState<"chapters" | "history">(
+    searchParams.get("curriculum") === "history" ? "history" : "chapters"
+  );
+  const setActiveTab = (tab: "chapters" | "history") => {
+    setActiveTabState(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "chapters") params.delete("curriculum");
+    else params.set("curriculum", tab);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  };
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Load sessions and progress from localStorage on mount (school-scoped)

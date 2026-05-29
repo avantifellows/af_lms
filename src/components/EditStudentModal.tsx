@@ -1,30 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Grade } from "./StudentTable";
+import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button } from "@/components/ui";
-
-interface Student {
-  group_user_id: string;
-  user_id: string;
-  student_pk_id: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  email: string | null;
-  date_of_birth: string | null;
-  student_id: string | null;
-  apaar_id: string | null;
-  category: string | null;
-  stream: string | null;
-  gender: string | null;
-  program_name: string | null;
-  program_id: number | null;
-  grade: number | null;
-  grade_id: string | null;
-  status: string | null;
-  updated_at: string | null;
-}
 
 export interface Batch {
   id: number;

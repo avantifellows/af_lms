@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOWED_TOP_LEVEL_KEYS,
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG,
+  computeInlineStats,
+  extractRemarks,
   getEntriesFromData,
   validateIndividualStudentDiscussionComplete,
   validateIndividualStudentDiscussionSave,
@@ -298,5 +300,57 @@ describe("validateIndividualStudentDiscussionComplete (strict)", () => {
     });
 
     expect(result.errors).toContain("Entry 0: grade must be 11 or 12");
+  });
+});
+
+describe("individual student discussion summary extractors", () => {
+  it("labels remarks with student names and computes entry/student stats", () => {
+    const data = {
+      entries: [
+        {
+          id: "entry-1",
+          grade: 11,
+          students: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
+          questions: {
+            oh_teaching_concern: { answer: true, remark: "Students want slower pacing" },
+            oh_additional_support: { answer: false },
+          },
+        },
+        {
+          id: "entry-2",
+          grade: 12,
+          students: [{ id: 3, name: "Carol" }],
+          questions: {
+            oh_teaching_concern: { answer: null, remark: "   " },
+          },
+        },
+      ],
+    };
+
+    expect(extractRemarks(data)).toEqual([
+      {
+        label: "Alice, Bob: Did any student raise a concern on teaching quality and classroom environment?",
+        text: "Students want slower pacing",
+      },
+    ]);
+    expect(computeInlineStats(data)).toEqual({
+      entryCount: 2,
+      studentCount: 3,
+      avgAnswered: 1,
+      totalQuestions: 2,
+    });
+  });
+
+  it("returns student-only stats for legacy students shape and empty for null/undefined", () => {
+    expect(extractRemarks({ students: [{ id: 1, name: "Alice" }] })).toEqual([]);
+    expect(computeInlineStats({ students: [{ id: 1, name: "Alice" }] })).toEqual({
+      entryCount: null,
+      studentCount: 1,
+      avgAnswered: null,
+      totalQuestions: 2,
+    });
+    expect(computeInlineStats({ students: [] })).toBeNull();
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });

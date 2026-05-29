@@ -76,10 +76,16 @@ const users = [
 
 const regions = ["North", "South", "East", "West"];
 
+const schoolCodeToName: Record<string, string> = {
+  SCH001: "JNV Bhavnagar",
+  SCH002: "JNV Mumbai",
+};
+
 function renderList(
   overrides: {
     initialUsers?: typeof users;
     regions?: string[];
+    schoolCodeToName?: Record<string, string>;
     currentUserEmail?: string;
   } = {}
 ) {
@@ -87,6 +93,7 @@ function renderList(
     <UserList
       initialUsers={overrides.initialUsers ?? users}
       regions={overrides.regions ?? regions}
+      schoolCodeToName={overrides.schoolCodeToName ?? schoolCodeToName}
       currentUserEmail={overrides.currentUserEmail ?? currentUserEmail}
     />
   );
@@ -188,9 +195,21 @@ describe("UserList", () => {
       expect(screen.getByText("North, South")).toBeInTheDocument();
     });
 
-    it("shows school codes for level 1 users", () => {
+    it("shows school names (with code in parens) for level 1 users", () => {
       renderList();
-      expect(screen.getByText("SCH001, SCH002")).toBeInTheDocument();
+      expect(screen.getByText("JNV Bhavnagar (SCH001)")).toBeInTheDocument();
+      expect(screen.getByText("JNV Mumbai (SCH002)")).toBeInTheDocument();
+    });
+
+    it("falls back to raw code when a school is missing from the map", () => {
+      renderList({
+        initialUsers: [
+          { ...users[2], school_codes: ["SCH001", "ORPHAN_CODE"] },
+        ],
+        schoolCodeToName: { SCH001: "JNV Bhavnagar" },
+      });
+      expect(screen.getByText("JNV Bhavnagar (SCH001)")).toBeInTheDocument();
+      expect(screen.getByText("ORPHAN_CODE")).toBeInTheDocument();
     });
 
     it("shows 'No regions assigned' for level 2 user with null regions", () => {

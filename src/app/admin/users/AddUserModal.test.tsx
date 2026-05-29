@@ -8,9 +8,15 @@ import AddUserModal from "./AddUserModal";
 
 const regions = ["North", "South", "East", "West"];
 
+const schoolCodeToName: Record<string, string> = {
+  SC001: "JNV Alpha",
+  SC002: "JNV Beta",
+};
+
 const defaultProps = {
   user: null,
   regions,
+  schoolCodeToName,
   onClose: vi.fn(),
   onSave: vi.fn(),
 };
@@ -306,8 +312,10 @@ describe("AddUserModal — school search (debounce)", () => {
       fireEvent.click(screen.getByText("Test School"));
     });
 
-    // School should appear as a chip
-    expect(screen.getByText("SC001")).toBeInTheDocument();
+    // Chip uses the page-level schoolCodeToName map (which has SC001 = "JNV Alpha").
+    // In production the search-result name and the map name come from the same
+    // DB column so they agree; in the test the fixture map wins.
+    expect(screen.getByText("JNV Alpha (SC001)")).toBeInTheDocument();
   });
 
   it("clears search results when level changes away from 1", async () => {
@@ -328,12 +336,20 @@ describe("AddUserModal — school search (debounce)", () => {
 // ---------------------------------------------------------------------------
 
 describe("AddUserModal — school chip management", () => {
-  it("shows pre-filled schools as chips in edit mode", () => {
+  it("shows pre-filled schools as chips with name + code in edit mode", () => {
     renderModal({
       user: { ...editUser, level: 1, school_codes: ["SC001", "SC002"], regions: null },
     });
-    expect(screen.getByText("SC001")).toBeInTheDocument();
-    expect(screen.getByText("SC002")).toBeInTheDocument();
+    expect(screen.getByText("JNV Alpha (SC001)")).toBeInTheDocument();
+    expect(screen.getByText("JNV Beta (SC002)")).toBeInTheDocument();
+  });
+
+  it("falls back to bare code when the school isn't in the map", () => {
+    renderModal({
+      user: { ...editUser, level: 1, school_codes: ["SC001", "MISSING"], regions: null },
+    });
+    expect(screen.getByText("JNV Alpha (SC001)")).toBeInTheDocument();
+    expect(screen.getByText("MISSING")).toBeInTheDocument();
   });
 
   it("removes school chip on × button click", async () => {
@@ -346,8 +362,8 @@ describe("AddUserModal — school chip management", () => {
     const removeButtons = screen.getAllByText("×");
     await user.click(removeButtons[0]);
 
-    expect(screen.queryByText("SC001")).not.toBeInTheDocument();
-    expect(screen.getByText("SC002")).toBeInTheDocument();
+    expect(screen.queryByText("JNV Alpha (SC001)")).not.toBeInTheDocument();
+    expect(screen.getByText("JNV Beta (SC002)")).toBeInTheDocument();
   });
 });
 

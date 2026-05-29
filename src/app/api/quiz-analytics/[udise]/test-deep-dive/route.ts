@@ -27,7 +27,15 @@ export async function GET(
 
   try {
     const program = url.searchParams.get("program") || undefined;
-    const data = await getTestDeepDiveFromDynamo(auth.school.id, grade, sessionId, program);
+    const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
+    const data = await getTestDeepDiveFromDynamo(
+      auth.school.id,
+      auth.school.name,
+      grade,
+      sessionId,
+      program,
+      stream
+    );
 
     if (!data) {
       return NextResponse.json(

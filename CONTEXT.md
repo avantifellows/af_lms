@@ -77,6 +77,7 @@ _Avoid_: Access tier, role level
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
+- A **School** has many **Staff** (via **Centres API**, keyed by `school.name`)
 - A **School** has many **Batches**
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)

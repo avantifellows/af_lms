@@ -13,6 +13,7 @@ interface Props {
   sessionId: string;
   testName: string;
   program?: string;
+  stream?: string;
   onBack: () => void;
   onDataLoaded?: (testName: string) => void;
 }
@@ -23,6 +24,7 @@ export default function TestDeepDive({
   sessionId,
   testName,
   program,
+  stream,
   onBack,
   onDataLoaded,
 }: Props) {
@@ -37,8 +39,9 @@ export default function TestDeepDive({
     setData(null);
 
     const programParam = program ? `&program=${encodeURIComponent(program)}` : "";
+    const streamParam = stream ? `&stream=${encodeURIComponent(stream)}` : "";
     fetch(
-      `/api/quiz-analytics/${schoolUdise}/test-deep-dive?grade=${grade}&sessionId=${encodeURIComponent(sessionId)}${programParam}`,
+      `/api/quiz-analytics/${schoolUdise}/test-deep-dive?grade=${grade}&sessionId=${encodeURIComponent(sessionId)}${programParam}${streamParam}`,
       { signal: controller.signal }
     )
       .then(async (res) => {
@@ -60,7 +63,7 @@ export default function TestDeepDive({
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [schoolUdise, grade, sessionId, program]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [schoolUdise, grade, sessionId, program, stream]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">
@@ -101,7 +104,14 @@ export default function TestDeepDive({
           </div>
 
           <SubjectAnalysisSection subjects={data.subjects} />
-          <ChapterAnalysisSection chapters={data.chapters} />
+          <ChapterAnalysisSection
+            chapters={data.chapters}
+            schoolUdise={schoolUdise}
+            grade={grade}
+            sessionId={sessionId}
+            program={program}
+            stream={stream}
+          />
           <StudentResultsTable students={data.students} />
         </>
       )}

@@ -71,6 +71,11 @@ const mockRegions = [
   { region: "Rajasthan", school_count: "12" },
 ];
 
+const mockSchoolNames = [
+  { code: "70705", name: "JNV Bhavnagar" },
+  { code: "14042", name: "JNV Mumbai" },
+];
+
 // ---- tests ----
 
 describe("UsersPage (server component)", () => {
@@ -102,13 +107,14 @@ describe("UsersPage (server component)", () => {
     expect(mockIsAdmin).toHaveBeenCalledWith("admin@avantifellows.org");
   });
 
-  it("fetches users and regions and renders UserList for admin", async () => {
+  it("fetches users, regions, and school names and renders UserList for admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
     mockIsAdmin.mockResolvedValue(true);
-    // query is called twice: once for users, once for regions
+    // query is called three times: users, regions, schools
     mockQuery
       .mockResolvedValueOnce(mockUsers)
-      .mockResolvedValueOnce(mockRegions);
+      .mockResolvedValueOnce(mockRegions)
+      .mockResolvedValueOnce(mockSchoolNames);
 
     const jsx = await UsersPage();
     render(jsx);
@@ -129,10 +135,14 @@ describe("UsersPage (server component)", () => {
     const props = JSON.parse(userList.getAttribute("data-props")!);
     expect(props.initialUsers).toEqual(mockUsers);
     expect(props.regions).toEqual(["Delhi", "Rajasthan"]);
+    expect(props.schoolCodeToName).toEqual({
+      "70705": "JNV Bhavnagar",
+      "14042": "JNV Mumbai",
+    });
     expect(props.currentUserEmail).toBe("admin@avantifellows.org");
 
-    // Verify both queries were called
-    expect(mockQuery).toHaveBeenCalledTimes(2);
+    // Verify all three queries were called
+    expect(mockQuery).toHaveBeenCalledTimes(3);
     // Users query
     const usersSql = mockQuery.mock.calls[0][0];
     expect(usersSql).toContain("user_permission");
@@ -141,12 +151,19 @@ describe("UsersPage (server component)", () => {
     const regionsSql = mockQuery.mock.calls[1][0];
     expect(regionsSql).toContain("af_school_category = 'JNV'");
     expect(regionsSql).toContain("GROUP BY region");
+    // Schools query
+    const schoolsSql = mockQuery.mock.calls[2][0];
+    expect(schoolsSql).toContain("SELECT code, name FROM school");
+    expect(schoolsSql).toContain("af_school_category = 'JNV'");
   });
 
-  it("renders with empty users and regions", async () => {
+  it("renders with empty users, regions, and schools", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
     mockIsAdmin.mockResolvedValue(true);
-    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
 
     const jsx = await UsersPage();
     render(jsx);
@@ -157,6 +174,7 @@ describe("UsersPage (server component)", () => {
     const props = JSON.parse(userList.getAttribute("data-props")!);
     expect(props.initialUsers).toEqual([]);
     expect(props.regions).toEqual([]);
+    expect(props.schoolCodeToName).toEqual({});
     expect(props.currentUserEmail).toBe("admin@avantifellows.org");
   });
 });

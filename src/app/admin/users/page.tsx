@@ -23,6 +23,11 @@ interface Region {
   school_count: string;
 }
 
+interface SchoolNameRow {
+  code: string;
+  name: string;
+}
+
 async function getUsers(): Promise<UserPermission[]> {
   return query<UserPermission>(
     `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name
@@ -41,6 +46,15 @@ async function getRegions(): Promise<Region[]> {
   );
 }
 
+async function getSchoolCodeToName(): Promise<Record<string, string>> {
+  const rows = await query<SchoolNameRow>(
+    `SELECT code, name FROM school WHERE af_school_category = 'JNV'`
+  );
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.code] = r.name;
+  return map;
+}
+
 export default async function UsersPage() {
   const session = await getServerSession(authOptions);
 
@@ -53,7 +67,11 @@ export default async function UsersPage() {
     redirect("/dashboard");
   }
 
-  const [users, regions] = await Promise.all([getUsers(), getRegions()]);
+  const [users, regions, schoolCodeToName] = await Promise.all([
+    getUsers(),
+    getRegions(),
+    getSchoolCodeToName(),
+  ]);
 
   return (
     <div className="min-h-screen bg-bg">
@@ -86,6 +104,7 @@ export default async function UsersPage() {
         <UserList
           initialUsers={users}
           regions={regions.map(r => r.region)}
+          schoolCodeToName={schoolCodeToName}
           currentUserEmail={session.user.email}
         />
       </main>

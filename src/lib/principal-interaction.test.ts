@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   PRINCIPAL_INTERACTION_CONFIG,
+  computeInlineStats,
+  extractRemarks,
   validatePrincipalInteractionSave,
   validatePrincipalInteractionComplete,
 } from "./principal-interaction";
@@ -222,5 +224,33 @@ describe("validatePrincipalInteractionComplete (strict)", () => {
     const result = validatePrincipalInteractionComplete(payload);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("Unknown field: extra");
+  });
+});
+
+describe("principal interaction summary extractors", () => {
+  it("extracts non-empty question remarks and computes answered stats", () => {
+    const data = {
+      questions: {
+        oh_program_feedback: { answer: true, remark: "Principal requested more updates" },
+        ip_curriculum_progress: { answer: false },
+        ip_key_events: { answer: null, remark: "   " },
+      },
+    };
+
+    expect(extractRemarks(data)).toEqual([
+      {
+        label: "Does the Principal have any feedback or concerns on the program implementation?",
+        text: "Principal requested more updates",
+      },
+    ]);
+    expect(computeInlineStats(data)).toEqual({
+      answeredCount: 2,
+      totalQuestions: 7,
+    });
+  });
+
+  it("handles null data gracefully", () => {
+    expect(extractRemarks(null)).toEqual([]);
+    expect(computeInlineStats(undefined)).toBeNull();
   });
 });
