@@ -15,7 +15,7 @@ import type {
 } from "@/types/curriculum";
 
 export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
-const CURRICULUM_PROGRAM_IDS = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
+const CURRICULUM_PROGRAM_IDS: number[] = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
 const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"];
 
 interface SchoolScopeRow {

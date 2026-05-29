@@ -9,9 +9,13 @@ import type {
   CurriculumOptionsResponse,
   ExamTrack,
   GradeNumber,
+  LmsCurriculumLog,
   SubjectName,
 } from "@/types/curriculum";
 import ChapterAccordion from "./ChapterAccordion";
+import LogSessionModal from "./LogSessionModal";
+import ProgressSummary from "./ProgressSummary";
+import SessionHistory from "./SessionHistory";
 
 interface CurriculumTabProps {
   schoolCode: string;
@@ -57,9 +61,13 @@ export default function CurriculumTab({
   const [selectedGrade, setSelectedGrade] = useState<GradeNumber | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<SubjectName | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [progress] = useState<Record<number, ChapterProgress>>({});
+  const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
+  const [logs, setLogs] = useState<LmsCurriculumLog[]>([]);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
-  const [isChaptersLoading, setIsChaptersLoading] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isLogSessionModalOpen, setIsLogSessionModalOpen] = useState(false);
+  const [isSavingLog, setIsSavingLog] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([]);
   const [activeTab, setActiveTabState] = useState<"chapters" | "logs">(
@@ -76,6 +84,8 @@ export default function CurriculumTab({
       setIsOptionsLoading(true);
       setError(null);
       setChapters([]);
+      setLogs([]);
+      setProgress({});
 
       try {
         const response = await fetch(
@@ -113,31 +123,47 @@ export default function CurriculumTab({
   useEffect(() => {
     if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
       setChapters([]);
+      setLogs([]);
+      setProgress({});
       return;
     }
 
+    const programId = selectedProgramId;
+    const examTrack = selectedExamTrack;
+    const grade = selectedGrade;
+    const subject = selectedSubject;
     let isCancelled = false;
 
-    async function fetchChapters() {
-      setIsChaptersLoading(true);
+    async function fetchCurriculumData() {
+      setIsDataLoading(true);
       setError(null);
 
       const params = new URLSearchParams({
         school_code: schoolCode,
-        program_id: String(selectedProgramId),
-        exam_track: selectedExamTrack,
-        grade: String(selectedGrade),
-        subject: selectedSubject,
+        program_id: String(programId),
+        exam_track: examTrack,
+        grade: String(grade),
+        subject,
       });
 
       try {
-        const response = await fetch(`/api/curriculum/chapters?${params.toString()}`);
-        if (!response.ok) {
+        const [chaptersResponse, logsResponse, progressResponse] = await Promise.all([
+          fetch(`/api/curriculum/chapters?${params.toString()}`),
+          fetch(`/api/curriculum/logs?${params.toString()}`),
+          fetch(`/api/curriculum/progress?${params.toString()}`),
+        ]);
+        if (!chaptersResponse.ok || !logsResponse.ok || !progressResponse.ok) {
           throw new Error("Failed to fetch chapters");
         }
-        const data = (await response.json()) as { chapters: Chapter[] };
+        const chaptersData = (await chaptersResponse.json()) as { chapters: Chapter[] };
+        const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
+        const progressData = (await progressResponse.json()) as {
+          progress: Record<number, ChapterProgress>;
+        };
         if (!isCancelled) {
-          setChapters(data.chapters);
+          setChapters(chaptersData.chapters);
+          setLogs(logsData.logs);
+          setProgress(progressData.progress);
         }
       } catch (err) {
         if (!isCancelled) {
@@ -145,15 +171,47 @@ export default function CurriculumTab({
         }
       } finally {
         if (!isCancelled) {
-          setIsChaptersLoading(false);
+          setIsDataLoading(false);
         }
       }
     }
 
-    fetchChapters();
+    fetchCurriculumData();
     return () => {
       isCancelled = true;
     };
+  }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
+
+  const refetchLogsAndProgress = useCallback(async () => {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      return;
+    }
+
+    const programId = selectedProgramId;
+    const examTrack = selectedExamTrack;
+    const grade = selectedGrade;
+    const subject = selectedSubject;
+    const params = new URLSearchParams({
+      school_code: schoolCode,
+      program_id: String(programId),
+      exam_track: examTrack,
+      grade: String(grade),
+      subject,
+    });
+
+    const [logsResponse, progressResponse] = await Promise.all([
+      fetch(`/api/curriculum/logs?${params.toString()}`),
+      fetch(`/api/curriculum/progress?${params.toString()}`),
+    ]);
+    if (!logsResponse.ok || !progressResponse.ok) {
+      throw new Error("Failed to refresh Curriculum Progress");
+    }
+    const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
+    const progressData = (await progressResponse.json()) as {
+      progress: Record<number, ChapterProgress>;
+    };
+    setLogs(logsData.logs);
+    setProgress(progressData.progress);
   }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
 
   const gradeOptions = useMemo(() => {
@@ -207,6 +265,46 @@ export default function CurriculumTab({
     );
     setSelectedGrade(grade);
     setSelectedSubject(first?.subject ?? null);
+  }
+
+  async function handleSaveLog(date: string, durationMinutes: number, topicIds: number[]) {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      return;
+    }
+
+    setIsSavingLog(true);
+    setLogError(null);
+    try {
+      const response = await fetch("/api/curriculum/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          program_id: selectedProgramId,
+          exam_track: selectedExamTrack,
+          grade: selectedGrade,
+          subject: selectedSubject,
+          log_date: date,
+          duration_minutes: durationMinutes,
+          topic_ids: topicIds,
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Your permissions changed. Reload the page before trying again.");
+        }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to save LMS Curriculum Log");
+      }
+
+      await refetchLogsAndProgress();
+      setIsLogSessionModalOpen(false);
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : "Failed to save LMS Curriculum Log");
+    } finally {
+      setIsSavingLog(false);
+    }
   }
 
   const hasEmptyConfig =
@@ -332,8 +430,12 @@ export default function CurriculumTab({
 
           {canEdit && (
             <button
-              disabled
-              className="px-4 py-2 bg-gray-200 text-gray-500 text-sm font-medium rounded-md cursor-not-allowed"
+              disabled={!selectedProgramId || chapters.length === 0}
+              onClick={() => {
+                setLogError(null);
+                setIsLogSessionModalOpen(true);
+              }}
+              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
             >
               + Add Log
             </button>
@@ -357,10 +459,6 @@ export default function CurriculumTab({
         </div>
       ) : (
         <>
-          <div className="bg-amber-50 text-amber-800 p-3 rounded-lg mb-4 text-sm">
-            Backend Progress and Logs are not available yet for this scope.
-          </div>
-
           <div className="border-b border-gray-200 mb-4">
             <nav className="flex space-x-8">
               <button
@@ -386,21 +484,33 @@ export default function CurriculumTab({
             </nav>
           </div>
 
-          {isChaptersLoading ? (
+          {isDataLoading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
             </div>
           ) : activeTab === "chapters" ? (
-            <ChapterAccordion
+            <>
+              <ProgressSummary chapters={chapters} progress={progress} />
+              <ChapterAccordion
+                chapters={chapters}
+                progress={progress}
+                expandedChapterIds={expandedChapterIds}
+                onToggleChapter={toggleChapter}
+              />
+            </>
+          ) : (
+            <SessionHistory logs={logs} />
+          )}
+
+          {isLogSessionModalOpen && (
+            <LogSessionModal
               chapters={chapters}
               progress={progress}
-              expandedChapterIds={expandedChapterIds}
-              onToggleChapter={toggleChapter}
+              onClose={() => setIsLogSessionModalOpen(false)}
+              onSave={handleSaveLog}
+              isSaving={isSavingLog}
+              error={logError}
             />
-          ) : (
-            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-              Backend Logs are not available yet.
-            </div>
           )}
         </>
       )}

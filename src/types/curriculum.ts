@@ -20,17 +20,25 @@ export interface Chapter {
   topics: Topic[];
 }
 
-export interface TeachingSession {
-  id: string;
-  date: string; // ISO date string (YYYY-MM-DD)
+export interface LmsCurriculumLogTopic {
+  topicId: number;
+  topicName: string;
+  chapterId: number;
+  chapterName: string;
+}
+
+export interface LmsCurriculumLog {
+  id: number;
+  logDate: string;
   durationMinutes: number;
-  topicIds: number[];
-  // Derived for display
-  topics: {
-    topicId: number;
-    topicName: string;
-    chapterName: string;
-  }[];
+  programId: number;
+  gradeId: number;
+  subjectId: number;
+  examTrack: ExamTrack;
+  topics: LmsCurriculumLogTopic[];
+  isEditable: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ChapterProgress {
@@ -72,26 +80,6 @@ export interface CurriculumOptionsResponse {
     subject: SubjectName | null;
     subjectId: number | null;
   };
-}
-
-export interface CurriculumTrackerState {
-  // Filters
-  selectedGrade: GradeNumber;
-  selectedSubject: SubjectName;
-
-  // Data (fetched from API)
-  chapters: Chapter[];
-  isLoading: boolean;
-  error: string | null;
-
-  // Progress (persisted to localStorage)
-  sessions: TeachingSession[];
-  progress: Record<number, ChapterProgress>; // chapterId -> progress
-
-  // UI state
-  expandedChapterIds: number[];
-  activeTab: "chapters" | "history";
-  isLogSessionModalOpen: boolean;
 }
 
 // API response types

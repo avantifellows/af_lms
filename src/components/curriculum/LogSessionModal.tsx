@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import type { Chapter, ChapterProgress } from "@/types/curriculum";
-import { getTodayDate } from "@/lib/curriculum-helpers";
+import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 interface LogSessionModalProps {
   chapters: Chapter[];
   progress: Record<number, ChapterProgress>;
   onClose: () => void;
-  onSave: (date: string, durationMinutes: number, topicIds: number[], completedChapterIds: number[]) => void;
+  onSave: (date: string, durationMinutes: number, topicIds: number[]) => void | Promise<void>;
+  isSaving?: boolean;
+  error?: string | null;
 }
 
 export default function LogSessionModal({
@@ -16,25 +18,14 @@ export default function LogSessionModal({
   progress,
   onClose,
   onSave,
+  isSaving = false,
+  error = null,
 }: LogSessionModalProps) {
-  const [date, setDate] = useState(getTodayDate());
+  const [date, setDate] = useState(getTodayIST());
   const [hours, setHours] = useState(1);
   const [minutes, setMinutes] = useState(0);
   const [selectedTopicIds, setSelectedTopicIds] = useState<Set<number>>(new Set());
   const [expandedChapterIds, setExpandedChapterIds] = useState<Set<number>>(new Set());
-  const [completedChapterIds, setCompletedChapterIds] = useState<Set<number>>(new Set());
-
-  const toggleChapterComplete = (chapterId: number) => {
-    setCompletedChapterIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(chapterId)) {
-        next.delete(chapterId);
-      } else {
-        next.add(chapterId);
-      }
-      return next;
-    });
-  };
 
   const toggleTopic = (topicId: number) => {
     setSelectedTopicIds((prev) => {
@@ -62,16 +53,15 @@ export default function LogSessionModal({
 
   const handleSave = () => {
     const durationMinutes = hours * 60 + minutes;
-    // Allow saving if either topics are selected OR chapters are marked complete
-    if (selectedTopicIds.size === 0 && completedChapterIds.size === 0) {
-      alert("Please select at least one topic or mark a chapter as complete");
+    if (selectedTopicIds.size === 0) {
+      alert("Please select at least one topic");
       return;
     }
     if (durationMinutes <= 0) {
       alert("Please enter a valid duration");
       return;
     }
-    onSave(date, durationMinutes, Array.from(selectedTopicIds), Array.from(completedChapterIds));
+    onSave(date, durationMinutes, Array.from(selectedTopicIds));
   };
 
   // Count selected topics per chapter
@@ -175,26 +165,11 @@ export default function LogSessionModal({
                   const chapterProgress = progress[chapter.id];
                   const hasTopics = chapter.topics.length > 0;
                   const isAlreadyComplete = chapterProgress?.isChapterComplete;
-                  const isMarkedComplete = completedChapterIds.has(chapter.id);
 
                   return (
                     <div key={chapter.id} className="border-b border-gray-100 last:border-b-0">
                       {/* Chapter Header */}
                       <div className="flex items-center px-3 py-2 gap-2">
-                        {/* Mark Complete Checkbox */}
-                        <label
-                          className="flex items-center"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isMarkedComplete || isAlreadyComplete}
-                            disabled={isAlreadyComplete}
-                            onChange={() => toggleChapterComplete(chapter.id)}
-                            className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 disabled:opacity-50"
-                          />
-                        </label>
-
                         {/* Expandable Chapter Name */}
                         <button
                           onClick={() => hasTopics && toggleChapterExpand(chapter.id)}
@@ -221,11 +196,6 @@ export default function LogSessionModal({
                         {isAlreadyComplete && (
                           <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">
                             ✓ Complete
-                          </span>
-                        )}
-                        {isMarkedComplete && !isAlreadyComplete && (
-                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">
-                            Will Complete
                           </span>
                         )}
                         {selectedCount > 0 && (
@@ -288,33 +258,34 @@ export default function LogSessionModal({
                   {getSelectedChapterCount() !== 1 ? "s" : ""}
                 </div>
               )}
-              {completedChapterIds.size > 0 && (
-                <div className="text-green-600">
-                  Chapters to complete: {completedChapterIds.size}
-                </div>
-              )}
-              {selectedTopicIds.size === 0 && completedChapterIds.size === 0 && (
+              {selectedTopicIds.size === 0 && (
                 <div className="text-gray-400 italic">
-                  Select topics or mark chapters as complete
+                  Select topics covered
                 </div>
               )}
             </div>
+            {error && (
+              <div className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
           </div>
 
           {/* Footer */}
           <div className="px-4 py-3 border-t border-gray-200 flex justify-end gap-3">
             <button
               onClick={onClose}
+              disabled={isSaving}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              disabled={selectedTopicIds.size === 0 && completedChapterIds.size === 0}
+              disabled={selectedTopicIds.size === 0 || isSaving}
               className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save Session
+              {isSaving ? "Saving..." : "Save Log"}
             </button>
           </div>
         </div>

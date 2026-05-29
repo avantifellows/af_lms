@@ -5,7 +5,12 @@ import { checkCurriculumSchema } from "@/lib/curriculum-schema";
 import { getCurriculumChapters } from "@/lib/curriculum-options";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 
-async function requireCurriculumViewAccess(session: Awaited<ReturnType<typeof getServerSession>>) {
+type CurriculumSession = {
+  user?: { email?: string | null } | null;
+  isPasscodeUser?: boolean;
+} | null;
+
+async function requireCurriculumViewAccess(session: CurriculumSession) {
   if (!session?.user?.email) {
     return {
       ok: false as const,
