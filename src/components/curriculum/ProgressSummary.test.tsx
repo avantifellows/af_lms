@@ -33,28 +33,28 @@ describe("ProgressSummary", () => {
   });
 
   it("renders chapters completed with total", () => {
-    render(<ProgressSummary chapters={chapters} progress={progress} />);
+    render(<ProgressSummary chapters={chapters} progress={progress} subjectTotalTimeMinutes={90} />);
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("/5")).toBeInTheDocument();
     expect(screen.getByText("chapters completed")).toBeInTheDocument();
   });
 
   it("renders topics covered with total", () => {
-    render(<ProgressSummary chapters={chapters} progress={progress} />);
+    render(<ProgressSummary chapters={chapters} progress={progress} subjectTotalTimeMinutes={90} />);
     expect(screen.getByText("8")).toBeInTheDocument();
     expect(screen.getByText("/20")).toBeInTheDocument();
     expect(screen.getByText("topics covered")).toBeInTheDocument();
   });
 
   it("renders total time from formatDuration", () => {
-    render(<ProgressSummary chapters={chapters} progress={progress} />);
+    render(<ProgressSummary chapters={chapters} progress={progress} subjectTotalTimeMinutes={75} />);
     expect(screen.getByText("1h 30m")).toBeInTheDocument();
     expect(screen.getByText("total time taught")).toBeInTheDocument();
-    expect(mockFormatDuration).toHaveBeenCalledWith(90);
+    expect(mockFormatDuration).toHaveBeenCalledWith(75);
   });
 
   it("passes chapters and progress to calculateStats", () => {
-    render(<ProgressSummary chapters={chapters} progress={progress} />);
+    render(<ProgressSummary chapters={chapters} progress={progress} subjectTotalTimeMinutes={90} />);
     expect(mockCalculateStats).toHaveBeenCalledWith(chapters, progress);
   });
 
@@ -68,7 +68,7 @@ describe("ProgressSummary", () => {
     });
     mockFormatDuration.mockReturnValue("0m");
 
-    render(<ProgressSummary chapters={[]} progress={{}} />);
+    render(<ProgressSummary chapters={[]} progress={{}} subjectTotalTimeMinutes={0} />);
     expect(screen.getByText("0m")).toBeInTheDocument();
     expect(screen.getByText("chapters completed")).toBeInTheDocument();
     expect(screen.getByText("topics covered")).toBeInTheDocument();

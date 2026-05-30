@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { checkCurriculumSchema } from "@/lib/curriculum-schema";
-import { getCurriculumChapters } from "@/lib/curriculum-options";
+import { getCurriculumOptions } from "@/lib/curriculum-options";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 
 type CurriculumSession = {
@@ -46,26 +46,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(schema, { status: schema.status });
   }
 
-  const searchParams = request.nextUrl.searchParams;
-  const schoolCode = searchParams.get("school_code")?.trim() || "";
-  const programId = Number.parseInt(searchParams.get("program_id") || "", 10);
-  const examTrack = searchParams.get("exam_track")?.trim() || "";
-  const grade = Number.parseInt(searchParams.get("grade") || "", 10);
-  const subject = searchParams.get("subject")?.trim() || "";
-
-  if (!schoolCode || !Number.isFinite(programId) || !examTrack || !Number.isFinite(grade) || !subject) {
-    return NextResponse.json(
-      { error: "school_code, program_id, exam_track, grade, and subject are required" },
-      { status: 400 }
-    );
+  const schoolCode = request.nextUrl.searchParams.get("school_code")?.trim() || "";
+  if (!schoolCode) {
+    return NextResponse.json({ error: "school_code is required" }, { status: 400 });
   }
 
-  const result = await getCurriculumChapters({
+  const rawProgramId = request.nextUrl.searchParams.get("program_id");
+  const programIdOverride = rawProgramId ? Number.parseInt(rawProgramId, 10) : null;
+
+  const result = await getCurriculumOptions({
     schoolCode,
-    programId,
-    examTrack,
-    grade,
-    subject,
+    programIdOverride: Number.isFinite(programIdOverride) ? programIdOverride : null,
     permission: access.permission,
   });
 
@@ -73,5 +64,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json({ chapters: result.chapters });
+  return NextResponse.json({
+    programs: result.programs,
+    examTracks: result.examTracks,
+    gradeSubjects: result.gradeSubjects,
+    defaults: result.defaults,
+  });
 }

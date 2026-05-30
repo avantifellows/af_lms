@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { checkCurriculumSchema } from "@/lib/curriculum-schema";
-import { getCurriculumChapters } from "@/lib/curriculum-options";
+import { getCurriculumProgress } from "@/lib/curriculum-progress";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 
 type CurriculumSession = {
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const result = await getCurriculumChapters({
+  const result = await getCurriculumProgress({
     schoolCode,
     programId,
     examTrack,
@@ -73,5 +73,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json({ chapters: result.chapters });
+  return NextResponse.json({
+    subjectTotalTimeMinutes: result.subjectTotalTimeMinutes,
+    progress: result.progress,
+  });
 }

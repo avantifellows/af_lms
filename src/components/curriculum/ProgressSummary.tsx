@@ -6,11 +6,13 @@ import { calculateStats, formatDuration } from "@/lib/curriculum-helpers";
 interface ProgressSummaryProps {
   chapters: Chapter[];
   progress: Record<number, ChapterProgress>;
+  subjectTotalTimeMinutes: number;
 }
 
 export default function ProgressSummary({
   chapters,
   progress,
+  subjectTotalTimeMinutes,
 }: ProgressSummaryProps) {
   const stats = calculateStats(chapters, progress);
 
@@ -42,7 +44,7 @@ export default function ProgressSummary({
         {/* Total Time */}
         <div className="text-center">
           <div className="text-2xl font-bold text-gray-900">
-            {formatDuration(stats.totalTimeMinutes)}
+            {formatDuration(subjectTotalTimeMinutes)}
           </div>
           <div className="text-xs text-gray-500 mt-1">total time taught</div>
         </div>

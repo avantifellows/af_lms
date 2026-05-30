@@ -1,41 +1,26 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CurriculumTab from "./CurriculumTab";
-import type { Chapter, ChapterProgress, TeachingSession } from "@/types/curriculum";
-
-// --- Mocks ---
-
-const mockLoadSessions = vi.fn<(code: string) => TeachingSession[]>();
-const mockSaveSessions = vi.fn();
-const mockLoadProgress = vi.fn<(code: string) => Record<number, ChapterProgress>>();
-const mockSaveProgress = vi.fn();
-const mockCalculateAllProgress = vi.fn<
-  (chapters: Chapter[], sessions: TeachingSession[], existing: Record<number, ChapterProgress>) => Record<number, ChapterProgress>
->();
-const mockGenerateSessionId = vi.fn();
+import type { Chapter, ChapterProgress } from "@/types/curriculum";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock("@/lib/curriculum-helpers", () => ({
-  loadSessions: (...args: unknown[]) => mockLoadSessions(...(args as [string])),
-  saveSessions: (...args: unknown[]) => mockSaveSessions(...args),
-  loadProgress: (...args: unknown[]) => mockLoadProgress(...(args as [string])),
-  saveProgress: (...args: unknown[]) => mockSaveProgress(...args),
-  calculateAllProgress: (...args: unknown[]) =>
-    mockCalculateAllProgress(
-      ...(args as [Chapter[], TeachingSession[], Record<number, ChapterProgress>])
-    ),
-  generateSessionId: () => mockGenerateSessionId(),
-}));
-
-// Mock child components as stubs
 vi.mock("./ProgressSummary", () => ({
-  default: (props: { chapters: Chapter[]; progress: Record<number, ChapterProgress> }) => (
-    <div data-testid="progress-summary" data-chapters={JSON.stringify(props.chapters)} />
+  default: (props: {
+    chapters: Chapter[];
+    progress: Record<number, ChapterProgress>;
+    subjectTotalTimeMinutes: number;
+  }) => (
+    <div
+      data-testid="progress-summary"
+      data-chapters={JSON.stringify(props.chapters)}
+      data-progress={JSON.stringify(props.progress)}
+      data-subject-total-time-minutes={props.subjectTotalTimeMinutes}
+    />
   ),
 }));
 
@@ -45,51 +30,123 @@ vi.mock("./ChapterAccordion", () => ({
     progress: Record<number, ChapterProgress>;
     expandedChapterIds: number[];
     onToggleChapter: (id: number) => void;
+    canEdit?: boolean;
+    onToggleChapterCompletion?: (id: number, completed: boolean) => void;
   }) => (
     <div data-testid="chapter-accordion" data-chapters={JSON.stringify(props.chapters)}>
       <button data-testid="toggle-chapter-1" onClick={() => props.onToggleChapter(1)}>
         Toggle
       </button>
+      {props.canEdit && (
+        <button
+          onClick={() => props.onToggleChapterCompletion?.(1, true)}
+        >
+          Mark Chapter Row
+        </button>
+      )}
     </div>
   ),
 }));
 
 vi.mock("./SessionHistory", () => ({
-  default: (props: { sessions: TeachingSession[] }) => (
-    <div data-testid="session-history" data-sessions={JSON.stringify(props.sessions)} />
+  default: (props: {
+    logs: Array<{ id: number; logDate: string; isEditable: boolean }>;
+    canEdit?: boolean;
+    onEditLog?: (log: { id: number; logDate: string; isEditable: boolean }) => void;
+    onDeleteLog?: (log: { id: number; logDate: string; isEditable: boolean }) => void;
+  }) => (
+    <div data-testid="session-history" data-logs={JSON.stringify(props.logs)}>
+      {props.logs.map((log) => (
+        <div key={log.id}>
+          <span>{log.logDate}</span>
+          {props.canEdit && (
+            <>
+              <button
+                disabled={!log.isEditable}
+                onClick={() => props.onEditLog?.(log)}
+              >
+                Edit log {log.id}
+              </button>
+              <button onClick={() => props.onDeleteLog?.(log)}>
+                Delete log {log.id}
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+    </div>
   ),
 }));
 
 vi.mock("./LogSessionModal", () => ({
   default: (props: {
-    chapters: Chapter[];
-    progress: Record<number, ChapterProgress>;
-    onClose: () => void;
-    onSave: (date: string, dur: number, topicIds: number[], chapterIds: number[]) => void;
+    onSave: (payload: {
+      date: string;
+      durationMinutes: number;
+      topicIds: number[];
+      completeChapterIds: number[];
+      uncompleteChapterIds: number[];
+    }) => void;
+    error?: string | null;
+    isSaving?: boolean;
+    editLog?: { id: number } | null;
   }) => (
     <div data-testid="log-session-modal">
-      <button data-testid="modal-close" onClick={props.onClose}>
-        Close
+      {props.editLog && <div>Editing log {props.editLog.id}</div>}
+      {props.error && <div>{props.error}</div>}
+      <button
+        onClick={() =>
+          props.onSave({
+            date: "2026-02-15",
+            durationMinutes: 90,
+            topicIds: [101],
+            completeChapterIds: [],
+            uncompleteChapterIds: [],
+          })
+        }
+        disabled={props.isSaving}
+      >
+        Save Mock Log
       </button>
       <button
-        data-testid="modal-save"
-        onClick={() => props.onSave("2026-02-15", 60, [101], [1])}
+        onClick={() =>
+          props.onSave({
+            date: "2026-02-15",
+            durationMinutes: 0,
+            topicIds: [],
+            completeChapterIds: [1],
+            uncompleteChapterIds: [],
+          })
+        }
+        disabled={props.isSaving}
       >
-        Save
-      </button>
-      <button
-        data-testid="modal-save-no-chapter"
-        onClick={() => props.onSave("2026-02-15", 45, [101, 102], [])}
-      >
-        Save No Chapter
+        Save Completion Only
       </button>
     </div>
   ),
 }));
 
-// --- Test data ---
+const optionsResponse = {
+  programs: [
+    { id: 1, name: "JNV CoE" },
+    { id: 2, name: "JNV Nodal" },
+  ],
+  examTracks: ["jee_main", "neet"],
+  gradeSubjects: [
+    { examTrack: "jee_main", grade: 11, gradeId: 3, subject: "Physics", subjectId: 4 },
+    { examTrack: "neet", grade: 12, gradeId: 4, subject: "Biology", subjectId: 3 },
+  ],
+  defaults: {
+    programId: 1,
+    examTrack: "jee_main",
+    grade: 11,
+    gradeId: 3,
+    subject: "Physics",
+    subjectId: 4,
+  },
+};
 
-const sampleChapters: Chapter[] = [
+const physicsChapters: Chapter[] = [
   {
     id: 1,
     code: "PH01",
@@ -97,591 +154,610 @@ const sampleChapters: Chapter[] = [
     grade: 11,
     subjectId: 4,
     subjectName: "Physics",
-    topics: [
-      { id: 101, code: "PH01.01", name: "Motion in a Straight Line", chapterId: 1 },
-      { id: 102, code: "PH01.02", name: "Projectile Motion", chapterId: 1 },
-    ],
+    examTrack: "jee_main",
+    prescribedMinutes: 90,
+    coverageSequence: 1,
+    topics: [{ id: 101, code: "PH01.01", name: "Motion", chapterId: 1 }],
   },
+];
+
+const biologyChapters: Chapter[] = [
   {
     id: 2,
-    code: "PH02",
-    name: "Laws of Motion",
-    grade: 11,
-    subjectId: 4,
-    subjectName: "Physics",
-    topics: [
-      { id: 201, code: "PH02.01", name: "Newton's Laws", chapterId: 2 },
-    ],
+    code: "BIO01",
+    name: "Plant Kingdom",
+    grade: 12,
+    subjectId: 3,
+    subjectName: "Biology",
+    examTrack: "neet",
+    prescribedMinutes: 120,
+    coverageSequence: 1,
+    topics: [{ id: 201, code: "BIO01.01", name: "Algae", chapterId: 2 }],
   },
 ];
-
-const sampleProgress: Record<number, ChapterProgress> = {
-  1: {
-    chapterId: 1,
-    completedTopicIds: [101],
-    totalTimeMinutes: 60,
-    lastTaughtDate: "2026-02-10",
-    allTopicsCovered: false,
-    isChapterComplete: false,
-    chapterCompletedDate: null,
-  },
-};
-
-const sampleSessions: TeachingSession[] = [
-  {
-    id: "session_1",
-    date: "2026-02-10",
-    durationMinutes: 60,
-    topicIds: [101],
-    topics: [{ topicId: 101, topicName: "Motion in a Straight Line", chapterName: "Kinematics" }],
-  },
-];
-
-// --- Helpers ---
 
 let mockFetch: ReturnType<typeof vi.fn>;
+const progressResponse = {
+  subjectTotalTimeMinutes: 90,
+  progress: {
+    1: {
+      chapterId: 1,
+      completedTopicIds: [101],
+      totalTimeMinutes: 90,
+      lastTaughtDate: "2026-02-15",
+      allTopicsCovered: true,
+      isChapterComplete: false,
+      chapterCompletedDate: null,
+    },
+  },
+};
+const logsResponse = {
+  logs: [
+    {
+      id: 10,
+      logDate: "2026-02-15",
+      durationMinutes: 90,
+      programId: 1,
+      gradeId: 3,
+      subjectId: 4,
+      examTrack: "jee_main",
+      topics: [{ topicId: 101, topicName: "Motion", chapterId: 1, chapterName: "Kinematics" }],
+      isEditable: true,
+      createdAt: "2026-02-15T10:00:00.000Z",
+      updatedAt: "2026-02-15T10:00:00.000Z",
+    },
+  ],
+};
 
-function setupFetch(chapters: Chapter[] = sampleChapters, ok = true) {
-  mockFetch.mockResolvedValue({
-    ok,
-    json: async () => ({ chapters }),
+function mockOkJson(body: unknown) {
+  return Promise.resolve({ ok: true, json: async () => body });
+}
+
+function setupFetch() {
+  mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+  if (url === "/api/curriculum/logs" && init?.method === "POST") {
+      return mockOkJson({ log: logsResponse.logs[0] });
+    }
+    if (url === "/api/curriculum/logs/10" && init?.method === "PATCH") {
+      return mockOkJson({ log: logsResponse.logs[0] });
+    }
+    if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+      return mockOkJson({ deleted: true });
+    }
+    if (url === "/api/curriculum/options?school_code=70705") {
+      return mockOkJson(optionsResponse);
+    }
+    if (url.includes("/api/curriculum/logs?")) {
+      return mockOkJson(logsResponse);
+    }
+    if (url.includes("/api/curriculum/progress?")) {
+      return mockOkJson(progressResponse);
+    }
+    if (url.includes("exam_track=neet")) {
+      return mockOkJson({ chapters: biologyChapters });
+    }
+    return mockOkJson({ chapters: physicsChapters });
   });
 }
 
 function renderTab(props: Partial<{ schoolCode: string; schoolName: string; canEdit: boolean }> = {}) {
   return render(
     <CurriculumTab
-      schoolCode={props.schoolCode ?? "SCH001"}
+      schoolCode={props.schoolCode ?? "70705"}
       schoolName={props.schoolName ?? "Test School"}
       canEdit={props.canEdit ?? true}
     />
   );
 }
 
-// --- Tests ---
-
 describe("CurriculumTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch = vi.fn();
     vi.stubGlobal("fetch", mockFetch);
-
-    // Default mock returns
-    mockLoadSessions.mockReturnValue([]);
-    mockLoadProgress.mockReturnValue({});
-    mockCalculateAllProgress.mockReturnValue({});
-    mockGenerateSessionId.mockReturnValue("session_new");
+    setupFetch();
   });
 
-  describe("initial rendering", () => {
-    it("renders heading, school name, and filter controls", async () => {
-      setupFetch();
-      renderTab({ schoolName: "Avanti School" });
-
-      expect(screen.getByText("JEE Curriculum Progress")).toBeInTheDocument();
-      expect(screen.getByText("Avanti School")).toBeInTheDocument();
-      expect(screen.getByLabelText("Grade")).toBeInTheDocument();
-      expect(screen.getByLabelText("Subject")).toBeInTheDocument();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-    });
-
-    it("shows loading spinner initially", () => {
-      // Never resolve fetch to keep loading
-      mockFetch.mockReturnValue(new Promise(() => {}));
-      renderTab();
-
-      // Loading spinner is a div with animate-spin class
-      const spinner = document.querySelector(".animate-spin");
-      expect(spinner).toBeInTheDocument();
-    });
-
-    it("shows '+ Log Session' button when canEdit is true", async () => {
-      setupFetch();
-      renderTab({ canEdit: true });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      expect(screen.getByText("+ Log Session")).toBeInTheDocument();
-    });
-
-    it("hides '+ Log Session' button and shows 'View Only' when canEdit is false", async () => {
-      setupFetch();
-      renderTab({ canEdit: false });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      expect(screen.queryByText("+ Log Session")).not.toBeInTheDocument();
-      expect(screen.getByText("View Only")).toBeInTheDocument();
-    });
-  });
-
-  describe("localStorage loading", () => {
-    it("loads sessions and progress from localStorage on mount", async () => {
-      mockLoadSessions.mockReturnValue(sampleSessions);
-      mockLoadProgress.mockReturnValue(sampleProgress);
-      setupFetch();
-
-      renderTab({ schoolCode: "SCH001" });
-
-      expect(mockLoadSessions).toHaveBeenCalledWith("SCH001");
-      expect(mockLoadProgress).toHaveBeenCalledWith("SCH001");
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("fetching chapters", () => {
-    it("fetches chapters for default grade=11 and subject=Physics on mount", async () => {
-      setupFetch();
-      renderTab();
-
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          "/api/curriculum/chapters?grade=11&subject=Physics"
-        );
-      });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-    });
-
-    it("recalculates progress after fetching chapters", async () => {
-      mockLoadProgress.mockReturnValue(sampleProgress);
-      mockCalculateAllProgress.mockReturnValue(sampleProgress);
-      setupFetch();
-      renderTab();
-
-      await waitFor(() => {
-        expect(mockCalculateAllProgress).toHaveBeenCalled();
-      });
-    });
-
-    it("shows error message when fetch fails (non-ok response)", async () => {
-      mockFetch.mockResolvedValue({ ok: false });
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByText("Failed to fetch chapters")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error message when fetch throws a network error", async () => {
-      mockFetch.mockRejectedValue(new Error("Network error"));
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByText("Network error")).toBeInTheDocument();
-      });
-    });
-
-    it("shows generic error for non-Error thrown objects", async () => {
-      mockFetch.mockRejectedValue("something wrong");
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByText("An error occurred")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("grade/subject selectors", () => {
-    it("fetches new chapters when grade changes to 12", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      mockFetch.mockClear();
-      setupFetch([]);
-
-      await user.selectOptions(screen.getByLabelText("Grade"), "12");
-
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          "/api/curriculum/chapters?grade=12&subject=Physics"
-        );
-      });
-    });
-
-    it("fetches new chapters when subject changes to Chemistry", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      mockFetch.mockClear();
-      setupFetch([]);
-
-      await user.selectOptions(screen.getByLabelText("Subject"), "Chemistry");
-
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          "/api/curriculum/chapters?grade=11&subject=Chemistry"
-        );
-      });
-    });
-  });
-
-  describe("tab switching", () => {
-    it("shows ChapterAccordion by default (Chapters tab active)", async () => {
-      setupFetch();
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      expect(screen.queryByTestId("session-history")).not.toBeInTheDocument();
-    });
-
-    it("switches to History tab and shows SessionHistory", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText("History"));
-
-      expect(screen.getByTestId("session-history")).toBeInTheDocument();
-      expect(screen.queryByTestId("chapter-accordion")).not.toBeInTheDocument();
-    });
-
-    it("switches back to Chapters tab", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab();
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText("History"));
-      expect(screen.getByTestId("session-history")).toBeInTheDocument();
-
-      await user.click(screen.getByText("Chapters"));
-      expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      expect(screen.queryByTestId("session-history")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("modal lifecycle", () => {
-    it("opens LogSessionModal when '+ Log Session' is clicked", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab({ canEdit: true });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
-
-      await user.click(screen.getByText("+ Log Session"));
-
-      expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
-    });
-
-    it("closes modal when onClose is called", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab({ canEdit: true });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText("+ Log Session"));
-      expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
-
-      await user.click(screen.getByTestId("modal-close"));
-      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
-    });
-
-    it("does not render modal when canEdit is false even if isModalOpen were true", async () => {
-      setupFetch();
-      renderTab({ canEdit: false });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      // No button to open modal, and modal is not rendered
-      expect(screen.queryByText("+ Log Session")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("saving sessions", () => {
-    it("saves a session with topics and chapter completion, then closes modal", async () => {
-      mockLoadSessions.mockReturnValue([]);
-      mockLoadProgress.mockReturnValue({});
-      mockCalculateAllProgress.mockReturnValue({});
-      mockGenerateSessionId.mockReturnValue("session_abc");
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab({ schoolCode: "SCH001", canEdit: true });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText("+ Log Session"));
-      expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
-
-      // Click save on the mock modal (calls onSave with date, 60, [101], [1])
-      await user.click(screen.getByTestId("modal-save"));
-
-      // Modal should close after save
-      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
-
-      // saveSessions should have been called with updated sessions
-      expect(mockSaveSessions).toHaveBeenCalledWith(
-        "SCH001",
-        expect.arrayContaining([
-          expect.objectContaining({
-            id: "session_abc",
-            date: "2026-02-15",
-            durationMinutes: 60,
-            topicIds: [101],
-          }),
-        ])
+  it("discovers backend options then fetches chapters for the default scope", async () => {
+    renderTab({ schoolName: "Avanti School" });
+
+    expect(await screen.findByText("JEE Main Curriculum Progress")).toBeInTheDocument();
+    expect(screen.getByText("Avanti School")).toBeInTheDocument();
+    expect(screen.getByLabelText("Program")).toBeInTheDocument();
+    expect(screen.getByLabelText("Exam Track")).toBeInTheDocument();
+    expect(screen.getByLabelText("Grade")).toBeInTheDocument();
+    expect(screen.getByLabelText("Subject")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("/api/curriculum/options?school_code=70705");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/chapters?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
       );
-
-      // saveProgress should have been called
-      expect(mockSaveProgress).toHaveBeenCalledWith("SCH001", expect.any(Object));
-    });
-
-    it("saves a session with topics only (no chapter completion)", async () => {
-      mockLoadSessions.mockReturnValue([]);
-      mockLoadProgress.mockReturnValue({});
-      mockCalculateAllProgress.mockReturnValue({});
-      mockGenerateSessionId.mockReturnValue("session_xyz");
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab({ schoolCode: "SCH002", canEdit: true });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText("+ Log Session"));
-      await user.click(screen.getByTestId("modal-save-no-chapter"));
-
-      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
-      expect(mockSaveSessions).toHaveBeenCalledWith(
-        "SCH002",
-        expect.arrayContaining([
-          expect.objectContaining({
-            id: "session_xyz",
-            durationMinutes: 45,
-            topicIds: [101, 102],
-          }),
-        ])
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
       );
     });
 
-    it("does not save when canEdit is false (guard in handleSaveSession)", async () => {
-      // canEdit=false prevents opening the modal entirely, but the guard also
-      // exists in handleSaveSession. We test it indirectly — no saveSessions calls.
-      setupFetch();
-      renderTab({ canEdit: false });
+    const accordion = await screen.findByTestId("chapter-accordion");
+    expect(JSON.parse(accordion.getAttribute("data-chapters") || "[]")).toEqual(physicsChapters);
+    expect(screen.getByTestId("progress-summary")).toHaveAttribute(
+      "data-subject-total-time-minutes",
+      "90"
+    );
+  });
 
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
+  it("loads backend logs after reload even when browser localStorage is unavailable", async () => {
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("localStorage unavailable");
       });
 
-      expect(mockSaveSessions).not.toHaveBeenCalled();
-      expect(mockSaveProgress).not.toHaveBeenCalled();
+    renderTab({ schoolName: "Avanti School" });
+
+    await screen.findByTestId("chapter-accordion");
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      );
     });
+    expect(getItemSpy).not.toHaveBeenCalled();
+  });
 
-    it("builds topic details with 'Unknown' fallback for missing topics", async () => {
-      // Set up chapters so topic 999 is not found in any chapter
-      const chaptersWithMissing: Chapter[] = [
-        {
-          id: 1,
-          code: "PH01",
-          name: "Kinematics",
-          grade: 11,
-          subjectId: 4,
-          subjectName: "Physics",
-          topics: [],
-        },
-      ];
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ chapters: chaptersWithMissing }),
-      });
-      mockCalculateAllProgress.mockReturnValue({});
-      mockGenerateSessionId.mockReturnValue("session_missing");
+  it("filters grade and subject by selected Exam Track, including NEET Biology", async () => {
+    const user = userEvent.setup();
+    renderTab();
 
-      // Override LogSessionModal mock to call onSave with topic 999 (not in chapters)
-      // We can't override the mock per-test easily, but our default mock sends topicId=101
-      // which is also not in chaptersWithMissing (empty topics). So the fallback will trigger.
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Exam Track"), "neet");
 
-      const user = userEvent.setup();
-      renderTab({ schoolCode: "SCH001", canEdit: true });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText("+ Log Session"));
-      await user.click(screen.getByTestId("modal-save"));
-
-      // The saved session should have topic details with "Unknown" for topic 101
-      // since chaptersWithMissing has no topics
-      expect(mockSaveSessions).toHaveBeenCalledWith(
-        "SCH001",
-        expect.arrayContaining([
-          expect.objectContaining({
-            topics: [
-              { topicId: 101, topicName: "Unknown", chapterName: "Unknown" },
-            ],
-          }),
-        ])
+    await waitFor(() => {
+      expect(screen.getByLabelText("Grade")).toHaveValue("12");
+      expect(screen.getByLabelText("Subject")).toHaveValue("Biology");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/chapters?school_code=70705&program_id=1&exam_track=neet&grade=12&subject=Biology"
       );
     });
   });
 
-  describe("chapter completion in progress", () => {
-    it("marks chapter as complete in progress when completedChapterIds includes it", async () => {
-      // Set up calculateAllProgress to return a progress with chapter 1
-      const progressWithChapter: Record<number, ChapterProgress> = {
-        1: {
-          chapterId: 1,
-          completedTopicIds: [101],
-          totalTimeMinutes: 60,
-          lastTaughtDate: "2026-02-15",
-          allTopicsCovered: false,
-          isChapterComplete: false,
-          chapterCompletedDate: null,
-        },
-      };
-      mockCalculateAllProgress.mockReturnValue(progressWithChapter);
-      mockGenerateSessionId.mockReturnValue("session_complete");
-      setupFetch();
+  it("shows backend Logs and opens the Add Log modal", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
 
-      const user = userEvent.setup();
-      renderTab({ schoolCode: "SCH001", canEdit: true });
+    await screen.findByTestId("chapter-accordion");
 
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
+    const addButton = screen.getByRole("button", { name: "+ Add Log" });
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    expect(screen.queryByText("History")).not.toBeInTheDocument();
 
-      await user.click(screen.getByText("+ Log Session"));
-      // modal-save calls onSave with completedChapterIds=[1]
-      await user.click(screen.getByTestId("modal-save"));
+    await user.click(screen.getByText("Logs"));
 
-      // saveProgress should be called, and chapter 1 should have isChapterComplete=true
-      expect(mockSaveProgress).toHaveBeenCalledWith(
-        "SCH001",
+    expect(screen.getByTestId("session-history")).toBeInTheDocument();
+    expect(screen.getByText("2026-02-15")).toBeInTheDocument();
+
+    await user.click(addButton);
+    expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
+  });
+
+  it("saves a topic-backed log through the backend and refreshes Logs and Progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Mock Log"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs",
         expect.objectContaining({
-          1: expect.objectContaining({
-            isChapterComplete: true,
-            chapterCompletedDate: "2026-02-15",
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            log_date: "2026-02-15",
+            duration_minutes: 90,
+            topic_ids: [101],
+            complete_chapter_ids: [],
+            uncomplete_chapter_ids: [],
           }),
         })
       );
     });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+  });
 
-    it("creates new progress entry for chapter not yet in progress map", async () => {
-      // calculateAllProgress returns empty — chapter 1 not present
-      mockCalculateAllProgress.mockReturnValue({});
-      mockGenerateSessionId.mockReturnValue("session_new_chapter");
-      setupFetch();
+  it("closes the Add Log modal and reports reload guidance when refresh fails after save", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs" && init?.method === "POST") {
+        return mockOkJson({ log: logsResponse.logs[0] });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?") && mockFetch.mock.calls.length > 4) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
 
-      const user = userEvent.setup();
-      renderTab({ schoolCode: "SCH001", canEdit: true });
+    renderTab({ canEdit: true });
 
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Mock Log"));
 
-      await user.click(screen.getByText("+ Log Session"));
-      // modal-save calls onSave with completedChapterIds=[1]
-      await user.click(screen.getByTestId("modal-save"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "Saved, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+      )
+    ).toBeInTheDocument();
+  });
 
-      // saveProgress should create a new entry for chapter 1
-      expect(mockSaveProgress).toHaveBeenCalledWith(
-        "SCH001",
+  it("saves completion-only changes without log date or duration and refreshes progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Completion Only"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs",
         expect.objectContaining({
-          1: expect.objectContaining({
-            chapterId: 1,
-            completedTopicIds: [],
-            totalTimeMinutes: 0,
-            lastTaughtDate: null,
-            allTopicsCovered: false,
-            isChapterComplete: true,
-            chapterCompletedDate: "2026-02-15",
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            topic_ids: [],
+            complete_chapter_ids: [1],
+            uncomplete_chapter_ids: [],
           }),
         })
       );
     });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
   });
 
-  describe("ProgressSummary integration", () => {
-    it("passes chapters and progress to ProgressSummary", async () => {
-      mockCalculateAllProgress.mockReturnValue(sampleProgress);
-      setupFetch();
-      renderTab();
+  it("saves edits through PATCH with no Chapter Completion fields and refreshes Logs and Progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
 
-      await waitFor(() => {
-        const summary = screen.getByTestId("progress-summary");
-        expect(summary).toBeInTheDocument();
-      });
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Edit log 10" }));
+
+    expect(screen.getByText("Editing log 10")).toBeInTheDocument();
+    await user.click(screen.getByText("Save Mock Log"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs/10",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            log_date: "2026-02-15",
+            duration_minutes: 90,
+            topic_ids: [101],
+          }),
+        })
+      );
     });
+    const patchCall = mockFetch.mock.calls.find(
+      ([url, init]) => url === "/api/curriculum/logs/10" && init?.method === "PATCH"
+    );
+    expect(patchCall?.[1]?.body).not.toContain("complete_chapter_ids");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
   });
 
-  describe("chapter toggle", () => {
-    it("passes onToggleChapter to ChapterAccordion", async () => {
-      setupFetch();
-      const user = userEvent.setup();
-      renderTab();
+  it("deletes a log through the backend and refreshes Logs and Progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
 
-      await waitFor(() => {
-        expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
-      });
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
 
-      // Click the toggle button exposed by our mock
-      await user.click(screen.getByTestId("toggle-chapter-1"));
-
-      // No crash — the toggle callback was invoked successfully
-      expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs/10",
+        expect.objectContaining({ method: "DELETE" })
+      );
     });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
   });
 
-  describe("empty chapters", () => {
-    it("renders ChapterAccordion with empty chapters array", async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ chapters: [] }),
-      });
-      renderTab();
-
-      await waitFor(() => {
-        const accordion = screen.getByTestId("chapter-accordion");
-        expect(accordion).toBeInTheDocument();
-        expect(accordion.getAttribute("data-chapters")).toBe("[]");
-      });
+  it("does not report delete as failed when refresh fails after a successful delete", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+        return mockOkJson({ deleted: true });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?") && mockFetch.mock.calls.length > 4) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
     });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    expect(
+      await screen.findByText(
+        "Deleted LMS Curriculum Log, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Failed to delete LMS Curriculum Log")).not.toBeInTheDocument();
+  });
+
+  it("keeps the log row visible and shows an API error when delete fails", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: "Delete failed" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    expect(await screen.findByText("Delete failed")).toBeInTheDocument();
+    expect(screen.getByTestId("session-history")).toHaveAttribute(
+      "data-logs",
+      JSON.stringify(logsResponse.logs)
+    );
+  });
+
+  it("shows reload guidance when DELETE is rejected after permissions change", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+  });
+
+  it("hides log delete controls for read-only users", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: false });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+
+    expect(screen.queryByRole("button", { name: "Delete log 10" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the edit modal open with reload guidance when PATCH permission changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "PATCH") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Edit log 10" }));
+    await user.click(screen.getByText("Save Mock Log"));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Editing log 10")).toBeInTheDocument();
+  });
+
+  it("marks completion from the chapter row through the dedicated endpoint and refreshes without creating a log", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Mark Chapter Row"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/chapters/1/completion",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            completed: true,
+          }),
+        })
+      );
+    });
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      "/api/curriculum/logs",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+  });
+
+  it("shows reload guidance when chapter-row completion is rejected after permissions change", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/chapters/1/completion" && init?.method === "PUT") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Mark Chapter Row"));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
+  });
+
+  it("keeps the Add Log modal open with reload guidance when mutation permission changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs" && init?.method === "POST") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Completion Only"));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when backend config is empty", async () => {
+    mockFetch.mockResolvedValueOnce(
+      await mockOkJson({
+        ...optionsResponse,
+        examTracks: [],
+        gradeSubjects: [],
+        defaults: {
+          programId: 1,
+          examTrack: null,
+          grade: null,
+          gradeId: null,
+          subject: null,
+          subjectId: null,
+        },
+      })
+    );
+
+    renderTab();
+
+    expect(await screen.findByText("No Curriculum configuration is available for this school.")).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/curriculum/chapters"));
   });
 });

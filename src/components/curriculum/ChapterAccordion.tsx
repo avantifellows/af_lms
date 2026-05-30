@@ -14,6 +14,9 @@ interface ChapterAccordionProps {
   progress: Record<number, ChapterProgress>;
   expandedChapterIds: number[];
   onToggleChapter: (chapterId: number) => void;
+  canEdit?: boolean;
+  onToggleChapterCompletion?: (chapterId: number, completed: boolean) => void;
+  updatingChapterId?: number | null;
 }
 
 export default function ChapterAccordion({
@@ -21,6 +24,9 @@ export default function ChapterAccordion({
   progress,
   expandedChapterIds,
   onToggleChapter,
+  canEdit = false,
+  onToggleChapterCompletion,
+  updatingChapterId = null,
 }: ChapterAccordionProps) {
   if (chapters.length === 0) {
     return (
@@ -39,38 +45,52 @@ export default function ChapterAccordion({
         const totalCount = chapter.topics.length;
         const indicator = getProgressIndicator(chapterProgress);
         const colorClass = getProgressColorClass(chapterProgress);
+        const isChapterComplete = chapterProgress?.isChapterComplete || false;
+        const isUpdatingCompletion = updatingChapterId === chapter.id;
 
         return (
           <div
             key={chapter.id}
-            className="bg-white rounded-lg shadow overflow-hidden"
+            data-chapter-row
+            className={`bg-white rounded-lg shadow overflow-hidden ${
+              isChapterComplete ? "bg-gray-50" : ""
+            }`}
           >
             {/* Chapter Header */}
-            <button
-              onClick={() => onToggleChapter(chapter.id)}
-              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
-            >
-              {/* Expand/Collapse Arrow */}
-              <span
-                className={`text-gray-400 transition-transform ${
-                  isExpanded ? "rotate-90" : ""
-                }`}
+            <div className="w-full px-4 py-3 flex items-center gap-3">
+              <button
+                onClick={() => onToggleChapter(chapter.id)}
+                className="flex-1 min-w-0 flex items-center gap-3 hover:text-gray-700 transition-colors text-left"
               >
-                ▶
-              </span>
+                {/* Expand/Collapse Arrow */}
+                <span
+                  className={`text-gray-400 transition-transform ${
+                    isExpanded ? "rotate-90" : ""
+                  }`}
+                >
+                  ▶
+                </span>
 
-              {/* Chapter Number and Name */}
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-900 truncate">
-                  {index + 1}. {chapter.name}
+                {/* Chapter Number and Name */}
+                <div className="flex-1 min-w-0">
+                  <div
+                    className={`font-medium truncate ${
+                      isChapterComplete ? "text-gray-500 line-through" : "text-gray-900"
+                    }`}
+                  >
+                    {index + 1}. {chapter.name}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    Last taught: {formatDate(chapterProgress?.lastTaughtDate || null)}
+                    {chapter.prescribedMinutes != null
+                      ? ` • Prescribed: ${formatDuration(chapter.prescribedMinutes)}`
+                      : ""}
+                    {chapterProgress?.totalTimeMinutes
+                      ? ` • Time: ${formatDuration(chapterProgress.totalTimeMinutes)}`
+                      : ""}
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
-                  Last taught: {formatDate(chapterProgress?.lastTaughtDate || null)}
-                  {chapterProgress?.totalTimeMinutes
-                    ? ` • Time: ${formatDuration(chapterProgress.totalTimeMinutes)}`
-                    : ""}
-                </div>
-              </div>
+              </button>
 
               {/* Progress Indicator */}
               <div className="flex items-center gap-2">
@@ -79,7 +99,20 @@ export default function ChapterAccordion({
                   {completedCount}/{totalCount}
                 </span>
               </div>
-            </button>
+
+              {canEdit && onToggleChapterCompletion && (
+                <button
+                  type="button"
+                  disabled={isUpdatingCompletion}
+                  onClick={() =>
+                    onToggleChapterCompletion(chapter.id, !isChapterComplete)
+                  }
+                  className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                >
+                  {isChapterComplete ? "Unmark complete" : "Mark complete"}
+                </button>
+              )}
+            </div>
 
             {/* Expanded Topics */}
             {isExpanded && (
