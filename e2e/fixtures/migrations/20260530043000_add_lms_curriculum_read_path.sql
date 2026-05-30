@@ -112,8 +112,8 @@ ON CONFLICT (id) DO UPDATE SET
 INSERT INTO public.school
   (id, code, name, inserted_at, updated_at, udise_code, af_school_category, region, state, district, program_ids)
 VALUES
-  (900075, 'LMS75', 'LMS Fixture School', NOW(), NOW(), '75000000075', 'JNV', 'AHMEDABAD', 'Gujarat', 'Ahmedabad', ARRAY[1, 2, 64]::integer[]),
-  (900076, 'LMS75EMPTY', 'LMS Empty Program Fixture School', NOW(), NOW(), '75000000076', 'JNV', 'AHMEDABAD', 'Gujarat', 'Ahmedabad', ARRAY[64]::integer[])
+  (900075, 'LMS75', 'LMS Fixture School', NOW(), NOW(), '75000000075', 'JNV', 'LMS_FIXTURE', 'Gujarat', 'Ahmedabad', ARRAY[1, 2, 64]::integer[]),
+  (900076, 'LMS75EMPTY', 'LMS Empty Program Fixture School', NOW(), NOW(), '75000000076', 'JNV', 'LMS_FIXTURE', 'Gujarat', 'Ahmedabad', ARRAY[64]::integer[])
 ON CONFLICT (id) DO UPDATE SET
   code = EXCLUDED.code,
   name = EXCLUDED.name,
