@@ -149,24 +149,16 @@ export async function validateChapterCompletionDeltas(params: {
     return {
       ok: false,
       status: 422,
-      error: "Chapters do not belong to the selected Grade, Subject, and Exam Track",
+      error:
+        chapterIds.length === 1
+          ? "Chapter does not belong to the selected Grade and Subject"
+          : "Chapters do not belong to the selected Grade, Subject, and Exam Track",
     };
   }
 
   const rowsByChapterId = new Map(rows.map((row) => [Number(row.chapter_id), row]));
   for (const chapterId of completeChapterIds) {
     if (!rowsByChapterId.get(chapterId)?.is_in_syllabus) {
-      return {
-        ok: false,
-        status: 422,
-        error: "Chapter is not in syllabus for the selected Exam Track",
-      };
-    }
-  }
-
-  for (const chapterId of uncompleteChapterIds) {
-    const row = rowsByChapterId.get(chapterId);
-    if (row && !row.is_in_syllabus && row.active_completed_at == null) {
       return {
         ok: false,
         status: 422,

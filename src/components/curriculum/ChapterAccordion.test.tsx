@@ -104,6 +104,65 @@ describe("ChapterAccordion", () => {
     expect(screen.getByText("2. Dynamics")).toBeInTheDocument();
   });
 
+  it("shows completion controls only when editing is allowed", () => {
+    const chapters = [makeChapter({ id: 1, name: "Kinematics" })];
+    const progress = {
+      1: makeProgress(1, { isChapterComplete: false }),
+    };
+
+    const { rerender } = render(
+      <ChapterAccordion
+        chapters={chapters}
+        progress={progress}
+        expandedChapterIds={[]}
+        onToggleChapter={vi.fn()}
+        canEdit={false}
+        onToggleChapterCompletion={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Mark complete" })).not.toBeInTheDocument();
+
+    rerender(
+      <ChapterAccordion
+        chapters={chapters}
+        progress={progress}
+        expandedChapterIds={[]}
+        onToggleChapter={vi.fn()}
+        canEdit
+        onToggleChapterCompletion={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Mark complete" })).toBeInTheDocument();
+  });
+
+  it("shows completed chapters as struck through and calls unmark from the row control", async () => {
+    const onToggleChapterCompletion = vi.fn();
+    const chapters = [makeChapter({ id: 1, name: "Kinematics" })];
+    const progress = {
+      1: makeProgress(1, {
+        isChapterComplete: true,
+        chapterCompletedDate: "2026-02-15T10:00:00.000Z",
+      }),
+    };
+
+    render(
+      <ChapterAccordion
+        chapters={chapters}
+        progress={progress}
+        expandedChapterIds={[]}
+        onToggleChapter={vi.fn()}
+        canEdit
+        onToggleChapterCompletion={onToggleChapterCompletion}
+      />
+    );
+
+    expect(screen.getByText("1. Kinematics")).toHaveClass("line-through");
+    await user.click(screen.getByRole("button", { name: "Unmark complete" }));
+    expect(onToggleChapterCompletion).toHaveBeenCalledWith(1, false);
+  });
+
   it("shows progress indicator and color class from helpers", () => {
     const chapters = [makeChapter({ id: 1, name: "Kinematics" })];
     const progress = {

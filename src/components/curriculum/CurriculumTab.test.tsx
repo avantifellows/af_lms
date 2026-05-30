@@ -25,11 +25,20 @@ vi.mock("./ChapterAccordion", () => ({
     progress: Record<number, ChapterProgress>;
     expandedChapterIds: number[];
     onToggleChapter: (id: number) => void;
+    canEdit?: boolean;
+    onToggleChapterCompletion?: (id: number, completed: boolean) => void;
   }) => (
     <div data-testid="chapter-accordion" data-chapters={JSON.stringify(props.chapters)}>
       <button data-testid="toggle-chapter-1" onClick={() => props.onToggleChapter(1)}>
         Toggle
       </button>
+      {props.canEdit && (
+        <button
+          onClick={() => props.onToggleChapterCompletion?.(1, true)}
+        >
+          Mark Chapter Row
+        </button>
+      )}
     </div>
   ),
 }));
@@ -346,6 +355,70 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("marks completion from the chapter row through the dedicated endpoint and refreshes without creating a log", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Mark Chapter Row"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/chapters/1/completion",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            completed: true,
+          }),
+        })
+      );
+    });
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      "/api/curriculum/logs",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+  });
+
+  it("shows reload guidance when chapter-row completion is rejected after permissions change", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/chapters/1/completion" && init?.method === "PUT") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Mark Chapter Row"));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("chapter-accordion")).toBeInTheDocument();
   });
 
   it("keeps the Add Log modal open with reload guidance when mutation permission changes", async () => {

@@ -67,7 +67,9 @@ export default function CurriculumTab({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isLogSessionModalOpen, setIsLogSessionModalOpen] = useState(false);
   const [isSavingLog, setIsSavingLog] = useState(false);
+  const [updatingCompletionChapterId, setUpdatingCompletionChapterId] = useState<number | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([]);
   const [activeTab, setActiveTabState] = useState<"chapters" | "logs">(
@@ -319,6 +321,45 @@ export default function CurriculumTab({
     }
   }
 
+  async function handleToggleChapterCompletion(chapterId: number, completed: boolean) {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      return;
+    }
+
+    setUpdatingCompletionChapterId(chapterId);
+    setCompletionError(null);
+    try {
+      const response = await fetch(`/api/curriculum/chapters/${chapterId}/completion`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          program_id: selectedProgramId,
+          exam_track: selectedExamTrack,
+          grade: selectedGrade,
+          subject: selectedSubject,
+          completed,
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Your permissions changed. Reload the page before trying again.");
+        }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to update Chapter Completion");
+      }
+
+      await refetchLogsAndProgress();
+    } catch (err) {
+      setCompletionError(
+        err instanceof Error ? err.message : "Failed to update Chapter Completion"
+      );
+    } finally {
+      setUpdatingCompletionChapterId(null);
+    }
+  }
+
   const hasEmptyConfig =
     !isOptionsLoading &&
     options != null &&
@@ -502,12 +543,20 @@ export default function CurriculumTab({
             </div>
           ) : activeTab === "chapters" ? (
             <>
+              {completionError && (
+                <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+                  {completionError}
+                </div>
+              )}
               <ProgressSummary chapters={chapters} progress={progress} />
               <ChapterAccordion
                 chapters={chapters}
                 progress={progress}
                 expandedChapterIds={expandedChapterIds}
                 onToggleChapter={toggleChapter}
+                canEdit={canEdit}
+                onToggleChapterCompletion={handleToggleChapterCompletion}
+                updatingChapterId={updatingCompletionChapterId}
               />
             </>
           ) : (

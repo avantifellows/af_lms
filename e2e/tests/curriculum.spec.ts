@@ -40,6 +40,45 @@ test.describe("Curriculum read path", () => {
     ).toBeVisible();
   });
 
+  test("admin can mark and unmark Chapter Completion from a chapter row across reloads", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+
+    const alphaRow = adminPage
+      .locator("[data-chapter-row]")
+      .filter({ hasText: "Fixture Alpha Physics" });
+
+    await alphaRow.getByRole("button", { name: "Mark complete" }).click();
+    await expect(
+      alphaRow.getByRole("button", { name: "Unmark complete" })
+    ).toBeVisible();
+
+    await adminPage.reload();
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await expect(
+      alphaRow.getByRole("button", { name: "Unmark complete" })
+    ).toBeVisible();
+
+    await alphaRow.getByRole("button", { name: "Unmark complete" }).click();
+    await expect(
+      alphaRow.getByRole("button", { name: "Mark complete" })
+    ).toBeVisible();
+
+    await adminPage.reload();
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await expect(
+      alphaRow.getByRole("button", { name: "Mark complete" })
+    ).toBeVisible();
+  });
+
   test("admin can save completion-only and mixed Add Log changes", async ({
     adminPage,
   }) => {
