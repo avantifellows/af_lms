@@ -74,6 +74,15 @@ export interface CurriculumSummaryFilterOptions {
   districts: string[];
 }
 
+export interface CurriculumSummaryStats {
+  totalRows: number;
+  flaggedRows: number;
+  avgCompletionPercent: number | null;
+  avgPrescribedPercent: number | null;
+  actualMinutes: number;
+  prescribedMinutes: number;
+}
+
 export interface CurriculumSummaryRow {
   rowKey: string;
   schoolCode: string;
@@ -102,6 +111,7 @@ export type CurriculumSummaryResult =
       ok: true;
       activeFilters: CurriculumSummaryFilters;
       filterOptions: CurriculumSummaryFilterOptions;
+      stats: CurriculumSummaryStats;
       rows: CurriculumSummaryRow[];
       totalRowCount: number;
       currentPage: number;
@@ -135,6 +145,24 @@ interface SummaryQueryRow {
   subject_id: string | number;
   subject_name: unknown;
   exam_track: ExamTrack;
+  completed_chapters: string | number | null;
+  total_configured_chapters: string | number | null;
+  prescribed_chapters: string | number | null;
+  actual_minutes: string | number | null;
+  prescribed_minutes: string | number | null;
+  delta_percent: string | number | null;
+  flagged: boolean | string | null;
+  flag_reasons: unknown;
+}
+
+interface StatsQueryRow {
+  total_rows: string | number | null;
+  flagged_rows: string | number | null;
+  completed_chapters: string | number | null;
+  total_configured_chapters: string | number | null;
+  prescribed_chapters: string | number | null;
+  actual_minutes: string | number | null;
+  prescribed_minutes: string | number | null;
 }
 
 const CURRICULUM_PROGRAM_IDS = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
@@ -215,6 +243,7 @@ export async function getCurriculumSummary(
       ok: true,
       activeFilters: params.filters,
       filterOptions,
+      stats: emptyStats(),
       rows: [],
       totalRowCount: 0,
       currentPage: page,
@@ -225,17 +254,21 @@ export async function getCurriculumSummary(
   }
 
   const offset = (page - 1) * pageSize;
+  const metricParams = buildMetricQueryParams(commonParams, params.filters);
+  const statsRows = await query<StatsQueryRow>(buildStatsSql(), metricParams);
+  const stats = mapStats(statsRows[0]);
   const rowRows = await query<SummaryQueryRow>(
     buildRowsSql(params.sort, params.dir),
-    [...commonParams, pageSize, offset]
+    [...metricParams, pageSize, offset]
   );
-  const totalRowCount = Number(rowRows[0]?.total_count ?? 0);
+  const totalRowCount = stats.totalRows;
   const totalPages = totalRowCount === 0 ? 0 : Math.ceil(totalRowCount / pageSize);
 
   return {
     ok: true,
     activeFilters: params.filters,
     filterOptions,
+    stats,
     rows: rowRows.map(mapSummaryRow),
     totalRowCount,
     currentPage: page,
@@ -264,6 +297,18 @@ function buildCommonQueryParams(
     filters.regions.length ? filters.regions : null,
     filters.states.length ? filters.states : null,
     filters.districts.length ? filters.districts : null,
+  ];
+}
+
+function buildMetricQueryParams(
+  commonParams: unknown[],
+  filters: CurriculumSummaryFilters
+): unknown[] {
+  return [
+    ...commonParams,
+    filters.from ?? null,
+    filters.to ?? null,
+    filters.flagged,
   ];
 }
 
@@ -297,6 +342,7 @@ function buildScopedUniverseSql(): string {
     ),
     configured_rows AS (
       SELECT DISTINCT
+        g.id AS grade_id,
         g.number AS grade,
         s.id AS subject_id,
         COALESCE(
@@ -325,6 +371,7 @@ function buildScopedUniverseSql(): string {
         ssp.program_id,
         ssp.program_name,
         ssp.program_order,
+        cr.grade_id,
         cr.grade,
         cr.subject_id,
         cr.subject_name,
@@ -344,6 +391,149 @@ function buildScopedUniverseSql(): string {
         AND ($13::text[] IS NULL OR state = ANY($13::text[]))
         AND ($14::text[] IS NULL OR district = ANY($14::text[]))
     )`;
+}
+
+function buildComputedRowsSql(): string {
+  return `${buildScopedUniverseSql()},
+    configured_metrics AS (
+      SELECT
+        g.id AS grade_id,
+        g.number AS grade,
+        ch.subject_id,
+        cfg.exam_track,
+        COUNT(*)::int AS total_configured_chapters,
+        COUNT(*) FILTER (WHERE cfg.prescribed_minutes > 0)::int AS prescribed_chapters,
+        COALESCE(SUM(cfg.prescribed_minutes), 0)::int AS prescribed_minutes
+      FROM lms_chapter_exam_configs cfg
+      JOIN chapter ch ON ch.id = cfg.chapter_id
+      JOIN grade g ON g.id = ch.grade_id
+      WHERE cfg.is_in_syllabus = true
+      GROUP BY g.id, g.number, ch.subject_id, cfg.exam_track
+    ),
+    actual_minutes AS (
+      SELECT
+        fr.school_code,
+        fr.program_id,
+        fr.grade_id,
+        fr.subject_id,
+        fr.exam_track,
+        COALESCE(SUM(l.duration_minutes), 0)::int AS actual_minutes
+      FROM filtered_rows fr
+      LEFT JOIN lms_curriculum_logs l
+        ON l.school_code = fr.school_code
+       AND l.program_id = fr.program_id
+       AND l.grade_id = fr.grade_id
+       AND l.subject_id = fr.subject_id
+       AND l.exam_track = fr.exam_track
+       AND l.deleted_at IS NULL
+       AND ($15::date IS NULL OR l.log_date >= $15::date)
+       AND ($16::date IS NULL OR l.log_date <= $16::date)
+      GROUP BY fr.school_code, fr.program_id, fr.grade_id, fr.subject_id, fr.exam_track
+    ),
+    completion_counts AS (
+      SELECT
+        fr.school_code,
+        fr.program_id,
+        fr.grade_id,
+        fr.subject_id,
+        fr.exam_track,
+        COUNT(DISTINCT cc.chapter_id)::int AS completed_chapters
+      FROM filtered_rows fr
+      JOIN lms_curriculum_chapter_completions cc
+        ON cc.school_code = fr.school_code
+       AND cc.program_id = fr.program_id
+       AND cc.exam_track = fr.exam_track
+       AND cc.deleted_at IS NULL
+      JOIN chapter ch
+        ON ch.id = cc.chapter_id
+       AND ch.grade_id = fr.grade_id
+       AND ch.subject_id = fr.subject_id
+      JOIN lms_chapter_exam_configs cfg
+        ON cfg.chapter_id = cc.chapter_id
+       AND cfg.exam_track = fr.exam_track
+       AND cfg.is_in_syllabus = true
+      GROUP BY fr.school_code, fr.program_id, fr.grade_id, fr.subject_id, fr.exam_track
+    ),
+    metric_rows AS (
+      SELECT
+        fr.*,
+        COALESCE(cc.completed_chapters, 0)::int AS completed_chapters,
+        COALESCE(cm.total_configured_chapters, 0)::int AS total_configured_chapters,
+        COALESCE(cm.prescribed_chapters, 0)::int AS prescribed_chapters,
+        COALESCE(am.actual_minutes, 0)::int AS actual_minutes,
+        COALESCE(cm.prescribed_minutes, 0)::int AS prescribed_minutes,
+        CASE
+          WHEN COALESCE(cm.prescribed_minutes, 0) > 0
+            THEN ((COALESCE(am.actual_minutes, 0) - cm.prescribed_minutes)::numeric / cm.prescribed_minutes::numeric) * 100
+          ELSE NULL
+        END AS delta_percent
+      FROM filtered_rows fr
+      LEFT JOIN configured_metrics cm
+        ON cm.grade_id = fr.grade_id
+       AND cm.subject_id = fr.subject_id
+       AND cm.exam_track = fr.exam_track
+      LEFT JOIN actual_minutes am
+        ON am.school_code = fr.school_code
+       AND am.program_id = fr.program_id
+       AND am.grade_id = fr.grade_id
+       AND am.subject_id = fr.subject_id
+       AND am.exam_track = fr.exam_track
+      LEFT JOIN completion_counts cc
+        ON cc.school_code = fr.school_code
+       AND cc.program_id = fr.program_id
+       AND cc.grade_id = fr.grade_id
+       AND cc.subject_id = fr.subject_id
+       AND cc.exam_track = fr.exam_track
+    ),
+    computed_rows AS (
+      SELECT
+        mr.*,
+        ARRAY_REMOVE(ARRAY[
+          CASE
+            WHEN mr.prescribed_minutes = 0 AND mr.actual_minutes > 0
+              THEN 'actual_time_on_zero_prescribed_minutes'
+            ELSE NULL
+          END,
+          CASE
+            WHEN mr.prescribed_minutes > 0 AND mr.delta_percent < -10
+              THEN 'under_prescribed_hours'
+            ELSE NULL
+          END,
+          CASE
+            WHEN mr.prescribed_minutes > 0 AND mr.delta_percent > 10
+              THEN 'over_prescribed_hours'
+            ELSE NULL
+          END,
+          CASE
+            WHEN mr.total_configured_chapters > 0
+             AND (mr.completed_chapters::numeric / mr.total_configured_chapters::numeric)
+               < (mr.prescribed_chapters::numeric / mr.total_configured_chapters::numeric)
+              THEN 'completion_below_prescribed_coverage'
+            ELSE NULL
+          END
+        ], NULL) AS flag_reasons
+      FROM metric_rows mr
+    ),
+    computed_filtered_rows AS (
+      SELECT
+        cr.*,
+        CARDINALITY(cr.flag_reasons) > 0 AS flagged
+      FROM computed_rows cr
+      WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
+    )`;
+}
+
+function buildStatsSql(): string {
+  return `${buildComputedRowsSql()}
+    SELECT
+      COUNT(*)::int AS total_rows,
+      COUNT(*) FILTER (WHERE flagged)::int AS flagged_rows,
+      COALESCE(SUM(completed_chapters), 0)::int AS completed_chapters,
+      COALESCE(SUM(total_configured_chapters), 0)::int AS total_configured_chapters,
+      COALESCE(SUM(prescribed_chapters), 0)::int AS prescribed_chapters,
+      COALESCE(SUM(actual_minutes), 0)::int AS actual_minutes,
+      COALESCE(SUM(prescribed_minutes), 0)::int AS prescribed_minutes
+    FROM computed_filtered_rows`;
 }
 
 function buildOptionsSql(): string {
@@ -388,7 +578,7 @@ function buildRowsSql(
   const sortColumn = SORT_SQL[sort];
   const direction = dir === "desc" ? "DESC" : "ASC";
 
-  return `${buildScopedUniverseSql()}
+  return `${buildComputedRowsSql()}
     SELECT
       COUNT(*) OVER() AS total_count,
       school_code,
@@ -401,10 +591,18 @@ function buildRowsSql(
       grade,
       subject_id,
       subject_name,
-      exam_track
-    FROM filtered_rows
+      exam_track,
+      completed_chapters,
+      total_configured_chapters,
+      prescribed_chapters,
+      actual_minutes,
+      prescribed_minutes,
+      delta_percent,
+      flagged,
+      flag_reasons
+    FROM computed_filtered_rows
     ORDER BY ${sortColumn} ${direction}, school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC
-    LIMIT $15 OFFSET $16`;
+    LIMIT $18 OFFSET $19`;
 }
 
 function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFilterOptions {
@@ -461,15 +659,59 @@ function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
     subjectId,
     subjectName: normalizeSubjectName(row.subject_name),
     examTrack,
-    completedChapters: 0,
-    totalConfiguredChapters: 0,
-    prescribedChapters: 0,
+    completedChapters: numberFromDb(row.completed_chapters),
+    totalConfiguredChapters: numberFromDb(row.total_configured_chapters),
+    prescribedChapters: numberFromDb(row.prescribed_chapters),
+    actualMinutes: numberFromDb(row.actual_minutes),
+    prescribedMinutes: numberFromDb(row.prescribed_minutes),
+    deltaPercent:
+      row.delta_percent === null || row.delta_percent === undefined
+        ? null
+        : Number(row.delta_percent),
+    flagged: row.flagged === true || row.flagged === "true",
+    flagReasons: parseJsonArray<string>(row.flag_reasons).map(String),
+  };
+}
+
+function mapStats(row: StatsQueryRow | undefined): CurriculumSummaryStats {
+  if (!row) {
+    return emptyStats();
+  }
+
+  const totalConfiguredChapters = numberFromDb(row.total_configured_chapters);
+  const completedChapters = numberFromDb(row.completed_chapters);
+  const prescribedChapters = numberFromDb(row.prescribed_chapters);
+
+  return {
+    totalRows: numberFromDb(row.total_rows),
+    flaggedRows: numberFromDb(row.flagged_rows),
+    avgCompletionPercent:
+      totalConfiguredChapters > 0
+        ? (completedChapters / totalConfiguredChapters) * 100
+        : null,
+    avgPrescribedPercent:
+      totalConfiguredChapters > 0
+        ? (prescribedChapters / totalConfiguredChapters) * 100
+        : null,
+    actualMinutes: numberFromDb(row.actual_minutes),
+    prescribedMinutes: numberFromDb(row.prescribed_minutes),
+  };
+}
+
+function emptyStats(): CurriculumSummaryStats {
+  return {
+    totalRows: 0,
+    flaggedRows: 0,
+    avgCompletionPercent: null,
+    avgPrescribedPercent: null,
     actualMinutes: 0,
     prescribedMinutes: 0,
-    deltaPercent: null,
-    flagged: false,
-    flagReasons: [],
   };
+}
+
+function numberFromDb(value: string | number | null | undefined): number {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function parseJsonArray<T>(value: unknown): T[] {

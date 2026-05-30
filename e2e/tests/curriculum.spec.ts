@@ -1,6 +1,37 @@
 import { test, expect } from "../fixtures/auth";
 
 test.describe("Curriculum read path", () => {
+  test("admin sees Curriculum Summary metrics for logged and zero-progress expected rows", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main,jee_advanced"
+    );
+
+    await expect(
+      adminPage.getByRole("heading", { name: "Curriculum Summary", exact: true })
+    ).toBeVisible();
+    await expect(adminPage.getByText("Top-level Actual Hours use raw LMS Curriculum Log duration")).toBeVisible();
+
+    const loggedRow = adminPage
+      .getByRole("row")
+      .filter({ hasText: "JNV Nodal" })
+      .filter({ hasText: "JEE Main" });
+    await expect(loggedRow).toContainText("1/2 (50%)");
+    await expect(loggedRow).toContainText("2/2 (100%)");
+    await expect(loggedRow).toContainText("-57.1%");
+    await expect(loggedRow).toContainText("1h 30m / 3h 30m");
+    await expect(loggedRow).toContainText("Under prescribed hours");
+
+    const zeroProgressRow = adminPage
+      .getByRole("row")
+      .filter({ hasText: "JNV Nodal" })
+      .filter({ hasText: "JEE Advanced" });
+    await expect(zeroProgressRow).toContainText("0/1 (0%)");
+    await expect(zeroProgressRow).toContainText("1/1 (100%)");
+    await expect(zeroProgressRow).toContainText("0h / 2h 30m");
+  });
+
   test("admin can select Program, Exam Track, Biology, and sees configured chapter ordering", async ({
     adminPage,
   }) => {

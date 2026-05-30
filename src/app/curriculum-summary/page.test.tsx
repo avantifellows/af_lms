@@ -102,6 +102,14 @@ const emptySummaryResult = {
     districts: [],
   },
   rows: [],
+  stats: {
+    totalRows: 0,
+    flaggedRows: 0,
+    avgCompletionPercent: null,
+    avgPrescribedPercent: null,
+    actualMinutes: 0,
+    prescribedMinutes: 0,
+  },
   totalRowCount: 0,
   currentPage: 1,
   totalPages: 0,
@@ -311,16 +319,24 @@ describe("CurriculumSummaryPage", () => {
           subjectId: 4,
           subjectName: "Physics",
           examTrack: "jee_main",
-          completedChapters: 0,
-          totalConfiguredChapters: 0,
-          prescribedChapters: 0,
-          actualMinutes: 0,
-          prescribedMinutes: 0,
-          deltaPercent: null,
-          flagged: false,
-          flagReasons: [],
+          completedChapters: 1,
+          totalConfiguredChapters: 2,
+          prescribedChapters: 2,
+          actualMinutes: 90,
+          prescribedMinutes: 210,
+          deltaPercent: -57.14285714285714,
+          flagged: true,
+          flagReasons: ["under_prescribed_hours", "completion_below_prescribed_coverage"],
         },
       ],
+      stats: {
+        totalRows: 2,
+        flaggedRows: 1,
+        avgCompletionPercent: 33.33333333333333,
+        avgPrescribedPercent: 83.33333333333334,
+        actualMinutes: 90,
+        prescribedMinutes: 360,
+      },
       totalRowCount: 1,
       totalPages: 1,
     });
@@ -337,7 +353,19 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByRole("cell", { name: "11" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Physics" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "JEE Main" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "1/2 (50%)" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "2/2 (100%)" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "-57.1%" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "1h 30m / 3h 30m" })).toBeInTheDocument();
+    expect(screen.getByText("Under prescribed hours")).toBeInTheDocument();
+    expect(screen.getByText("Completion below prescribed coverage")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Top-level Actual Hours use raw LMS Curriculum Log duration/)
+    ).toBeInTheDocument();
     expect(screen.getByText("Total Rows")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("Flagged Rows")).toBeInTheDocument();
+    expect(screen.getByText("33.3%")).toBeInTheDocument();
+    expect(screen.getByText("83.3%")).toBeInTheDocument();
   });
 });

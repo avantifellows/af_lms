@@ -166,3 +166,15 @@ ON CONFLICT (chapter_id, exam_track) DO UPDATE SET
   coverage_sequence = EXCLUDED.coverage_sequence,
   updated_by_email = EXCLUDED.updated_by_email,
   updated_at = NOW();
+
+INSERT INTO public.lms_curriculum_logs
+  (school_code, program_id, grade_id, subject_id, exam_track, log_date, duration_minutes, created_by_email, inserted_by_email, updated_by_email, deleted_at)
+VALUES
+  ('LMS75', 2, 3, 4, 'jee_main', DATE '2026-05-15', 90, 'e2e@avantifellows.org', 'e2e@avantifellows.org', 'e2e@avantifellows.org', NULL),
+  ('LMS75', 2, 3, 4, 'jee_main', DATE '2026-05-16', 120, 'e2e@avantifellows.org', 'e2e@avantifellows.org', 'e2e@avantifellows.org', NOW());
+
+INSERT INTO public.lms_curriculum_chapter_completions
+  (school_code, program_id, chapter_id, exam_track, completed_at, completed_by_email, inserted_by_email, updated_by_email, deleted_at)
+VALUES
+  ('LMS75', 2, 90007501, 'jee_main', TIMESTAMP '2026-05-15 08:00:00', 'e2e@avantifellows.org', 'e2e@avantifellows.org', 'e2e@avantifellows.org', NULL),
+  ('LMS75', 2, 90007502, 'jee_main', TIMESTAMP '2026-05-16 08:00:00', 'e2e@avantifellows.org', 'e2e@avantifellows.org', 'e2e@avantifellows.org', NOW());

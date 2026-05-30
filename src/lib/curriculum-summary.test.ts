@@ -56,6 +56,17 @@ describe("curriculum summary", () => {
       ])
       .mockResolvedValueOnce([
         {
+          total_rows: 1,
+          flagged_rows: 0,
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
           total_count: 1,
           school_code: "70705",
           school_name: "JNV Bhavnagar",
@@ -68,6 +79,14 @@ describe("curriculum summary", () => {
           subject_id: 4,
           subject_name: "Physics",
           exam_track: "jee_main",
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
+          delta_percent: null,
+          flagged: false,
+          flag_reasons: [],
         },
       ]);
 
@@ -87,6 +106,14 @@ describe("curriculum summary", () => {
       totalRowCount: 1,
       currentPage: 1,
       totalPages: 1,
+      stats: {
+        totalRows: 1,
+        flaggedRows: 0,
+        avgCompletionPercent: null,
+        avgPrescribedPercent: null,
+        actualMinutes: 0,
+        prescribedMinutes: 0,
+      },
       filterOptions: {
         schools: [{ code: "70705", name: "JNV Bhavnagar" }],
         programs: [{ id: 1, name: "JNV CoE" }],
@@ -119,7 +146,170 @@ describe("curriculum summary", () => {
         },
       ],
     });
-    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns computed metrics and weighted stats for the full filtered set before pagination", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+          states: [],
+          districts: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          total_rows: 2,
+          flagged_rows: 1,
+          completed_chapters: 2,
+          total_configured_chapters: 6,
+          prescribed_chapters: 5,
+          actual_minutes: 90,
+          prescribed_minutes: 360,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          total_count: 2,
+          school_code: "70705",
+          school_name: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          program_id: 1,
+          program_name: "JNV CoE",
+          grade: 11,
+          subject_id: 4,
+          subject_name: "Physics",
+          exam_track: "jee_main",
+          completed_chapters: 2,
+          total_configured_chapters: 2,
+          prescribed_chapters: 2,
+          actual_minutes: 90,
+          prescribed_minutes: 180,
+          delta_percent: -50,
+          flagged: true,
+          flag_reasons: ["under_prescribed_hours"],
+        },
+      ]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 1,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      totalRowCount: 2,
+      totalPages: 2,
+      stats: {
+        totalRows: 2,
+        flaggedRows: 1,
+        avgCompletionPercent: 33.33333333333333,
+        avgPrescribedPercent: 83.33333333333334,
+        actualMinutes: 90,
+        prescribedMinutes: 360,
+      },
+      rows: [
+        {
+          completedChapters: 2,
+          totalConfiguredChapters: 2,
+          prescribedChapters: 2,
+          actualMinutes: 90,
+          prescribedMinutes: 180,
+          deltaPercent: -50,
+          flagged: true,
+          flagReasons: ["under_prescribed_hours"],
+        },
+      ],
+    });
+  });
+
+  it("keeps zero-prescribed delta blank while surfacing actual-time flag reasons", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+          states: [],
+          districts: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          total_rows: 1,
+          flagged_rows: 1,
+          completed_chapters: 0,
+          total_configured_chapters: 1,
+          prescribed_chapters: 0,
+          actual_minutes: 45,
+          prescribed_minutes: 0,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          total_count: 1,
+          school_code: "70705",
+          school_name: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          program_id: 1,
+          program_name: "JNV CoE",
+          grade: 11,
+          subject_id: 4,
+          subject_name: "Physics",
+          exam_track: "jee_main",
+          completed_chapters: 0,
+          total_configured_chapters: 1,
+          prescribed_chapters: 0,
+          actual_minutes: 45,
+          prescribed_minutes: 0,
+          delta_percent: null,
+          flagged: true,
+          flag_reasons: ["actual_time_on_zero_prescribed_minutes"],
+        },
+      ]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      rows: [
+        {
+          actualMinutes: 45,
+          prescribedMinutes: 0,
+          deltaPercent: null,
+          flagged: true,
+          flagReasons: ["actual_time_on_zero_prescribed_minutes"],
+        },
+      ],
+    });
   });
 
   it("ignores malformed list and date filters while preserving well-formed values", () => {
@@ -163,6 +353,17 @@ describe("curriculum summary", () => {
           regions: ["West"],
           states: ["Gujarat"],
           districts: ["Bhavnagar"],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          total_rows: 0,
+          flagged_rows: 0,
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
         },
       ])
       .mockResolvedValueOnce([]);
@@ -245,10 +446,21 @@ describe("curriculum summary", () => {
       rows: [],
       totalRowCount: 0,
     });
+    expect(result).toMatchObject({
+      ok: true,
+      stats: {
+        totalRows: 0,
+        flaggedRows: 0,
+        avgCompletionPercent: null,
+        avgPrescribedPercent: null,
+        actualMinutes: 0,
+        prescribedMinutes: 0,
+      },
+    });
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("uses bulk expected-row SQL without active-student or activity-log dependencies", async () => {
+  it("uses bulk summary SQL without active-student dependencies", async () => {
     mockQuery.mockResolvedValueOnce([
       {
         schools: [],
@@ -259,6 +471,16 @@ describe("curriculum summary", () => {
         regions: [],
         states: [],
         districts: [],
+      },
+    ]).mockResolvedValueOnce([
+      {
+        total_rows: 0,
+        flagged_rows: 0,
+        completed_chapters: 0,
+        total_configured_chapters: 0,
+        prescribed_chapters: 0,
+        actual_minutes: 0,
+        prescribed_minutes: 0,
       },
     ]).mockResolvedValueOnce([]);
 
@@ -281,9 +503,65 @@ describe("curriculum summary", () => {
       .join("\n");
     expect(combinedSql).toContain("cross join configured_rows");
     expect(combinedSql).toContain("coalesce(ss.program_ids, array[]::int[])");
+    expect(combinedSql).toContain("lms_curriculum_logs");
+    expect(combinedSql).toContain("l.log_date");
+    expect(combinedSql).toContain("l.deleted_at is null");
+    expect(combinedSql).toContain("lms_curriculum_chapter_completions");
+    expect(combinedSql).toContain("cc.deleted_at is null");
+    expect(combinedSql).toContain("mr.delta_percent < -10");
+    expect(combinedSql).toContain("mr.delta_percent > 10");
     expect(combinedSql).not.toContain("group_user");
     expect(combinedSql).not.toContain("student");
-    expect(combinedSql).not.toContain("lms_curriculum_logs");
-    expect(combinedSql).not.toContain("log_date");
+  });
+
+  it("passes date filters and Only flagged into the computed summary queries", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        schools: [],
+        programs: [],
+        grades: [],
+        subjects: [],
+        exam_tracks: [],
+        regions: [],
+        states: [],
+        districts: [],
+      },
+    ]).mockResolvedValueOnce([
+      {
+        total_rows: 0,
+        flagged_rows: 0,
+        completed_chapters: 0,
+        total_configured_chapters: 0,
+        prescribed_chapters: 0,
+        actual_minutes: 0,
+        prescribed_minutes: 0,
+      },
+    ]).mockResolvedValueOnce([]);
+
+    await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams(
+        { from: "2026-05-01", to: "2026-05-30", flagged: "true" },
+        "2026-05-30"
+      ),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    const statsCall = mockQuery.mock.calls[1];
+    const rowsCall = mockQuery.mock.calls[2];
+    expect(statsCall[1].slice(14)).toEqual(["2026-05-01", "2026-05-30", true]);
+    expect(rowsCall[1].slice(14, 17)).toEqual([
+      "2026-05-01",
+      "2026-05-30",
+      true,
+    ]);
+    expect(String(rowsCall[0])).toContain(
+      "WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)"
+    );
   });
 });

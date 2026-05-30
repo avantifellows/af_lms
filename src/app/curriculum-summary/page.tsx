@@ -116,12 +116,28 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
         ) : (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-              <StatCard label="Total Rows" value={summary.totalRowCount} size="sm" />
-              <StatCard label="Flagged Rows" value="0" size="sm" />
-              <StatCard label="Avg Completion" value="—" size="sm" />
-              <StatCard label="Avg Prescribed" value="—" size="sm" />
-              <StatCard label="Actual Hours" value="0h" size="sm" />
-              <StatCard label="Prescribed Hours" value="0h" size="sm" />
+              <StatCard label="Total Rows" value={summary.stats.totalRows} size="sm" />
+              <StatCard label="Flagged Rows" value={summary.stats.flaggedRows} size="sm" />
+              <StatCard
+                label="Avg Completion"
+                value={formatPercent(summary.stats.avgCompletionPercent)}
+                size="sm"
+              />
+              <StatCard
+                label="Avg Prescribed"
+                value={formatPercent(summary.stats.avgPrescribedPercent)}
+                size="sm"
+              />
+              <StatCard
+                label="Actual Hours"
+                value={formatHours(summary.stats.actualMinutes)}
+                size="sm"
+              />
+              <StatCard
+                label="Prescribed Hours"
+                value={formatHours(summary.stats.prescribedMinutes)}
+                size="sm"
+              />
             </div>
 
             <CurriculumSummaryFiltersCard
@@ -140,6 +156,11 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
                   </h2>
                   <p className="text-sm text-text-secondary">
                     {formatDateRange(summary.activeFilters)}
+                  </p>
+                  <p className="mt-1 max-w-3xl text-xs text-text-muted">
+                    Top-level Actual Hours use raw LMS Curriculum Log duration
+                    for the selected date range and may include time that is
+                    not visible in current in-syllabus chapter expansion.
                   </p>
                 </div>
                 <Link
@@ -347,17 +368,35 @@ function CurriculumSummaryTable({ rows }: { rows: CurriculumSummaryRow[] }) {
                 {formatExamTrack(row.examTrack)}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {row.completedChapters}/{row.totalConfiguredChapters}
+                {formatCoverage(row.completedChapters, row.totalConfiguredChapters)}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {row.prescribedChapters}/{row.totalConfiguredChapters}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">—</td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                0h / 0h
+                {formatCoverage(row.prescribedChapters, row.totalConfiguredChapters)}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {row.flagged ? "Yes" : "No"}
+                {formatDelta(row.deltaPercent)}
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                {formatHours(row.actualMinutes)} / {formatHours(row.prescribedMinutes)}
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                <div className="flex max-w-xs flex-col gap-1">
+                  <span className={row.flagged ? "font-bold text-danger" : ""}>
+                    {row.flagged ? "Yes" : "No"}
+                  </span>
+                  {row.flagReasons.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {row.flagReasons.map((reason) => (
+                        <span
+                          key={reason}
+                          className="rounded border border-warning-border bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text"
+                        >
+                          {formatFlagReason(reason)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </td>
             </tr>
           ))}
@@ -397,4 +436,54 @@ function formatExamTrack(track: string): string {
   if (track === "jee_advanced") return "JEE Advanced";
   if (track === "neet") return "NEET";
   return track;
+}
+
+function formatCoverage(count: number, total: number): string {
+  const pct = total > 0 ? ` (${formatPercent((count / total) * 100)})` : "";
+  return `${count}/${total}${pct}`;
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  const rounded = Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+}
+
+function formatDelta(value: number | null): string {
+  return formatPercent(value);
+}
+
+function formatHours(minutes: number): string {
+  if (minutes <= 0) {
+    return "0h";
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (hours === 0) {
+    return `${remainingMinutes}m`;
+  }
+  if (remainingMinutes === 0) {
+    return `${hours}h`;
+  }
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function formatFlagReason(reason: string): string {
+  switch (reason) {
+    case "under_prescribed_hours":
+      return "Under prescribed hours";
+    case "over_prescribed_hours":
+      return "Over prescribed hours";
+    case "completion_below_prescribed_coverage":
+      return "Completion below prescribed coverage";
+    case "actual_time_on_zero_prescribed_minutes":
+      return "Actual time on zero prescribed minutes";
+    default:
+      return reason;
+  }
 }
