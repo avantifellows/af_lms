@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { Chapter, ChapterProgress } from "@/types/curriculum";
+import { useMemo, useState } from "react";
+import type { Chapter, ChapterProgress, LmsCurriculumLog } from "@/types/curriculum";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 interface LogSessionModalProps {
@@ -17,6 +17,7 @@ interface LogSessionModalProps {
   }) => void | Promise<void>;
   isSaving?: boolean;
   error?: string | null;
+  editLog?: LmsCurriculumLog | null;
 }
 
 function formatDuration(minutes: number | undefined): string {
@@ -35,14 +36,29 @@ export default function LogSessionModal({
   onSave,
   isSaving = false,
   error = null,
+  editLog = null,
 }: LogSessionModalProps) {
-  const [date, setDate] = useState(getTodayIST());
-  const [hours, setHours] = useState(1);
-  const [minutes, setMinutes] = useState(0);
-  const [selectedTopicIds, setSelectedTopicIds] = useState<Set<number>>(new Set());
+  const isEditMode = editLog != null;
+  const initialTopicIds = useMemo(
+    () => editLog?.topics.map((topic) => Number(topic.topicId)) ?? [],
+    [editLog]
+  );
+  const initialExpandedChapterIds = useMemo(
+    () => editLog?.topics.map((topic) => Number(topic.chapterId)) ?? [],
+    [editLog]
+  );
+  const initialDurationMinutes = editLog?.durationMinutes ?? 60;
+  const [date, setDate] = useState(editLog?.logDate ?? getTodayIST());
+  const [hours, setHours] = useState(Math.floor(initialDurationMinutes / 60));
+  const [minutes, setMinutes] = useState(initialDurationMinutes % 60);
+  const [selectedTopicIds, setSelectedTopicIds] = useState<Set<number>>(
+    new Set(initialTopicIds)
+  );
   const [completeChapterIds, setCompleteChapterIds] = useState<Set<number>>(new Set());
   const [uncompleteChapterIds, setUncompleteChapterIds] = useState<Set<number>>(new Set());
-  const [expandedChapterIds, setExpandedChapterIds] = useState<Set<number>>(new Set());
+  const [expandedChapterIds, setExpandedChapterIds] = useState<Set<number>>(
+    new Set(initialExpandedChapterIds)
+  );
 
   const toggleTopic = (topicId: number) => {
     setSelectedTopicIds((prev) => {
@@ -57,25 +73,27 @@ export default function LogSessionModal({
   };
 
   const toggleChapterExpand = (chapterId: number) => {
+    const normalizedChapterId = Number(chapterId);
     setExpandedChapterIds((prev) => {
       const next = new Set(prev);
-      if (next.has(chapterId)) {
-        next.delete(chapterId);
+      if (next.has(normalizedChapterId)) {
+        next.delete(normalizedChapterId);
       } else {
-        next.add(chapterId);
+        next.add(normalizedChapterId);
       }
       return next;
     });
   };
 
   const toggleChapterCompletion = (chapterId: number, isAlreadyComplete: boolean) => {
+    const normalizedChapterId = Number(chapterId);
     if (isAlreadyComplete) {
       setUncompleteChapterIds((prev) => {
         const next = new Set(prev);
-        if (next.has(chapterId)) {
-          next.delete(chapterId);
+        if (next.has(normalizedChapterId)) {
+          next.delete(normalizedChapterId);
         } else {
-          next.add(chapterId);
+          next.add(normalizedChapterId);
         }
         return next;
       });
@@ -84,10 +102,10 @@ export default function LogSessionModal({
 
     setCompleteChapterIds((prev) => {
       const next = new Set(prev);
-      if (next.has(chapterId)) {
-        next.delete(chapterId);
+      if (next.has(normalizedChapterId)) {
+        next.delete(normalizedChapterId);
       } else {
-        next.add(chapterId);
+        next.add(normalizedChapterId);
       }
       return next;
     });
@@ -99,8 +117,8 @@ export default function LogSessionModal({
     const hasCompletionDeltas =
       completeChapterIds.size > 0 || uncompleteChapterIds.size > 0;
 
-    if (!hasTopicSelections && !hasCompletionDeltas) {
-      alert("Please select at least one topic or Chapter Completion change");
+    if (!hasTopicSelections && (isEditMode || !hasCompletionDeltas)) {
+      alert(isEditMode ? "Please select at least one topic" : "Please select at least one topic or Chapter Completion change");
       return;
     }
     if (hasTopicSelections && durationMinutes <= 0) {
@@ -118,15 +136,15 @@ export default function LogSessionModal({
 
   // Count selected topics per chapter
   const getSelectedCountForChapter = (chapter: Chapter): number => {
-    return chapter.topics.filter((t) => selectedTopicIds.has(t.id)).length;
+    return chapter.topics.filter((t) => selectedTopicIds.has(Number(t.id))).length;
   };
 
   // Count unique chapters with selections
   const getSelectedChapterCount = (): number => {
     const chaptersWithSelections = new Set<number>();
     for (const chapter of chapters) {
-      if (chapter.topics.some((t) => selectedTopicIds.has(t.id))) {
-        chaptersWithSelections.add(chapter.id);
+      if (chapter.topics.some((t) => selectedTopicIds.has(Number(t.id)))) {
+        chaptersWithSelections.add(Number(chapter.id));
       }
     }
     return chaptersWithSelections.size;
@@ -212,14 +230,15 @@ export default function LogSessionModal({
 
               <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
                 {chapters.map((chapter) => {
-                  const isExpanded = expandedChapterIds.has(chapter.id);
+                  const chapterId = Number(chapter.id);
+                  const isExpanded = expandedChapterIds.has(chapterId);
                   const selectedCount = getSelectedCountForChapter(chapter);
                   const chapterProgress = progress[chapter.id];
                   const hasTopics = chapter.topics.length > 0;
                   const isAlreadyComplete = chapterProgress?.isChapterComplete;
                   const isCompletionChecked = isAlreadyComplete
-                    ? !uncompleteChapterIds.has(chapter.id)
-                    : completeChapterIds.has(chapter.id);
+                    ? !uncompleteChapterIds.has(chapterId)
+                    : completeChapterIds.has(chapterId);
 
                   return (
                     <div key={chapter.id} data-chapter-row className="border-b border-gray-100 last:border-b-0">
@@ -227,7 +246,7 @@ export default function LogSessionModal({
                       <div className="flex items-center px-3 py-2 gap-2">
                         {/* Expandable Chapter Name */}
                         <button
-                          onClick={() => hasTopics && toggleChapterExpand(chapter.id)}
+                          onClick={() => hasTopics && toggleChapterExpand(chapterId)}
                           disabled={!hasTopics}
                           className={`flex-1 flex items-center gap-2 text-left ${
                             hasTopics ? "hover:text-accent" : "opacity-50 cursor-not-allowed"
@@ -251,17 +270,19 @@ export default function LogSessionModal({
                         </button>
 
                         {/* Badges */}
-                        <label className="flex items-center gap-1 text-xs text-gray-600">
-                          <input
-                            type="checkbox"
-                            checked={isCompletionChecked}
-                            onChange={() =>
-                              toggleChapterCompletion(chapter.id, Boolean(isAlreadyComplete))
-                            }
-                            className="w-4 h-4 rounded border-gray-300 text-accent focus:ring-accent/20"
-                          />
-                          Complete
-                        </label>
+                        {!isEditMode && (
+                          <label className="flex items-center gap-1 text-xs text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={isCompletionChecked}
+                              onChange={() =>
+                                toggleChapterCompletion(chapterId, Boolean(isAlreadyComplete))
+                              }
+                              className="w-4 h-4 rounded border-gray-300 text-accent focus:ring-accent/20"
+                            />
+                            Complete
+                          </label>
+                        )}
                         {isAlreadyComplete && (
                           <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">
                             ✓ Complete
@@ -283,9 +304,12 @@ export default function LogSessionModal({
                       {isExpanded && hasTopics && (
                         <div className="bg-gray-50 border-t border-gray-100">
                           {chapter.topics.map((topic) => {
-                            const isSelected = selectedTopicIds.has(topic.id);
+                            const topicId = Number(topic.id);
+                            const isSelected = selectedTopicIds.has(topicId);
                             const wasAlreadyCovered =
-                              chapterProgress?.completedTopicIds.includes(topic.id);
+                              chapterProgress?.completedTopicIds
+                                .map((id) => Number(id))
+                                .includes(topicId);
 
                             return (
                               <label
@@ -297,7 +321,7 @@ export default function LogSessionModal({
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
-                                  onChange={() => toggleTopic(topic.id)}
+                                  onChange={() => toggleTopic(topicId)}
                                   className="w-4 h-4 rounded border-gray-300 text-accent focus:ring-accent/20"
                                 />
                                 <span className="flex-1 text-sm text-gray-700">
@@ -352,14 +376,16 @@ export default function LogSessionModal({
             <button
               onClick={handleSave}
               disabled={
-                (selectedTopicIds.size === 0 &&
+                ((isEditMode && selectedTopicIds.size === 0) ||
+                  (!isEditMode &&
+                    selectedTopicIds.size === 0 &&
                   completeChapterIds.size === 0 &&
-                  uncompleteChapterIds.size === 0) ||
+                    uncompleteChapterIds.size === 0)) ||
                 isSaving
               }
               className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSaving ? "Saving..." : "Save Log"}
+              {isSaving ? "Saving..." : isEditMode ? "Save Changes" : "Save Log"}
             </button>
           </div>
         </div>

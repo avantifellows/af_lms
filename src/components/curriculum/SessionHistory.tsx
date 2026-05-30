@@ -5,9 +5,15 @@ import { formatDuration } from "@/lib/curriculum-helpers";
 
 interface SessionHistoryProps {
   logs: LmsCurriculumLog[];
+  canEdit?: boolean;
+  onEditLog?: (log: LmsCurriculumLog) => void;
 }
 
-export default function SessionHistory({ logs }: SessionHistoryProps) {
+export default function SessionHistory({
+  logs,
+  canEdit = false,
+  onEditLog,
+}: SessionHistoryProps) {
   if (logs.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
@@ -55,12 +61,29 @@ export default function SessionHistory({ logs }: SessionHistoryProps) {
             className="bg-white rounded-lg shadow overflow-hidden"
           >
             {/* Session Header */}
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-3">
               <div className="font-medium text-gray-900">
                 {formatSessionDate(log.logDate)}
               </div>
-              <div className="text-sm text-gray-600">
-                Duration: {formatDuration(log.durationMinutes)}
+              <div className="flex items-center gap-3">
+                {!log.isEditable && (
+                  <span className="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+                    Historical log
+                  </span>
+                )}
+                <div className="text-sm text-gray-600">
+                  Duration: {formatDuration(log.durationMinutes)}
+                </div>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => onEditLog?.(log)}
+                    disabled={!log.isEditable}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    Edit log
+                  </button>
+                )}
               </div>
             </div>
 

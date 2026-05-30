@@ -66,6 +66,7 @@ export default function CurriculumTab({
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isLogSessionModalOpen, setIsLogSessionModalOpen] = useState(false);
+  const [editingLog, setEditingLog] = useState<LmsCurriculumLog | null>(null);
   const [isSavingLog, setIsSavingLog] = useState(false);
   const [updatingCompletionChapterId, setUpdatingCompletionChapterId] = useState<number | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
@@ -283,26 +284,38 @@ export default function CurriculumTab({
     setIsSavingLog(true);
     setLogError(null);
     try {
-      const response = await fetch("/api/curriculum/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_code: schoolCode,
-          program_id: selectedProgramId,
-          exam_track: selectedExamTrack,
-          grade: selectedGrade,
-          subject: selectedSubject,
-          ...(payload.topicIds.length > 0
-            ? {
-                log_date: payload.date,
-                duration_minutes: payload.durationMinutes,
-              }
-            : {}),
-          topic_ids: payload.topicIds,
-          complete_chapter_ids: payload.completeChapterIds,
-          uncomplete_chapter_ids: payload.uncompleteChapterIds,
-        }),
-      });
+      const isEditMode = editingLog != null;
+      const response = await fetch(
+        isEditMode ? `/api/curriculum/logs/${editingLog.id}` : "/api/curriculum/logs",
+        {
+          method: isEditMode ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isEditMode
+              ? {
+                  log_date: payload.date,
+                  duration_minutes: payload.durationMinutes,
+                  topic_ids: payload.topicIds,
+                }
+              : {
+                  school_code: schoolCode,
+                  program_id: selectedProgramId,
+                  exam_track: selectedExamTrack,
+                  grade: selectedGrade,
+                  subject: selectedSubject,
+                  ...(payload.topicIds.length > 0
+                    ? {
+                        log_date: payload.date,
+                        duration_minutes: payload.durationMinutes,
+                      }
+                    : {}),
+                  topic_ids: payload.topicIds,
+                  complete_chapter_ids: payload.completeChapterIds,
+                  uncomplete_chapter_ids: payload.uncompleteChapterIds,
+                }
+          ),
+        }
+      );
 
       if (!response.ok) {
         if (response.status === 403) {
@@ -314,6 +327,7 @@ export default function CurriculumTab({
 
       await refetchLogsAndProgress();
       setIsLogSessionModalOpen(false);
+      setEditingLog(null);
     } catch (err) {
       setLogError(err instanceof Error ? err.message : "Failed to save LMS Curriculum Log");
     } finally {
@@ -486,6 +500,7 @@ export default function CurriculumTab({
               disabled={!selectedProgramId || chapters.length === 0}
               onClick={() => {
                 setLogError(null);
+                setEditingLog(null);
                 setIsLogSessionModalOpen(true);
               }}
               className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
@@ -560,7 +575,15 @@ export default function CurriculumTab({
               />
             </>
           ) : (
-            <SessionHistory logs={logs} />
+            <SessionHistory
+              logs={logs}
+              canEdit={canEdit}
+              onEditLog={(log) => {
+                setLogError(null);
+                setEditingLog(log);
+                setIsLogSessionModalOpen(true);
+              }}
+            />
           )}
 
           {isLogSessionModalOpen && (
@@ -571,6 +594,7 @@ export default function CurriculumTab({
               onSave={handleSaveLog}
               isSaving={isSavingLog}
               error={logError}
+              editLog={editingLog}
             />
           )}
         </>

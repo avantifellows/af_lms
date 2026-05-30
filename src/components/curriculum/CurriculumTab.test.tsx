@@ -44,10 +44,24 @@ vi.mock("./ChapterAccordion", () => ({
 }));
 
 vi.mock("./SessionHistory", () => ({
-  default: (props: { logs: Array<{ id: number; logDate: string }> }) => (
+  default: (props: {
+    logs: Array<{ id: number; logDate: string; isEditable: boolean }>;
+    canEdit?: boolean;
+    onEditLog?: (log: { id: number; logDate: string; isEditable: boolean }) => void;
+  }) => (
     <div data-testid="session-history" data-logs={JSON.stringify(props.logs)}>
       {props.logs.map((log) => (
-        <div key={log.id}>{log.logDate}</div>
+        <div key={log.id}>
+          <span>{log.logDate}</span>
+          {props.canEdit && (
+            <button
+              disabled={!log.isEditable}
+              onClick={() => props.onEditLog?.(log)}
+            >
+              Edit log {log.id}
+            </button>
+          )}
+        </div>
       ))}
     </div>
   ),
@@ -64,8 +78,10 @@ vi.mock("./LogSessionModal", () => ({
     }) => void;
     error?: string | null;
     isSaving?: boolean;
+    editLog?: { id: number } | null;
   }) => (
     <div data-testid="log-session-modal">
+      {props.editLog && <div>Editing log {props.editLog.id}</div>}
       {props.error && <div>{props.error}</div>}
       <button
         onClick={() =>
@@ -188,7 +204,10 @@ function mockOkJson(body: unknown) {
 
 function setupFetch() {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-    if (url === "/api/curriculum/logs" && init?.method === "POST") {
+  if (url === "/api/curriculum/logs" && init?.method === "POST") {
+      return mockOkJson({ log: logsResponse.logs[0] });
+    }
+    if (url === "/api/curriculum/logs/10" && init?.method === "PATCH") {
       return mockOkJson({ log: logsResponse.logs[0] });
     }
     if (url === "/api/curriculum/options?school_code=70705") {
@@ -355,6 +374,72 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("saves edits through PATCH with no Chapter Completion fields and refreshes Logs and Progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Edit log 10" }));
+
+    expect(screen.getByText("Editing log 10")).toBeInTheDocument();
+    await user.click(screen.getByText("Save Mock Log"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs/10",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            log_date: "2026-02-15",
+            duration_minutes: 90,
+            topic_ids: [101],
+          }),
+        })
+      );
+    });
+    const patchCall = mockFetch.mock.calls.find(
+      ([url, init]) => url === "/api/curriculum/logs/10" && init?.method === "PATCH"
+    );
+    expect(patchCall?.[1]?.body).not.toContain("complete_chapter_ids");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+  });
+
+  it("keeps the edit modal open with reload guidance when PATCH permission changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "PATCH") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Edit log 10" }));
+    await user.click(screen.getByText("Save Mock Log"));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Editing log 10")).toBeInTheDocument();
   });
 
   it("marks completion from the chapter row through the dedicated endpoint and refreshes without creating a log", async () => {

@@ -111,5 +111,30 @@ test.describe("Curriculum read path", () => {
     await expect(adminPage.getByText("Log Teaching Session")).toBeHidden();
     await adminPage.getByRole("button", { name: "Logs" }).click();
     await expect(adminPage.getByText("Beta Forces")).toBeVisible();
+
+    await adminPage.getByRole("button", { name: "Edit log" }).click();
+    await expect(adminPage.getByText("Log Teaching Session")).toBeVisible();
+    await expect(adminPage.getByRole("checkbox", { name: "Complete" })).toBeHidden();
+
+    await adminPage.getByRole("checkbox", { name: /Beta Forces/ }).uncheck();
+    const alphaEditRow = adminPage
+      .locator("[data-chapter-row]")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await alphaEditRow.getByText("Fixture Alpha Physics").click();
+    await adminPage.getByRole("checkbox", { name: /Alpha Motion/ }).check();
+    await adminPage.getByRole("button", { name: "Save Changes" }).click();
+
+    await expect(adminPage.getByText("Log Teaching Session")).toBeHidden();
+    await expect(adminPage.getByText("Alpha Motion")).toBeVisible();
+    await expect(adminPage.getByText("Beta Forces")).toBeHidden();
+
+    await adminPage.reload();
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Chapters" }).click();
+    await alphaEditRow.getByText("Fixture Alpha Physics").click();
+    await expect(alphaEditRow.getByText("1/1")).toBeVisible();
+    await expect(alphaEditRow.getByText(/Time: 1h/)).toBeVisible();
   });
 });

@@ -48,8 +48,23 @@ interface ValidTopicRow {
   chapter_name: unknown;
 }
 
+interface LogMutationScopeRow {
+  id: number;
+  school_code: string;
+  program_id: number;
+  grade_id: number;
+  subject_id: number;
+  exam_track: ExamTrack;
+  is_editable: boolean;
+}
+
 type CurriculumMutationResult =
   | { ok: true; log: LmsCurriculumLog | null; completions: ChapterCompletionState[]; createdLog: boolean }
+  | CurriculumValidationFailure
+  | { ok: false; status: 404; error: string };
+
+type CurriculumEditResult =
+  | { ok: true; log: LmsCurriculumLog }
   | CurriculumValidationFailure
   | { ok: false; status: 404; error: string };
 
@@ -96,12 +111,12 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
     let log = logsById.get(row.id);
     if (!log) {
       log = {
-        id: row.id,
+        id: Number(row.id),
         logDate: toDateString(row.log_date),
         durationMinutes: row.duration_minutes,
-        programId: row.program_id,
-        gradeId: row.grade_id,
-        subjectId: row.subject_id,
+        programId: Number(row.program_id),
+        gradeId: Number(row.grade_id),
+        subjectId: Number(row.subject_id),
         examTrack: row.exam_track,
         topics: [],
         isEditable: true,
@@ -109,7 +124,7 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
         updatedAt: toTimestampString(row.updated_at),
         _editable: true,
       };
-      logsById.set(row.id, log);
+      logsById.set(Number(row.id), log);
     }
 
     if (!row.topic_currently_in_syllabus) {
@@ -118,9 +133,9 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
     }
 
     const topic: LmsCurriculumLogTopic = {
-      topicId: row.topic_id,
+      topicId: Number(row.topic_id),
       topicName: extractEnglishName(row.topic_name, "topic"),
-      chapterId: row.chapter_id,
+      chapterId: Number(row.chapter_id),
       chapterName: extractEnglishName(row.chapter_name, "chapter"),
     };
     log.topics.push(topic);
@@ -208,6 +223,73 @@ async function loadValidTopics(params: {
   );
 }
 
+async function loadValidTopicsForStoredScope(params: {
+  topicIds: number[];
+  examTrack: ExamTrack;
+  gradeId: number;
+  subjectId: number;
+}): Promise<ValidTopicRow[]> {
+  return query<ValidTopicRow>(
+    `SELECT
+       t.id AS topic_id,
+       t.name AS topic_name,
+       ch.id AS chapter_id,
+       ch.name AS chapter_name
+     FROM topic t
+     JOIN chapter ch ON ch.id = t.chapter_id
+     JOIN lms_chapter_exam_configs cfg
+       ON cfg.chapter_id = ch.id
+      AND cfg.exam_track = $1
+      AND cfg.is_in_syllabus = true
+     WHERE t.id = ANY($2::int[])
+       AND ch.grade_id = $3
+       AND ch.subject_id = $4`,
+    [params.examTrack, params.topicIds, params.gradeId, params.subjectId]
+  );
+}
+
+async function loadLogMutationScope(id: number): Promise<LogMutationScopeRow | null> {
+  const rows = await query<LogMutationScopeRow>(
+    `SELECT
+       l.id,
+       l.school_code,
+       l.program_id,
+       l.grade_id,
+       l.subject_id,
+       l.exam_track,
+       COALESCE(
+         bool_and(
+           EXISTS (
+             SELECT 1
+             FROM lms_chapter_exam_configs current_cfg
+             JOIN topic current_topic ON current_topic.chapter_id = current_cfg.chapter_id
+             WHERE current_topic.id = lt.topic_id
+               AND current_cfg.exam_track = l.exam_track
+               AND current_cfg.is_in_syllabus = true
+           )
+         ),
+         false
+       ) AS is_editable
+     FROM lms_curriculum_logs l
+     JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
+     WHERE l.id = $1
+       AND l.deleted_at IS NULL
+     GROUP BY l.id, l.school_code, l.program_id, l.grade_id, l.subject_id, l.exam_track`,
+    [id]
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    ...row,
+    id: Number(row.id),
+    program_id: Number(row.program_id),
+    grade_id: Number(row.grade_id),
+    subject_id: Number(row.subject_id),
+  };
+}
+
 async function insertCurriculumLog(
   client: PoolClient,
   params: {
@@ -248,7 +330,7 @@ async function insertCurriculumLog(
     ]
   );
 
-  const logId = inserted.rows[0]?.id;
+  const logId = Number(inserted.rows[0]?.id);
   if (!logId) throw new Error("Failed to create LMS Curriculum Log");
 
   await client.query(
@@ -258,6 +340,40 @@ async function insertCurriculumLog(
   );
 
   return logId;
+}
+
+async function replaceCurriculumLogTopics(
+  client: PoolClient,
+  params: {
+    logId: number;
+    logDate: string;
+    durationMinutes: number;
+    topicIds: number[];
+    actorEmail: string;
+  }
+): Promise<void> {
+  await client.query(
+    `UPDATE lms_curriculum_logs
+     SET log_date = $2,
+         duration_minutes = $3,
+         updated_by_email = $4,
+         updated_at = (NOW() AT TIME ZONE 'UTC')
+     WHERE id = $1
+       AND deleted_at IS NULL`,
+    [params.logId, params.logDate, params.durationMinutes, params.actorEmail]
+  );
+
+  await client.query(
+    `DELETE FROM lms_curriculum_log_topics
+     WHERE curriculum_log_id = $1`,
+    [params.logId]
+  );
+
+  await client.query(
+    `INSERT INTO lms_curriculum_log_topics (curriculum_log_id, topic_id)
+     SELECT $1::int, unnest($2::int[])`,
+    [params.logId, params.topicIds]
+  );
 }
 
 export async function getCurriculumLogs(params: {
@@ -473,4 +589,81 @@ export async function createCurriculumLog(params: {
     completions: mutation.completions,
     createdLog: mutation.logId != null,
   };
+}
+
+export async function updateCurriculumLog(params: {
+  id: number;
+  logDate: string | null;
+  durationMinutes: number | null;
+  topicIds: unknown;
+  permission: UserPermission;
+  actorEmail: string;
+}): Promise<CurriculumEditResult> {
+  const log = await loadLogMutationScope(params.id);
+  if (!log) {
+    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
+  }
+
+  const scope = await resolveCurriculumProgramScope(log.school_code, params.permission);
+  if (!scope.ok) return scope;
+  if (!scope.allowedProgramIds.includes(log.program_id)) {
+    return { ok: false, status: 403, error: "Forbidden" };
+  }
+
+  if (!log.is_editable) {
+    return { ok: false, status: 422, error: "Historical LMS Curriculum Logs are not editable" };
+  }
+
+  const topicIds = normalizeTopicIds(params.topicIds);
+  if (topicIds.length === 0) {
+    return { ok: false, status: 422, error: "At least one topic is required" };
+  }
+
+  const logDate = params.logDate;
+  if (!logDate || !isPastOrTodayIST(logDate) || isFutureIST(logDate)) {
+    return { ok: false, status: 422, error: "Log date cannot be in the future" };
+  }
+
+  const durationMinutes = params.durationMinutes;
+  if (
+    durationMinutes == null ||
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes <= 0 ||
+    durationMinutes > 720
+  ) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Duration must be greater than 0 and at most 720 minutes",
+    };
+  }
+
+  const validTopics = await loadValidTopicsForStoredScope({
+    topicIds,
+    examTrack: log.exam_track,
+    gradeId: log.grade_id,
+    subjectId: log.subject_id,
+  });
+  if (validTopics.length !== topicIds.length) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Topics do not belong to the LMS Curriculum Log scope",
+    };
+  }
+
+  await withTransaction((client) =>
+    replaceCurriculumLogTopics(client, {
+      logId: params.id,
+      logDate,
+      durationMinutes,
+      topicIds,
+      actorEmail: params.actorEmail,
+    })
+  );
+
+  const updatedLog = await getCurriculumLogById(params.id);
+  if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");
+
+  return { ok: true, log: updatedLog };
 }

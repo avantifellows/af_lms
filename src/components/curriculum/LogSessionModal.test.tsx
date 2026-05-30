@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LogSessionModal from "./LogSessionModal";
-import type { Chapter, ChapterProgress } from "@/types/curriculum";
+import type { Chapter, ChapterProgress, LmsCurriculumLog } from "@/types/curriculum";
 
 vi.mock("@/lib/curriculum-date-helpers", () => ({
   getTodayIST: () => "2026-02-15",
@@ -52,6 +52,7 @@ function renderModal(
     onSave: Parameters<typeof LogSessionModal>[0]["onSave"];
     isSaving: boolean;
     error: string | null;
+    editLog: LmsCurriculumLog | null;
   }> = {}
 ) {
   return render(
@@ -62,6 +63,7 @@ function renderModal(
       onSave={props.onSave ?? vi.fn()}
       isSaving={props.isSaving}
       error={props.error}
+      editLog={props.editLog ?? null}
     />
   );
 }
@@ -173,5 +175,53 @@ describe("LogSessionModal", () => {
     expect(
       screen.getByText("Your permissions changed. Reload the page before trying again.")
     ).toBeInTheDocument();
+  });
+
+  it("pre-populates edit mode from one LMS Curriculum Log without Chapter Completion controls", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderModal({
+      onSave,
+      editLog: {
+        id: 12,
+        logDate: "2026-02-12",
+        durationMinutes: 90,
+        programId: 1,
+        gradeId: 3,
+        subjectId: 4,
+        examTrack: "jee_main",
+        topics: [
+          {
+            topicId: 102,
+            topicName: "Projectile Motion",
+            chapterId: 1,
+            chapterName: "Kinematics",
+          },
+        ],
+        isEditable: true,
+        createdAt: "2026-02-12T10:00:00.000Z",
+        updatedAt: "2026-02-12T10:00:00.000Z",
+      },
+    });
+
+    expect((document.querySelector('input[type="date"]') as HTMLInputElement).value).toBe(
+      "2026-02-12"
+    );
+    const [hours, minutes] = screen.getAllByRole("spinbutton");
+    expect(hours).toHaveValue(1);
+    expect(minutes).toHaveValue(30);
+    expect(screen.queryByRole("checkbox", { name: /complete/i })).not.toBeInTheDocument();
+
+    const topicLabel = screen.getByText("Projectile Motion").closest("label")!;
+    expect(within(topicLabel).getByRole("checkbox")).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(onSave).toHaveBeenCalledWith({
+      date: "2026-02-12",
+      durationMinutes: 90,
+      topicIds: [102],
+      completeChapterIds: [],
+      uncompleteChapterIds: [],
+    });
   });
 });

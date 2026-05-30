@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import SessionHistory from "./SessionHistory";
 import type { LmsCurriculumLog } from "@/types/curriculum";
 
@@ -113,5 +114,38 @@ describe("SessionHistory", () => {
     expect(screen.getByText("Momentum")).toBeInTheDocument();
     expect(screen.getByText("Waves")).toBeInTheDocument();
     expect(screen.getByText("Sound")).toBeInTheDocument();
+  });
+
+  it("opens editable LMS Curriculum Logs and disables historical log edit controls", async () => {
+    const user = userEvent.setup();
+    const onEditLog = vi.fn();
+    const editableLog = makeLog({ id: 1, isEditable: true });
+    const historicalLog = makeLog({
+      id: 2,
+      logDate: "2026-01-20",
+      isEditable: false,
+    });
+
+    render(
+      <SessionHistory
+        logs={[editableLog, historicalLog]}
+        canEdit
+        onEditLog={onEditLog}
+      />
+    );
+
+    const editButtons = screen.getAllByRole("button", { name: /edit log/i });
+    expect(editButtons[0]).toBeEnabled();
+    expect(editButtons[1]).toBeDisabled();
+    expect(screen.getByText("Historical log")).toBeInTheDocument();
+
+    await user.click(editButtons[0]);
+    expect(onEditLog).toHaveBeenCalledWith(editableLog);
+  });
+
+  it("hides edit controls for read-only users", () => {
+    render(<SessionHistory logs={[makeLog()]} canEdit={false} onEditLog={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /edit log/i })).not.toBeInTheDocument();
   });
 });
