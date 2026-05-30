@@ -35,6 +35,21 @@ describe("curriculum schema preflight", () => {
     });
   });
 
+  it("checks log date and soft-delete columns required by Curriculum Summary", async () => {
+    mockQuery.mockResolvedValue([]);
+
+    await checkCurriculumSchema();
+
+    const [, params] = mockQuery.mock.calls[0] as [string, string[]];
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "lms_curriculum_logs",
+        "log_date",
+        "deleted_at",
+      ])
+    );
+  });
+
   it("caches the preflight result until tests reset it", async () => {
     mockQuery.mockResolvedValue([]);
 
