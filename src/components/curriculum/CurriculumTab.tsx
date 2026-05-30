@@ -62,6 +62,7 @@ export default function CurriculumTab({
   const [selectedSubject, setSelectedSubject] = useState<SubjectName | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
+  const [subjectTotalTimeMinutes, setSubjectTotalTimeMinutes] = useState(0);
   const [logs, setLogs] = useState<LmsCurriculumLog[]>([]);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
@@ -89,6 +90,7 @@ export default function CurriculumTab({
       setChapters([]);
       setLogs([]);
       setProgress({});
+      setSubjectTotalTimeMinutes(0);
 
       try {
         const response = await fetch(
@@ -128,6 +130,7 @@ export default function CurriculumTab({
       setChapters([]);
       setLogs([]);
       setProgress({});
+      setSubjectTotalTimeMinutes(0);
       return;
     }
 
@@ -140,6 +143,8 @@ export default function CurriculumTab({
     async function fetchCurriculumData() {
       setIsDataLoading(true);
       setError(null);
+      setLogError(null);
+      setCompletionError(null);
 
       const params = new URLSearchParams({
         school_code: schoolCode,
@@ -161,12 +166,14 @@ export default function CurriculumTab({
         const chaptersData = (await chaptersResponse.json()) as { chapters: Chapter[] };
         const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
         const progressData = (await progressResponse.json()) as {
+          subjectTotalTimeMinutes: number;
           progress: Record<number, ChapterProgress>;
         };
         if (!isCancelled) {
           setChapters(chaptersData.chapters);
           setLogs(logsData.logs);
           setProgress(progressData.progress);
+          setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
         }
       } catch (err) {
         if (!isCancelled) {
@@ -211,10 +218,12 @@ export default function CurriculumTab({
     }
     const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
     const progressData = (await progressResponse.json()) as {
+      subjectTotalTimeMinutes: number;
       progress: Record<number, ChapterProgress>;
     };
     setLogs(logsData.logs);
     setProgress(progressData.progress);
+    setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
   }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
 
   const gradeOptions = useMemo(() => {
@@ -325,9 +334,15 @@ export default function CurriculumTab({
         throw new Error(body?.error ?? "Failed to save LMS Curriculum Log");
       }
 
-      await refetchLogsAndProgress();
       setIsLogSessionModalOpen(false);
       setEditingLog(null);
+      try {
+        await refetchLogsAndProgress();
+      } catch {
+        setLogError(
+          "Saved, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+        );
+      }
     } catch (err) {
       setLogError(err instanceof Error ? err.message : "Failed to save LMS Curriculum Log");
     } finally {
@@ -364,7 +379,13 @@ export default function CurriculumTab({
         throw new Error(body?.error ?? "Failed to update Chapter Completion");
       }
 
-      await refetchLogsAndProgress();
+      try {
+        await refetchLogsAndProgress();
+      } catch {
+        setCompletionError(
+          "Chapter Completion was updated, but refresh failed. Reload the page to see the latest data."
+        );
+      }
     } catch (err) {
       setCompletionError(
         err instanceof Error ? err.message : "Failed to update Chapter Completion"
@@ -389,10 +410,18 @@ export default function CurriculumTab({
         throw new Error(body?.error ?? "Failed to delete LMS Curriculum Log");
       }
 
-      await refetchLogsAndProgress();
     } catch (err) {
       setLogError(
         err instanceof Error ? err.message : "Failed to delete LMS Curriculum Log"
+      );
+      return;
+    }
+
+    try {
+      await refetchLogsAndProgress();
+    } catch {
+      setLogError(
+        "Deleted LMS Curriculum Log, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
       );
     }
   }
@@ -575,6 +604,11 @@ export default function CurriculumTab({
             </nav>
           </div>
 
+          {logError && !isLogSessionModalOpen && (
+            <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+              {logError}
+            </div>
+          )}
           {isDataLoading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
@@ -586,7 +620,11 @@ export default function CurriculumTab({
                   {completionError}
                 </div>
               )}
-              <ProgressSummary chapters={chapters} progress={progress} />
+              <ProgressSummary
+                chapters={chapters}
+                progress={progress}
+                subjectTotalTimeMinutes={subjectTotalTimeMinutes}
+              />
               <ChapterAccordion
                 chapters={chapters}
                 progress={progress}
@@ -599,11 +637,6 @@ export default function CurriculumTab({
             </>
           ) : (
             <>
-              {logError && !isLogSessionModalOpen && (
-                <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
-                  {logError}
-                </div>
-              )}
               <SessionHistory
                 logs={logs}
                 canEdit={canEdit}
@@ -621,7 +654,11 @@ export default function CurriculumTab({
             <LogSessionModal
               chapters={chapters}
               progress={progress}
-              onClose={() => setIsLogSessionModalOpen(false)}
+              onClose={() => {
+                setIsLogSessionModalOpen(false);
+                setEditingLog(null);
+                setLogError(null);
+              }}
               onSave={handleSaveLog}
               isSaving={isSavingLog}
               error={logError}

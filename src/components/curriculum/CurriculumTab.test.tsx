@@ -10,11 +10,16 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("./ProgressSummary", () => ({
-  default: (props: { chapters: Chapter[]; progress: Record<number, ChapterProgress> }) => (
+  default: (props: {
+    chapters: Chapter[];
+    progress: Record<number, ChapterProgress>;
+    subjectTotalTimeMinutes: number;
+  }) => (
     <div
       data-testid="progress-summary"
       data-chapters={JSON.stringify(props.chapters)}
       data-progress={JSON.stringify(props.progress)}
+      data-subject-total-time-minutes={props.subjectTotalTimeMinutes}
     />
   ),
 }));
@@ -278,6 +283,10 @@ describe("CurriculumTab", () => {
 
     const accordion = await screen.findByTestId("chapter-accordion");
     expect(JSON.parse(accordion.getAttribute("data-chapters") || "[]")).toEqual(physicsChapters);
+    expect(screen.getByTestId("progress-summary")).toHaveAttribute(
+      "data-subject-total-time-minutes",
+      "90"
+    );
   });
 
   it("loads backend logs after reload even when browser localStorage is unavailable", async () => {
@@ -372,6 +381,43 @@ describe("CurriculumTab", () => {
     );
   });
 
+  it("closes the Add Log modal and reports reload guidance when refresh fails after save", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs" && init?.method === "POST") {
+        return mockOkJson({ log: logsResponse.logs[0] });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?") && mockFetch.mock.calls.length > 4) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Mock Log"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("log-session-modal")).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "Saved, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+      )
+    ).toBeInTheDocument();
+  });
+
   it("saves completion-only changes without log date or duration and refreshes progress", async () => {
     const user = userEvent.setup();
     renderTab({ canEdit: true });
@@ -462,6 +508,41 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("does not report delete as failed when refresh fails after a successful delete", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+        return mockOkJson({ deleted: true });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?") && mockFetch.mock.calls.length > 4) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    expect(
+      await screen.findByText(
+        "Deleted LMS Curriculum Log, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Failed to delete LMS Curriculum Log")).not.toBeInTheDocument();
   });
 
   it("keeps the log row visible and shows an API error when delete fails", async () => {

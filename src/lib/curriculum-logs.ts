@@ -356,8 +356,8 @@ async function replaceCurriculumLogTopics(
     topicIds: number[];
     actorEmail: string;
   }
-): Promise<void> {
-  await client.query(
+): Promise<boolean> {
+  const updated = await client.query(
     `UPDATE lms_curriculum_logs
      SET log_date = $2,
          duration_minutes = $3,
@@ -367,6 +367,9 @@ async function replaceCurriculumLogTopics(
        AND deleted_at IS NULL`,
     [params.logId, params.logDate, params.durationMinutes, params.actorEmail]
   );
+  if (updated.rowCount === 0) {
+    return false;
+  }
 
   await client.query(
     `DELETE FROM lms_curriculum_log_topics
@@ -379,6 +382,7 @@ async function replaceCurriculumLogTopics(
      SELECT $1::int, unnest($2::int[])`,
     [params.logId, params.topicIds]
   );
+  return true;
 }
 
 export async function getCurriculumLogs(params: {
@@ -657,7 +661,7 @@ export async function updateCurriculumLog(params: {
     };
   }
 
-  await withTransaction((client) =>
+  const updated = await withTransaction((client) =>
     replaceCurriculumLogTopics(client, {
       logId: params.id,
       logDate,
@@ -666,6 +670,9 @@ export async function updateCurriculumLog(params: {
       actorEmail: params.actorEmail,
     })
   );
+  if (!updated) {
+    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
+  }
 
   const updatedLog = await getCurriculumLogById(params.id);
   if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");

@@ -48,4 +48,28 @@ describe("curriculum schema preflight", () => {
 
     expect(mockQuery).toHaveBeenCalledTimes(2);
   });
+
+  it("does not permanently cache unavailable schema results", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        { table_name: "lms_chapter_exam_configs", column_name: "exam_track" },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await expect(checkCurriculumSchema()).resolves.toMatchObject({ ok: false });
+    await expect(checkCurriculumSchema()).resolves.toEqual({ ok: true });
+
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries after a transient preflight query failure", async () => {
+    mockQuery
+      .mockRejectedValueOnce(new Error("connection reset"))
+      .mockResolvedValueOnce([]);
+
+    await expect(checkCurriculumSchema()).rejects.toThrow("connection reset");
+    await expect(checkCurriculumSchema()).resolves.toEqual({ ok: true });
+
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
 });

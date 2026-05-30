@@ -9,7 +9,7 @@ interface SubjectTotalRow {
 
 interface ProgressRow {
   chapter_id: number;
-  topic_id: number;
+  topic_id: number | null;
   log_id: number | null;
   log_date: string | Date | null;
   duration_minutes: number | null;
@@ -95,7 +95,7 @@ export async function getCurriculumProgress(params: {
      FROM lms_chapter_exam_configs cfg
      JOIN chapter ch ON ch.id = cfg.chapter_id
      JOIN grade g ON g.id = ch.grade_id
-     JOIN topic t ON t.chapter_id = ch.id
+     LEFT JOIN topic t ON t.chapter_id = ch.id
      LEFT JOIN scoped_log_topics slt ON slt.topic_id = t.id
      WHERE cfg.exam_track = $5
        AND cfg.is_in_syllabus = true
@@ -146,9 +146,16 @@ export async function getCurriculumProgress(params: {
     if (!topicIdsByChapter.has(row.chapter_id)) {
       topicIdsByChapter.set(row.chapter_id, new Set());
     }
-    topicIdsByChapter.get(row.chapter_id)?.add(row.topic_id);
+    if (row.topic_id != null) {
+      topicIdsByChapter.get(row.chapter_id)?.add(row.topic_id);
+    }
 
-    if (row.log_id == null || row.duration_minutes == null || row.total_topics_in_log == null) {
+    if (
+      row.topic_id == null ||
+      row.log_id == null ||
+      row.duration_minutes == null ||
+      row.total_topics_in_log == null
+    ) {
       continue;
     }
 

@@ -138,6 +138,56 @@ describe("GET /api/curriculum/progress", () => {
     );
   });
 
+  it("includes configured topicless chapters when loading Chapter Completion state", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ subject_total_time_minutes: "0" }])
+      .mockResolvedValueOnce([
+        {
+          chapter_id: 3,
+          topic_id: null,
+          log_id: null,
+          log_date: null,
+          duration_minutes: null,
+          total_topics_in_log: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { chapter_id: 3, completed_at: "2026-02-17T00:00:00.000Z" },
+      ]);
+
+    const res = await GET(
+      nextReq(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      )
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      subjectTotalTimeMinutes: 0,
+      progress: {
+        "3": {
+          chapterId: 3,
+          completedTopicIds: [],
+          totalTimeMinutes: 0,
+          lastTaughtDate: null,
+          allTopicsCovered: false,
+          isChapterComplete: true,
+          chapterCompletedDate: "2026-02-17T00:00:00.000Z",
+        },
+      },
+    });
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      5,
+      expect.stringContaining("LEFT JOIN topic t ON t.chapter_id = ch.id"),
+      ["70705", 1, 3, 4, "jee_main", 11]
+    );
+  });
+
   it("returns 403 for passcode users", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION);
 

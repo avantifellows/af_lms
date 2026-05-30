@@ -412,6 +412,45 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
     expect(mockWithTransaction).toHaveBeenCalledTimes(1);
     expect(mockQuery).toHaveBeenCalledTimes(5);
   });
+
+  it("does not rewrite topic rows if the log is concurrently soft-deleted before update", async () => {
+    const clientQuery = vi.fn().mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    mockWithTransaction.mockImplementation(async (fn) =>
+      fn({ query: clientQuery } as never)
+    );
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([editableLogRow])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([
+        {
+          topic_id: 102,
+          topic_name: [{ lang_code: "en", topic: "Projectile Motion" }],
+          chapter_id: 1,
+          chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+        },
+      ]);
+
+    const res = await PATCH(
+      jsonReq({
+        log_date: "2026-02-16",
+        duration_minutes: 120,
+        topic_ids: [102],
+      }),
+      routeParams({ id: "12" })
+    );
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({
+      error: "LMS Curriculum Log not found",
+    });
+    expect(clientQuery).toHaveBeenCalledTimes(1);
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM lms_curriculum_log_topics"),
+      expect.anything()
+    );
+  });
 });
 
 describe("DELETE /api/curriculum/logs/[id]", () => {

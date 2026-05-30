@@ -75,7 +75,18 @@ async function loadCurriculumSchemaStatus(): Promise<CurriculumSchemaStatus> {
 }
 
 export function checkCurriculumSchema(): Promise<CurriculumSchemaStatus> {
-  cachedStatus ??= loadCurriculumSchemaStatus();
+  cachedStatus ??= loadCurriculumSchemaStatus().then(
+    (status) => {
+      if (!status.ok) {
+        cachedStatus = null;
+      }
+      return status;
+    },
+    (error) => {
+      cachedStatus = null;
+      throw error;
+    }
+  );
   return cachedStatus;
 }
 
