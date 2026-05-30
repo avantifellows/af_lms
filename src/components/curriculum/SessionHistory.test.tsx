@@ -119,6 +119,7 @@ describe("SessionHistory", () => {
   it("opens editable LMS Curriculum Logs and disables historical log edit controls", async () => {
     const user = userEvent.setup();
     const onEditLog = vi.fn();
+    const onDeleteLog = vi.fn();
     const editableLog = makeLog({ id: 1, isEditable: true });
     const historicalLog = makeLog({
       id: 2,
@@ -131,21 +132,61 @@ describe("SessionHistory", () => {
         logs={[editableLog, historicalLog]}
         canEdit
         onEditLog={onEditLog}
+        onDeleteLog={onDeleteLog}
       />
     );
 
     const editButtons = screen.getAllByRole("button", { name: /edit log/i });
     expect(editButtons[0]).toBeEnabled();
     expect(editButtons[1]).toBeDisabled();
+    const deleteButtons = screen.getAllByRole("button", { name: /delete log/i });
+    expect(deleteButtons[0]).toBeEnabled();
+    expect(deleteButtons[1]).toBeEnabled();
     expect(screen.getByText("Historical log")).toBeInTheDocument();
 
     await user.click(editButtons[0]);
     expect(onEditLog).toHaveBeenCalledWith(editableLog);
   });
 
-  it("hides edit controls for read-only users", () => {
-    render(<SessionHistory logs={[makeLog()]} canEdit={false} onEditLog={vi.fn()} />);
+  it("confirms before requesting LMS Curriculum Log deletion", async () => {
+    const user = userEvent.setup();
+    const onDeleteLog = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const log = makeLog();
+
+    render(<SessionHistory logs={[log]} canEdit onDeleteLog={onDeleteLog} />);
+
+    await user.click(screen.getByRole("button", { name: /delete log/i }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Delete this LMS Curriculum Log? It will be removed from Logs and Progress."
+    );
+    expect(onDeleteLog).toHaveBeenCalledWith(log);
+  });
+
+  it("does not request deletion when confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    const onDeleteLog = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<SessionHistory logs={[makeLog()]} canEdit onDeleteLog={onDeleteLog} />);
+
+    await user.click(screen.getByRole("button", { name: /delete log/i }));
+
+    expect(onDeleteLog).not.toHaveBeenCalled();
+  });
+
+  it("hides edit and delete controls for read-only users", () => {
+    render(
+      <SessionHistory
+        logs={[makeLog()]}
+        canEdit={false}
+        onEditLog={vi.fn()}
+        onDeleteLog={vi.fn()}
+      />
+    );
 
     expect(screen.queryByRole("button", { name: /edit log/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete log/i })).not.toBeInTheDocument();
   });
 });

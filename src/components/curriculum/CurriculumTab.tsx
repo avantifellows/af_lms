@@ -374,6 +374,29 @@ export default function CurriculumTab({
     }
   }
 
+  async function handleDeleteLog(log: LmsCurriculumLog) {
+    setLogError(null);
+    try {
+      const response = await fetch(`/api/curriculum/logs/${log.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Your permissions changed. Reload the page before trying again.");
+        }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to delete LMS Curriculum Log");
+      }
+
+      await refetchLogsAndProgress();
+    } catch (err) {
+      setLogError(
+        err instanceof Error ? err.message : "Failed to delete LMS Curriculum Log"
+      );
+    }
+  }
+
   const hasEmptyConfig =
     !isOptionsLoading &&
     options != null &&
@@ -575,15 +598,23 @@ export default function CurriculumTab({
               />
             </>
           ) : (
-            <SessionHistory
-              logs={logs}
-              canEdit={canEdit}
-              onEditLog={(log) => {
-                setLogError(null);
-                setEditingLog(log);
-                setIsLogSessionModalOpen(true);
-              }}
-            />
+            <>
+              {logError && !isLogSessionModalOpen && (
+                <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+                  {logError}
+                </div>
+              )}
+              <SessionHistory
+                logs={logs}
+                canEdit={canEdit}
+                onEditLog={(log) => {
+                  setLogError(null);
+                  setEditingLog(log);
+                  setIsLogSessionModalOpen(true);
+                }}
+                onDeleteLog={handleDeleteLog}
+              />
+            </>
           )}
 
           {isLogSessionModalOpen && (

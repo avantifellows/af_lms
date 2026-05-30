@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { checkCurriculumSchema } from "@/lib/curriculum-schema";
-import { updateCurriculumLog } from "@/lib/curriculum-logs";
+import { deleteCurriculumLog, updateCurriculumLog } from "@/lib/curriculum-logs";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
 
 type CurriculumSession = {
@@ -87,4 +87,36 @@ export async function PATCH(
   }
 
   return NextResponse.json({ log: result.log });
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: rawId } = await params;
+  const id = Number.parseInt(rawId, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid log id" }, { status: 400 });
+  }
+
+  const session = await getServerSession(authOptions);
+  const access = await requireCurriculumEditAccess(session);
+  if (!access.ok) return access.response;
+
+  const schema = await checkCurriculumSchema();
+  if (!schema.ok) {
+    return NextResponse.json(schema, { status: schema.status });
+  }
+
+  const result = await deleteCurriculumLog({
+    id,
+    permission: access.permission,
+    actorEmail: access.email,
+  });
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+
+  return NextResponse.json({ deleted: true });
 }

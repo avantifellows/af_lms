@@ -7,12 +7,14 @@ interface SessionHistoryProps {
   logs: LmsCurriculumLog[];
   canEdit?: boolean;
   onEditLog?: (log: LmsCurriculumLog) => void;
+  onDeleteLog?: (log: LmsCurriculumLog) => void;
 }
 
 export default function SessionHistory({
   logs,
   canEdit = false,
   onEditLog,
+  onDeleteLog,
 }: SessionHistoryProps) {
   if (logs.length === 0) {
     return (
@@ -50,6 +52,15 @@ export default function SessionHistory({
     });
   };
 
+  const handleDeleteLog = (log: LmsCurriculumLog) => {
+    const confirmed = window.confirm(
+      "Delete this LMS Curriculum Log? It will be removed from Logs and Progress."
+    );
+    if (confirmed) {
+      onDeleteLog?.(log);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {logs.map((log) => {
@@ -58,6 +69,7 @@ export default function SessionHistory({
         return (
           <div
             key={log.id}
+            data-curriculum-log-row
             className="bg-white rounded-lg shadow overflow-hidden"
           >
             {/* Session Header */}
@@ -75,14 +87,23 @@ export default function SessionHistory({
                   Duration: {formatDuration(log.durationMinutes)}
                 </div>
                 {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => onEditLog?.(log)}
-                    disabled={!log.isEditable}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
-                  >
-                    Edit log
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onEditLog?.(log)}
+                      disabled={!log.isEditable}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      Edit log
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLog(log)}
+                      className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                    >
+                      Delete log
+                    </button>
+                  </>
                 )}
               </div>
             </div>

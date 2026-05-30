@@ -27,7 +27,7 @@ import {
   routeParams,
 } from "../../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
-import { PATCH } from "./route";
+import { DELETE, PATCH } from "./route";
 
 const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
@@ -44,6 +44,13 @@ function jsonReq(body: unknown) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }
+  );
+}
+
+function deleteReq() {
+  return new NextRequest(
+    new URL("/api/curriculum/logs/12", "http://localhost"),
+    { method: "DELETE" }
   );
 }
 
@@ -404,5 +411,107 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
 
     expect(mockWithTransaction).toHaveBeenCalledTimes(1);
     expect(mockQuery).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe("DELETE /api/curriculum/logs/[id]", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetCurriculumSchemaCheckForTests();
+    mockSession.mockResolvedValue(TEACHER_SESSION);
+    mockGetUserPermission.mockResolvedValue(teacherPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mockCanAccessSchoolSync.mockReturnValue(true);
+  });
+
+  it("soft-deletes one LMS Curriculum Log after verifying the stored row scope", async () => {
+    const clientQuery = vi.fn().mockResolvedValueOnce({ rows: [] });
+    mockWithTransaction.mockImplementation(async (fn) =>
+      fn({ query: clientQuery } as never)
+    );
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([editableLogRow])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(200);
+    expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("SET deleted_at = (NOW() AT TIME ZONE 'UTC')"),
+      [12, "teacher@avantifellows.org"]
+    );
+    await expect(res.json()).resolves.toEqual({ deleted: true });
+  });
+
+  it("rejects users without Curriculum edit access before loading the log", async () => {
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(403);
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects passcode users before loading the log", async () => {
+    mockSession.mockResolvedValue(PASSCODE_SESSION);
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(403);
+    expect(mockGetUserPermission).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-school deletes by the stored row scope", async () => {
+    mockCanAccessSchoolSync.mockReturnValue(false);
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([editableLogRow])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }]);
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(403);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-program deletes by the stored row Program", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([editableLogRow])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [2] }])
+      .mockResolvedValueOnce([{ id: 2, name: "JNV Nodal" }]);
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(403);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns not found for missing or already-deleted logs", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({
+      error: "LMS Curriculum Log not found",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 });

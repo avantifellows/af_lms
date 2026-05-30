@@ -101,7 +101,7 @@ test.describe("Curriculum read path", () => {
 
     await adminPage.getByRole("button", { name: "+ Add Log" }).click();
     const betaRow = adminPage
-      .locator("[data-chapter-row]")
+      .locator(".fixed [data-chapter-row]")
       .filter({ hasText: "Fixture Beta Physics" });
     await betaRow.getByRole("checkbox", { name: "Complete" }).check();
     await betaRow.getByText("Fixture Beta Physics").click();
@@ -136,5 +136,40 @@ test.describe("Curriculum read path", () => {
     await alphaEditRow.getByText("Fixture Alpha Physics").click();
     await expect(alphaEditRow.getByText("1/1")).toBeVisible();
     await expect(alphaEditRow.getByText(/Time: 1h/)).toBeVisible();
+  });
+
+  test("admin can delete a log and it stays excluded after reload", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+
+    await adminPage.getByRole("button", { name: "+ Add Log" }).click();
+    const betaRow = adminPage
+      .locator(".fixed [data-chapter-row]")
+      .filter({ hasText: "Fixture Beta Physics" });
+    await betaRow.getByRole("button").first().click();
+    await adminPage.getByRole("checkbox", { name: /Beta Forces/ }).check();
+    await adminPage.getByRole("button", { name: "Save Log" }).click();
+
+    await expect(adminPage.getByText("Log Teaching Session")).toBeHidden();
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    await expect(adminPage.getByText("Beta Forces")).toBeVisible();
+
+    const betaLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Beta Forces" });
+    adminPage.once("dialog", (dialog) => dialog.accept());
+    await betaLog.getByRole("button", { name: "Delete log" }).click();
+    await expect(adminPage.getByText("Beta Forces")).toBeHidden();
+
+    await adminPage.reload();
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    await expect(adminPage.getByText("Beta Forces")).toBeHidden();
   });
 });

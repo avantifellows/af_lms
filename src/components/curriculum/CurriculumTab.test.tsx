@@ -48,18 +48,24 @@ vi.mock("./SessionHistory", () => ({
     logs: Array<{ id: number; logDate: string; isEditable: boolean }>;
     canEdit?: boolean;
     onEditLog?: (log: { id: number; logDate: string; isEditable: boolean }) => void;
+    onDeleteLog?: (log: { id: number; logDate: string; isEditable: boolean }) => void;
   }) => (
     <div data-testid="session-history" data-logs={JSON.stringify(props.logs)}>
       {props.logs.map((log) => (
         <div key={log.id}>
           <span>{log.logDate}</span>
           {props.canEdit && (
-            <button
-              disabled={!log.isEditable}
-              onClick={() => props.onEditLog?.(log)}
-            >
-              Edit log {log.id}
-            </button>
+            <>
+              <button
+                disabled={!log.isEditable}
+                onClick={() => props.onEditLog?.(log)}
+              >
+                Edit log {log.id}
+              </button>
+              <button onClick={() => props.onDeleteLog?.(log)}>
+                Delete log {log.id}
+              </button>
+            </>
           )}
         </div>
       ))}
@@ -210,6 +216,9 @@ function setupFetch() {
     if (url === "/api/curriculum/logs/10" && init?.method === "PATCH") {
       return mockOkJson({ log: logsResponse.logs[0] });
     }
+    if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+      return mockOkJson({ deleted: true });
+    }
     if (url === "/api/curriculum/options?school_code=70705") {
       return mockOkJson(optionsResponse);
     }
@@ -269,6 +278,27 @@ describe("CurriculumTab", () => {
 
     const accordion = await screen.findByTestId("chapter-accordion");
     expect(JSON.parse(accordion.getAttribute("data-chapters") || "[]")).toEqual(physicsChapters);
+  });
+
+  it("loads backend logs after reload even when browser localStorage is unavailable", async () => {
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("localStorage unavailable");
+      });
+
+    renderTab({ schoolName: "Avanti School" });
+
+    await screen.findByTestId("chapter-accordion");
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      );
+    });
+    expect(getItemSpy).not.toHaveBeenCalled();
   });
 
   it("filters grade and subject by selected Exam Track, including NEET Biology", async () => {
@@ -410,6 +440,98 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("deletes a log through the backend and refreshes Logs and Progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs/10",
+        expect.objectContaining({ method: "DELETE" })
+      );
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+  });
+
+  it("keeps the log row visible and shows an API error when delete fails", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: "Delete failed" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    expect(await screen.findByText("Delete failed")).toBeInTheDocument();
+    expect(screen.getByTestId("session-history")).toHaveAttribute(
+      "data-logs",
+      JSON.stringify(logsResponse.logs)
+    );
+  });
+
+  it("shows reload guidance when DELETE is rejected after permissions change", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs/10" && init?.method === "DELETE") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+    await user.click(screen.getByRole("button", { name: "Delete log 10" }));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+  });
+
+  it("hides log delete controls for read-only users", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: false });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByText("Logs"));
+
+    expect(screen.queryByRole("button", { name: "Delete log 10" })).not.toBeInTheDocument();
   });
 
   it("keeps the edit modal open with reload guidance when PATCH permission changes", async () => {

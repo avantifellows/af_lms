@@ -126,6 +126,16 @@ describe("GET /api/curriculum/progress", () => {
       },
     });
     expect(mockQuery).toHaveBeenCalledTimes(6);
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining("AND deleted_at IS NULL"),
+      ["70705", 1, 3, 4, "jee_main"]
+    );
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      5,
+      expect.stringContaining("AND l.deleted_at IS NULL"),
+      ["70705", 1, 3, 4, "jee_main", 11]
+    );
   });
 
   it("returns 403 for passcode users", async () => {

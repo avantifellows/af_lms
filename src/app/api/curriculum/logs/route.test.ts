@@ -144,6 +144,10 @@ describe("/api/curriculum/logs", () => {
         expect.objectContaining({ id: 11, isEditable: false }),
       ],
     });
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining("AND l.deleted_at IS NULL"),
+      ["70705", 1, 3, 4, "jee_main"]
+    );
   });
 
   it("creates a topic-backed LMS Curriculum Log transactionally", async () => {

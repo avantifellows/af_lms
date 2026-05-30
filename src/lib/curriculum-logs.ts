@@ -68,6 +68,11 @@ type CurriculumEditResult =
   | CurriculumValidationFailure
   | { ok: false; status: 404; error: string };
 
+type CurriculumDeleteResult =
+  | { ok: true; deleted: true }
+  | CurriculumValidationFailure
+  | { ok: false; status: 404; error: string };
+
 type CurriculumLogsResult =
   | { ok: true; logs: LmsCurriculumLog[] }
   | CurriculumValidationFailure
@@ -666,4 +671,35 @@ export async function updateCurriculumLog(params: {
   if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");
 
   return { ok: true, log: updatedLog };
+}
+
+export async function deleteCurriculumLog(params: {
+  id: number;
+  permission: UserPermission;
+  actorEmail: string;
+}): Promise<CurriculumDeleteResult> {
+  const log = await loadLogMutationScope(params.id);
+  if (!log) {
+    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
+  }
+
+  const scope = await resolveCurriculumProgramScope(log.school_code, params.permission);
+  if (!scope.ok) return scope;
+  if (!scope.allowedProgramIds.includes(log.program_id)) {
+    return { ok: false, status: 403, error: "Forbidden" };
+  }
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE lms_curriculum_logs
+       SET deleted_at = (NOW() AT TIME ZONE 'UTC'),
+           updated_by_email = $2,
+           updated_at = (NOW() AT TIME ZONE 'UTC')
+       WHERE id = $1
+         AND deleted_at IS NULL`,
+      [params.id, params.actorEmail]
+    );
+  });
+
+  return { ok: true, deleted: true };
 }
