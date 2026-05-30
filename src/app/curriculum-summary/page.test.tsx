@@ -102,6 +102,7 @@ const emptySummaryResult = {
     districts: [],
   },
   rows: [],
+  chapterRowsByParentKey: {},
   stats: {
     totalRows: 0,
     flaggedRows: 0,
@@ -367,6 +368,99 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByText("Flagged Rows")).toBeInTheDocument();
     expect(screen.getByText("33.3%")).toBeInTheDocument();
     expect(screen.getByText("83.3%")).toBeInTheDocument();
+  });
+
+  it("renders expanded chapter rows with allocated-hours note and read-only controls", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      rows: [
+        {
+          rowKey: "70705:1:11:4:jee_main",
+          schoolCode: "70705",
+          schoolName: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          programId: 1,
+          programName: "JNV CoE",
+          grade: 11,
+          subjectId: 4,
+          subjectName: "Physics",
+          examTrack: "jee_main",
+          completedChapters: 1,
+          totalConfiguredChapters: 2,
+          prescribedChapters: 1,
+          actualMinutes: 120,
+          prescribedMinutes: 90,
+          deltaPercent: 33.33333333333333,
+          flagged: true,
+          flagReasons: ["over_prescribed_hours"],
+        },
+      ],
+      chapterRowsByParentKey: {
+        "70705:1:11:4:jee_main": [
+          {
+            parentRowKey: "70705:1:11:4:jee_main",
+            chapterId: 44,
+            chapterCode: "11P1",
+            chapterName: "Kinematics",
+            coverageSequence: 1,
+            completedCount: 1,
+            prescribedCount: 1,
+            actualMinutes: 95,
+            prescribedMinutes: 90,
+            deltaPercent: 5.555555555555555,
+            flagged: false,
+            flagReasons: [],
+          },
+          {
+            parentRowKey: "70705:1:11:4:jee_main",
+            chapterId: 45,
+            chapterCode: "11P2",
+            chapterName: "Vectors",
+            coverageSequence: 2,
+            completedCount: 0,
+            prescribedCount: 0,
+            actualMinutes: 25,
+            prescribedMinutes: 0,
+            deltaPercent: null,
+            flagged: true,
+            flagReasons: ["actual_time_on_zero_prescribed_minutes"],
+          },
+        ],
+      },
+      totalRowCount: 1,
+      totalPages: 1,
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    expect(screen.getByText("Chapter expansion")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Chapter Actual Hours use allocated rounded minutes/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Kinematics")).toBeInTheDocument();
+    expect(screen.getByText("11P1")).toBeInTheDocument();
+    expect(screen.getByText("Vectors")).toBeInTheDocument();
+    expect(screen.getByText("11P2")).toBeInTheDocument();
+    expect(screen.getAllByRole("cell", { name: "1/1" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("cell", { name: "0/1" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("cell", { name: "25m / 0h" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Actual time on zero prescribed minutes")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save|edit|delete/i })).not.toBeInTheDocument();
   });
 
   it("renders sortable headers that preserve filters and reset pagination", async () => {

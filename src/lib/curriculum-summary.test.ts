@@ -94,7 +94,8 @@ describe("curriculum summary", () => {
           flagged: false,
           flag_reasons: [],
         },
-      ]);
+      ])
+      .mockResolvedValueOnce([]);
 
     const result = await getCurriculumSummary({
       actorEmail: "pm@avantifellows.org",
@@ -152,7 +153,7 @@ describe("curriculum summary", () => {
         },
       ],
     });
-    expect(mockQuery).toHaveBeenCalledTimes(4);
+    expect(mockQuery).toHaveBeenCalledTimes(5);
   });
 
   it("returns computed metrics and weighted stats for the full filtered set before pagination", async () => {
@@ -204,7 +205,8 @@ describe("curriculum summary", () => {
           flagged: true,
           flag_reasons: ["under_prescribed_hours"],
         },
-      ]);
+      ])
+      .mockResolvedValueOnce([]);
 
     const result = await getCurriculumSummary({
       actorEmail: "pm@avantifellows.org",
@@ -293,7 +295,8 @@ describe("curriculum summary", () => {
           flagged: true,
           flag_reasons: ["actual_time_on_zero_prescribed_minutes"],
         },
-      ]);
+      ])
+      .mockResolvedValueOnce([]);
 
     const result = await getCurriculumSummary({
       actorEmail: "pm@avantifellows.org",
@@ -773,5 +776,125 @@ describe("curriculum summary", () => {
       totalPages: 2,
     });
     expect(mockQuery.mock.calls[3][1].slice(-2)).toEqual([10, 10]);
+  });
+
+  it("loads chapter rows only for the current page top-level rows", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+          states: [],
+          districts: [],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(12))
+      .mockResolvedValueOnce([
+        {
+          total_rows: 12,
+          flagged_rows: 0,
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          total_count: 12,
+          school_code: "70705",
+          school_name: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          program_id: 1,
+          program_name: "JNV CoE",
+          grade: 11,
+          subject_id: 4,
+          subject_name: "Physics",
+          exam_track: "jee_main",
+          completed_chapters: 0,
+          total_configured_chapters: 2,
+          prescribed_chapters: 1,
+          actual_minutes: 95,
+          prescribed_minutes: 90,
+          delta_percent: 5.5555555556,
+          flagged: false,
+          flag_reasons: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          parent_row_key: "70705:1:11:4:jee_main",
+          chapter_id: 44,
+          chapter_code: "11P1",
+          chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+          coverage_sequence: 2,
+          completed_count: 1,
+          prescribed_count: 1,
+          actual_minutes: 95,
+          prescribed_minutes: 90,
+          delta_percent: 5.5555555556,
+          flagged: false,
+          flag_reasons: [],
+        },
+      ]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 2,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      chapterRowsByParentKey: {
+        "70705:1:11:4:jee_main": [
+          {
+            parentRowKey: "70705:1:11:4:jee_main",
+            chapterId: 44,
+            chapterCode: "11P1",
+            chapterName: "Kinematics",
+            coverageSequence: 2,
+            completedCount: 1,
+            prescribedCount: 1,
+            actualMinutes: 95,
+            prescribedMinutes: 90,
+            deltaPercent: 5.5555555556,
+            flagged: false,
+            flagReasons: [],
+          },
+        ],
+      },
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(5);
+    const chapterSql = String(mockQuery.mock.calls[4][0]).replace(/\s+/g, " ");
+    expect(chapterSql).toContain("current_page_rows AS");
+    expect(chapterSql.indexOf("LIMIT $18 OFFSET $19")).toBeLessThan(
+      chapterSql.lastIndexOf("JOIN lms_chapter_exam_configs cfg")
+    );
+    expect(chapterSql).toContain("cfg.is_in_syllabus = true");
+    expect(chapterSql).toContain(
+      "ROUND( duration_minutes::numeric * (topics_in_chapter_for_log::numeric / NULLIF(total_topics_in_log, 0)::numeric) )"
+    );
+    expect(chapterSql).toContain("cc.deleted_at IS NULL");
+    expect(chapterSql).toContain("cmr.delta_percent < -10");
+    expect(chapterSql).toContain("cmr.delta_percent > 10");
+    expect(chapterSql).toContain("cmr.prescribed_minutes > 0 AND cmr.completed_count = 0");
+    expect(chapterSql).toContain("cmr.prescribed_minutes = 0 AND cmr.actual_minutes > 0");
+    expect(chapterSql).toContain(
+      "ORDER BY page_row_order ASC, coverage_sequence ASC NULLS LAST, chapter_code ASC, chapter_sort_name ASC, chapter_id ASC"
+    );
+    expect(mockQuery.mock.calls[4][1].slice(-2)).toEqual([10, 10]);
   });
 });

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
@@ -14,6 +14,7 @@ import {
   normalizeCurriculumSummarySearchParams,
   normalizeCurriculumSummarySort,
   type CurriculumSummaryDatePreset,
+  type CurriculumSummaryChapterRow,
   type CurriculumSummaryFilterOptions,
   type CurriculumSummaryFilters,
   type CurriculumSummaryRow,
@@ -220,6 +221,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
               ) : (
                 <CurriculumSummaryTable
                   rows={summary.rows}
+                  chapterRowsByParentKey={summary.chapterRowsByParentKey}
                   sort={summary.sort}
                   dir={summary.dir}
                   currentParams={resolvedSearchParams}
@@ -376,11 +378,13 @@ function FilterField({
 
 function CurriculumSummaryTable({
   rows,
+  chapterRowsByParentKey,
   sort,
   dir,
   currentParams,
 }: {
   rows: CurriculumSummaryRow[];
+  chapterRowsByParentKey: Record<string, CurriculumSummaryChapterRow[]>;
   sort: CurriculumSummarySortKey;
   dir: CurriculumSummarySortDirection;
   currentParams: Record<string, string | undefined>;
@@ -429,59 +433,162 @@ function CurriculumSummaryTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border bg-bg-card">
-          {rows.map((row) => (
-            <tr key={row.rowKey}>
-              <td className="whitespace-nowrap px-4 py-3 font-medium text-text-primary">
-                <span>{row.schoolName}</span>{" "}
-                <span className="text-text-muted">{row.schoolCode}</span>
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {row.programName}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {row.grade}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {row.subjectName}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatExamTrack(row.examTrack)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatCoverage(row.completedChapters, row.totalConfiguredChapters)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatCoverage(row.prescribedChapters, row.totalConfiguredChapters)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatDelta(row.deltaPercent)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatHours(row.actualMinutes)} / {formatHours(row.prescribedMinutes)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                <div className="flex max-w-xs flex-col gap-1">
-                  <span className={row.flagged ? "font-bold text-danger" : ""}>
-                    {row.flagged ? "Yes" : "No"}
-                  </span>
-                  {row.flagReasons.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {row.flagReasons.map((reason) => (
-                        <span
-                          key={reason}
-                          className="rounded border border-warning-border bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text"
-                        >
-                          {formatFlagReason(reason)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const chapterRows = chapterRowsByParentKey[row.rowKey] ?? [];
+
+            return (
+              <Fragment key={row.rowKey}>
+                <tr>
+                  <td className="whitespace-nowrap px-4 py-3 font-medium text-text-primary">
+                    <span>{row.schoolName}</span>{" "}
+                    <span className="text-text-muted">{row.schoolCode}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {row.programName}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {row.grade}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {row.subjectName}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {formatExamTrack(row.examTrack)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {formatCoverage(row.completedChapters, row.totalConfiguredChapters)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {formatCoverage(row.prescribedChapters, row.totalConfiguredChapters)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {formatDelta(row.deltaPercent)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {formatHours(row.actualMinutes)} / {formatHours(row.prescribedMinutes)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    <FlagReasons flagged={row.flagged} reasons={row.flagReasons} />
+                  </td>
+                </tr>
+                <tr>
+                  <td colSpan={10} className="bg-bg-muted px-4 py-4">
+                    <ChapterExpansionTable chapterRows={chapterRows} />
+                  </td>
+                </tr>
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ChapterExpansionTable({
+  chapterRows,
+}: {
+  chapterRows: CurriculumSummaryChapterRow[];
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+        <h3 className="text-sm font-bold text-text-primary">Chapter expansion</h3>
+        <p className="max-w-3xl text-xs text-text-muted">
+          Chapter Actual Hours use allocated rounded minutes from covered topics and
+          may not sum exactly to top-level Actual Hours, which use raw log duration.
+        </p>
+      </div>
+      {chapterRows.length === 0 ? (
+        <p className="text-sm text-text-secondary">
+          No in-syllabus chapter rows are configured for this row.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="min-w-full divide-y divide-border text-xs">
+            <thead className="bg-bg-card">
+              <tr>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Chapter
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Code
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Completed
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Prescribed
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Delta %
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Lecture vs prescribed
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Flagged
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border bg-bg-card">
+              {chapterRows.map((chapter) => (
+                <tr key={`${chapter.parentRowKey}:${chapter.chapterId}`}>
+                  <td className="whitespace-nowrap px-3 py-2 font-medium text-text-primary">
+                    {chapter.chapterName}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {chapter.chapterCode}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {formatChapterCoverage(chapter.completedCount)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {formatChapterCoverage(chapter.prescribedCount)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {formatDelta(chapter.deltaPercent)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {formatHours(chapter.actualMinutes)} / {formatHours(chapter.prescribedMinutes)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    <FlagReasons flagged={chapter.flagged} reasons={chapter.flagReasons} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FlagReasons({
+  flagged,
+  reasons,
+}: {
+  flagged: boolean;
+  reasons: string[];
+}) {
+  return (
+    <div className="flex max-w-xs flex-col gap-1">
+      <span className={flagged ? "font-bold text-danger" : ""}>
+        {flagged ? "Yes" : "No"}
+      </span>
+      {reasons.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {reasons.map((reason) => (
+            <span
+              key={reason}
+              className="rounded border border-warning-border bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text"
+            >
+              {formatFlagReason(reason)}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -635,6 +742,10 @@ function formatCoverage(count: number, total: number): string {
   return `${count}/${total}${pct}`;
 }
 
+function formatChapterCoverage(count: number): string {
+  return `${count}/1`;
+}
+
 function formatPercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) {
     return "—";
@@ -675,6 +786,8 @@ function formatFlagReason(reason: string): string {
       return "Completion below prescribed coverage";
     case "actual_time_on_zero_prescribed_minutes":
       return "Actual time on zero prescribed minutes";
+    case "incomplete_prescribed_chapter":
+      return "Incomplete prescribed chapter";
     default:
       return reason;
   }

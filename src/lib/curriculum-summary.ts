@@ -111,6 +111,21 @@ export interface CurriculumSummaryRow {
   flagReasons: string[];
 }
 
+export interface CurriculumSummaryChapterRow {
+  parentRowKey: string;
+  chapterId: number;
+  chapterCode: string;
+  chapterName: string;
+  coverageSequence: number;
+  completedCount: 0 | 1;
+  prescribedCount: 0 | 1;
+  actualMinutes: number;
+  prescribedMinutes: number;
+  deltaPercent: number | null;
+  flagged: boolean;
+  flagReasons: string[];
+}
+
 export type CurriculumSummaryResult =
   | {
       ok: true;
@@ -120,6 +135,7 @@ export type CurriculumSummaryResult =
       filterOptions: CurriculumSummaryFilterOptions;
       stats: CurriculumSummaryStats;
       rows: CurriculumSummaryRow[];
+      chapterRowsByParentKey: Record<string, CurriculumSummaryChapterRow[]>;
       totalRowCount: number;
       currentPage: number;
       totalPages: number;
@@ -134,6 +150,7 @@ export type CurriculumSummaryResult =
       filterOptions: CurriculumSummaryFilterOptions;
       stats: CurriculumSummaryStats;
       rows: [];
+      chapterRowsByParentKey: Record<string, CurriculumSummaryChapterRow[]>;
       totalRowCount: 0;
       currentPage: number;
       totalPages: 0;
@@ -169,6 +186,21 @@ interface SummaryQueryRow {
   completed_chapters: string | number | null;
   total_configured_chapters: string | number | null;
   prescribed_chapters: string | number | null;
+  actual_minutes: string | number | null;
+  prescribed_minutes: string | number | null;
+  delta_percent: string | number | null;
+  flagged: boolean | string | null;
+  flag_reasons: unknown;
+}
+
+interface ChapterQueryRow {
+  parent_row_key: string;
+  chapter_id: string | number;
+  chapter_code: string | null;
+  chapter_name: unknown;
+  coverage_sequence: string | number | null;
+  completed_count: string | number | null;
+  prescribed_count: string | number | null;
   actual_minutes: string | number | null;
   prescribed_minutes: string | number | null;
   delta_percent: string | number | null;
@@ -275,6 +307,7 @@ export async function getCurriculumSummary(
       filterOptions,
       stats: emptyStats(),
       rows: [],
+      chapterRowsByParentKey: {},
       totalRowCount: 0,
       currentPage: page,
       totalPages: 0,
@@ -294,6 +327,7 @@ export async function getCurriculumSummary(
       filterOptions,
       stats: emptyStats(),
       rows: [],
+      chapterRowsByParentKey: {},
       totalRowCount: 0,
       currentPage: page,
       totalPages: 0,
@@ -313,6 +347,12 @@ export async function getCurriculumSummary(
     buildRowsSql(params.sort, params.dir),
     [...metricParams, pageSize, offset]
   );
+  const chapterRows = rowRows.length
+    ? await query<ChapterQueryRow>(
+        buildChapterRowsSql(params.sort, params.dir),
+        [...metricParams, pageSize, offset]
+      )
+    : [];
 
   return {
     ok: true,
@@ -320,6 +360,7 @@ export async function getCurriculumSummary(
     filterOptions,
     stats,
     rows: rowRows.map(mapSummaryRow),
+    chapterRowsByParentKey: mapChapterRowsByParentKey(chapterRows),
     totalRowCount,
     currentPage,
     totalPages,
@@ -677,6 +718,209 @@ function buildRowsSql(
     LIMIT $18 OFFSET $19`;
 }
 
+function buildChapterRowsSql(
+  sort: CurriculumSummarySortKey,
+  dir: CurriculumSummarySortDirection
+): string {
+  return `${buildComputedRowsSql()},
+    current_page_rows AS (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (ORDER BY ${buildOrderClause(sort, dir)}) AS page_row_order
+      FROM computed_filtered_rows
+      ORDER BY ${buildOrderClause(sort, dir)}
+      LIMIT $18 OFFSET $19
+    ),
+    scoped_log_topics AS (
+      SELECT
+        cpr.school_code,
+        cpr.program_id,
+        cpr.grade_id,
+        cpr.subject_id,
+        cpr.exam_track,
+        l.id AS log_id,
+        l.duration_minutes,
+        lt.topic_id,
+        COUNT(*) OVER (
+          PARTITION BY
+            cpr.school_code,
+            cpr.program_id,
+            cpr.grade_id,
+            cpr.subject_id,
+            cpr.exam_track,
+            l.id
+        ) AS total_topics_in_log
+      FROM current_page_rows cpr
+      JOIN lms_curriculum_logs l
+        ON l.school_code = cpr.school_code
+       AND l.program_id = cpr.program_id
+       AND l.grade_id = cpr.grade_id
+       AND l.subject_id = cpr.subject_id
+       AND l.exam_track = cpr.exam_track
+       AND l.deleted_at IS NULL
+       AND ($15::date IS NULL OR l.log_date >= $15::date)
+       AND ($16::date IS NULL OR l.log_date <= $16::date)
+      JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
+    ),
+    chapter_log_allocations AS (
+      SELECT
+        slt.school_code,
+        slt.program_id,
+        slt.grade_id,
+        slt.subject_id,
+        slt.exam_track,
+        ch.id AS chapter_id,
+        slt.log_id,
+        MAX(slt.duration_minutes)::int AS duration_minutes,
+        MAX(slt.total_topics_in_log)::int AS total_topics_in_log,
+        COUNT(DISTINCT slt.topic_id)::int AS topics_in_chapter_for_log
+      FROM scoped_log_topics slt
+      JOIN topic t ON t.id = slt.topic_id
+      JOIN chapter ch
+        ON ch.id = t.chapter_id
+       AND ch.grade_id = slt.grade_id
+       AND ch.subject_id = slt.subject_id
+      JOIN lms_chapter_exam_configs cfg
+        ON cfg.chapter_id = ch.id
+       AND cfg.exam_track = slt.exam_track
+       AND cfg.is_in_syllabus = true
+      GROUP BY
+        slt.school_code,
+        slt.program_id,
+        slt.grade_id,
+        slt.subject_id,
+        slt.exam_track,
+        ch.id,
+        slt.log_id
+    ),
+    chapter_actual_minutes AS (
+      SELECT
+        school_code,
+        program_id,
+        grade_id,
+        subject_id,
+        exam_track,
+        chapter_id,
+        COALESCE(
+          SUM(
+            ROUND(
+              duration_minutes::numeric
+              * (topics_in_chapter_for_log::numeric / NULLIF(total_topics_in_log, 0)::numeric)
+            )
+          ),
+          0
+        )::int AS actual_minutes
+      FROM chapter_log_allocations
+      GROUP BY school_code, program_id, grade_id, subject_id, exam_track, chapter_id
+    ),
+    chapter_metric_rows AS (
+      SELECT
+        CONCAT(
+          cpr.school_code,
+          ':',
+          cpr.program_id,
+          ':',
+          cpr.grade,
+          ':',
+          cpr.subject_id,
+          ':',
+          cpr.exam_track
+        ) AS parent_row_key,
+        cpr.page_row_order,
+        ch.id AS chapter_id,
+        ch.code AS chapter_code,
+        ch.name AS chapter_name,
+        COALESCE(
+          (
+            SELECT item->>'chapter'
+            FROM jsonb_array_elements(ch.name::jsonb) item
+            WHERE item->>'lang_code' = 'en'
+            LIMIT 1
+          ),
+          ch.code,
+          'Unknown chapter'
+        ) AS chapter_sort_name,
+        cfg.coverage_sequence,
+        CASE WHEN cc.chapter_id IS NULL THEN 0 ELSE 1 END AS completed_count,
+        CASE WHEN cfg.prescribed_minutes > 0 THEN 1 ELSE 0 END AS prescribed_count,
+        COALESCE(cam.actual_minutes, 0)::int AS actual_minutes,
+        COALESCE(cfg.prescribed_minutes, 0)::int AS prescribed_minutes,
+        CASE
+          WHEN COALESCE(cfg.prescribed_minutes, 0) > 0
+            THEN ((COALESCE(cam.actual_minutes, 0) - cfg.prescribed_minutes)::numeric / cfg.prescribed_minutes::numeric) * 100
+          ELSE NULL
+        END AS delta_percent
+      FROM current_page_rows cpr
+      JOIN lms_chapter_exam_configs cfg
+        ON cfg.exam_track = cpr.exam_track
+       AND cfg.is_in_syllabus = true
+      JOIN chapter ch
+        ON ch.id = cfg.chapter_id
+       AND ch.grade_id = cpr.grade_id
+       AND ch.subject_id = cpr.subject_id
+      LEFT JOIN lms_curriculum_chapter_completions cc
+        ON cc.school_code = cpr.school_code
+       AND cc.program_id = cpr.program_id
+       AND cc.exam_track = cpr.exam_track
+       AND cc.chapter_id = ch.id
+       AND cc.deleted_at IS NULL
+      LEFT JOIN chapter_actual_minutes cam
+        ON cam.school_code = cpr.school_code
+       AND cam.program_id = cpr.program_id
+       AND cam.grade_id = cpr.grade_id
+       AND cam.subject_id = cpr.subject_id
+       AND cam.exam_track = cpr.exam_track
+       AND cam.chapter_id = ch.id
+    ),
+    chapter_computed_rows AS (
+      SELECT
+        cmr.*,
+        ARRAY_REMOVE(ARRAY[
+          CASE
+            WHEN cmr.prescribed_minutes = 0 AND cmr.actual_minutes > 0
+              THEN 'actual_time_on_zero_prescribed_minutes'
+            ELSE NULL
+          END,
+          CASE
+            WHEN cmr.prescribed_minutes > 0 AND cmr.delta_percent < -10
+              THEN 'under_prescribed_hours'
+            ELSE NULL
+          END,
+          CASE
+            WHEN cmr.prescribed_minutes > 0 AND cmr.delta_percent > 10
+              THEN 'over_prescribed_hours'
+            ELSE NULL
+          END,
+          CASE
+            WHEN cmr.prescribed_minutes > 0 AND cmr.completed_count = 0
+              THEN 'incomplete_prescribed_chapter'
+            ELSE NULL
+          END
+        ], NULL) AS flag_reasons
+      FROM chapter_metric_rows cmr
+    )
+    SELECT
+      parent_row_key,
+      chapter_id,
+      chapter_code,
+      chapter_name,
+      coverage_sequence,
+      completed_count,
+      prescribed_count,
+      actual_minutes,
+      prescribed_minutes,
+      delta_percent,
+      CARDINALITY(flag_reasons) > 0 AS flagged,
+      flag_reasons
+    FROM chapter_computed_rows
+    ORDER BY
+      page_row_order ASC,
+      coverage_sequence ASC NULLS LAST,
+      chapter_code ASC,
+      chapter_sort_name ASC,
+      chapter_id ASC`;
+}
+
 function buildOrderClause(
   sort: CurriculumSummarySortKey,
   dir: CurriculumSummarySortDirection
@@ -762,6 +1006,43 @@ function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
   };
 }
 
+function mapChapterRowsByParentKey(
+  rows: ChapterQueryRow[]
+): Record<string, CurriculumSummaryChapterRow[]> {
+  const grouped: Record<string, CurriculumSummaryChapterRow[]> = {};
+
+  for (const row of rows) {
+    const mapped = mapChapterRow(row);
+    grouped[mapped.parentRowKey] = grouped[mapped.parentRowKey] ?? [];
+    grouped[mapped.parentRowKey].push(mapped);
+  }
+
+  return grouped;
+}
+
+function mapChapterRow(row: ChapterQueryRow): CurriculumSummaryChapterRow {
+  const prescribedCount = numberFromDb(row.prescribed_count) > 0 ? 1 : 0;
+  const completedCount = numberFromDb(row.completed_count) > 0 ? 1 : 0;
+
+  return {
+    parentRowKey: String(row.parent_row_key),
+    chapterId: numberFromDb(row.chapter_id),
+    chapterCode: String(row.chapter_code ?? ""),
+    chapterName: normalizeChapterName(row.chapter_name),
+    coverageSequence: numberFromDb(row.coverage_sequence),
+    completedCount,
+    prescribedCount,
+    actualMinutes: numberFromDb(row.actual_minutes),
+    prescribedMinutes: numberFromDb(row.prescribed_minutes),
+    deltaPercent:
+      row.delta_percent === null || row.delta_percent === undefined
+        ? null
+        : Number(row.delta_percent),
+    flagged: row.flagged === true || row.flagged === "true",
+    flagReasons: parseJsonArray<string>(row.flag_reasons).map(String),
+  };
+}
+
 function mapStats(row: StatsQueryRow | undefined): CurriculumSummaryStats {
   if (!row) {
     return emptyStats();
@@ -821,6 +1102,10 @@ function parseJsonArray<T>(value: unknown): T[] {
 function normalizeSubjectName(value: unknown): string {
   const name = extractEnglishName(value, "subject");
   return name === "Mathematics" ? "Maths" : name;
+}
+
+function normalizeChapterName(value: unknown): string {
+  return extractEnglishName(value, "chapter");
 }
 
 function extractEnglishName(value: unknown, field: string): string {
