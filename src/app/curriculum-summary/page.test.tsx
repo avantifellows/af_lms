@@ -6,14 +6,20 @@ const {
   mockGetUserPermission,
   mockGetFeatureAccess,
   mockGetProgramContextSync,
-  mockCheckCurriculumSchema,
+  mockGetCurriculumSummary,
+  mockNormalizeFilters,
+  mockNormalizeSort,
+  mockNormalizePage,
   mockRedirect,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
-  mockCheckCurriculumSchema: vi.fn(),
+  mockGetCurriculumSummary: vi.fn(),
+  mockNormalizeFilters: vi.fn(),
+  mockNormalizeSort: vi.fn(),
+  mockNormalizePage: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -27,8 +33,11 @@ vi.mock("@/lib/permissions", () => ({
   getFeatureAccess: mockGetFeatureAccess,
   getProgramContextSync: mockGetProgramContextSync,
 }));
-vi.mock("@/lib/curriculum-schema", () => ({
-  checkCurriculumSchema: mockCheckCurriculumSchema,
+vi.mock("@/lib/curriculum-summary", () => ({
+  getCurriculumSummary: mockGetCurriculumSummary,
+  normalizeCurriculumSummarySearchParams: mockNormalizeFilters,
+  normalizeCurriculumSummarySort: mockNormalizeSort,
+  normalizeCurriculumSummaryPage: mockNormalizePage,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -64,7 +73,41 @@ const teacherPermission = {
   email: "teacher@avantifellows.org",
   role: "teacher",
 };
-const schemaReady = { ok: true };
+const defaultFilters = {
+  schools: [],
+  programs: [],
+  grades: [],
+  subjects: [],
+  examTracks: [],
+  regions: [],
+  states: [],
+  districts: [],
+  preset: "current_academic_year",
+  from: "2026-04-01",
+  to: "2026-05-30",
+  flagged: false,
+  forceEmpty: false,
+};
+const emptySummaryResult = {
+  ok: true,
+  activeFilters: defaultFilters,
+  filterOptions: {
+    schools: [],
+    programs: [],
+    grades: [],
+    subjects: [],
+    examTracks: [],
+    regions: [],
+    states: [],
+    districts: [],
+  },
+  rows: [],
+  totalRowCount: 0,
+  currentPage: 1,
+  totalPages: 0,
+  sort: "school",
+  dir: "asc",
+};
 const coeNodalProgramContext = {
   hasAccess: true,
   programIds: [1, 2],
@@ -78,6 +121,10 @@ describe("CurriculumSummaryPage", () => {
     mockRedirect.mockImplementation((url: string) => {
       throw new Error(`REDIRECT:${url}`);
     });
+    mockNormalizeFilters.mockReturnValue(defaultFilters);
+    mockNormalizeSort.mockReturnValue({ sort: "school", dir: "asc" });
+    mockNormalizePage.mockReturnValue(1);
+    mockGetCurriculumSummary.mockResolvedValue(emptySummaryResult);
   });
 
   it("redirects unauthenticated users to /", async () => {
@@ -177,7 +224,7 @@ describe("CurriculumSummaryPage", () => {
       canEdit: false,
     });
     mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
-    mockCheckCurriculumSchema.mockResolvedValue({
+    mockGetCurriculumSummary.mockResolvedValue({
       ok: false,
       status: 503,
       error: "LMS curriculum schema unavailable",
@@ -214,7 +261,7 @@ describe("CurriculumSummaryPage", () => {
         canEdit: false,
       });
       mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
-      mockCheckCurriculumSchema.mockResolvedValue(schemaReady);
+      mockGetCurriculumSummary.mockResolvedValue(emptySummaryResult);
 
       const jsx = await CurriculumSummaryPage({
         searchParams: defaultSearchParams,
@@ -225,7 +272,72 @@ describe("CurriculumSummaryPage", () => {
         screen.getByRole("heading", { level: 1, name: "Curriculum Summary" })
       ).toBeInTheDocument();
       expect(screen.getByText("Read only")).toBeInTheDocument();
-      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Apply filters" })
+      ).toBeInTheDocument();
     }
   );
+
+  it("renders expected Curriculum Summary row grain from the helper result", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [{ code: "70705", name: "JNV Bhavnagar" }],
+        programs: [{ id: 1, name: "JNV CoE" }],
+        grades: [11],
+        subjects: [{ id: 4, name: "Physics" }],
+        examTracks: ["jee_main"],
+      },
+      rows: [
+        {
+          rowKey: "70705:1:11:4:jee_main",
+          schoolCode: "70705",
+          schoolName: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          programId: 1,
+          programName: "JNV CoE",
+          grade: 11,
+          subjectId: 4,
+          subjectName: "Physics",
+          examTrack: "jee_main",
+          completedChapters: 0,
+          totalConfiguredChapters: 0,
+          prescribedChapters: 0,
+          actualMinutes: 0,
+          prescribedMinutes: 0,
+          deltaPercent: null,
+          flagged: false,
+          flagReasons: [],
+        },
+      ],
+      totalRowCount: 1,
+      totalPages: 1,
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({ schools: "70705" }),
+    });
+    render(jsx);
+
+    expect(screen.getByText("Current academic year: 2026-04-01 to 2026-05-30")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Exam Track" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "JNV Bhavnagar 70705" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "JNV CoE" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "11" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Physics" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "JEE Main" })).toBeInTheDocument();
+    expect(screen.getByText("Total Rows")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+  });
 });
