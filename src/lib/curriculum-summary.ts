@@ -247,8 +247,8 @@ export function normalizeCurriculumSummarySearchParams(
   const preset =
     requestedPreset ?? (manualFrom || manualTo ? "custom" : "current_academic_year");
   const presetRange = resolvePresetDateRange(preset, todayIstDate);
-  const from = presetRange?.from ?? manualFrom;
-  const to = presetRange?.to ?? manualTo;
+  const from = preset === "all" ? undefined : presetRange?.from ?? manualFrom;
+  const to = preset === "all" ? undefined : presetRange?.to ?? manualTo;
 
   return {
     schools: parseStringList(searchParams.schools, isSchoolCode),
@@ -1161,7 +1161,7 @@ function isExamTrack(value: string): value is ExamTrack {
 }
 
 function isSortKey(value: string | undefined): value is CurriculumSummarySortKey {
-  return Boolean(value && value in SORT_SQL);
+  return Boolean(value && Object.prototype.hasOwnProperty.call(SORT_SQL, value));
 }
 
 function normalizePreset(value: string | undefined): CurriculumSummaryDatePreset | null {

@@ -352,6 +352,24 @@ describe("curriculum summary", () => {
     });
   });
 
+  it("treats all-date preset as unbounded even when stale date inputs are submitted", () => {
+    const filters = normalizeCurriculumSummarySearchParams(
+      {
+        preset: "all",
+        from: "2026-05-01",
+        to: "2026-05-30",
+      },
+      "2026-05-30"
+    );
+
+    expect(filters).toMatchObject({
+      preset: "all",
+      from: undefined,
+      to: undefined,
+      forceEmpty: false,
+    });
+  });
+
   it("normalizes supported sort keys with a safe deterministic default", () => {
     expect(normalizeCurriculumSummarySort(undefined, undefined)).toEqual({
       sort: "flagged",
@@ -382,6 +400,10 @@ describe("curriculum summary", () => {
     ).toEqual({
       sort: "flagged",
       dir: "desc",
+    });
+    expect(normalizeCurriculumSummarySort("toString", "asc")).toEqual({
+      sort: "flagged",
+      dir: "asc",
     });
   });
 
