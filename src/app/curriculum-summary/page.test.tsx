@@ -368,4 +368,192 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByText("33.3%")).toBeInTheDocument();
     expect(screen.getByText("83.3%")).toBeInTheDocument();
   });
+
+  it("renders sortable headers that preserve filters and reset pagination", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockNormalizeSort.mockReturnValue({ sort: "school", dir: "asc" });
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      rows: [
+        {
+          rowKey: "70705:1:11:4:jee_main",
+          schoolCode: "70705",
+          schoolName: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          programId: 1,
+          programName: "JNV CoE",
+          grade: 11,
+          subjectId: 4,
+          subjectName: "Physics",
+          examTrack: "jee_main",
+          completedChapters: 1,
+          totalConfiguredChapters: 2,
+          prescribedChapters: 2,
+          actualMinutes: 90,
+          prescribedMinutes: 210,
+          deltaPercent: -57.14285714285714,
+          flagged: true,
+          flagReasons: ["under_prescribed_hours"],
+        },
+      ],
+      totalRowCount: 1,
+      totalPages: 1,
+      sort: "school",
+      dir: "asc",
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({
+        schools: "70705",
+        flagged: "true",
+        sort: "school",
+        dir: "asc",
+        page: "3",
+      }),
+    });
+    render(jsx);
+
+    expect(screen.getByRole("link", { name: "School ↑" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?schools=70705&flagged=true&sort=school&dir=desc"
+    );
+    expect(screen.getByRole("link", { name: "Delta %" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?schools=70705&flagged=true&sort=delta&dir=asc"
+    );
+    expect(screen.getByRole("link", { name: "Flagged" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?schools=70705&flagged=true&sort=flagged&dir=desc"
+    );
+  });
+
+  it("renders pagination links that preserve active filters and sorting", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockNormalizeSort.mockReturnValue({ sort: "delta", dir: "asc" });
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      rows: [
+        {
+          rowKey: "70705:1:11:4:jee_main",
+          schoolCode: "70705",
+          schoolName: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          programId: 1,
+          programName: "JNV CoE",
+          grade: 11,
+          subjectId: 4,
+          subjectName: "Physics",
+          examTrack: "jee_main",
+          completedChapters: 1,
+          totalConfiguredChapters: 2,
+          prescribedChapters: 2,
+          actualMinutes: 90,
+          prescribedMinutes: 210,
+          deltaPercent: -57.14285714285714,
+          flagged: true,
+          flagReasons: ["under_prescribed_hours"],
+        },
+      ],
+      totalRowCount: 30,
+      currentPage: 2,
+      totalPages: 3,
+      sort: "delta",
+      dir: "asc",
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({
+        schools: "70705",
+        sort: "delta",
+        dir: "asc",
+        page: "2",
+      }),
+    });
+    render(jsx);
+
+    expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Previous" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?schools=70705&sort=delta&dir=asc&page=1"
+    );
+    expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary?schools=70705&sort=delta&dir=asc&page=3"
+    );
+  });
+
+  it("renders a narrow-filters state when the row-count guard trips", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      rowCountGuardTripped: true,
+      estimatedRowCount: 10001,
+      rows: [],
+      totalRowCount: 0,
+      totalPages: 0,
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    expect(
+      screen.getByText("Narrow filters to load Curriculum Summary")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/More than 10,000 expected Curriculum Summary rows/)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No Curriculum Summary rows match the selected filters.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the dense filters inside a disclosure control", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue(emptySummaryResult);
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    expect(screen.getByText("Filters")).toBeInTheDocument();
+    expect(screen.getByLabelText("Schools")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Apply filters" })
+    ).toBeInTheDocument();
+  });
 });

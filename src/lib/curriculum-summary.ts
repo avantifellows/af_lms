@@ -8,7 +8,12 @@ export type CurriculumSummarySortKey =
   | "program"
   | "grade"
   | "subject"
-  | "exam_track";
+  | "exam_track"
+  | "completed"
+  | "prescribed"
+  | "delta"
+  | "actual"
+  | "flagged";
 export type CurriculumSummarySortDirection = "asc" | "desc";
 export type CurriculumSummaryDatePreset =
   | "today"
@@ -109,6 +114,8 @@ export interface CurriculumSummaryRow {
 export type CurriculumSummaryResult =
   | {
       ok: true;
+      rowCountGuardTripped?: false;
+      estimatedRowCount?: number;
       activeFilters: CurriculumSummaryFilters;
       filterOptions: CurriculumSummaryFilterOptions;
       stats: CurriculumSummaryStats;
@@ -116,6 +123,20 @@ export type CurriculumSummaryResult =
       totalRowCount: number;
       currentPage: number;
       totalPages: number;
+      sort: CurriculumSummarySortKey;
+      dir: CurriculumSummarySortDirection;
+    }
+  | {
+      ok: true;
+      rowCountGuardTripped: true;
+      estimatedRowCount: number;
+      activeFilters: CurriculumSummaryFilters;
+      filterOptions: CurriculumSummaryFilterOptions;
+      stats: CurriculumSummaryStats;
+      rows: [];
+      totalRowCount: 0;
+      currentPage: number;
+      totalPages: 0;
       sort: CurriculumSummarySortKey;
       dir: CurriculumSummarySortDirection;
     }
@@ -165,6 +186,10 @@ interface StatsQueryRow {
   prescribed_minutes: string | number | null;
 }
 
+interface GuardQueryRow {
+  estimated_rows: string | number | null;
+}
+
 const CURRICULUM_PROGRAM_IDS = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
 const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 const SORT_SQL: Record<CurriculumSummarySortKey, string> = {
@@ -173,6 +198,11 @@ const SORT_SQL: Record<CurriculumSummarySortKey, string> = {
   grade: "grade",
   subject: "subject_name",
   exam_track: "exam_track",
+  completed: "completed_percent",
+  prescribed: "prescribed_percent",
+  delta: "delta_percent",
+  actual: "actual_minutes",
+  flagged: "flagged",
 };
 
 export function normalizeCurriculumSummarySearchParams(
@@ -209,10 +239,10 @@ export function normalizeCurriculumSummarySort(
   sort?: string,
   dir?: string
 ): { sort: CurriculumSummarySortKey; dir: CurriculumSummarySortDirection } {
-  const normalizedSort = isSortKey(sort) ? sort : "school";
+  const normalizedSort = isSortKey(sort) ? sort : "flagged";
   return {
     sort: normalizedSort,
-    dir: dir === "desc" ? "desc" : "asc",
+    dir: dir === "asc" ? "asc" : "desc",
   };
 }
 
@@ -253,16 +283,36 @@ export async function getCurriculumSummary(
     };
   }
 
-  const offset = (page - 1) * pageSize;
+  const guardRows = await query<GuardQueryRow>(buildRowCountGuardSql(), commonParams);
+  const estimatedRowCount = numberFromDb(guardRows[0]?.estimated_rows);
+  if (estimatedRowCount > 10000) {
+    return {
+      ok: true,
+      rowCountGuardTripped: true,
+      estimatedRowCount,
+      activeFilters: params.filters,
+      filterOptions,
+      stats: emptyStats(),
+      rows: [],
+      totalRowCount: 0,
+      currentPage: page,
+      totalPages: 0,
+      sort: params.sort,
+      dir: params.dir,
+    };
+  }
+
   const metricParams = buildMetricQueryParams(commonParams, params.filters);
   const statsRows = await query<StatsQueryRow>(buildStatsSql(), metricParams);
   const stats = mapStats(statsRows[0]);
+  const totalRowCount = stats.totalRows;
+  const totalPages = totalRowCount === 0 ? 0 : Math.ceil(totalRowCount / pageSize);
+  const currentPage = totalPages === 0 ? page : Math.min(page, totalPages);
+  const offset = (currentPage - 1) * pageSize;
   const rowRows = await query<SummaryQueryRow>(
     buildRowsSql(params.sort, params.dir),
     [...metricParams, pageSize, offset]
   );
-  const totalRowCount = stats.totalRows;
-  const totalPages = totalRowCount === 0 ? 0 : Math.ceil(totalRowCount / pageSize);
 
   return {
     ok: true,
@@ -271,7 +321,7 @@ export async function getCurriculumSummary(
     stats,
     rows: rowRows.map(mapSummaryRow),
     totalRowCount,
-    currentPage: page,
+    currentPage,
     totalPages,
     sort: params.sort,
     dir: params.dir,
@@ -463,6 +513,16 @@ function buildComputedRowsSql(): string {
         COALESCE(am.actual_minutes, 0)::int AS actual_minutes,
         COALESCE(cm.prescribed_minutes, 0)::int AS prescribed_minutes,
         CASE
+          WHEN COALESCE(cm.total_configured_chapters, 0) > 0
+            THEN (COALESCE(cc.completed_chapters, 0)::numeric / cm.total_configured_chapters::numeric) * 100
+          ELSE NULL
+        END AS completed_percent,
+        CASE
+          WHEN COALESCE(cm.total_configured_chapters, 0) > 0
+            THEN (COALESCE(cm.prescribed_chapters, 0)::numeric / cm.total_configured_chapters::numeric) * 100
+          ELSE NULL
+        END AS prescribed_percent,
+        CASE
           WHEN COALESCE(cm.prescribed_minutes, 0) > 0
             THEN ((COALESCE(am.actual_minutes, 0) - cm.prescribed_minutes)::numeric / cm.prescribed_minutes::numeric) * 100
           ELSE NULL
@@ -517,7 +577,12 @@ function buildComputedRowsSql(): string {
     computed_filtered_rows AS (
       SELECT
         cr.*,
-        CARDINALITY(cr.flag_reasons) > 0 AS flagged
+        CARDINALITY(cr.flag_reasons) > 0 AS flagged,
+        CASE
+          WHEN 'actual_time_on_zero_prescribed_minutes' = ANY(cr.flag_reasons) THEN 0
+          WHEN CARDINALITY(cr.flag_reasons) > 0 THEN 1
+          ELSE 2
+        END AS flag_priority
       FROM computed_rows cr
       WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
     )`;
@@ -571,13 +636,20 @@ function buildOptionsSql(): string {
     GROUP BY geo_options.regions, geo_options.states, geo_options.districts`;
 }
 
+function buildRowCountGuardSql(): string {
+  return `${buildScopedUniverseSql()}
+    SELECT COUNT(*)::int AS estimated_rows
+    FROM (
+      SELECT 1
+      FROM filtered_rows
+      LIMIT 10001
+    ) capped_rows`;
+}
+
 function buildRowsSql(
   sort: CurriculumSummarySortKey,
   dir: CurriculumSummarySortDirection
 ): string {
-  const sortColumn = SORT_SQL[sort];
-  const direction = dir === "desc" ? "DESC" : "ASC";
-
   return `${buildComputedRowsSql()}
     SELECT
       COUNT(*) OVER() AS total_count,
@@ -601,8 +673,25 @@ function buildRowsSql(
       flagged,
       flag_reasons
     FROM computed_filtered_rows
-    ORDER BY ${sortColumn} ${direction}, school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC
+    ORDER BY ${buildOrderClause(sort, dir)}
     LIMIT $18 OFFSET $19`;
+}
+
+function buildOrderClause(
+  sort: CurriculumSummarySortKey,
+  dir: CurriculumSummarySortDirection
+): string {
+  const direction = dir === "desc" ? "DESC" : "ASC";
+  const tieBreakers =
+    "school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC";
+
+  if (sort === "flagged" && dir === "desc") {
+    return `flagged DESC, flag_priority ASC, delta_percent ASC NULLS LAST, ${tieBreakers}`;
+  }
+
+  const sortColumn = SORT_SQL[sort];
+  const nullsClause = sort === "delta" ? " NULLS LAST" : "";
+  return `${sortColumn} ${direction}${nullsClause}, ${tieBreakers}`;
 }
 
 function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFilterOptions {

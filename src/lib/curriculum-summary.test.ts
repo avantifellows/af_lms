@@ -15,6 +15,7 @@ vi.mock("./curriculum-schema", () => ({
 import {
   getCurriculumSummary,
   normalizeCurriculumSummarySearchParams,
+  normalizeCurriculumSummarySort,
 } from "./curriculum-summary";
 
 const pmPermission: UserPermission = {
@@ -25,6 +26,10 @@ const pmPermission: UserPermission = {
   regions: null,
   program_ids: [1, 2],
 };
+
+function guardRows(estimatedRows = 1) {
+  return [{ estimated_rows: estimatedRows }];
+}
 
 describe("curriculum summary", () => {
   beforeEach(() => {
@@ -54,6 +59,7 @@ describe("curriculum summary", () => {
           districts: ["Bhavnagar"],
         },
       ])
+      .mockResolvedValueOnce(guardRows())
       .mockResolvedValueOnce([
         {
           total_rows: 1,
@@ -146,7 +152,7 @@ describe("curriculum summary", () => {
         },
       ],
     });
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    expect(mockQuery).toHaveBeenCalledTimes(4);
   });
 
   it("returns computed metrics and weighted stats for the full filtered set before pagination", async () => {
@@ -163,6 +169,7 @@ describe("curriculum summary", () => {
           districts: [],
         },
       ])
+      .mockResolvedValueOnce(guardRows(2))
       .mockResolvedValueOnce([
         {
           total_rows: 2,
@@ -251,6 +258,7 @@ describe("curriculum summary", () => {
           districts: [],
         },
       ])
+      .mockResolvedValueOnce(guardRows(0))
       .mockResolvedValueOnce([
         {
           total_rows: 1,
@@ -341,6 +349,39 @@ describe("curriculum summary", () => {
     });
   });
 
+  it("normalizes supported sort keys with a safe deterministic default", () => {
+    expect(normalizeCurriculumSummarySort(undefined, undefined)).toEqual({
+      sort: "flagged",
+      dir: "desc",
+    });
+    expect(normalizeCurriculumSummarySort("completed", "asc")).toEqual({
+      sort: "completed",
+      dir: "asc",
+    });
+    expect(normalizeCurriculumSummarySort("prescribed", "desc")).toEqual({
+      sort: "prescribed",
+      dir: "desc",
+    });
+    expect(normalizeCurriculumSummarySort("delta", "desc")).toEqual({
+      sort: "delta",
+      dir: "desc",
+    });
+    expect(normalizeCurriculumSummarySort("actual", "asc")).toEqual({
+      sort: "actual",
+      dir: "asc",
+    });
+    expect(normalizeCurriculumSummarySort("flagged", "asc")).toEqual({
+      sort: "flagged",
+      dir: "asc",
+    });
+    expect(
+      normalizeCurriculumSummarySort("delta; DROP TABLE school", "asc; DROP")
+    ).toEqual({
+      sort: "flagged",
+      dir: "desc",
+    });
+  });
+
   it("keeps geography filter options independent from expected-row filters", async () => {
     mockQuery
       .mockResolvedValueOnce([
@@ -355,6 +396,7 @@ describe("curriculum summary", () => {
           districts: ["Bhavnagar"],
         },
       ])
+      .mockResolvedValueOnce(guardRows(0))
       .mockResolvedValueOnce([
         {
           total_rows: 0,
@@ -472,7 +514,7 @@ describe("curriculum summary", () => {
         states: [],
         districts: [],
       },
-    ]).mockResolvedValueOnce([
+    ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
       {
         total_rows: 0,
         flagged_rows: 0,
@@ -526,7 +568,7 @@ describe("curriculum summary", () => {
         states: [],
         districts: [],
       },
-    ]).mockResolvedValueOnce([
+    ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
       {
         total_rows: 0,
         flagged_rows: 0,
@@ -552,8 +594,8 @@ describe("curriculum summary", () => {
       todayIstDate: "2026-05-30",
     });
 
-    const statsCall = mockQuery.mock.calls[1];
-    const rowsCall = mockQuery.mock.calls[2];
+    const statsCall = mockQuery.mock.calls[2];
+    const rowsCall = mockQuery.mock.calls[3];
     expect(statsCall[1].slice(14)).toEqual(["2026-05-01", "2026-05-30", true]);
     expect(rowsCall[1].slice(14, 17)).toEqual([
       "2026-05-01",
@@ -563,5 +605,173 @@ describe("curriculum summary", () => {
     expect(String(rowsCall[0])).toContain(
       "WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)"
     );
+  });
+
+  it("uses deterministic default sorting before the page slice", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        schools: [],
+        programs: [],
+        grades: [],
+        subjects: [],
+        exam_tracks: [],
+        regions: [],
+        states: [],
+        districts: [],
+      },
+    ]).mockResolvedValueOnce(guardRows(20)).mockResolvedValueOnce([
+      {
+        total_rows: 20,
+        flagged_rows: 2,
+        completed_chapters: 0,
+        total_configured_chapters: 0,
+        prescribed_chapters: 0,
+        actual_minutes: 0,
+        prescribed_minutes: 0,
+      },
+    ]).mockResolvedValueOnce([]);
+
+    await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "flagged",
+      dir: "desc",
+      page: 2,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    const rowsSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
+    expect(rowsSql).toContain(
+      "ORDER BY flagged DESC, flag_priority ASC, delta_percent ASC NULLS LAST, school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC"
+    );
+    expect(rowsSql.indexOf("ORDER BY")).toBeLessThan(rowsSql.indexOf("LIMIT $18 OFFSET $19"));
+    expect(mockQuery.mock.calls[3][1].slice(-2)).toEqual([10, 10]);
+  });
+
+  it("orders manual delta sorts with null delta values last", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        schools: [],
+        programs: [],
+        grades: [],
+        subjects: [],
+        exam_tracks: [],
+        regions: [],
+        states: [],
+        districts: [],
+      },
+    ]).mockResolvedValueOnce(guardRows(2)).mockResolvedValueOnce([
+      {
+        total_rows: 2,
+        flagged_rows: 0,
+        completed_chapters: 0,
+        total_configured_chapters: 0,
+        prescribed_chapters: 0,
+        actual_minutes: 0,
+        prescribed_minutes: 0,
+      },
+    ]).mockResolvedValueOnce([]);
+
+    await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "delta",
+      dir: "desc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ")).toContain(
+      "ORDER BY delta_percent DESC NULLS LAST, school_name ASC"
+    );
+  });
+
+  it("stops before detailed summary queries when the expected row guard trips", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+          states: [],
+          districts: [],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(10001));
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "flagged",
+      dir: "desc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      rowCountGuardTripped: true,
+      estimatedRowCount: 10001,
+      rows: [],
+      totalRowCount: 0,
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(String(mockQuery.mock.calls[1][0])).toContain("LIMIT 10001");
+  });
+
+  it("clamps requested pages before querying the paginated rows", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+          states: [],
+          districts: [],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(11))
+      .mockResolvedValueOnce([
+        {
+          total_rows: 11,
+          flagged_rows: 0,
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 99,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      currentPage: 2,
+      totalPages: 2,
+    });
+    expect(mockQuery.mock.calls[3][1].slice(-2)).toEqual([10, 10]);
   });
 });

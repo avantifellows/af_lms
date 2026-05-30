@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
@@ -16,6 +17,8 @@ import {
   type CurriculumSummaryFilterOptions,
   type CurriculumSummaryFilters,
   type CurriculumSummaryRow,
+  type CurriculumSummarySortDirection,
+  type CurriculumSummarySortKey,
 } from "@/lib/curriculum-summary";
 import {
   getFeatureAccess,
@@ -26,6 +29,22 @@ import {
 interface PageProps {
   searchParams: Promise<Record<string, string | undefined>>;
 }
+
+const SORT_COLUMNS: Record<
+  CurriculumSummarySortKey,
+  { label: string; defaultDir: CurriculumSummarySortDirection }
+> = {
+  school: { label: "School", defaultDir: "asc" },
+  program: { label: "Program", defaultDir: "asc" },
+  grade: { label: "Grade", defaultDir: "asc" },
+  subject: { label: "Subject", defaultDir: "asc" },
+  exam_track: { label: "Exam Track", defaultDir: "asc" },
+  completed: { label: "Completed", defaultDir: "asc" },
+  prescribed: { label: "Prescribed", defaultDir: "asc" },
+  delta: { label: "Delta %", defaultDir: "asc" },
+  actual: { label: "Actual Hours", defaultDir: "asc" },
+  flagged: { label: "Flagged", defaultDir: "desc" },
+};
 
 export default async function CurriculumSummaryPage({ searchParams }: PageProps) {
   const resolvedSearchParams = await searchParams;
@@ -113,6 +132,29 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
               </ul>
             </div>
           </Card>
+        ) : summary.rowCountGuardTripped ? (
+          <div className="space-y-5">
+            <CurriculumSummaryFiltersCard
+              filters={summary.activeFilters}
+              options={summary.filterOptions}
+            />
+            <Card className="border-l-4 border-l-warning-border p-6">
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-warning-text">
+                  Too many rows
+                </p>
+                <h2 className="text-lg font-bold text-text-primary">
+                  Narrow filters to load Curriculum Summary
+                </h2>
+                <p className="text-sm text-text-secondary">
+                  More than 10,000 expected Curriculum Summary rows match the
+                  current School, Program, Grade, Subject, Exam Track, and
+                  geography filters. Narrow at least one filter to run the
+                  detailed summary query.
+                </p>
+              </div>
+            </Card>
+          </div>
         ) : (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
@@ -176,12 +218,19 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
                   No Curriculum Summary rows match the selected filters.
                 </div>
               ) : (
-                <CurriculumSummaryTable rows={summary.rows} />
+                <CurriculumSummaryTable
+                  rows={summary.rows}
+                  sort={summary.sort}
+                  dir={summary.dir}
+                  currentParams={resolvedSearchParams}
+                />
               )}
 
-              <div className="border-t border-border px-4 py-3 text-sm text-text-secondary">
-                Page {summary.currentPage} of {summary.totalPages || 1}
-              </div>
+              <CurriculumSummaryPagination
+                currentPage={summary.currentPage}
+                totalPages={summary.totalPages}
+                currentParams={resolvedSearchParams}
+              />
             </Card>
           </div>
         )}
@@ -199,99 +248,104 @@ function CurriculumSummaryFiltersCard({
 }) {
   return (
     <Card className="p-4">
-      <form action="/curriculum-summary" method="get" className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          <FilterField
-            label="Schools"
-            name="schools"
-            value={filters.schools.join(",")}
-            placeholder={options.schools.map((school) => school.code).join(",")}
-          />
-          <FilterField
-            label="Programs"
-            name="programs"
-            value={filters.programs.join(",")}
-            placeholder={options.programs.map((program) => String(program.id)).join(",")}
-          />
-          <FilterField
-            label="Grades"
-            name="grades"
-            value={filters.grades.join(",")}
-            placeholder={options.grades.join(",")}
-          />
-          <FilterField
-            label="Subjects"
-            name="subjects"
-            value={filters.subjects.join(",")}
-            placeholder={options.subjects.map((subject) => String(subject.id)).join(",")}
-          />
-          <FilterField
-            label="Exam Track"
-            name="exam_tracks"
-            value={filters.examTracks.join(",")}
-            placeholder={options.examTracks.join(",")}
-          />
-          <FilterField
-            label="Regions"
-            name="regions"
-            value={filters.regions.join(",")}
-            placeholder={options.regions.join(",")}
-          />
-          <FilterField
-            label="States"
-            name="states"
-            value={filters.states.join(",")}
-            placeholder={options.states.join(",")}
-          />
-          <FilterField
-            label="Districts"
-            name="districts"
-            value={filters.districts.join(",")}
-            placeholder={options.districts.join(",")}
-          />
-          <label className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
-            Date preset
-            <select
-              name="preset"
-              defaultValue={filters.preset}
-              className="rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-            >
-              <option value="today">Today</option>
-              <option value="last_7_days">Last 7 days</option>
-              <option value="last_30_days">Last 30 days</option>
-              <option value="current_academic_year">Current academic year</option>
-              <option value="all">All dates</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <FilterField label="From" name="from" value={filters.from ?? ""} />
-          <FilterField label="To" name="to" value={filters.to ?? ""} />
-          <label className="flex items-center gap-2 pt-6 text-sm font-medium text-text-secondary">
-            <input
-              type="checkbox"
-              name="flagged"
-              value="true"
-              defaultChecked={filters.flagged}
-              className="h-4 w-4 rounded border-border text-accent"
+      <details open>
+        <summary className="cursor-pointer text-sm font-bold text-text-primary">
+          Filters
+        </summary>
+        <form action="/curriculum-summary" method="get" className="mt-4 space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <FilterField
+              label="Schools"
+              name="schools"
+              value={filters.schools.join(",")}
+              placeholder={options.schools.map((school) => school.code).join(",")}
             />
-            Only flagged
-          </label>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            className="rounded-md bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover"
-          >
-            Apply filters
-          </button>
-          <Link
-            href="/curriculum-summary"
-            className="text-sm font-bold text-accent hover:text-accent-hover"
-          >
-            Clear filters
-          </Link>
-        </div>
-      </form>
+            <FilterField
+              label="Programs"
+              name="programs"
+              value={filters.programs.join(",")}
+              placeholder={options.programs.map((program) => String(program.id)).join(",")}
+            />
+            <FilterField
+              label="Grades"
+              name="grades"
+              value={filters.grades.join(",")}
+              placeholder={options.grades.join(",")}
+            />
+            <FilterField
+              label="Subjects"
+              name="subjects"
+              value={filters.subjects.join(",")}
+              placeholder={options.subjects.map((subject) => String(subject.id)).join(",")}
+            />
+            <FilterField
+              label="Exam Track"
+              name="exam_tracks"
+              value={filters.examTracks.join(",")}
+              placeholder={options.examTracks.join(",")}
+            />
+            <FilterField
+              label="Regions"
+              name="regions"
+              value={filters.regions.join(",")}
+              placeholder={options.regions.join(",")}
+            />
+            <FilterField
+              label="States"
+              name="states"
+              value={filters.states.join(",")}
+              placeholder={options.states.join(",")}
+            />
+            <FilterField
+              label="Districts"
+              name="districts"
+              value={filters.districts.join(",")}
+              placeholder={options.districts.join(",")}
+            />
+            <label className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
+              Date preset
+              <select
+                name="preset"
+                defaultValue={filters.preset}
+                className="rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
+              >
+                <option value="today">Today</option>
+                <option value="last_7_days">Last 7 days</option>
+                <option value="last_30_days">Last 30 days</option>
+                <option value="current_academic_year">Current academic year</option>
+                <option value="all">All dates</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <FilterField label="From" name="from" value={filters.from ?? ""} />
+            <FilterField label="To" name="to" value={filters.to ?? ""} />
+            <label className="flex items-center gap-2 pt-6 text-sm font-medium text-text-secondary">
+              <input
+                type="checkbox"
+                name="flagged"
+                value="true"
+                defaultChecked={filters.flagged}
+                className="h-4 w-4 rounded border-border text-accent"
+              />
+              Only flagged
+            </label>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover"
+            >
+              Apply filters
+            </button>
+            <Link
+              href="/curriculum-summary"
+              className="text-sm font-bold text-accent hover:text-accent-hover"
+            >
+              Clear filters
+            </Link>
+          </div>
+        </form>
+      </details>
     </Card>
   );
 }
@@ -320,30 +374,56 @@ function FilterField({
   );
 }
 
-function CurriculumSummaryTable({ rows }: { rows: CurriculumSummaryRow[] }) {
+function CurriculumSummaryTable({
+  rows,
+  sort,
+  dir,
+  currentParams,
+}: {
+  rows: CurriculumSummaryRow[];
+  sort: CurriculumSummarySortKey;
+  dir: CurriculumSummarySortDirection;
+  currentParams: Record<string, string | undefined>;
+}) {
+  const headers: Array<
+    | { label: string; sortKey: CurriculumSummarySortKey }
+    | { label: string; sortKey?: undefined }
+  > = [
+    { label: "School", sortKey: "school" },
+    { label: "Program", sortKey: "program" },
+    { label: "Grade", sortKey: "grade" },
+    { label: "Subject", sortKey: "subject" },
+    { label: "Exam Track", sortKey: "exam_track" },
+    { label: "Completed", sortKey: "completed" },
+    { label: "Prescribed", sortKey: "prescribed" },
+    { label: "Delta %", sortKey: "delta" },
+    { label: "Lecture vs prescribed", sortKey: "actual" },
+    { label: "Flagged", sortKey: "flagged" },
+  ];
+
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-border text-sm">
         <thead className="bg-bg-muted">
           <tr>
-            {[
-              "School",
-              "Program",
-              "Grade",
-              "Subject",
-              "Exam Track",
-              "Completed",
-              "Prescribed",
-              "Delta %",
-              "Lecture vs prescribed",
-              "Flagged",
-            ].map((header) => (
+            {headers.map((header) => (
               <th
-                key={header}
+                key={header.label}
                 scope="col"
                 className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
               >
-                {header}
+                {header.sortKey ? (
+                  <SortHeader
+                    column={header.sortKey}
+                    currentSort={sort}
+                    currentDir={dir}
+                    currentParams={currentParams}
+                  >
+                    {header.label}
+                  </SortHeader>
+                ) : (
+                  header.label
+                )}
               </th>
             ))}
           </tr>
@@ -404,6 +484,118 @@ function CurriculumSummaryTable({ rows }: { rows: CurriculumSummaryRow[] }) {
       </table>
     </div>
   );
+}
+
+function SortHeader({
+  column,
+  currentSort,
+  currentDir,
+  currentParams,
+  children,
+}: {
+  column: CurriculumSummarySortKey;
+  currentSort: CurriculumSummarySortKey;
+  currentDir: CurriculumSummarySortDirection;
+  currentParams: Record<string, string | undefined>;
+  children: ReactNode;
+}) {
+  const active = currentSort === column;
+  const nextDir: CurriculumSummarySortDirection = active
+    ? currentDir === "asc"
+      ? "desc"
+      : "asc"
+    : SORT_COLUMNS[column].defaultDir;
+  const indicator = active ? (currentDir === "asc" ? "↑" : "↓") : "";
+
+  return (
+    <Link
+      href={sortHref(column, nextDir, currentParams)}
+      className="inline-flex items-center gap-1 text-text-muted hover:text-text-primary"
+    >
+      <span>
+        {children}
+        {indicator ? ` ${indicator}` : ""}
+      </span>
+    </Link>
+  );
+}
+
+function sortHref(
+  column: CurriculumSummarySortKey,
+  dir: CurriculumSummarySortDirection,
+  currentParams: Record<string, string | undefined>
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(currentParams)) {
+    if (value && key !== "sort" && key !== "dir" && key !== "page") {
+      params.set(key, value);
+    }
+  }
+  params.set("sort", column);
+  params.set("dir", dir);
+  return `/curriculum-summary?${params.toString()}`;
+}
+
+function CurriculumSummaryPagination({
+  currentPage,
+  totalPages,
+  currentParams,
+}: {
+  currentPage: number;
+  totalPages: number;
+  currentParams: Record<string, string | undefined>;
+}) {
+  const displayTotalPages = totalPages || 1;
+  const hasPrevious = currentPage > 1;
+  const hasNext = totalPages > 0 && currentPage < totalPages;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border px-4 py-3 text-sm text-text-secondary sm:flex-row sm:items-center sm:justify-between">
+      <span>
+        Page {currentPage} of {displayTotalPages}
+      </span>
+      <div className="flex items-center gap-2">
+        {hasPrevious ? (
+          <Link
+            href={pageHref(currentPage - 1, currentParams)}
+            className="rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover"
+          >
+            Previous
+          </Link>
+        ) : (
+          <span className="rounded-md border border-border px-3 py-1.5 font-bold text-text-muted">
+            Previous
+          </span>
+        )}
+        {hasNext ? (
+          <Link
+            href={pageHref(currentPage + 1, currentParams)}
+            className="rounded-md border border-border px-3 py-1.5 font-bold text-accent hover:text-accent-hover"
+          >
+            Next
+          </Link>
+        ) : (
+          <span className="rounded-md border border-border px-3 py-1.5 font-bold text-text-muted">
+            Next
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function pageHref(
+  page: number,
+  currentParams: Record<string, string | undefined>
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(currentParams)) {
+    if (value && key !== "page") {
+      params.set(key, value);
+    }
+  }
+  params.set("page", String(page));
+  return `/curriculum-summary?${params.toString()}`;
 }
 
 function formatDateRange(filters: CurriculumSummaryFilters): string {
