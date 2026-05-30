@@ -131,8 +131,8 @@ describe("GET /api/curriculum/options", () => {
         { code: "70705", region: "AHMEDABAD", program_ids: [1, 2, 64] },
       ])
       .mockResolvedValueOnce([
-        { id: 1, name: "JNV CoE" },
-        { id: 2, name: "JNV Nodal" },
+        { id: "1", name: "JNV CoE" },
+        { id: "2", name: "JNV Nodal" },
       ])
       .mockResolvedValueOnce([]);
 

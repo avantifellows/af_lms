@@ -39,4 +39,38 @@ test.describe("Curriculum read path", () => {
       adminPage.getByText("No curriculum-enabled Programs are available for this school.")
     ).toBeVisible();
   });
+
+  test("admin can save completion-only and mixed Add Log changes", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+
+    await adminPage.getByRole("button", { name: "+ Add Log" }).click();
+    await expect(adminPage.getByText("Log Teaching Session")).toBeVisible();
+    const alphaRow = adminPage
+      .locator("[data-chapter-row]")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await alphaRow.getByRole("checkbox", { name: "Complete" }).check();
+    await adminPage.getByRole("button", { name: "Save Log" }).click();
+
+    await expect(adminPage.getByText("Log Teaching Session")).toBeHidden();
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    await expect(adminPage.getByText("No LMS Curriculum Logs yet.")).toBeVisible();
+
+    await adminPage.getByRole("button", { name: "+ Add Log" }).click();
+    const betaRow = adminPage
+      .locator("[data-chapter-row]")
+      .filter({ hasText: "Fixture Beta Physics" });
+    await betaRow.getByRole("checkbox", { name: "Complete" }).check();
+    await betaRow.getByText("Fixture Beta Physics").click();
+    await adminPage.getByRole("checkbox", { name: /Beta Forces/ }).check();
+    await adminPage.getByRole("button", { name: "Save Log" }).click();
+
+    await expect(adminPage.getByText("Log Teaching Session")).toBeHidden();
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    await expect(adminPage.getByText("Beta Forces")).toBeVisible();
+  });
 });

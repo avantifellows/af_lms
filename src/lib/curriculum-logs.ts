@@ -8,6 +8,12 @@ import {
   type CurriculumValidationFailure,
 } from "./curriculum-options";
 import { isFutureIST, isPastOrTodayIST } from "./curriculum-date-helpers";
+import {
+  markChapterComplete,
+  unmarkChapterComplete,
+  validateChapterCompletionDeltas,
+  type ChapterCompletionState,
+} from "./curriculum-chapter-completion";
 import type {
   ExamTrack,
   GradeNumber,
@@ -43,7 +49,7 @@ interface ValidTopicRow {
 }
 
 type CurriculumMutationResult =
-  | { ok: true; log: LmsCurriculumLog }
+  | { ok: true; log: LmsCurriculumLog | null; completions: ChapterCompletionState[]; createdLog: boolean }
   | CurriculumValidationFailure
   | { ok: false; status: 404; error: string };
 
@@ -355,67 +361,116 @@ export async function createCurriculumLog(params: {
   logDate: string | null;
   durationMinutes: number | null;
   topicIds: unknown;
+  completeChapterIds?: unknown;
+  uncompleteChapterIds?: unknown;
   permission: UserPermission;
   actorEmail: string;
 }): Promise<CurriculumMutationResult> {
-  const scope = await validateSelectedScope(params);
+  const topicIds = normalizeTopicIds(params.topicIds);
+  const scope = await validateChapterCompletionDeltas({
+    schoolCode: params.schoolCode,
+    programId: params.programId,
+    examTrack: params.examTrack,
+    grade: params.grade,
+    subject: params.subject,
+    completeChapterIds: params.completeChapterIds,
+    uncompleteChapterIds: params.uncompleteChapterIds,
+    permission: params.permission,
+  });
   if (!scope.ok) return scope;
 
-  const topicIds = normalizeTopicIds(params.topicIds);
-  if (topicIds.length === 0) {
+  const hasCompletionDeltas =
+    scope.completeChapterIds.length > 0 ||
+    scope.uncompleteChapterIds.length > 0;
+  if (topicIds.length === 0 && !hasCompletionDeltas) {
     return { ok: false, status: 422, error: "Nothing to save" };
   }
 
   const logDate = params.logDate;
   const durationMinutes = params.durationMinutes;
 
-  if (!logDate || !isPastOrTodayIST(logDate) || isFutureIST(logDate)) {
-    return { ok: false, status: 422, error: "Log date cannot be in the future" };
-  }
+  if (topicIds.length > 0) {
+    if (!logDate || !isPastOrTodayIST(logDate) || isFutureIST(logDate)) {
+      return { ok: false, status: 422, error: "Log date cannot be in the future" };
+    }
 
-  if (
-    durationMinutes == null ||
-    !Number.isInteger(durationMinutes) ||
-    durationMinutes <= 0 ||
-    durationMinutes > 720
-  ) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Duration must be greater than 0 and at most 720 minutes",
-    };
-  }
+    if (
+      durationMinutes == null ||
+      !Number.isInteger(durationMinutes) ||
+      durationMinutes <= 0 ||
+      durationMinutes > 720
+    ) {
+      return {
+        ok: false,
+        status: 422,
+        error: "Duration must be greater than 0 and at most 720 minutes",
+      };
+    }
 
-  const validTopics = await loadValidTopics({
-    topicIds,
-    examTrack: scope.examTrack,
-    grade: scope.grade,
-    subjectId: scope.subjectId,
-  });
-  if (validTopics.length !== topicIds.length) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Topics do not belong to the selected Grade, Subject, and Exam Track",
-    };
-  }
-
-  const logId = await withTransaction((client) =>
-    insertCurriculumLog(client, {
-      schoolCode: params.schoolCode,
-      programId: params.programId,
-      gradeId: scope.gradeId,
-      subjectId: scope.subjectId,
-      examTrack: scope.examTrack,
-      logDate,
-      durationMinutes,
+    const validTopics = await loadValidTopics({
       topicIds,
-      actorEmail: params.actorEmail,
-    })
-  );
+      examTrack: scope.examTrack,
+      grade: scope.grade,
+      subjectId: scope.subjectId,
+    });
+    if (validTopics.length !== topicIds.length) {
+      return {
+        ok: false,
+        status: 422,
+        error: "Topics do not belong to the selected Grade, Subject, and Exam Track",
+      };
+    }
+  }
 
-  const log = await getCurriculumLogById(logId);
-  if (!log) throw new Error("Created LMS Curriculum Log was not found");
+  const mutation = await withTransaction(async (client) => {
+    const logId = topicIds.length
+      ? await insertCurriculumLog(client, {
+          schoolCode: params.schoolCode,
+          programId: params.programId,
+          gradeId: scope.gradeId,
+          subjectId: scope.subjectId,
+          examTrack: scope.examTrack,
+          logDate: logDate as string,
+          durationMinutes: durationMinutes as number,
+          topicIds,
+          actorEmail: params.actorEmail,
+        })
+      : null;
 
-  return { ok: true, log };
+    const completions: ChapterCompletionState[] = [];
+    for (const chapterId of scope.completeChapterIds) {
+      completions.push(
+        await markChapterComplete(client, {
+          schoolCode: params.schoolCode,
+          programId: params.programId,
+          chapterId,
+          examTrack: scope.examTrack,
+          actorEmail: params.actorEmail,
+        })
+      );
+    }
+    for (const chapterId of scope.uncompleteChapterIds) {
+      completions.push(
+        await unmarkChapterComplete(client, {
+          schoolCode: params.schoolCode,
+          programId: params.programId,
+          chapterId,
+          examTrack: scope.examTrack,
+          actorEmail: params.actorEmail,
+        })
+      );
+    }
+
+    return { logId, completions };
+  });
+
+  const log = mutation.logId ? await getCurriculumLogById(mutation.logId) : null;
+  if (mutation.logId && !log) throw new Error("Created LMS Curriculum Log was not found");
+
+  return {
+    ok: true,
+    log,
+    completions: mutation.completions,
+    createdLog: mutation.logId != null,
+  };
 }

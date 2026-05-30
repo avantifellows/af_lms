@@ -267,7 +267,13 @@ export default function CurriculumTab({
     setSelectedSubject(first?.subject ?? null);
   }
 
-  async function handleSaveLog(date: string, durationMinutes: number, topicIds: number[]) {
+  async function handleSaveLog(payload: {
+    date: string;
+    durationMinutes: number;
+    topicIds: number[];
+    completeChapterIds: number[];
+    uncompleteChapterIds: number[];
+  }) {
     if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
       return;
     }
@@ -284,9 +290,15 @@ export default function CurriculumTab({
           exam_track: selectedExamTrack,
           grade: selectedGrade,
           subject: selectedSubject,
-          log_date: date,
-          duration_minutes: durationMinutes,
-          topic_ids: topicIds,
+          ...(payload.topicIds.length > 0
+            ? {
+                log_date: payload.date,
+                duration_minutes: payload.durationMinutes,
+              }
+            : {}),
+          topic_ids: payload.topicIds,
+          complete_chapter_ids: payload.completeChapterIds,
+          uncomplete_chapter_ids: payload.uncompleteChapterIds,
         }),
       });
 

@@ -46,17 +46,45 @@ vi.mock("./SessionHistory", () => ({
 
 vi.mock("./LogSessionModal", () => ({
   default: (props: {
-    onSave: (date: string, durationMinutes: number, topicIds: number[]) => void;
+    onSave: (payload: {
+      date: string;
+      durationMinutes: number;
+      topicIds: number[];
+      completeChapterIds: number[];
+      uncompleteChapterIds: number[];
+    }) => void;
     error?: string | null;
     isSaving?: boolean;
   }) => (
     <div data-testid="log-session-modal">
       {props.error && <div>{props.error}</div>}
       <button
-        onClick={() => props.onSave("2026-02-15", 90, [101])}
+        onClick={() =>
+          props.onSave({
+            date: "2026-02-15",
+            durationMinutes: 90,
+            topicIds: [101],
+            completeChapterIds: [],
+            uncompleteChapterIds: [],
+          })
+        }
         disabled={props.isSaving}
       >
         Save Mock Log
+      </button>
+      <button
+        onClick={() =>
+          props.onSave({
+            date: "2026-02-15",
+            durationMinutes: 0,
+            topicIds: [],
+            completeChapterIds: [1],
+            uncompleteChapterIds: [],
+          })
+        }
+        disabled={props.isSaving}
+      >
+        Save Completion Only
       </button>
     </div>
   ),
@@ -272,6 +300,8 @@ describe("CurriculumTab", () => {
             log_date: "2026-02-15",
             duration_minutes: 90,
             topic_ids: [101],
+            complete_chapter_ids: [],
+            uncomplete_chapter_ids: [],
           }),
         })
       );
@@ -282,6 +312,69 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("saves completion-only changes without log date or duration and refreshes progress", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Completion Only"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            topic_ids: [],
+            complete_chapter_ids: [1],
+            uncomplete_chapter_ids: [],
+          }),
+        })
+      );
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+    );
+  });
+
+  it("keeps the Add Log modal open with reload guidance when mutation permission changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/curriculum/logs" && init?.method === "POST") {
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) });
+      }
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url.includes("/api/curriculum/logs?")) {
+        return mockOkJson(logsResponse);
+      }
+      if (url.includes("/api/curriculum/progress?")) {
+        return mockOkJson(progressResponse);
+      }
+      return mockOkJson({ chapters: physicsChapters });
+    });
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByText("Save Completion Only"));
+
+    expect(
+      await screen.findByText("Your permissions changed. Reload the page before trying again.")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
   });
 
   it("shows an empty state when backend config is empty", async () => {

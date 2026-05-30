@@ -153,13 +153,13 @@ export async function resolveCurriculumProgramScope(
   );
 
   const programs = allowedProgramIds.length
-    ? await query<CurriculumProgramOption>(
+    ? (await query<CurriculumProgramOption>(
         `SELECT id, name
          FROM program
          WHERE id = ANY($1::int[])
          ORDER BY array_position(ARRAY[1, 2]::int[], id)`,
         [allowedProgramIds]
-      )
+      )).map((program) => ({ ...program, id: Number(program.id) }))
     : [];
 
   return {

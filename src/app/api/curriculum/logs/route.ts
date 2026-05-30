@@ -126,6 +126,8 @@ export async function POST(request: NextRequest) {
     logDate,
     durationMinutes,
     topicIds: body.topic_ids,
+    completeChapterIds: body.complete_chapter_ids,
+    uncompleteChapterIds: body.uncomplete_chapter_ids,
     permission: access.permission,
     actorEmail: access.email,
   });
@@ -134,5 +136,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json({ log: result.log }, { status: 201 });
+  return NextResponse.json(
+    { log: result.log, completions: result.completions },
+    { status: result.createdLog ? 201 : 200 }
+  );
 }

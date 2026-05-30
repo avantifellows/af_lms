@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.lms_curriculum_logs (
     exam_track character varying(32) NOT NULL,
     log_date date NOT NULL,
     duration_minutes integer NOT NULL,
+    created_by_email character varying(255),
     inserted_by_email character varying(255),
     updated_by_email character varying(255),
     deleted_at timestamp(0) without time zone,

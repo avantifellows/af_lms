@@ -49,7 +49,7 @@ const progress: Record<number, ChapterProgress> = {
 function renderModal(
   props: Partial<{
     onClose: () => void;
-    onSave: (date: string, durationMinutes: number, topicIds: number[]) => void;
+    onSave: Parameters<typeof LogSessionModal>[0]["onSave"];
     isSaving: boolean;
     error: string | null;
   }> = {}
@@ -84,7 +84,7 @@ describe("LogSessionModal", () => {
     expect(screen.queryByText("Will Complete")).not.toBeInTheDocument();
   });
 
-  it("selects topics and submits backend log fields only", async () => {
+  it("selects topics and submits backend log fields with no completion deltas", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     renderModal({ onSave });
@@ -94,7 +94,13 @@ describe("LogSessionModal", () => {
     await user.click(within(topicLabel).getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Save Log" }));
 
-    expect(onSave).toHaveBeenCalledWith("2026-02-15", 60, [101]);
+    expect(onSave).toHaveBeenCalledWith({
+      date: "2026-02-15",
+      durationMinutes: 60,
+      topicIds: [101],
+      completeChapterIds: [],
+      uncompleteChapterIds: [],
+    });
   });
 
   it("calculates duration from hours and minutes", async () => {
@@ -113,10 +119,42 @@ describe("LogSessionModal", () => {
     await user.click(within(topicLabel).getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Save Log" }));
 
-    expect(onSave).toHaveBeenCalledWith("2026-02-15", 150, [201]);
+    expect(onSave).toHaveBeenCalledWith({
+      date: "2026-02-15",
+      durationMinutes: 150,
+      topicIds: [201],
+      completeChapterIds: [],
+      uncompleteChapterIds: [],
+    });
   });
 
-  it("shows already covered and completed context without enabling completion mutation", async () => {
+  it("submits completion-only mark and unmark deltas without requiring duration", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderModal({ onSave });
+
+    const [hours] = screen.getAllByRole("spinbutton");
+    await user.clear(hours);
+    await user.type(hours, "0");
+
+    const kinematicsRow = screen.getByText("Kinematics").closest("[data-chapter-row]")!;
+    await user.click(within(kinematicsRow).getByRole("checkbox", { name: /complete/i }));
+    const lawsRow = screen.getByText("Laws of Motion").closest("[data-chapter-row]")!;
+    await user.click(within(lawsRow).getByRole("checkbox", { name: /complete/i }));
+
+    expect(screen.getByText("Prescribed: 1h 30m")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save Log" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      date: "2026-02-15",
+      durationMinutes: 0,
+      topicIds: [],
+      completeChapterIds: [2],
+      uncompleteChapterIds: [1],
+    });
+  });
+
+  it("shows already covered and completed context with completion controls", async () => {
     const user = userEvent.setup();
     renderModal();
 
@@ -125,7 +163,7 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByText("Kinematics"));
 
     expect(screen.getByText("✓ covered")).toBeInTheDocument();
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
   });
 
   it("shows save errors and saving state from the backend mutation", () => {

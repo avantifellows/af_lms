@@ -8,9 +8,24 @@ interface LogSessionModalProps {
   chapters: Chapter[];
   progress: Record<number, ChapterProgress>;
   onClose: () => void;
-  onSave: (date: string, durationMinutes: number, topicIds: number[]) => void | Promise<void>;
+  onSave: (payload: {
+    date: string;
+    durationMinutes: number;
+    topicIds: number[];
+    completeChapterIds: number[];
+    uncompleteChapterIds: number[];
+  }) => void | Promise<void>;
   isSaving?: boolean;
   error?: string | null;
+}
+
+function formatDuration(minutes: number | undefined): string {
+  if (!minutes) return "0m";
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours > 0 && remainingMinutes > 0) return `${hours}h ${remainingMinutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${remainingMinutes}m`;
 }
 
 export default function LogSessionModal({
@@ -25,6 +40,8 @@ export default function LogSessionModal({
   const [hours, setHours] = useState(1);
   const [minutes, setMinutes] = useState(0);
   const [selectedTopicIds, setSelectedTopicIds] = useState<Set<number>>(new Set());
+  const [completeChapterIds, setCompleteChapterIds] = useState<Set<number>>(new Set());
+  const [uncompleteChapterIds, setUncompleteChapterIds] = useState<Set<number>>(new Set());
   const [expandedChapterIds, setExpandedChapterIds] = useState<Set<number>>(new Set());
 
   const toggleTopic = (topicId: number) => {
@@ -51,17 +68,52 @@ export default function LogSessionModal({
     });
   };
 
-  const handleSave = () => {
-    const durationMinutes = hours * 60 + minutes;
-    if (selectedTopicIds.size === 0) {
-      alert("Please select at least one topic");
+  const toggleChapterCompletion = (chapterId: number, isAlreadyComplete: boolean) => {
+    if (isAlreadyComplete) {
+      setUncompleteChapterIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(chapterId)) {
+          next.delete(chapterId);
+        } else {
+          next.add(chapterId);
+        }
+        return next;
+      });
       return;
     }
-    if (durationMinutes <= 0) {
+
+    setCompleteChapterIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(chapterId)) {
+        next.delete(chapterId);
+      } else {
+        next.add(chapterId);
+      }
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    const durationMinutes = hours * 60 + minutes;
+    const hasTopicSelections = selectedTopicIds.size > 0;
+    const hasCompletionDeltas =
+      completeChapterIds.size > 0 || uncompleteChapterIds.size > 0;
+
+    if (!hasTopicSelections && !hasCompletionDeltas) {
+      alert("Please select at least one topic or Chapter Completion change");
+      return;
+    }
+    if (hasTopicSelections && durationMinutes <= 0) {
       alert("Please enter a valid duration");
       return;
     }
-    onSave(date, durationMinutes, Array.from(selectedTopicIds));
+    onSave({
+      date,
+      durationMinutes,
+      topicIds: Array.from(selectedTopicIds),
+      completeChapterIds: Array.from(completeChapterIds),
+      uncompleteChapterIds: Array.from(uncompleteChapterIds),
+    });
   };
 
   // Count selected topics per chapter
@@ -165,9 +217,12 @@ export default function LogSessionModal({
                   const chapterProgress = progress[chapter.id];
                   const hasTopics = chapter.topics.length > 0;
                   const isAlreadyComplete = chapterProgress?.isChapterComplete;
+                  const isCompletionChecked = isAlreadyComplete
+                    ? !uncompleteChapterIds.has(chapter.id)
+                    : completeChapterIds.has(chapter.id);
 
                   return (
-                    <div key={chapter.id} className="border-b border-gray-100 last:border-b-0">
+                    <div key={chapter.id} data-chapter-row className="border-b border-gray-100 last:border-b-0">
                       {/* Chapter Header */}
                       <div className="flex items-center px-3 py-2 gap-2">
                         {/* Expandable Chapter Name */}
@@ -190,9 +245,23 @@ export default function LogSessionModal({
                           <span className={`text-sm truncate ${isAlreadyComplete ? "text-gray-400 line-through" : "text-gray-700"}`}>
                             {chapter.name}
                           </span>
+                          <span className="text-xs text-gray-400">
+                            Prescribed: {formatDuration(chapter.prescribedMinutes)}
+                          </span>
                         </button>
 
                         {/* Badges */}
+                        <label className="flex items-center gap-1 text-xs text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={isCompletionChecked}
+                            onChange={() =>
+                              toggleChapterCompletion(chapter.id, Boolean(isAlreadyComplete))
+                            }
+                            className="w-4 h-4 rounded border-gray-300 text-accent focus:ring-accent/20"
+                          />
+                          Complete
+                        </label>
                         {isAlreadyComplete && (
                           <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">
                             ✓ Complete
@@ -282,7 +351,12 @@ export default function LogSessionModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={selectedTopicIds.size === 0 || isSaving}
+              disabled={
+                (selectedTopicIds.size === 0 &&
+                  completeChapterIds.size === 0 &&
+                  uncompleteChapterIds.size === 0) ||
+                isSaving
+              }
               className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? "Saving..." : "Save Log"}
