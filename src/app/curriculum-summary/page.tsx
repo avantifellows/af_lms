@@ -1,16 +1,20 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { Fragment, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
+import CurriculumSummaryFiltersForm from "./CurriculumSummaryFiltersForm";
+import CurriculumSummaryPageSizeSelect from "./CurriculumSummaryPageSizeSelect";
+import CurriculumSummaryTableRows from "./CurriculumSummaryTableRows";
 import {
   getCurriculumSummary,
   normalizeCurriculumSummaryPage,
+  normalizeCurriculumSummaryPageSize,
   normalizeCurriculumSummarySearchParams,
   normalizeCurriculumSummarySort,
   type CurriculumSummaryDatePreset,
@@ -93,6 +97,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
     resolvedSearchParams.dir
   );
   const page = normalizeCurriculumSummaryPage(resolvedSearchParams.page);
+  const pageSize = normalizeCurriculumSummaryPageSize(resolvedSearchParams.limit);
   const summary = await getCurriculumSummary({
     actorEmail: email,
     permission,
@@ -100,7 +105,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
     sort,
     dir,
     page,
-    pageSize: 10,
+    pageSize,
     todayIstDate,
   });
 
@@ -231,6 +236,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
               <CurriculumSummaryPagination
                 currentPage={summary.currentPage}
                 totalPages={summary.totalPages}
+                pageSize={pageSize}
                 currentParams={resolvedSearchParams}
               />
             </Card>
@@ -254,125 +260,9 @@ function CurriculumSummaryFiltersCard({
         <summary className="cursor-pointer text-sm font-bold text-text-primary">
           Filters
         </summary>
-        <form action="/curriculum-summary" method="get" className="mt-4 space-y-4">
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <FilterField
-              label="Schools"
-              name="schools"
-              value={filters.schools.join(",")}
-              placeholder={options.schools.map((school) => school.code).join(",")}
-            />
-            <FilterField
-              label="Programs"
-              name="programs"
-              value={filters.programs.join(",")}
-              placeholder={options.programs.map((program) => String(program.id)).join(",")}
-            />
-            <FilterField
-              label="Grades"
-              name="grades"
-              value={filters.grades.join(",")}
-              placeholder={options.grades.join(",")}
-            />
-            <FilterField
-              label="Subjects"
-              name="subjects"
-              value={filters.subjects.join(",")}
-              placeholder={options.subjects.map((subject) => String(subject.id)).join(",")}
-            />
-            <FilterField
-              label="Exam Track"
-              name="exam_tracks"
-              value={filters.examTracks.join(",")}
-              placeholder={options.examTracks.join(",")}
-            />
-            <FilterField
-              label="Regions"
-              name="regions"
-              value={filters.regions.join(",")}
-              placeholder={options.regions.join(",")}
-            />
-            <FilterField
-              label="States"
-              name="states"
-              value={filters.states.join(",")}
-              placeholder={options.states.join(",")}
-            />
-            <FilterField
-              label="Districts"
-              name="districts"
-              value={filters.districts.join(",")}
-              placeholder={options.districts.join(",")}
-            />
-            <label className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
-              Date preset
-              <select
-                name="preset"
-                defaultValue={filters.preset}
-                className="rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-              >
-                <option value="today">Today</option>
-                <option value="last_7_days">Last 7 days</option>
-                <option value="last_30_days">Last 30 days</option>
-                <option value="current_academic_year">Current academic year</option>
-                <option value="all">All dates</option>
-                <option value="custom">Custom</option>
-              </select>
-            </label>
-            <FilterField label="From" name="from" value={filters.from ?? ""} />
-            <FilterField label="To" name="to" value={filters.to ?? ""} />
-            <label className="flex items-center gap-2 pt-6 text-sm font-medium text-text-secondary">
-              <input
-                type="checkbox"
-                name="flagged"
-                value="true"
-                defaultChecked={filters.flagged}
-                className="h-4 w-4 rounded border-border text-accent"
-              />
-              Only flagged
-            </label>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="submit"
-              className="rounded-md bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover"
-            >
-              Apply filters
-            </button>
-            <Link
-              href="/curriculum-summary"
-              className="text-sm font-bold text-accent hover:text-accent-hover"
-            >
-              Clear filters
-            </Link>
-          </div>
-        </form>
+        <CurriculumSummaryFiltersForm filters={filters} options={options} />
       </details>
     </Card>
-  );
-}
-
-function FilterField({
-  label,
-  name,
-  value,
-  placeholder,
-}: {
-  label: string;
-  name: string;
-  value: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
-      {label}
-      <input
-        name={name}
-        defaultValue={value}
-        placeholder={placeholder}
-        className="rounded-md border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
-      />
-    </label>
   );
 }
 
@@ -432,163 +322,11 @@ function CurriculumSummaryTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border bg-bg-card">
-          {rows.map((row) => {
-            const chapterRows = chapterRowsByParentKey[row.rowKey] ?? [];
-
-            return (
-              <Fragment key={row.rowKey}>
-                <tr>
-                  <td className="whitespace-nowrap px-4 py-3 font-medium text-text-primary">
-                    <span>{row.schoolName}</span>{" "}
-                    <span className="text-text-muted">{row.schoolCode}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {row.programName}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {row.grade}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {row.subjectName}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {formatExamTrack(row.examTrack)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {formatCoverage(row.completedChapters, row.totalConfiguredChapters)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {formatCoverage(row.prescribedChapters, row.totalConfiguredChapters)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {formatDelta(row.deltaPercent)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    {formatHours(row.actualMinutes)} / {formatHours(row.prescribedMinutes)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                    <FlagReasons flagged={row.flagged} reasons={row.flagReasons} />
-                  </td>
-                </tr>
-                <tr>
-                  <td colSpan={10} className="bg-bg-muted px-4 py-4">
-                    <ChapterExpansionTable chapterRows={chapterRows} />
-                  </td>
-                </tr>
-              </Fragment>
-            );
-          })}
-        </tbody>
+        <CurriculumSummaryTableRows
+          rows={rows}
+          chapterRowsByParentKey={chapterRowsByParentKey}
+        />
       </table>
-    </div>
-  );
-}
-
-function ChapterExpansionTable({
-  chapterRows,
-}: {
-  chapterRows: CurriculumSummaryChapterRow[];
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-        <h3 className="text-sm font-bold text-text-primary">Chapter expansion</h3>
-        <p className="max-w-3xl text-xs text-text-muted">
-          Chapter Actual Hours use allocated rounded minutes from covered topics and
-          may not sum exactly to top-level Actual Hours, which use raw log duration.
-        </p>
-      </div>
-      {chapterRows.length === 0 ? (
-        <p className="text-sm text-text-secondary">
-          No in-syllabus chapter rows are configured for this row.
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full divide-y divide-border text-xs">
-            <thead className="bg-bg-card">
-              <tr>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Chapter
-                </th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Code
-                </th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Completed
-                </th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Prescribed
-                </th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Delta %
-                </th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Lecture vs prescribed
-                </th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
-                  Flagged
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-bg-card">
-              {chapterRows.map((chapter) => (
-                <tr key={`${chapter.parentRowKey}:${chapter.chapterId}`}>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-text-primary">
-                    {chapter.chapterName}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
-                    {chapter.chapterCode}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
-                    {formatChapterCoverage(chapter.completedCount)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
-                    {formatChapterCoverage(chapter.prescribedCount)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
-                    {formatDelta(chapter.deltaPercent)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
-                    {formatHours(chapter.actualMinutes)} / {formatHours(chapter.prescribedMinutes)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
-                    <FlagReasons flagged={chapter.flagged} reasons={chapter.flagReasons} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FlagReasons({
-  flagged,
-  reasons,
-}: {
-  flagged: boolean;
-  reasons: string[];
-}) {
-  return (
-    <div className="flex max-w-xs flex-col gap-1">
-      <span className={flagged ? "font-bold text-danger" : ""}>
-        {flagged ? "Yes" : "No"}
-      </span>
-      {reasons.length > 0 ? (
-        <div className="flex flex-wrap gap-1">
-          {reasons.map((reason) => (
-            <span
-              key={reason}
-              className="rounded border border-warning-border bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-text"
-            >
-              {formatFlagReason(reason)}
-            </span>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -646,10 +384,12 @@ function sortHref(
 function CurriculumSummaryPagination({
   currentPage,
   totalPages,
+  pageSize,
   currentParams,
 }: {
   currentPage: number;
   totalPages: number;
+  pageSize: number;
   currentParams: Record<string, string | undefined>;
 }) {
   const displayTotalPages = totalPages || 1;
@@ -661,7 +401,11 @@ function CurriculumSummaryPagination({
       <span>
         Page {currentPage} of {displayTotalPages}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <CurriculumSummaryPageSizeSelect
+          currentParams={currentParams}
+          pageSize={pageSize}
+        />
         {hasPrevious ? (
           <Link
             href={pageHref(currentPage - 1, currentParams)}
@@ -730,22 +474,6 @@ function formatPreset(preset: CurriculumSummaryDatePreset): string {
   }
 }
 
-function formatExamTrack(track: string): string {
-  if (track === "jee_main") return "JEE Main";
-  if (track === "jee_advanced") return "JEE Advanced";
-  if (track === "neet") return "NEET";
-  return track;
-}
-
-function formatCoverage(count: number, total: number): string {
-  const pct = total > 0 ? ` (${formatPercent((count / total) * 100)})` : "";
-  return `${count}/${total}${pct}`;
-}
-
-function formatChapterCoverage(count: number): string {
-  return `${count}/1`;
-}
-
 function formatPercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) {
     return "—";
@@ -753,10 +481,6 @@ function formatPercent(value: number | null): string {
 
   const rounded = Math.round(value * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
-}
-
-function formatDelta(value: number | null): string {
-  return formatPercent(value);
 }
 
 function formatHours(minutes: number): string {
@@ -774,21 +498,4 @@ function formatHours(minutes: number): string {
     return `${hours}h`;
   }
   return `${hours}h ${remainingMinutes}m`;
-}
-
-function formatFlagReason(reason: string): string {
-  switch (reason) {
-    case "under_prescribed_hours":
-      return "Under prescribed hours";
-    case "over_prescribed_hours":
-      return "Over prescribed hours";
-    case "completion_below_prescribed_coverage":
-      return "Completion below prescribed coverage";
-    case "actual_time_on_zero_prescribed_minutes":
-      return "Actual time on zero prescribed minutes";
-    case "incomplete_prescribed_chapter":
-      return "Incomplete prescribed chapter";
-    default:
-      return reason;
-  }
 }

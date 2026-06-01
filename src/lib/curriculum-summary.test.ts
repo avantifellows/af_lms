@@ -14,6 +14,7 @@ vi.mock("./curriculum-schema", () => ({
 
 import {
   getCurriculumSummary,
+  normalizeCurriculumSummaryPageSize,
   normalizeCurriculumSummarySearchParams,
   normalizeCurriculumSummarySort,
 } from "./curriculum-summary";
@@ -35,6 +36,14 @@ describe("curriculum summary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheckCurriculumSchema.mockResolvedValue({ ok: true });
+  });
+
+  it("normalizes page size to supported values and defaults to 20", () => {
+    expect(normalizeCurriculumSummaryPageSize()).toBe(20);
+    expect(normalizeCurriculumSummaryPageSize("20")).toBe(20);
+    expect(normalizeCurriculumSummaryPageSize("50")).toBe(50);
+    expect(normalizeCurriculumSummaryPageSize("999")).toBe(20);
+    expect(normalizeCurriculumSummaryPageSize("abc")).toBe(20);
   });
 
   it("returns scoped expected rows and filter options with zero placeholder metrics", async () => {
@@ -407,7 +416,7 @@ describe("curriculum summary", () => {
     });
   });
 
-  it("keeps geography filter options independent from expected-row filters", async () => {
+  it("keeps dashboard filter options independent from their own active filters", async () => {
     mockQuery
       .mockResolvedValueOnce([
         {
@@ -451,9 +460,20 @@ describe("curriculum summary", () => {
       todayIstDate: "2026-05-30",
     });
 
-    expect(String(mockQuery.mock.calls[0][0])).toContain(
-      "LEFT JOIN filtered_rows ON true"
+    const optionsSql = String(mockQuery.mock.calls[0][0]).toLowerCase();
+    expect(optionsSql).toContain("from school_options");
+    expect(optionsSql).toContain("from program_options");
+    expect(optionsSql).toContain("from grade_options");
+    expect(optionsSql).toContain("from subject_options");
+    expect(optionsSql).toContain("from exam_track_options");
+    expect(optionsSql).toContain("from geo_options");
+    expect(optionsSql).toContain("subject_filter_option_rows as");
+    expect(optionsSql).toContain("exam_track_filter_option_rows as");
+    expect(optionsSql).toContain("where ($9::int[] is null or grade = any($9::int[]))");
+    expect(optionsSql).toContain(
+      "where ($10::int[] is null or subject_id = any($10::int[]))"
     );
+    expect(optionsSql).not.toContain("left join filtered_rows on true");
   });
 
   it("defaults to the current academic year using the injected IST date", () => {
@@ -569,7 +589,10 @@ describe("curriculum summary", () => {
       .map(([sql]) => String(sql).toLowerCase())
       .join("\n");
     expect(combinedSql).toContain("cross join configured_rows");
-    expect(combinedSql).toContain("coalesce(ss.program_ids, array[]::int[])");
+    expect(combinedSql).toContain("join program p on p.id = any($4::int[])");
+    expect(combinedSql).toContain("from school_options");
+    expect(combinedSql).toContain("from program_options");
+    expect(combinedSql).not.toContain("ss.program_ids");
     expect(combinedSql).toContain("lms_curriculum_logs");
     expect(combinedSql).toContain("l.log_date");
     expect(combinedSql).toContain("l.deleted_at is null");

@@ -283,6 +283,11 @@ export function normalizeCurriculumSummaryPage(page?: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+export function normalizeCurriculumSummaryPageSize(limit?: string): number {
+  const parsed = Number.parseInt(limit ?? "20", 10);
+  return [10, 20, 50, 100].includes(parsed) ? parsed : 20;
+}
+
 export async function getCurriculumSummary(
   params: CurriculumSummaryParams
 ): Promise<CurriculumSummaryResult> {
@@ -406,7 +411,7 @@ function buildMetricQueryParams(
 function buildScopedUniverseSql(): string {
   return `
     WITH scoped_schools AS (
-      SELECT s.code, s.name, s.region, s.state, s.district, s.program_ids
+      SELECT s.code, s.name, s.region, s.state, s.district
       FROM school s
       WHERE s.af_school_category = 'JNV'
         AND (
@@ -426,10 +431,8 @@ function buildScopedUniverseSql(): string {
         p.name AS program_name,
         array_position($4::int[], p.id) AS program_order
       FROM scoped_schools ss
-      JOIN LATERAL unnest(COALESCE(ss.program_ids, ARRAY[]::int[])) AS school_program(program_id) ON true
-      JOIN program p ON p.id = school_program.program_id
-      WHERE school_program.program_id = ANY($4::int[])
-        AND ($5::boolean OR school_program.program_id = ANY($6::int[]))
+      JOIN program p ON p.id = ANY($4::int[])
+      WHERE ($5::boolean OR p.id = ANY($6::int[]))
     ),
     configured_rows AS (
       SELECT DISTINCT
@@ -644,6 +647,48 @@ function buildStatsSql(): string {
 
 function buildOptionsSql(): string {
   return `${buildScopedUniverseSql()},
+    school_options AS (
+      SELECT DISTINCT school_code, school_name, region, state, district
+      FROM scoped_school_programs
+    ),
+    program_options AS (
+      SELECT DISTINCT program_id, program_name, program_order
+      FROM scoped_school_programs
+    ),
+    primary_filter_option_rows AS (
+      SELECT *
+      FROM expected_rows
+      WHERE ($7::text[] IS NULL OR school_code = ANY($7::text[]))
+        AND ($8::int[] IS NULL OR program_id = ANY($8::int[]))
+        AND ($12::text[] IS NULL OR region = ANY($12::text[]))
+        AND ($13::text[] IS NULL OR state = ANY($13::text[]))
+        AND ($14::text[] IS NULL OR district = ANY($14::text[]))
+    ),
+    subject_filter_option_rows AS (
+      SELECT *
+      FROM primary_filter_option_rows
+      WHERE ($9::int[] IS NULL OR grade = ANY($9::int[]))
+    ),
+    exam_track_filter_option_rows AS (
+      SELECT *
+      FROM subject_filter_option_rows
+      WHERE ($10::int[] IS NULL OR subject_id = ANY($10::int[]))
+    ),
+    grade_options AS (
+      SELECT DISTINCT grade
+      FROM primary_filter_option_rows
+      WHERE grade IS NOT NULL
+    ),
+    subject_options AS (
+      SELECT DISTINCT subject_id, subject_name
+      FROM subject_filter_option_rows
+      WHERE subject_id IS NOT NULL
+    ),
+    exam_track_options AS (
+      SELECT DISTINCT exam_track
+      FROM exam_track_filter_option_rows
+      WHERE exam_track IS NOT NULL
+    ),
     geo_options AS (
       SELECT
         COALESCE(jsonb_agg(DISTINCT region) FILTER (WHERE region IS NOT NULL), '[]'::jsonb) AS regions,
@@ -652,29 +697,42 @@ function buildOptionsSql(): string {
       FROM scoped_schools
     )
     SELECT
-      COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
-        'code', school_code,
-        'name', school_name,
-        'region', region,
-        'state', state,
-        'district', district
-      )) FILTER (WHERE school_code IS NOT NULL), '[]'::jsonb) AS schools,
-      COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
-        'id', program_id,
-        'name', program_name
-      )) FILTER (WHERE program_id IS NOT NULL), '[]'::jsonb) AS programs,
-      COALESCE(jsonb_agg(DISTINCT grade) FILTER (WHERE grade IS NOT NULL), '[]'::jsonb) AS grades,
-      COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
-        'id', subject_id,
-        'name', subject_name
-      )) FILTER (WHERE subject_id IS NOT NULL), '[]'::jsonb) AS subjects,
-      COALESCE(jsonb_agg(DISTINCT exam_track) FILTER (WHERE exam_track IS NOT NULL), '[]'::jsonb) AS exam_tracks,
+      (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+          'code', school_code,
+          'name', school_name,
+          'region', region,
+          'state', state,
+          'district', district
+        ) ORDER BY school_name, school_code), '[]'::jsonb)
+        FROM school_options
+      ) AS schools,
+      (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+          'id', program_id,
+          'name', program_name
+        ) ORDER BY program_order, program_id), '[]'::jsonb)
+        FROM program_options
+      ) AS programs,
+      (
+        SELECT COALESCE(jsonb_agg(grade ORDER BY grade), '[]'::jsonb)
+        FROM grade_options
+      ) AS grades,
+      (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+          'id', subject_id,
+          'name', subject_name
+        ) ORDER BY subject_id), '[]'::jsonb)
+        FROM subject_options
+      ) AS subjects,
+      (
+        SELECT COALESCE(jsonb_agg(exam_track ORDER BY exam_track), '[]'::jsonb)
+        FROM exam_track_options
+      ) AS exam_tracks,
       geo_options.regions,
       geo_options.states,
       geo_options.districts
-    FROM geo_options
-    LEFT JOIN filtered_rows ON true
-    GROUP BY geo_options.regions, geo_options.states, geo_options.districts`;
+    FROM geo_options`;
 }
 
 function buildRowCountGuardSql(): string {

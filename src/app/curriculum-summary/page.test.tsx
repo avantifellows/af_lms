@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -10,7 +11,9 @@ const {
   mockNormalizeFilters,
   mockNormalizeSort,
   mockNormalizePage,
+  mockNormalizePageSize,
   mockRedirect,
+  mockRouterPush,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -20,14 +23,19 @@ const {
   mockNormalizeFilters: vi.fn(),
   mockNormalizeSort: vi.fn(),
   mockNormalizePage: vi.fn(),
+  mockNormalizePageSize: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
+  mockRouterPush: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
+vi.mock("next/navigation", () => ({
+  redirect: mockRedirect,
+  useRouter: () => ({ push: mockRouterPush }),
+}));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
   getFeatureAccess: mockGetFeatureAccess,
@@ -38,6 +46,7 @@ vi.mock("@/lib/curriculum-summary", () => ({
   normalizeCurriculumSummarySearchParams: mockNormalizeFilters,
   normalizeCurriculumSummarySort: mockNormalizeSort,
   normalizeCurriculumSummaryPage: mockNormalizePage,
+  normalizeCurriculumSummaryPageSize: mockNormalizePageSize,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -133,6 +142,7 @@ describe("CurriculumSummaryPage", () => {
     mockNormalizeFilters.mockReturnValue(defaultFilters);
     mockNormalizeSort.mockReturnValue({ sort: "school", dir: "asc" });
     mockNormalizePage.mockReturnValue(1);
+    mockNormalizePageSize.mockReturnValue(20);
     mockGetCurriculumSummary.mockResolvedValue(emptySummaryResult);
   });
 
@@ -284,6 +294,12 @@ describe("CurriculumSummaryPage", () => {
       expect(
         screen.getByRole("button", { name: "Apply filters" })
       ).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Rows per page" })).toHaveValue(
+        "20"
+      );
+      expect(mockGetCurriculumSummary).toHaveBeenCalledWith(
+        expect.objectContaining({ pageSize: 20 })
+      );
     }
   );
 
@@ -349,7 +365,8 @@ describe("CurriculumSummaryPage", () => {
 
     expect(screen.getByText("Current academic year: 2026-04-01 to 2026-05-30")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Exam Track" })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "JNV Bhavnagar 70705" })).toBeInTheDocument();
+    expect(screen.getByText("JNV Bhavnagar")).toBeInTheDocument();
+    expect(screen.getByText("70705")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "JNV CoE" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "11" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Physics" })).toBeInTheDocument();
@@ -357,7 +374,18 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByRole("cell", { name: "1/2 (50%)" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "2/2 (100%)" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "-57.1%" })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "1h 30m / 3h 30m" })).toBeInTheDocument();
+    expect(screen.getByText("1h 30m / 3h 30m")).toBeInTheDocument();
+    expect(
+      screen.getByRole("meter", { name: "42.9%" })
+    ).toHaveAttribute("aria-valuetext", "42.9%");
+    expect(
+      screen.getByRole("img", { name: "Time flag: Under prescribed hours" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "Coverage flag: Completion below prescribed coverage",
+      })
+    ).toBeInTheDocument();
     expect(screen.getByText("Under prescribed hours")).toBeInTheDocument();
     expect(screen.getByText("Completion below prescribed coverage")).toBeInTheDocument();
     expect(
@@ -370,7 +398,8 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByText("83.3%")).toBeInTheDocument();
   });
 
-  it("renders expanded chapter rows with allocated-hours note and read-only controls", async () => {
+  it("keeps chapter expansion collapsed by default and expands it on demand", async () => {
+    const user = userEvent.setup();
     mockGetServerSession.mockResolvedValue(pmSession);
     mockGetUserPermission.mockResolvedValue(pmPermission);
     mockGetFeatureAccess.mockReturnValue({
@@ -446,6 +475,26 @@ describe("CurriculumSummaryPage", () => {
     });
     render(jsx);
 
+    expect(
+      screen.getByRole("button", {
+        name: "Show chapters for JNV Bhavnagar 70705 JNV CoE Grade 11 Physics JEE Main",
+      })
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Chapter expansion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kinematics")).not.toBeInTheDocument();
+    expect(screen.queryByText("Vectors")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Show chapters for JNV Bhavnagar 70705 JNV CoE Grade 11 Physics JEE Main",
+      })
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Hide chapters for JNV Bhavnagar 70705 JNV CoE Grade 11 Physics JEE Main",
+      })
+    ).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Chapter expansion")).toBeInTheDocument();
     expect(
       screen.getByText(/Chapter Actual Hours use allocated rounded minutes/)
@@ -456,7 +505,17 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByText("11P2")).toBeInTheDocument();
     expect(screen.getAllByRole("cell", { name: "1/1" }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole("cell", { name: "0/1" }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByRole("cell", { name: "25m / 0h" })).toBeInTheDocument();
+    expect(screen.getByText("25m / 0h")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "—",
+      })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "Time flag: Actual time on zero prescribed minutes",
+      })
+    ).toBeInTheDocument();
     expect(
       screen.getByText("Actual time on zero prescribed minutes")
     ).toBeInTheDocument();
@@ -594,6 +653,52 @@ describe("CurriculumSummaryPage", () => {
     );
   });
 
+  it("lets users change rows per page while preserving filters and resetting pagination", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockNormalizePageSize.mockReturnValue(50);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      totalRowCount: 125,
+      currentPage: 3,
+      totalPages: 3,
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({
+        schools: "70705",
+        sort: "delta",
+        dir: "asc",
+        page: "3",
+        limit: "50",
+      }),
+    });
+    render(jsx);
+
+    expect(mockNormalizePageSize).toHaveBeenCalledWith("50");
+    expect(mockGetCurriculumSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ pageSize: 50 })
+    );
+
+    const pageSizeSelect = screen.getByRole("combobox", {
+      name: "Rows per page",
+    });
+    expect(pageSizeSelect).toHaveValue("50");
+
+    await user.selectOptions(pageSizeSelect, "20");
+
+    expect(mockRouterPush).toHaveBeenCalledWith(
+      "/curriculum-summary?schools=70705&sort=delta&dir=asc"
+    );
+  });
+
   it("renders a narrow-filters state when the row-count guard trips", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
     mockGetUserPermission.mockResolvedValue(pmPermission);
@@ -646,8 +751,503 @@ describe("CurriculumSummaryPage", () => {
 
     expect(screen.getByText("Filters")).toBeInTheDocument();
     expect(screen.getByLabelText("Schools")).toBeInTheDocument();
+    expect(screen.getByLabelText("Programs")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Apply filters" })
     ).toBeInTheDocument();
+  });
+
+  it("renders preselected schools from URL filters as removable chips", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      activeFilters: {
+        ...defaultFilters,
+        schools: ["70705"],
+      },
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "70705",
+            name: "JNV Bhavnagar",
+            region: "West",
+            state: "Gujarat",
+            district: "Bhavnagar",
+          },
+        ],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({ schools: "70705" }),
+    });
+    render(jsx);
+
+    expect(screen.getByText("JNV Bhavnagar (70705)")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove JNV Bhavnagar (70705)" })
+    ).toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe(
+      "70705"
+    );
+  });
+
+  it("lets users search schools by name or code and keeps the schools query value comma-separated", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "70705",
+            name: "JNV Bhavnagar",
+            region: "West",
+            state: "Gujarat",
+            district: "Bhavnagar",
+          },
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "North",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+        ],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    const input = screen.getByRole("combobox", { name: "Schools" });
+    await user.type(input, "agra");
+
+    expect(screen.getByRole("option", { name: "JNV Agra (64037)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /JNV Bhavnagar/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: "JNV Agra (64037)" }));
+    expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe(
+      "64037"
+    );
+
+    await user.type(input, "70705");
+    await user.click(screen.getByRole("option", { name: "JNV Bhavnagar (70705)" }));
+
+    expect(screen.getByText("JNV Agra (64037)")).toBeInTheDocument();
+    expect(screen.getByText("JNV Bhavnagar (70705)")).toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe(
+      "64037,70705"
+    );
+  });
+
+  it("lets users search programs by name or id and keeps the programs query value comma-separated", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      activeFilters: {
+        ...defaultFilters,
+        programs: [1],
+      },
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        programs: [
+          { id: 1, name: "JNV CoE" },
+          { id: 2, name: "JNV Nodal" },
+        ],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({ programs: "1" }),
+    });
+    render(jsx);
+
+    expect(screen.getByText("JNV CoE (1)")).toBeInTheDocument();
+
+    const input = screen.getByRole("combobox", { name: "Programs" });
+    await user.type(input, "nodal");
+
+    expect(screen.getByRole("option", { name: "JNV Nodal (2)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /JNV CoE/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: "JNV Nodal (2)" }));
+
+    expect(screen.getByText("JNV CoE (1)")).toBeInTheDocument();
+    expect(screen.getByText("JNV Nodal (2)")).toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="programs"]')?.value).toBe(
+      "1,2"
+    );
+  });
+
+  it("lets users search grades, subjects, and exam tracks as multi-select filters", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        grades: [11, 12],
+        subjects: [
+          { id: 4, name: "Physics" },
+          { id: 5, name: "Chemistry" },
+        ],
+        examTracks: ["jee_main", "jee_advanced", "neet"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "Grades" }), "12");
+    await user.click(screen.getByRole("option", { name: "Grade 12" }));
+    expect(document.querySelector<HTMLInputElement>('input[name="grades"]')?.value).toBe(
+      "12"
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Subjects" }), "chem");
+    await user.click(screen.getByRole("option", { name: "Chemistry (5)" }));
+    expect(document.querySelector<HTMLInputElement>('input[name="subjects"]')?.value).toBe(
+      "5"
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Exam Track" }), "advanced");
+    await user.click(screen.getByRole("option", { name: "JEE Advanced" }));
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value
+    ).toBe("jee_advanced");
+  });
+
+  it("lets users search geography filters when no schools are selected", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        regions: ["Bhopal", "Jaipur"],
+        states: ["Gujarat", "Uttar Pradesh"],
+        districts: ["Agra", "Bhavnagar"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "Regions" }), "jai");
+    await user.click(screen.getByRole("option", { name: "Jaipur" }));
+    expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe(
+      "Jaipur"
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "States" }), "uttar");
+    await user.click(screen.getByRole("option", { name: "Uttar Pradesh" }));
+    expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+      "Uttar Pradesh"
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Districts" }), "agra");
+    await user.click(screen.getByRole("option", { name: "Agra" }));
+    expect(document.querySelector<HTMLInputElement>('input[name="districts"]')?.value).toBe(
+      "Agra"
+    );
+  });
+
+  it("derives read-only geography filters from selected schools", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      activeFilters: {
+        ...defaultFilters,
+        schools: ["70705", "64037"],
+      },
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "70705",
+            name: "JNV Bhavnagar",
+            region: "West",
+            state: "Gujarat",
+            district: "Bhavnagar",
+          },
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "North",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+        ],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({ schools: "70705,64037" }),
+    });
+    render(jsx);
+
+    expect(screen.getByText("West")).toBeInTheDocument();
+    expect(screen.getByText("North")).toBeInTheDocument();
+    expect(screen.getByText("Gujarat")).toBeInTheDocument();
+    expect(screen.getByText("Uttar Pradesh")).toBeInTheDocument();
+    expect(screen.getByText("Bhavnagar")).toBeInTheDocument();
+    expect(screen.getByText("Agra")).toBeInTheDocument();
+    expect(screen.getAllByText("Derived from selected schools")).toHaveLength(3);
+    expect(screen.queryByRole("combobox", { name: "Regions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "States" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Districts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove West/ })).not.toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe(
+      "North,West"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+      "Gujarat,Uttar Pradesh"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="districts"]')?.value).toBe(
+      "Agra,Bhavnagar"
+    );
+  });
+
+  it("auto-fills read-only geography filters immediately after schools are selected", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "North",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+        ],
+        regions: ["North", "West"],
+        states: ["Gujarat", "Uttar Pradesh"],
+        districts: ["Agra", "Bhavnagar"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    expect(screen.getByRole("combobox", { name: "Regions" })).toBeInTheDocument();
+
+    await user.type(screen.getByRole("combobox", { name: "Schools" }), "agra");
+    await user.click(screen.getByRole("option", { name: "JNV Agra (64037)" }));
+
+    expect(screen.queryByRole("combobox", { name: "Regions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "States" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Districts" })).not.toBeInTheDocument();
+    expect(screen.getByText("North")).toBeInTheDocument();
+    expect(screen.getByText("Uttar Pradesh")).toBeInTheDocument();
+    expect(screen.getByText("Agra")).toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe(
+      "64037"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe(
+      "North"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+      "Uttar Pradesh"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="districts"]')?.value).toBe(
+      "Agra"
+    );
+  });
+
+  it("auto-selects the first program, grade, subject, and exam track when a school is selected", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "North",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+        ],
+        programs: [
+          { id: 1, name: "JNV CoE" },
+          { id: 2, name: "JNV Nodal" },
+        ],
+        grades: [11, 12],
+        subjects: [
+          { id: 4, name: "Physics" },
+          { id: 5, name: "Chemistry" },
+        ],
+        examTracks: ["jee_main", "neet"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "Schools" }), "agra");
+    await user.click(screen.getByRole("option", { name: "JNV Agra (64037)" }));
+
+    expect(screen.getByText("JNV CoE (1)")).toBeInTheDocument();
+    expect(screen.getByText("Grade 11")).toBeInTheDocument();
+    expect(screen.getByText("Physics (4)")).toBeInTheDocument();
+    expect(screen.getByText("JEE Main")).toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="programs"]')?.value).toBe(
+      "1"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="grades"]')?.value).toBe(
+      "11"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="subjects"]')?.value).toBe(
+      "4"
+    );
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value
+    ).toBe("jee_main");
+  });
+
+  it("does not override existing primary filter choices when a school is selected", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      activeFilters: {
+        ...defaultFilters,
+        programs: [2],
+        grades: [12],
+        subjects: [5],
+        examTracks: ["neet"],
+      },
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "North",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+        ],
+        programs: [
+          { id: 1, name: "JNV CoE" },
+          { id: 2, name: "JNV Nodal" },
+        ],
+        grades: [11, 12],
+        subjects: [
+          { id: 4, name: "Physics" },
+          { id: 5, name: "Chemistry" },
+        ],
+        examTracks: ["jee_main", "neet"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({
+        programs: "2",
+        grades: "12",
+        subjects: "5",
+        exam_tracks: "neet",
+      }),
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "Schools" }), "agra");
+    await user.click(screen.getByRole("option", { name: "JNV Agra (64037)" }));
+
+    expect(document.querySelector<HTMLInputElement>('input[name="programs"]')?.value).toBe(
+      "2"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="grades"]')?.value).toBe(
+      "12"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="subjects"]')?.value).toBe(
+      "5"
+    );
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value
+    ).toBe("neet");
   });
 });
