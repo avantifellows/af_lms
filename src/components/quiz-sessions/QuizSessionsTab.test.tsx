@@ -168,7 +168,7 @@ describe("QuizSessionsTab", () => {
         sessions = [
           {
             id: 99,
-            name: String(createdPayload.name || "[LMS] Part Test 11"),
+            name: String(createdPayload.name || "Part Test 11"),
             start_time: String(createdPayload.startTime),
             end_time: String(createdPayload.endTime),
             is_active: true,
@@ -290,7 +290,7 @@ describe("QuizSessionsTab", () => {
         parentBatchId: "EnableStudents_11_Engg",
         classBatchIds: ["EnableStudents_11_Engg_A", "EnableStudents_11_Engg_B"],
         stream: "engineering",
-        name: "[LMS] Part Test 11",
+        name: "Part Test 11",
         showAnswers: false,
         showScores: true,
         shuffle: false,
@@ -301,7 +301,7 @@ describe("QuizSessionsTab", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Create Quiz Session" })).not.toBeInTheDocument();
-      expect(screen.getByText("[LMS] Part Test 11")).toBeInTheDocument();
+      expect(screen.getByText("Part Test 11")).toBeInTheDocument();
       expect(screen.getByText("Processing")).toBeInTheDocument();
       expect(screen.getByText("Queued")).toBeInTheDocument();
     });
