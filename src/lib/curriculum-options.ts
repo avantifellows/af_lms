@@ -21,7 +21,6 @@ const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"
 interface SchoolScopeRow {
   code: string;
   region: string | null;
-  program_ids: number[] | null;
 }
 
 interface ConfigScopeRow {
@@ -124,7 +123,7 @@ export async function resolveCurriculumProgramScope(
   permission: UserPermission
 ): Promise<ProgramScopeResult> {
   const schools = await query<SchoolScopeRow>(
-    `SELECT code, region, program_ids
+    `SELECT code, region
      FROM school
      WHERE code = $1
      LIMIT 1`,
@@ -140,16 +139,10 @@ export async function resolveCurriculumProgramScope(
     return { ok: false, status: 403, error: "Forbidden" };
   }
 
-  let allowedProgramIds = (school.program_ids ?? []).filter((id) =>
-    CURRICULUM_PROGRAM_IDS.includes(id)
-  );
-  if (permission.role !== "admin") {
-    const callerProgramIds = permission.program_ids ?? [];
-    allowedProgramIds = allowedProgramIds.filter((id) => callerProgramIds.includes(id));
-  }
-
-  allowedProgramIds = CURRICULUM_PROGRAM_IDS.filter((id) =>
-    allowedProgramIds.includes(id)
+  const callerProgramIds =
+    permission.role === "admin" ? CURRICULUM_PROGRAM_IDS : permission.program_ids ?? [];
+  const allowedProgramIds = CURRICULUM_PROGRAM_IDS.filter((id) =>
+    callerProgramIds.includes(id)
   );
 
   const programs = allowedProgramIds.length

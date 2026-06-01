@@ -79,8 +79,8 @@ describe("/api/curriculum/logs", () => {
       .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
       .mockResolvedValueOnce([
         {
-          id: 10,
-          log_date: "2026-02-15",
+          id: "10",
+          log_date: new Date(2026, 1, 15),
           duration_minutes: 90,
           program_id: 1,
           grade_id: 3,
@@ -90,6 +90,22 @@ describe("/api/curriculum/logs", () => {
           updated_at: "2026-02-15T10:00:00.000Z",
           topic_id: 101,
           topic_name: [{ lang_code: "en", topic: "Motion" }],
+          chapter_id: 1,
+          chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+          topic_currently_in_syllabus: true,
+        },
+        {
+          id: "10",
+          log_date: new Date(2026, 1, 15),
+          duration_minutes: 90,
+          program_id: 1,
+          grade_id: 3,
+          subject_id: 4,
+          exam_track: "jee_main",
+          inserted_at: "2026-02-15T10:00:00.000Z",
+          updated_at: "2026-02-15T10:00:00.000Z",
+          topic_id: 103,
+          topic_name: [{ lang_code: "en", topic: "Acceleration" }],
           chapter_id: 1,
           chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
           topic_currently_in_syllabus: true,
@@ -133,6 +149,12 @@ describe("/api/curriculum/logs", () => {
             {
               topicId: 101,
               topicName: "Motion",
+              chapterId: 1,
+              chapterName: "Kinematics",
+            },
+            {
+              topicId: 103,
+              topicName: "Acceleration",
               chapterId: 1,
               chapterName: "Kinematics",
             },
@@ -224,6 +246,7 @@ describe("/api/curriculum/logs", () => {
       expect.stringContaining("INSERT INTO lms_curriculum_logs"),
       ["70705", 1, 3, 4, "jee_main", "2026-02-15", 90, "teacher@avantifellows.org"]
     );
+    expect(String(clientQuery.mock.calls[0][0])).toContain("inserted_by_email");
     expect(clientQuery).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining("INSERT INTO lms_curriculum_log_topics"),
@@ -360,6 +383,7 @@ describe("/api/curriculum/logs", () => {
       expect.stringContaining("INSERT INTO lms_curriculum_logs"),
       ["70705", 1, 3, 4, "jee_main", "2026-02-15", 90, "teacher@avantifellows.org"]
     );
+    expect(String(clientQuery.mock.calls[0][0])).toContain("inserted_by_email");
     expect(clientQuery).toHaveBeenNthCalledWith(
       3,
       expect.stringContaining("INSERT INTO lms_curriculum_chapter_completions"),

@@ -130,6 +130,32 @@ describe("LogSessionModal", () => {
     });
   });
 
+  it("clears a zero duration field on focus so typing replaces the default zero", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderModal({ onSave });
+
+    const [, minutes] = screen.getAllByRole("spinbutton");
+    expect(minutes).toHaveValue(0);
+
+    await user.click(minutes);
+    expect(minutes).toHaveValue(null);
+    await user.type(minutes, "30");
+
+    await user.click(screen.getByText("Kinematics"));
+    const topicLabel = screen.getByText("Motion in a Straight Line").closest("label")!;
+    await user.click(within(topicLabel).getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Save Log" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      date: "2026-02-15",
+      durationMinutes: 90,
+      topicIds: [101],
+      completeChapterIds: [],
+      uncompleteChapterIds: [],
+    });
+  });
+
   it("submits completion-only mark and unmark deltas without requiring duration", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
