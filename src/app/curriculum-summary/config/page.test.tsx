@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -156,7 +157,72 @@ describe("CurriculumConfigPage", () => {
     expect(screen.queryByLabelText("School")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Program")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
+  });
+
+  it("exports with the current filters and keeps page state visible on failure", async () => {
+    const filteredParams = {
+      filters: {
+        examTrack: "neet",
+        grade: 12,
+        subject: "5",
+        search: "organic chemistry",
+        syllabusStatus: "all",
+      },
+      page: 3,
+      limit: 20,
+      sort: "updated_at",
+      dir: "desc",
+    };
+    mockNormalizeCurriculumConfigListParams.mockReturnValue(filteredParams);
+    mockGetCurriculumConfigList.mockResolvedValue({
+      ...listResult,
+      activeFilters: filteredParams.filters,
+      filterOptions: {
+        ...listResult.filterOptions,
+        subjects: [{ id: 4, name: "Physics" }, { id: 5, name: "Biology" }],
+      },
+      currentPage: 3,
+      totalPages: 4,
+      limit: 20,
+      sort: "updated_at",
+      dir: "desc",
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => "schema unavailable",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jsx = await CurriculumConfigPage({
+      searchParams: Promise.resolve({
+        exam_track: "neet",
+        grade: "12",
+        subject: "5",
+        search: "organic chemistry",
+        syllabus_status: "all",
+        page: "3",
+        limit: "20",
+        sort: "updated_at",
+        dir: "desc",
+      }),
+    });
+    render(jsx);
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/curriculum/configs/export?exam_track=neet&grade=12&subject=5&search=organic+chemistry&syllabus_status=all&sort=updated_at&dir=desc"
+    );
+    expect(
+      await screen.findByText("Could not export Curriculum Config rows.")
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Exam Track")).toHaveValue("neet");
+    expect(screen.getByLabelText("Grade")).toHaveValue("12");
+    expect(screen.getByLabelText("Subject")).toHaveValue("5");
+    expect(screen.getByLabelText("Syllabus status")).toHaveValue("all");
+    expect(screen.getByText("PHY-01")).toBeInTheDocument();
   });
 
   it("renders an empty table state", async () => {

@@ -23,6 +23,7 @@ import {
   createCurriculumConfigRow,
   editCurriculumConfigRow,
   getCurriculumConfigChapterOptions,
+  getCurriculumConfigExport,
   getCurriculumConfigImpact,
   normalizeCurriculumConfigEditPayload,
   getCurriculumConfigList,
@@ -325,6 +326,86 @@ describe("curriculum config list helpers", () => {
       details: ["lms_chapter_exam_configs.id"],
     });
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("curriculum config export helpers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckCurriculumConfigManagementSchema.mockResolvedValue({ ok: true });
+  });
+
+  it("exports filtered rows as safe CSV while ignoring pagination", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        config_id: "42",
+        chapter_id: "7",
+        chapter_code: '=PHY-01',
+        chapter_name: 'Motion, "fast"',
+        grade: "11",
+        subject_id: "4",
+        subject_name: "Physics",
+        exam_track: "jee_main",
+        is_in_syllabus: true,
+        prescribed_minutes: "90",
+        coverage_sequence: "2",
+        updated_by_email: null,
+        updated_at: null,
+      },
+      {
+        config_id: "43",
+        chapter_id: "8",
+        chapter_code: "+PHY-02",
+        chapter_name: "-Laws",
+        grade: "11",
+        subject_id: "4",
+        subject_name: "@Physics",
+        exam_track: "jee_main",
+        is_in_syllabus: false,
+        prescribed_minutes: "0",
+        coverage_sequence: "3",
+        updated_by_email: "\tadmin@avantifellows.org",
+        updated_at: "\r2026-05-30T10:00:00.000Z",
+      },
+    ]);
+
+    const result = await getCurriculumConfigExport(
+      normalizeCurriculumConfigListParams({
+        exam_track: "jee_main",
+        grade: "11",
+        subject: "4",
+        search: " phy ",
+        syllabus_status: "all",
+        page: "4",
+        limit: "10",
+        sort: "coverage_sequence",
+        dir: "desc",
+      }),
+      new Date("2026-06-01T08:15:00.000Z")
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      filename: "curriculum-config-2026-06-01.csv",
+      csv: [
+        "chapter_code,chapter_name,grade,subject,exam_track,is_in_syllabus,prescribed_minutes,prescribed_hours,coverage_sequence,updated_by_email,updated_at",
+        "\"'=PHY-01\",\"Motion, \"\"fast\"\"\",11,Physics,jee_main,true,90,1.5,2,,",
+        "\"'+PHY-02\",'-Laws,11,'@Physics,jee_main,false,0,0,3,\"'\tadmin@avantifellows.org\",\"'\r2026-05-30T10:00:00.000Z\"",
+      ].join("\r\n"),
+    });
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      "jee_main",
+      11,
+      "4",
+      "%phy%",
+      "all",
+    ]);
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("ORDER BY coverage_sequence DESC");
+    expect(sql).not.toContain("LIMIT $6");
+    expect(sql).not.toContain("OFFSET");
   });
 });
 

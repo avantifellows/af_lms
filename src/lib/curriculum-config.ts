@@ -145,6 +145,14 @@ export type CurriculumConfigListResult =
     }
   | CurriculumSchemaUnavailable;
 
+export type CurriculumConfigExportResult =
+  | {
+      ok: true;
+      filename: string;
+      csv: string;
+    }
+  | CurriculumSchemaUnavailable;
+
 export type CurriculumConfigChapterOptionsResult =
   | {
       ok: true;
@@ -589,6 +597,27 @@ export async function getCurriculumConfigList(
   };
 }
 
+export async function getCurriculumConfigExport(
+  params: CurriculumConfigListParams,
+  now = new Date()
+): Promise<CurriculumConfigExportResult> {
+  const schema = await checkCurriculumConfigManagementSchema();
+  if (!schema.ok) {
+    return schema;
+  }
+
+  const rows = await query<CurriculumConfigQueryRow>(
+    buildExportRowsSql(params.sort, params.dir),
+    buildListQueryParams(params.filters)
+  );
+
+  return {
+    ok: true,
+    filename: `curriculum-config-${formatExportDate(now)}.csv`,
+    csv: formatCurriculumConfigCsv(rows.map(mapCurriculumConfigRow)),
+  };
+}
+
 export async function getCurriculumConfigChapterOptions(
   params: CurriculumConfigChapterOptionsParams
 ): Promise<CurriculumConfigChapterOptionsResult> {
@@ -998,6 +1027,14 @@ function buildRowsSql(
   return `${buildBaseListSql()}
     ORDER BY ${buildOrderClause(sort, dir)}
     LIMIT $6 OFFSET $7`;
+}
+
+function buildExportRowsSql(
+  sort: CurriculumConfigSortKey,
+  dir: CurriculumConfigSortDirection
+): string {
+  return `${buildBaseListSql()}
+    ORDER BY ${buildOrderClause(sort, dir)}`;
 }
 
 function buildChapterOptionsSql(): string {
@@ -1488,6 +1525,68 @@ function buildOrderClause(
     updated_at: "updated_at",
   };
   return `${sortSql[sort]} ${direction}, ${baseOrder}`;
+}
+
+function formatCurriculumConfigCsv(rows: CurriculumConfigRow[]): string {
+  const header = [
+    "chapter_code",
+    "chapter_name",
+    "grade",
+    "subject",
+    "exam_track",
+    "is_in_syllabus",
+    "prescribed_minutes",
+    "prescribed_hours",
+    "coverage_sequence",
+    "updated_by_email",
+    "updated_at",
+  ];
+  const body = rows.map((row) =>
+    [
+      row.chapterCode,
+      row.chapterName,
+      row.grade,
+      row.subjectName,
+      row.examTrack,
+      row.isInSyllabus,
+      row.prescribedMinutes,
+      formatPrescribedHours(row.prescribedHours),
+      row.coverageSequence,
+      row.updatedByEmail,
+      row.updatedAt,
+    ]
+      .map(csvCell)
+      .join(",")
+  );
+
+  return [header.join(","), ...body].join("\r\n");
+}
+
+function csvCell(value: string | number | boolean): string {
+  const raw = String(value);
+  const escapedForFormula = formulaEscape(raw);
+  const mustQuote =
+    raw.startsWith("=") ||
+    raw.startsWith("+") ||
+    /[",\r\n\t]/.test(escapedForFormula);
+
+  if (!mustQuote) {
+    return escapedForFormula;
+  }
+
+  return `"${escapedForFormula.replaceAll('"', '""')}"`;
+}
+
+function formulaEscape(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
+function formatPrescribedHours(hours: number): string {
+  return Number.isInteger(hours) ? String(hours) : String(hours);
+}
+
+function formatExportDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 function mapFilterOptions(row: ConfigOptionsQueryRow | undefined): CurriculumConfigFilterOptions {

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { Download } from "lucide-react";
 
 import PageHeader from "@/components/PageHeader";
 import { Card } from "@/components/ui";
@@ -14,6 +13,7 @@ import {
   type CurriculumConfigSyllabusStatus,
 } from "@/lib/curriculum-config";
 import type { ExamTrack } from "@/types/curriculum";
+import CurriculumConfigExportButton from "./CurriculumConfigExportButton";
 import CurriculumConfigTable from "./CurriculumConfigTable";
 
 interface PageProps {
@@ -76,14 +76,7 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-bold text-text-muted"
-                  >
-                    <Download className="h-4 w-4" aria-hidden="true" />
-                    Export
-                  </button>
+                  <CurriculumConfigExportButton exportHref={exportHref(result)} />
                 </div>
               </div>
 
@@ -297,4 +290,18 @@ function pageHref(
   params.set("dir", result.dir);
   params.set("page", String(page));
   return `/curriculum-summary/config?${params.toString()}`;
+}
+
+function exportHref(
+  result: Extract<CurriculumConfigListResult, { ok: true }>
+): string {
+  const params = new URLSearchParams();
+  params.set("exam_track", result.activeFilters.examTrack);
+  if (result.activeFilters.grade) params.set("grade", String(result.activeFilters.grade));
+  if (result.activeFilters.subject) params.set("subject", result.activeFilters.subject);
+  if (result.activeFilters.search) params.set("search", result.activeFilters.search);
+  params.set("syllabus_status", result.activeFilters.syllabusStatus);
+  params.set("sort", result.sort);
+  params.set("dir", result.dir);
+  return `/api/curriculum/configs/export?${params.toString()}`;
 }
