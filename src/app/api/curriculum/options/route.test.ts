@@ -149,7 +149,7 @@ describe("GET /api/curriculum/options", () => {
     expect(json.defaults.programId).toBe(2);
   });
 
-  it("allows admins to see school CoE/Nodal Programs while excluding NVS", async () => {
+  it("allows admins to see CoE/Nodal Programs while excluding NVS", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockGetUserPermission.mockResolvedValue({
       email: "admin@avantifellows.org",
@@ -181,11 +181,20 @@ describe("GET /api/curriculum/options", () => {
     ]);
   });
 
-  it("returns an empty state when no curriculum-enabled Program is available", async () => {
+  it("returns an empty state when the user has no curriculum-backed Program", async () => {
+    mockGetUserPermission.mockResolvedValue({
+      email: "teacher@avantifellows.org",
+      level: 1,
+      role: "teacher",
+      school_codes: ["70705"],
+      regions: null,
+      program_ids: [64],
+      read_only: false,
+    });
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { code: "70705", region: "AHMEDABAD", program_ids: [64] },
+        { code: "70705", region: "AHMEDABAD" },
       ]);
 
     const res = await GET(nextReq("/api/curriculum/options?school_code=70705"));

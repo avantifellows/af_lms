@@ -236,9 +236,14 @@ describe("PUT /api/curriculum/chapters/[chapterId]/completion", () => {
   });
 
   it("rejects cross-program completion mutations", async () => {
+    mockGetUserPermission.mockResolvedValue({
+      ...teacherPermission,
+      program_ids: [2],
+    });
     mockQuery
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [2] }]);
+      .mockResolvedValueOnce([{ code: "70705", region: "North" }])
+      .mockResolvedValueOnce([{ id: 2, name: "JNV Nodal" }]);
 
     const res = await PUT(
       jsonReq({
