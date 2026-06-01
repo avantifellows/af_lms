@@ -90,7 +90,12 @@ function extractEnglishName(jsonbData: unknown, field: string): string {
 }
 
 function toDateString(value: string | Date): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
   return value.slice(0, 10);
 }
 
@@ -113,10 +118,11 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
   const logsById = new Map<number, LmsCurriculumLog & { _editable: boolean }>();
 
   for (const row of rows) {
-    let log = logsById.get(row.id);
+    const logId = Number(row.id);
+    let log = logsById.get(logId);
     if (!log) {
       log = {
-        id: Number(row.id),
+        id: logId,
         logDate: toDateString(row.log_date),
         durationMinutes: row.duration_minutes,
         programId: Number(row.program_id),
@@ -129,7 +135,7 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
         updatedAt: toTimestampString(row.updated_at),
         _editable: true,
       };
-      logsById.set(Number(row.id), log);
+      logsById.set(logId, log);
     }
 
     if (!row.topic_currently_in_syllabus) {
@@ -319,9 +325,10 @@ async function insertCurriculumLog(
        log_date,
        duration_minutes,
        created_by_email,
+       inserted_by_email,
        updated_by_email
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $8)
      RETURNING id, log_date, duration_minutes, program_id, grade_id, subject_id, exam_track, inserted_at, updated_at`,
     [
       params.schoolCode,

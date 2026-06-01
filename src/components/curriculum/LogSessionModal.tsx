@@ -29,6 +29,18 @@ function formatDuration(minutes: number | undefined): string {
   return `${remainingMinutes}m`;
 }
 
+function normalizeDurationInput(value: string, max: number): string {
+  if (value === "") return "";
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed)) return "";
+  return String(Math.min(max, Math.max(0, parsed)));
+}
+
+function parseDurationInput(value: string): number {
+  const parsed = parseInt(value, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 export default function LogSessionModal({
   chapters,
   progress,
@@ -49,8 +61,8 @@ export default function LogSessionModal({
   );
   const initialDurationMinutes = editLog?.durationMinutes ?? 60;
   const [date, setDate] = useState(editLog?.logDate ?? getTodayIST());
-  const [hours, setHours] = useState(Math.floor(initialDurationMinutes / 60));
-  const [minutes, setMinutes] = useState(initialDurationMinutes % 60);
+  const [hours, setHours] = useState(String(Math.floor(initialDurationMinutes / 60)));
+  const [minutes, setMinutes] = useState(String(initialDurationMinutes % 60));
   const [selectedTopicIds, setSelectedTopicIds] = useState<Set<number>>(
     new Set(initialTopicIds)
   );
@@ -112,7 +124,7 @@ export default function LogSessionModal({
   };
 
   const handleSave = () => {
-    const durationMinutes = hours * 60 + minutes;
+    const durationMinutes = parseDurationInput(hours) * 60 + parseDurationInput(minutes);
     const hasTopicSelections = selectedTopicIds.size > 0;
     const hasCompletionDeltas =
       completeChapterIds.size > 0 || uncompleteChapterIds.size > 0;
@@ -202,7 +214,10 @@ export default function LogSessionModal({
                     min={0}
                     max={12}
                     value={hours}
-                    onChange={(e) => setHours(Math.max(0, parseInt(e.target.value) || 0))}
+                    onFocus={(e) => {
+                      if (e.currentTarget.value === "0") setHours("");
+                    }}
+                    onChange={(e) => setHours(normalizeDurationInput(e.target.value, 12))}
                     className="w-16 rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900 text-center focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-sm text-gray-500">hrs</span>
@@ -211,7 +226,10 @@ export default function LogSessionModal({
                     min={0}
                     max={59}
                     value={minutes}
-                    onChange={(e) => setMinutes(Math.min(59, Math.max(0, parseInt(e.target.value) || 0)))}
+                    onFocus={(e) => {
+                      if (e.currentTarget.value === "0") setMinutes("");
+                    }}
+                    onChange={(e) => setMinutes(normalizeDurationInput(e.target.value, 59))}
                     className="w-16 rounded-md border border-gray-300 bg-white px-2 py-2 text-sm text-gray-900 text-center focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-sm text-gray-500">mins</span>
