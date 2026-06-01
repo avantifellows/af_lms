@@ -12,6 +12,7 @@ const {
 
 vi.mock("./permissions", () => ({
   getUserPermission: mockGetUserPermission,
+  PROGRAM_IDS: { COE: 1, NODAL: 2 },
 }));
 vi.mock("./db", () => ({ query: mockQuery }));
 vi.mock("./curriculum-schema", () => ({
@@ -19,6 +20,9 @@ vi.mock("./curriculum-schema", () => ({
 }));
 
 import {
+  editCurriculumConfigRow,
+  getCurriculumConfigImpact,
+  normalizeCurriculumConfigEditPayload,
   getCurriculumConfigList,
   mapCurriculumConfigRow,
   normalizeCurriculumConfigListParams,
@@ -318,5 +322,271 @@ describe("curriculum config list helpers", () => {
       details: ["lms_chapter_exam_configs.id"],
     });
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("curriculum config edit helpers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckCurriculumConfigManagementSchema.mockResolvedValue({ ok: true });
+  });
+
+  it("rejects immutable identity and unknown edit payload fields before mutation", () => {
+    expect(
+      normalizeCurriculumConfigEditPayload({
+        id: 42,
+        chapter_id: 7,
+        exam_track: "neet",
+        prescribed_minutes: 90,
+        coverage_sequence: 3,
+        is_in_syllabus: true,
+        updated_at: "2026-05-30T10:00:00.000Z",
+        extra: "nope",
+      })
+    ).toEqual({
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields: {
+        chapter_id: "Chapter identity is read-only",
+        exam_track: "Exam Track is read-only",
+        extra: "Field is not editable",
+        id: "Config id is read-only",
+      },
+    });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("returns field-level validation errors for invalid editable values", () => {
+    expect(
+      normalizeCurriculumConfigEditPayload({
+        prescribed_minutes: -1,
+        coverage_sequence: 0,
+        is_in_syllabus: "false",
+        updated_at: "",
+      })
+    ).toEqual({
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields: {
+        coverage_sequence: "Coverage order must be positive",
+        is_in_syllabus: "Syllabus status is required",
+        prescribed_minutes: "Prescribed minutes must be zero or greater",
+        updated_at: "Last-seen updated_at is required",
+      },
+    });
+
+    expect(
+      normalizeCurriculumConfigEditPayload({
+        prescribed_minutes: 45,
+        coverage_sequence: 2,
+        is_in_syllabus: false,
+        updated_at: "2026-05-30T10:00:00.000Z",
+      })
+    ).toEqual({
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields: {
+        prescribed_minutes:
+          "Out-of-syllabus rows must have zero prescribed minutes",
+      },
+    });
+  });
+
+  it("returns impact counts with log-topic chapter joins and soft-delete filters", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        expected_summary_rows: "12",
+        active_curriculum_logs: "3",
+        active_chapter_completions: "4",
+        duplicate_coverage_count: "1",
+      },
+    ]);
+
+    await expect(
+      getCurriculumConfigImpact({
+        chapterId: 7,
+        examTrack: "jee_main",
+        configId: 42,
+        isInSyllabus: true,
+        prescribedMinutes: 0,
+        coverageSequence: 2,
+      })
+    ).resolves.toEqual({
+      ok: true,
+      counts: {
+        expectedSummaryRows: 12,
+        activeCurriculumLogs: 3,
+        activeChapterCompletions: 4,
+      },
+      warnings: [
+        {
+          code: "duplicate_coverage_sequence",
+          message:
+            "Another in-syllabus row in the same Grade, Subject, and Exam Track already uses this coverage order.",
+        },
+        {
+          code: "zero_prescribed_minutes",
+          message:
+            "This in-syllabus row has zero prescribed minutes and will still appear in Curriculum Summary.",
+        },
+      ],
+    });
+
+    const impactSql = mockQuery.mock.calls[0][0] as string;
+    expect(impactSql).toContain("JOIN lms_curriculum_log_topics lclt");
+    expect(impactSql).toContain("JOIN topic t ON t.id = lclt.topic_id");
+    expect(impactSql).toContain("t.chapter_id = $1");
+    expect(impactSql).toContain("l.deleted_at IS NULL");
+    expect(impactSql).toContain("cc.deleted_at IS NULL");
+    expect(impactSql).not.toContain("l.chapter_id");
+  });
+
+  it("updates an existing config row with optimistic concurrency and audit fields only", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          failure_reason: null,
+          config_id: "42",
+          chapter_id: "7",
+          chapter_code: "PHY-01",
+          chapter_name: "Motion",
+          grade: "11",
+          subject_id: "4",
+          subject_name: "Physics",
+          exam_track: "jee_main",
+          is_in_syllabus: true,
+          prescribed_minutes: "120",
+          coverage_sequence: "3",
+          updated_by_email: "admin@avantifellows.org",
+          updated_at: "2026-06-01T12:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          expected_summary_rows: "12",
+          active_curriculum_logs: "0",
+          active_chapter_completions: "0",
+          duplicate_coverage_count: "0",
+        },
+      ]);
+
+    await expect(
+      editCurriculumConfigRow({
+        id: 42,
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          prescribed_minutes: 120,
+          coverage_sequence: 3,
+          is_in_syllabus: true,
+          updated_at: "2026-05-30T10:00:00.000Z",
+        },
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      row: {
+        id: 42,
+        prescribedMinutes: 120,
+        coverageSequence: 3,
+        updatedByEmail: "admin@avantifellows.org",
+      },
+      warnings: [],
+    });
+
+    const updateSql = mockQuery.mock.calls[0][0] as string;
+    expect(updateSql).toContain("UPDATE lms_chapter_exam_configs cfg");
+    expect(updateSql).toContain("cfg.updated_at = $5::timestamp");
+    expect(updateSql).toContain("updated_by_email = $6");
+    expect(updateSql).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
+    expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_logs/i);
+    expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_chapter_completions/i);
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      42,
+      true,
+      120,
+      3,
+      "2026-05-30T10:00:00.000Z",
+      "admin@avantifellows.org",
+    ]);
+  });
+
+  it("returns conflict for stale writes and rejects normal in-syllabus removal", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        failure_reason: "stale",
+        config_id: null,
+        chapter_id: null,
+        chapter_code: null,
+        chapter_name: null,
+        grade: null,
+        subject_id: null,
+        subject_name: null,
+        exam_track: null,
+        is_in_syllabus: null,
+        prescribed_minutes: null,
+        coverage_sequence: null,
+        updated_by_email: null,
+        updated_at: null,
+      },
+    ]);
+
+    await expect(
+      editCurriculumConfigRow({
+        id: 42,
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          prescribed_minutes: 120,
+          coverage_sequence: 3,
+          is_in_syllabus: true,
+          updated_at: "2026-05-30T10:00:00.000Z",
+        },
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Curriculum Config row is stale",
+    });
+
+    mockQuery.mockResolvedValueOnce([
+      {
+        failure_reason: "removal_not_allowed",
+        config_id: null,
+        chapter_id: null,
+        chapter_code: null,
+        chapter_name: null,
+        grade: null,
+        subject_id: null,
+        subject_name: null,
+        exam_track: null,
+        is_in_syllabus: null,
+        prescribed_minutes: null,
+        coverage_sequence: null,
+        updated_by_email: null,
+        updated_at: null,
+      },
+    ]);
+
+    await expect(
+      editCurriculumConfigRow({
+        id: 42,
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          prescribed_minutes: 0,
+          coverage_sequence: 3,
+          is_in_syllabus: false,
+          updated_at: "2026-05-30T10:00:00.000Z",
+        },
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields: {
+        is_in_syllabus:
+          "Use the dedicated remove-from-syllabus flow for in-syllabus rows",
+      },
+    });
   });
 });

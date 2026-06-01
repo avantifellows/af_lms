@@ -11,10 +11,10 @@ import {
   normalizeCurriculumConfigListParams,
   requireCurriculumConfigAdmin,
   type CurriculumConfigListResult,
-  type CurriculumConfigRow,
   type CurriculumConfigSyllabusStatus,
 } from "@/lib/curriculum-config";
 import type { ExamTrack } from "@/types/curriculum";
+import CurriculumConfigTable from "./CurriculumConfigTable";
 
 interface PageProps {
   searchParams: Promise<Record<string, string | undefined>>;
@@ -51,7 +51,7 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
     <div className="min-h-screen bg-bg">
       <PageHeader
         title="Curriculum Config"
-        subtitle="Read-only global LMS Chapter Exam Config review"
+        subtitle="Manage global LMS Chapter Exam Config rows"
         backHref="/curriculum-summary"
         userEmail={access.email}
         containerClassName="w-full px-4 py-3 sm:px-6 lg:px-8"
@@ -66,7 +66,7 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
               <div className="flex flex-col gap-3 border-b border-border px-4 py-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                    Read only
+                    Editable
                   </p>
                   <h2 className="text-lg font-bold text-text-primary">
                     LMS Chapter Exam Config rows
@@ -100,7 +100,10 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
                   No Curriculum Config rows match the selected filters.
                 </div>
               ) : (
-                <ConfigTable rows={result.rows} />
+                <CurriculumConfigTable
+                  rows={result.rows}
+                  activeFilters={result.activeFilters}
+                />
               )}
 
               <ConfigPagination result={result} />
@@ -249,79 +252,6 @@ function ConfigFilters({
   );
 }
 
-function ConfigTable({ rows }: { rows: CurriculumConfigRow[] }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-border text-sm">
-        <thead className="bg-bg-muted">
-          <tr>
-            {[
-              "Config ID",
-              "Chapter",
-              "Grade",
-              "Subject",
-              "Exam Track",
-              "Syllabus",
-              "Prescribed",
-              "Coverage order",
-              "Updated by",
-              "Updated at",
-              "Actions",
-            ].map((header) => (
-              <th
-                key={header}
-                scope="col"
-                className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-text-muted"
-              >
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border bg-bg-card">
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td className="px-4 py-3 font-mono text-text-secondary">{row.id}</td>
-              <td className="px-4 py-3">
-                <div className="font-bold text-text-primary">{row.chapterCode}</div>
-                <div className="text-text-secondary">{row.chapterName}</div>
-                <div className="text-xs text-text-muted">Chapter ID {row.chapterId}</div>
-              </td>
-              <td className="px-4 py-3 text-text-secondary">{row.grade}</td>
-              <td className="px-4 py-3 text-text-secondary">{row.subjectName}</td>
-              <td className="px-4 py-3 text-text-secondary">
-                {formatExamTrack(row.examTrack)}
-              </td>
-              <td className="px-4 py-3 text-text-secondary">
-                {row.isInSyllabus ? "In syllabus" : "Out of syllabus"}
-              </td>
-              <td className="px-4 py-3 text-text-secondary">
-                {row.prescribedMinutes}m ({row.prescribedHoursLabel})
-              </td>
-              <td className="px-4 py-3 text-text-secondary">
-                {row.coverageSequence}
-              </td>
-              <td className="px-4 py-3 text-text-secondary">
-                {row.updatedByEmail}
-              </td>
-              <td className="px-4 py-3 text-text-secondary">{row.updatedAt}</td>
-              <td className="px-4 py-3">
-                <button
-                  type="button"
-                  disabled
-                  className="rounded-md border border-border px-3 py-1.5 text-xs font-bold text-text-muted"
-                >
-                  Review
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function ConfigPagination({
   result,
 }: {
@@ -381,8 +311,4 @@ function pageHref(
   params.set("dir", result.dir);
   params.set("page", String(page));
   return `/curriculum-summary/config?${params.toString()}`;
-}
-
-function formatExamTrack(track: ExamTrack): string {
-  return EXAM_TRACK_OPTIONS.find((option) => option.value === track)?.label ?? track;
 }

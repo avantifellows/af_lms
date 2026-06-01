@@ -20,6 +20,25 @@ const {
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
+vi.mock("./CurriculumConfigTable", () => ({
+  __esModule: true,
+  default: ({
+    rows,
+  }: {
+    rows: Array<{ id: number; chapterCode: string; chapterName: string; prescribedHoursLabel: string }>;
+  }) => (
+    <div>
+      {rows.map((row) => (
+        <div key={row.id}>
+          <span>{row.chapterCode}</span>
+          <span>{row.chapterName}</span>
+          <span>{row.prescribedHoursLabel}</span>
+          <button type="button">Edit</button>
+        </div>
+      ))}
+    </div>
+  ),
+}));
 vi.mock("@/lib/curriculum-config", () => ({
   requireCurriculumConfigAdmin: mockRequireCurriculumConfigAdmin,
   normalizeCurriculumConfigListParams: mockNormalizeCurriculumConfigListParams,

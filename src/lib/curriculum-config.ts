@@ -3,7 +3,7 @@ import {
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
 import { query } from "./db";
-import { getUserPermission, type UserPermission } from "./permissions";
+import { getUserPermission, PROGRAM_IDS, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumConfigSession = {
@@ -111,6 +111,61 @@ export type CurriculumConfigListResult =
     }
   | CurriculumSchemaUnavailable;
 
+export interface CurriculumConfigEditPayload {
+  isInSyllabus: boolean;
+  prescribedMinutes: number;
+  coverageSequence: number;
+  updatedAt: string;
+}
+
+export type CurriculumConfigValidationFailure = {
+  ok: false;
+  status: 422;
+  error: string;
+  fields: Record<string, string>;
+};
+
+export type CurriculumConfigEditPayloadResult =
+  | { ok: true; payload: CurriculumConfigEditPayload }
+  | CurriculumConfigValidationFailure;
+
+export interface CurriculumConfigWarning {
+  code: "duplicate_coverage_sequence" | "zero_prescribed_minutes";
+  message: string;
+}
+
+export interface CurriculumConfigImpactParams {
+  chapterId: number;
+  examTrack: ExamTrack;
+  configId?: number;
+  isInSyllabus?: boolean;
+  prescribedMinutes?: number;
+  coverageSequence?: number;
+}
+
+export type CurriculumConfigImpactResult =
+  | {
+      ok: true;
+      counts: {
+        expectedSummaryRows: number;
+        activeCurriculumLogs: number;
+        activeChapterCompletions: number;
+      };
+      warnings: CurriculumConfigWarning[];
+    }
+  | CurriculumSchemaUnavailable;
+
+export type CurriculumConfigEditResult =
+  | {
+      ok: true;
+      row: CurriculumConfigRow;
+      warnings: CurriculumConfigWarning[];
+      impact: Extract<CurriculumConfigImpactResult, { ok: true }>["counts"];
+    }
+  | CurriculumConfigValidationFailure
+  | CurriculumSchemaUnavailable
+  | { ok: false; status: 404 | 409; error: string };
+
 interface ConfigOptionsQueryRow {
   grades: unknown;
   subjects: unknown;
@@ -119,6 +174,17 @@ interface ConfigOptionsQueryRow {
 
 interface CountQueryRow {
   total_count: string | number | null;
+}
+
+interface ImpactQueryRow {
+  expected_summary_rows: string | number | null;
+  active_curriculum_logs: string | number | null;
+  active_chapter_completions: string | number | null;
+  duplicate_coverage_count: string | number | null;
+}
+
+interface EditMutationRow extends CurriculumConfigQueryRow {
+  failure_reason: "stale" | "missing" | "removal_not_allowed" | null;
 }
 
 const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
@@ -215,6 +281,86 @@ export function mapCurriculumConfigRow(
   };
 }
 
+export function normalizeCurriculumConfigEditPayload(
+  body: unknown
+): CurriculumConfigEditPayloadResult {
+  const fields: Record<string, string> = {};
+  const payload = isPlainObject(body) ? body : {};
+  const allowedKeys = new Set([
+    "is_in_syllabus",
+    "prescribed_minutes",
+    "coverage_sequence",
+    "updated_at",
+  ]);
+
+  for (const key of Object.keys(payload)) {
+    if (allowedKeys.has(key)) continue;
+    if (key === "id") {
+      fields[key] = "Config id is read-only";
+    } else if (key === "chapter_id") {
+      fields[key] = "Chapter identity is read-only";
+    } else if (key === "exam_track") {
+      fields[key] = "Exam Track is read-only";
+    } else {
+      fields[key] = "Field is not editable";
+    }
+  }
+
+  if (Object.keys(fields).length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields,
+    };
+  }
+
+  const isInSyllabus =
+    typeof payload.is_in_syllabus === "boolean" ? payload.is_in_syllabus : null;
+  const prescribedMinutes = integerFromPayload(payload.prescribed_minutes);
+  const coverageSequence = integerFromPayload(payload.coverage_sequence);
+  const updatedAt =
+    typeof payload.updated_at === "string" ? payload.updated_at.trim() : "";
+
+  if (isInSyllabus === null) {
+    fields.is_in_syllabus = "Syllabus status is required";
+  }
+  if (coverageSequence === null || coverageSequence <= 0) {
+    fields.coverage_sequence = "Coverage order must be positive";
+  }
+  if (prescribedMinutes === null || prescribedMinutes < 0) {
+    fields.prescribed_minutes = "Prescribed minutes must be zero or greater";
+  }
+  if (isInSyllabus === false && prescribedMinutes !== null && prescribedMinutes > 0) {
+    fields.prescribed_minutes =
+      "Out-of-syllabus rows must have zero prescribed minutes";
+  }
+  if (!updatedAt) {
+    fields.updated_at = "Last-seen updated_at is required";
+  } else if (Number.isNaN(Date.parse(updatedAt))) {
+    fields.updated_at = "Last-seen updated_at is invalid";
+  }
+
+  if (Object.keys(fields).length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields,
+    };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      isInSyllabus: isInSyllabus ?? false,
+      prescribedMinutes: prescribedMinutes ?? 0,
+      coverageSequence: coverageSequence ?? 0,
+      updatedAt,
+    },
+  };
+}
+
 export async function getCurriculumConfigList(
   params: CurriculumConfigListParams
 ): Promise<CurriculumConfigListResult> {
@@ -246,6 +392,115 @@ export async function getCurriculumConfigList(
     limit: params.limit,
     sort: params.sort,
     dir: params.dir,
+  };
+}
+
+export async function getCurriculumConfigImpact(
+  params: CurriculumConfigImpactParams
+): Promise<CurriculumConfigImpactResult> {
+  const schema = await checkCurriculumConfigManagementSchema();
+  if (!schema.ok) {
+    return schema;
+  }
+
+  const rows = await query<ImpactQueryRow>(buildImpactSql(), [
+    params.chapterId,
+    params.examTrack,
+    [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL],
+    params.coverageSequence ?? null,
+    params.configId ?? null,
+  ]);
+  const row = rows[0];
+
+  return {
+    ok: true,
+    counts: {
+      expectedSummaryRows: numberFromDb(row?.expected_summary_rows),
+      activeCurriculumLogs: numberFromDb(row?.active_curriculum_logs),
+      activeChapterCompletions: numberFromDb(row?.active_chapter_completions),
+    },
+    warnings: buildCurriculumConfigWarnings({
+      duplicateCoverageCount: numberFromDb(row?.duplicate_coverage_count),
+      isInSyllabus: params.isInSyllabus,
+      prescribedMinutes: params.prescribedMinutes,
+    }),
+  };
+}
+
+export async function editCurriculumConfigRow(params: {
+  id: number;
+  adminEmail: string;
+  body: unknown;
+}): Promise<CurriculumConfigEditResult> {
+  const schema = await checkCurriculumConfigManagementSchema();
+  if (!schema.ok) {
+    return schema;
+  }
+
+  const payloadResult = normalizeCurriculumConfigEditPayload(params.body);
+  if (!payloadResult.ok) {
+    return payloadResult;
+  }
+
+  if (!Number.isInteger(params.id) || params.id <= 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields: { id: "Config id must be positive" },
+    };
+  }
+
+  const payload = payloadResult.payload;
+  const rows = await query<EditMutationRow>(buildEditSql(), [
+    params.id,
+    payload.isInSyllabus,
+    payload.prescribedMinutes,
+    payload.coverageSequence,
+    payload.updatedAt,
+    params.adminEmail,
+  ]);
+  const row = rows[0];
+
+  if (!row || row.failure_reason === "missing") {
+    return { ok: false, status: 404, error: "Curriculum Config row not found" };
+  }
+  if (row.failure_reason === "stale") {
+    return { ok: false, status: 409, error: "Curriculum Config row is stale" };
+  }
+  if (row.failure_reason === "removal_not_allowed") {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config edit payload",
+      fields: {
+        is_in_syllabus:
+          "Use the dedicated remove-from-syllabus flow for in-syllabus rows",
+      },
+    };
+  }
+
+  const mappedRow = mapCurriculumConfigRow(row);
+  const impact = await getCurriculumConfigImpact({
+    chapterId: mappedRow.chapterId,
+    examTrack: mappedRow.examTrack,
+    configId: mappedRow.id,
+    isInSyllabus: mappedRow.isInSyllabus,
+    prescribedMinutes: mappedRow.prescribedMinutes,
+    coverageSequence: mappedRow.coverageSequence,
+  });
+
+  return {
+    ok: true,
+    row: mappedRow,
+    warnings: impact.ok ? impact.warnings : [],
+    impact: impact.ok
+      ? impact.counts
+      : {
+          expectedSummaryRows: 0,
+          activeCurriculumLogs: 0,
+          activeChapterCompletions: 0,
+        },
   };
 }
 
@@ -378,6 +633,196 @@ function buildRowsSql(
     LIMIT $6 OFFSET $7`;
 }
 
+function buildImpactSql(): string {
+  return `
+    WITH target_chapter AS (
+      SELECT
+        ch.id AS chapter_id,
+        ch.grade_id,
+        ch.subject_id
+      FROM chapter ch
+      WHERE ch.id = $1
+    ),
+    expected_summary AS (
+      SELECT COUNT(*)::int AS expected_summary_rows
+      FROM school s
+      CROSS JOIN program p
+      CROSS JOIN target_chapter tc
+      WHERE s.af_school_category = 'JNV'
+        AND p.id = ANY($3::int[])
+    ),
+    active_logs AS (
+      SELECT COUNT(DISTINCT l.id)::int AS active_curriculum_logs
+      FROM lms_curriculum_logs l
+      JOIN lms_curriculum_log_topics lclt ON lclt.log_id = l.id
+      JOIN topic t ON t.id = lclt.topic_id
+      WHERE t.chapter_id = $1
+        AND l.exam_track = $2
+        AND l.deleted_at IS NULL
+    ),
+    active_completions AS (
+      SELECT COUNT(*)::int AS active_chapter_completions
+      FROM lms_curriculum_chapter_completions cc
+      WHERE cc.chapter_id = $1
+        AND cc.exam_track = $2
+        AND cc.deleted_at IS NULL
+    ),
+    duplicate_sequences AS (
+      SELECT COUNT(*)::int AS duplicate_coverage_count
+      FROM lms_chapter_exam_configs dup
+      JOIN chapter dup_ch ON dup_ch.id = dup.chapter_id
+      JOIN target_chapter tc
+        ON tc.grade_id = dup_ch.grade_id
+       AND tc.subject_id = dup_ch.subject_id
+      WHERE $4::int IS NOT NULL
+        AND dup.exam_track = $2
+        AND dup.coverage_sequence = $4::int
+        AND dup.is_in_syllabus = true
+        AND ($5::int IS NULL OR dup.id <> $5::int)
+    )
+    SELECT
+      expected_summary.expected_summary_rows,
+      active_logs.active_curriculum_logs,
+      active_completions.active_chapter_completions,
+      duplicate_sequences.duplicate_coverage_count
+    FROM expected_summary
+    CROSS JOIN active_logs
+    CROSS JOIN active_completions
+    CROSS JOIN duplicate_sequences`;
+}
+
+function buildEditSql(): string {
+  return `
+    WITH current_config AS (
+      SELECT
+        cfg.id,
+        cfg.is_in_syllabus AS current_is_in_syllabus
+      FROM lms_chapter_exam_configs cfg
+      WHERE cfg.id = $1
+    ),
+    updated AS (
+      UPDATE lms_chapter_exam_configs cfg
+      SET is_in_syllabus = $2,
+          prescribed_minutes = $3,
+          coverage_sequence = $4,
+          updated_by_email = $6,
+          updated_at = (NOW() AT TIME ZONE 'UTC')
+      FROM current_config current_config
+      WHERE cfg.id = current_config.id
+        AND cfg.updated_at = $5::timestamp
+        AND NOT (
+          current_config.current_is_in_syllabus = true
+          AND $2::boolean = false
+        )
+      RETURNING
+        cfg.id,
+        cfg.chapter_id,
+        cfg.exam_track,
+        cfg.is_in_syllabus,
+        cfg.prescribed_minutes,
+        cfg.coverage_sequence,
+        cfg.updated_by_email,
+        cfg.updated_at
+    ),
+    updated_row AS (
+      SELECT
+        NULL::text AS failure_reason,
+        updated.id AS config_id,
+        updated.chapter_id,
+        ch.code AS chapter_code,
+        COALESCE(
+          (
+            SELECT item->>'chapter'
+            FROM jsonb_array_elements(ch.name::jsonb) item
+            WHERE item->>'lang_code' = 'en'
+            LIMIT 1
+          ),
+          ch.code,
+          'Unknown chapter'
+        ) AS chapter_name,
+        g.number AS grade,
+        s.id AS subject_id,
+        COALESCE(
+          (
+            SELECT item->>'subject'
+            FROM jsonb_array_elements(s.name::jsonb) item
+            WHERE item->>'lang_code' = 'en'
+            LIMIT 1
+          ),
+          'Unknown subject'
+        ) AS subject_name,
+        updated.exam_track,
+        updated.is_in_syllabus,
+        updated.prescribed_minutes,
+        updated.coverage_sequence,
+        updated.updated_by_email,
+        updated.updated_at
+      FROM updated
+      JOIN chapter ch
+        ON ch.id = updated.chapter_id
+      JOIN grade g ON g.id = ch.grade_id
+      JOIN subject s ON s.id = ch.subject_id
+    ),
+    failure AS (
+      SELECT
+        CASE
+          WHEN NOT EXISTS (SELECT 1 FROM current_config) THEN 'missing'
+          WHEN EXISTS (
+            SELECT 1
+            FROM current_config
+            WHERE current_is_in_syllabus = true
+          ) AND $2::boolean = false THEN 'removal_not_allowed'
+          ELSE 'stale'
+        END AS failure_reason
+      WHERE NOT EXISTS (SELECT 1 FROM updated)
+    )
+    SELECT *
+    FROM updated_row
+    UNION ALL
+    SELECT
+      failure_reason,
+      NULL::int AS config_id,
+      NULL::int AS chapter_id,
+      NULL::text AS chapter_code,
+      NULL::text AS chapter_name,
+      NULL::int AS grade,
+      NULL::int AS subject_id,
+      NULL::text AS subject_name,
+      NULL::text AS exam_track,
+      NULL::boolean AS is_in_syllabus,
+      NULL::int AS prescribed_minutes,
+      NULL::int AS coverage_sequence,
+      NULL::text AS updated_by_email,
+      NULL::timestamp AS updated_at
+    FROM failure`;
+}
+
+function buildCurriculumConfigWarnings(params: {
+  duplicateCoverageCount: number;
+  isInSyllabus?: boolean;
+  prescribedMinutes?: number;
+}): CurriculumConfigWarning[] {
+  const warnings: CurriculumConfigWarning[] = [];
+
+  if (params.duplicateCoverageCount > 0) {
+    warnings.push({
+      code: "duplicate_coverage_sequence",
+      message:
+        "Another in-syllabus row in the same Grade, Subject, and Exam Track already uses this coverage order.",
+    });
+  }
+
+  if (params.isInSyllabus === true && params.prescribedMinutes === 0) {
+    warnings.push({
+      code: "zero_prescribed_minutes",
+      message:
+        "This in-syllabus row has zero prescribed minutes and will still appear in Curriculum Summary.",
+    });
+  }
+
+  return warnings;
+}
+
 function buildOrderClause(
   sort: CurriculumConfigSortKey,
   dir: CurriculumConfigSortDirection
@@ -420,6 +865,10 @@ function mapFilterOptions(row: ConfigOptionsQueryRow | undefined): CurriculumCon
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function numberOption(
   value: string | undefined,
   allowedValues: Array<number | null>,
@@ -443,6 +892,16 @@ function positiveInteger(value: string | undefined): number | null {
 function numberFromDb(value: string | number | null | undefined): number {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
+}
+
+function integerFromPayload(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+  return Number.isInteger(parsed) ? parsed : null;
 }
 
 function localizedName(
