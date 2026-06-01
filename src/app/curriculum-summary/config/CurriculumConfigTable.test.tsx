@@ -342,4 +342,128 @@ describe("CurriculumConfigTable", () => {
       })
     );
   });
+
+  it("removes an in-syllabus row through a global-impact confirmation flow", async () => {
+    const removedRow: CurriculumConfigRow = {
+      ...inSyllabusRow,
+      isInSyllabus: false,
+      syllabusStatus: "out_of_syllabus",
+      prescribedMinutes: 0,
+      prescribedHoursLabel: "0h",
+    };
+    const fetchMock = vi.fn((input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/curriculum/configs/impact")) {
+        return Promise.resolve(
+          jsonResponse({
+            counts: {
+              expectedSummaryRows: 12,
+              activeCurriculumLogs: 2,
+              activeChapterCompletions: 5,
+            },
+            warnings: [],
+          })
+        );
+      }
+      if (
+        url === "/api/curriculum/configs/42/remove-from-syllabus" &&
+        init?.method === "POST"
+      ) {
+        return Promise.resolve(
+          jsonResponse({
+            row: removedRow,
+            warnings: [],
+            impact: {
+              expectedSummaryRows: 12,
+              activeCurriculumLogs: 2,
+              activeChapterCompletions: 5,
+            },
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Remove from syllabus" })
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("PHY-01").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Motion").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("JEE Main").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "This global change removes the row from live Curriculum options and Curriculum Summary calculations without deleting historical LMS Curriculum Logs or Chapter Completion records."
+      )
+    ).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByText("Summary rows")).toBeInTheDocument());
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("Active logs")).toBeInTheDocument();
+    expect(screen.getAllByText("2").length).toBeGreaterThan(0);
+    expect(screen.getByText("Chapter completions")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove from syllabus" }));
+
+    expect(
+      await screen.findByText("Curriculum Config row removed but hidden by active filters.")
+    ).toBeInTheDocument();
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/curriculum/configs/42/remove-from-syllabus",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"updated_at":"2026-05-30T10:00:00.000Z"'),
+      })
+    );
+  });
+
+  it("does not expose remove on out-of-syllabus rows", () => {
+    const outOfSyllabusRow: CurriculumConfigRow = {
+      ...inSyllabusRow,
+      isInSyllabus: false,
+      syllabusStatus: "out_of_syllabus",
+      prescribedMinutes: 0,
+      prescribedHoursLabel: "0h",
+    };
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(
+      <CurriculumConfigTable rows={[outOfSyllabusRow]} activeFilters={baseFilters} />
+    );
+
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+  });
+
+  it("shows stale conflict messaging from remove-from-syllabus", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input, init) => {
+        if (init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse(
+              { error: "Curriculum Config row is stale" },
+              { status: 409, ok: false }
+            )
+          );
+        }
+        return Promise.resolve(jsonResponse({ counts: null, warnings: [] }));
+      })
+    );
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove from syllabus" }));
+
+    expect(
+      await screen.findByText("This row changed since you opened it. Reload and reopen the row.")
+    ).toBeInTheDocument();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
 });

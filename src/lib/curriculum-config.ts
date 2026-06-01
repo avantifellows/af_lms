@@ -167,6 +167,10 @@ export interface CurriculumConfigCreatePayload {
   coverageSequence: number;
 }
 
+export interface CurriculumConfigRemovePayload {
+  updatedAt: string;
+}
+
 export type CurriculumConfigValidationFailure = {
   ok: false;
   status: 422;
@@ -180,6 +184,10 @@ export type CurriculumConfigEditPayloadResult =
 
 export type CurriculumConfigCreatePayloadResult =
   | { ok: true; payload: CurriculumConfigCreatePayload }
+  | CurriculumConfigValidationFailure;
+
+export type CurriculumConfigRemovePayloadResult =
+  | { ok: true; payload: CurriculumConfigRemovePayload }
   | CurriculumConfigValidationFailure;
 
 export interface CurriculumConfigWarning {
@@ -230,6 +238,17 @@ export type CurriculumConfigCreateResult =
   | CurriculumSchemaUnavailable
   | { ok: false; status: 409; error: string };
 
+export type CurriculumConfigRemoveResult =
+  | {
+      ok: true;
+      row: CurriculumConfigRow;
+      warnings: CurriculumConfigWarning[];
+      impact: Extract<CurriculumConfigImpactResult, { ok: true }>["counts"];
+    }
+  | CurriculumConfigValidationFailure
+  | CurriculumSchemaUnavailable
+  | { ok: false; status: 404 | 409; error: string };
+
 interface ConfigOptionsQueryRow {
   grades: unknown;
   subjects: unknown;
@@ -253,6 +272,10 @@ interface EditMutationRow extends CurriculumConfigQueryRow {
 
 interface CreateMutationRow extends CurriculumConfigQueryRow {
   failure_reason: "duplicate" | "missing_chapter" | null;
+}
+
+interface RemoveMutationRow extends CurriculumConfigQueryRow {
+  failure_reason: "stale" | "missing" | "already_out_of_syllabus" | null;
 }
 
 const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
@@ -506,6 +529,32 @@ export function normalizeCurriculumConfigCreatePayload(
   };
 }
 
+export function normalizeCurriculumConfigRemovePayload(
+  body: unknown
+): CurriculumConfigRemovePayloadResult {
+  const payload = isPlainObject(body) ? body : {};
+  const updatedAt =
+    typeof payload.updated_at === "string" ? payload.updated_at.trim() : "";
+  const fields: Record<string, string> = {};
+
+  if (!updatedAt) {
+    fields.updated_at = "Last-seen updated_at is required";
+  } else if (Number.isNaN(Date.parse(updatedAt))) {
+    fields.updated_at = "Last-seen updated_at is invalid";
+  }
+
+  if (Object.keys(fields).length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config remove payload",
+      fields,
+    };
+  }
+
+  return { ok: true, payload: { updatedAt } };
+}
+
 export async function getCurriculumConfigList(
   params: CurriculumConfigListParams
 ): Promise<CurriculumConfigListResult> {
@@ -722,6 +771,78 @@ export async function editCurriculumConfigRow(params: {
       fields: {
         is_in_syllabus:
           "Use the dedicated remove-from-syllabus flow for in-syllabus rows",
+      },
+    };
+  }
+
+  const mappedRow = mapCurriculumConfigRow(row);
+  const impact = await getCurriculumConfigImpact({
+    chapterId: mappedRow.chapterId,
+    examTrack: mappedRow.examTrack,
+    configId: mappedRow.id,
+    isInSyllabus: mappedRow.isInSyllabus,
+    prescribedMinutes: mappedRow.prescribedMinutes,
+    coverageSequence: mappedRow.coverageSequence,
+  });
+
+  return {
+    ok: true,
+    row: mappedRow,
+    warnings: impact.ok ? impact.warnings : [],
+    impact: impact.ok
+      ? impact.counts
+      : {
+          expectedSummaryRows: 0,
+          activeCurriculumLogs: 0,
+          activeChapterCompletions: 0,
+        },
+  };
+}
+
+export async function removeCurriculumConfigRowFromSyllabus(params: {
+  id: number;
+  adminEmail: string;
+  body: unknown;
+}): Promise<CurriculumConfigRemoveResult> {
+  const schema = await checkCurriculumConfigManagementSchema();
+  if (!schema.ok) {
+    return schema;
+  }
+
+  const payloadResult = normalizeCurriculumConfigRemovePayload(params.body);
+  if (!payloadResult.ok) {
+    return payloadResult;
+  }
+
+  if (!Number.isInteger(params.id) || params.id <= 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config remove payload",
+      fields: { id: "Config id must be positive" },
+    };
+  }
+
+  const rows = await query<RemoveMutationRow>(buildRemoveFromSyllabusSql(), [
+    params.id,
+    payloadResult.payload.updatedAt,
+    params.adminEmail,
+  ]);
+  const row = rows[0];
+
+  if (!row || row.failure_reason === "missing") {
+    return { ok: false, status: 404, error: "Curriculum Config row not found" };
+  }
+  if (row.failure_reason === "stale") {
+    return { ok: false, status: 409, error: "Curriculum Config row is stale" };
+  }
+  if (row.failure_reason === "already_out_of_syllabus") {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config remove payload",
+      fields: {
+        is_in_syllabus: "Curriculum Config row is already out of syllabus",
       },
     };
   }
@@ -1196,6 +1317,104 @@ function buildEditSql(): string {
             FROM current_config
             WHERE current_is_in_syllabus = true
           ) AND $2::boolean = false THEN 'removal_not_allowed'
+          ELSE 'stale'
+        END AS failure_reason
+      WHERE NOT EXISTS (SELECT 1 FROM updated)
+    )
+    SELECT *
+    FROM updated_row
+    UNION ALL
+    SELECT
+      failure_reason,
+      NULL::int AS config_id,
+      NULL::int AS chapter_id,
+      NULL::text AS chapter_code,
+      NULL::text AS chapter_name,
+      NULL::int AS grade,
+      NULL::int AS subject_id,
+      NULL::text AS subject_name,
+      NULL::text AS exam_track,
+      NULL::boolean AS is_in_syllabus,
+      NULL::int AS prescribed_minutes,
+      NULL::int AS coverage_sequence,
+      NULL::text AS updated_by_email,
+      NULL::timestamp AS updated_at
+    FROM failure`;
+}
+
+function buildRemoveFromSyllabusSql(): string {
+  return `
+    WITH updated AS (
+      UPDATE lms_chapter_exam_configs cfg
+      SET is_in_syllabus = false,
+          prescribed_minutes = 0,
+          updated_by_email = $3,
+          updated_at = (NOW() AT TIME ZONE 'UTC')
+      WHERE cfg.id = $1
+        AND cfg.updated_at = $2::timestamp
+        AND cfg.is_in_syllabus = true
+      RETURNING
+        cfg.id,
+        cfg.chapter_id,
+        cfg.exam_track,
+        cfg.is_in_syllabus,
+        cfg.prescribed_minutes,
+        cfg.coverage_sequence,
+        cfg.updated_by_email,
+        cfg.updated_at
+    ),
+    updated_row AS (
+      SELECT
+        NULL::text AS failure_reason,
+        updated.id AS config_id,
+        updated.chapter_id,
+        ch.code AS chapter_code,
+        COALESCE(
+          (
+            SELECT item->>'chapter'
+            FROM jsonb_array_elements(ch.name::jsonb) item
+            WHERE item->>'lang_code' = 'en'
+            LIMIT 1
+          ),
+          ch.code,
+          'Unknown chapter'
+        ) AS chapter_name,
+        g.number AS grade,
+        s.id AS subject_id,
+        COALESCE(
+          (
+            SELECT item->>'subject'
+            FROM jsonb_array_elements(s.name::jsonb) item
+            WHERE item->>'lang_code' = 'en'
+            LIMIT 1
+          ),
+          'Unknown subject'
+        ) AS subject_name,
+        updated.exam_track,
+        updated.is_in_syllabus,
+        updated.prescribed_minutes,
+        updated.coverage_sequence,
+        updated.updated_by_email,
+        updated.updated_at
+      FROM updated
+      JOIN chapter ch
+        ON ch.id = updated.chapter_id
+      JOIN grade g ON g.id = ch.grade_id
+      JOIN subject s ON s.id = ch.subject_id
+    ),
+    failure AS (
+      SELECT
+        CASE
+          WHEN NOT EXISTS (
+            SELECT 1 FROM lms_chapter_exam_configs cfg WHERE cfg.id = $1
+          ) THEN 'missing'
+          WHEN EXISTS (
+            SELECT 1
+            FROM lms_chapter_exam_configs cfg
+            WHERE cfg.id = $1
+              AND cfg.updated_at = $2::timestamp
+              AND cfg.is_in_syllabus = false
+          ) THEN 'already_out_of_syllabus'
           ELSE 'stale'
         END AS failure_reason
       WHERE NOT EXISTS (SELECT 1 FROM updated)

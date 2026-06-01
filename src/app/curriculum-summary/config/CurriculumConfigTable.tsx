@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { AlertTriangle, CheckCircle2, Pencil, Plus, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import type {
@@ -34,6 +34,7 @@ export default function CurriculumConfigTable({
 }: CurriculumConfigTableProps) {
   const router = useRouter();
   const [editingRow, setEditingRow] = useState<CurriculumConfigRow | null>(null);
+  const [removingRow, setRemovingRow] = useState<CurriculumConfigRow | null>(null);
   const [adding, setAdding] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -53,6 +54,16 @@ export default function CurriculumConfigTable({
       rowMatchesFilters(row, activeFilters)
         ? "Curriculum Config row added."
         : "Curriculum Config row added but hidden by active filters."
+    );
+    router.refresh();
+  }
+
+  function handleRemoved(row: CurriculumConfigRow) {
+    setRemovingRow(null);
+    setSuccessMessage(
+      rowMatchesFilters(row, activeFilters)
+        ? "Curriculum Config row removed."
+        : "Curriculum Config row removed but hidden by active filters."
     );
     router.refresh();
   }
@@ -145,6 +156,7 @@ export default function CurriculumConfigTable({
                 <td className="px-4 py-3 text-text-secondary">{row.updatedByEmail}</td>
                 <td className="px-4 py-3 text-text-secondary">{row.updatedAt}</td>
                 <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -156,6 +168,20 @@ export default function CurriculumConfigTable({
                     <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                     Edit
                   </button>
+                  {row.isInSyllabus ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSuccessMessage("");
+                        setRemovingRow(row);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-danger px-3 py-1.5 text-xs font-bold text-danger hover:bg-danger-bg"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Remove
+                    </button>
+                  ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -167,6 +193,13 @@ export default function CurriculumConfigTable({
           row={editingRow}
           onClose={() => setEditingRow(null)}
           onSaved={handleSaved}
+        />
+      ) : null}
+      {removingRow ? (
+        <RemovePanel
+          row={removingRow}
+          onClose={() => setRemovingRow(null)}
+          onRemoved={handleRemoved}
         />
       ) : null}
       {adding ? (
@@ -182,6 +215,144 @@ export default function CurriculumConfigTable({
         />
       ) : null}
     </>
+  );
+}
+
+function RemovePanel({
+  row,
+  onClose,
+  onRemoved,
+}: {
+  row: CurriculumConfigRow;
+  onClose: () => void;
+  onRemoved: (row: CurriculumConfigRow) => void;
+}) {
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState("");
+  const [impact, setImpact] = useState<ImpactState>({
+    loading: true,
+    counts: null,
+    warnings: [],
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({
+      chapter_id: String(row.chapterId),
+      exam_track: row.examTrack,
+      config_id: String(row.id),
+      coverage_sequence: String(row.coverageSequence),
+      prescribed_minutes: "0",
+      is_in_syllabus: "false",
+    });
+    void fetch(`/api/curriculum/configs/impact?${params.toString()}`)
+      .then((response) => response.json())
+      .then((json) => {
+        if (!cancelled) {
+          setImpact({
+            loading: false,
+            counts: json.counts ?? null,
+            warnings: json.warnings ?? [],
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImpact({ loading: false, counts: null, warnings: [] });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [row.chapterId, row.coverageSequence, row.examTrack, row.id]);
+
+  async function handleRemove() {
+    setRemoving(true);
+    setError("");
+    const response = await fetch(
+      `/api/curriculum/configs/${row.id}/remove-from-syllabus`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updated_at: row.updatedAt }),
+      }
+    );
+    const json = await response.json();
+    setRemoving(false);
+
+    if (response.status === 409) {
+      setError("This row changed since you opened it. Reload and reopen the row.");
+      return;
+    }
+    if (!response.ok) {
+      setError(json.error ?? "Could not remove Curriculum Config row.");
+      return;
+    }
+
+    onRemoved(json.row);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30">
+      <aside className="ml-auto flex h-full w-full max-w-xl flex-col overflow-y-auto bg-bg-card shadow-xl">
+        <div className="flex items-start justify-between border-b border-border px-5 py-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-text-muted">
+              LMS Chapter Exam Config
+            </p>
+            <h2 className="text-lg font-bold text-text-primary">
+              Remove from syllabus
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close remove panel"
+            className="rounded-md border border-border p-2 text-text-secondary hover:text-text-primary"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex flex-1 flex-col">
+          <div className="space-y-5 px-5 py-5">
+            <ReadOnlyGrid row={row} />
+            <div className="rounded-md border border-danger bg-danger-bg px-3 py-3 text-sm text-danger">
+              <p className="font-bold">{row.chapterCode}</p>
+              <p>{row.chapterName}</p>
+              <p>{formatExamTrack(row.examTrack)}</p>
+            </div>
+            <p className="text-sm text-text-secondary">
+              This global change removes the row from live Curriculum options and
+              Curriculum Summary calculations without deleting historical LMS Curriculum
+              Logs or Chapter Completion records.
+            </p>
+            <ImpactBlock impact={impact} warnings={impact.warnings} />
+            {error ? (
+              <div className="rounded-md border border-danger bg-danger-bg px-3 py-2 text-sm font-bold text-danger">
+                {error}
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-auto flex justify-end gap-3 border-t border-border px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-4 py-2 text-sm font-bold text-text-secondary hover:text-text-primary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleRemove()}
+              disabled={removing}
+              className="rounded-md bg-danger px-4 py-2 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
+            >
+              {removing ? "Removing" : "Remove from syllabus"}
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
   );
 }
 
