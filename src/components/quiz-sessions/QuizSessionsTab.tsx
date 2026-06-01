@@ -826,17 +826,9 @@ export default function QuizSessionsTab({
                     setMenuState(null);
                   }}
                   disabled={sessionProcessing || busy}
-                  className="flex w-full items-center justify-between px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                  className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
                 >
-                  <span>{enabled ? "Disable Session" : "Enable Session"}</span>
-                  <span
-                    className={`text-base leading-none ${
-                      enabled ? "text-accent" : "text-red-700"
-                    }`}
-                    aria-hidden="true"
-                  >
-                    {enabled ? "✓" : "✕"}
-                  </span>
+                  {enabled ? "Disable Session" : "Enable Session"}
                 </button>
                 {endNowAvailable ? (
                   <button
