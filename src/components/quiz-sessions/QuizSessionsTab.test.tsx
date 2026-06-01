@@ -168,7 +168,7 @@ describe("QuizSessionsTab", () => {
         sessions = [
           {
             id: 99,
-            name: String(createdPayload.name || "[LMS] Part Test 11"),
+            name: String(createdPayload.name || "Part Test 11"),
             start_time: String(createdPayload.startTime),
             end_time: String(createdPayload.endTime),
             is_active: true,
@@ -235,7 +235,7 @@ describe("QuizSessionsTab", () => {
     expect(screen.getByText("Second Quiz")).toBeInTheDocument();
     expect(screen.getByText("Synced Quiz With Last Time")).toBeInTheDocument();
     expect(
-      screen.getByText("Results sync automatically every 30 minutes. Manual sync is not needed.")
+      screen.getByText("Results sync automatically every 60 minutes. Manual sync is not needed.")
     ).toBeInTheDocument();
 
     await user.selectOptions(screen.getAllByRole("combobox")[0], "EnableStudents_11_Engg_B");
@@ -281,6 +281,11 @@ describe("QuizSessionsTab", () => {
 
     expect(await screen.findByText("Part Test 11")).toBeInTheDocument();
     await user.click(screen.getByText("Part Test 11"));
+    await user.click(screen.getByRole("button", { name: "Advanced Settings" }));
+    await user.click(screen.getByLabelText("Shuffle question order"));
+    expect(screen.getByRole("button", { name: "Q & A" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "OMR" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Both" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Create Session" }));
 
     await waitFor(() => {
@@ -290,18 +295,18 @@ describe("QuizSessionsTab", () => {
         parentBatchId: "EnableStudents_11_Engg",
         classBatchIds: ["EnableStudents_11_Engg_A", "EnableStudents_11_Engg_B"],
         stream: "engineering",
-        name: "[LMS] Part Test 11",
+        name: "Part Test 11",
         showAnswers: false,
         showScores: true,
-        shuffle: false,
-        gurukulFormatType: "both",
+        shuffle: true,
+        gurukulFormatType: "qa",
       });
     });
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Create Quiz Session" })).not.toBeInTheDocument();
-      expect(screen.getByText("[LMS] Part Test 11")).toBeInTheDocument();
+      expect(screen.getByText("Part Test 11")).toBeInTheDocument();
       expect(screen.getByText("Processing")).toBeInTheDocument();
       expect(screen.getByText("Queued")).toBeInTheDocument();
     });
@@ -318,10 +323,10 @@ describe("QuizSessionsTab", () => {
 
     expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
     expect(
-      screen.getByText("Results sync automatically every 30 minutes. Manual sync is not needed.")
+      screen.getByText("Results sync automatically every 60 minutes. Manual sync is not needed.")
     ).toBeInTheDocument();
     expect(
-      screen.getAllByText("Results sync automatically every 30 minutes. Manual sync is not needed.")
+      screen.getAllByText("Results sync automatically every 60 minutes. Manual sync is not needed.")
     ).toHaveLength(1);
 
     const existingQuizRow = screen.getByText("Existing Quiz").closest("tr");

@@ -241,7 +241,7 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
         show_answers: true,
         show_scores: false,
         shuffle: true,
-        gurukul_format_type: "omr",
+        gurukul_format_type: "qa",
         untouched: "keep-me",
       },
     });
