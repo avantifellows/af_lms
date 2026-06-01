@@ -43,7 +43,11 @@ export default function SessionHistory({
 
   // Format date for display
   const formatSessionDate = (dateStr: string): string => {
-    const date = new Date(dateStr);
+    const [year, month, day] = dateStr.split("-").map(Number);
+    const date =
+      Number.isInteger(year) && Number.isInteger(month) && Number.isInteger(day)
+        ? new Date(year, month - 1, day)
+        : new Date(dateStr);
     return date.toLocaleDateString("en-IN", {
       weekday: "short",
       month: "short",
