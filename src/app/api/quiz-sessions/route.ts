@@ -327,7 +327,8 @@ export async function POST(request: NextRequest) {
 
   const sessionName = body.name?.trim() || getDefaultSessionName(selectedTemplate.name);
   const testType = selectedTemplate.testType || "assessment";
-  const gurukulFormatType = body.gurukulFormatType || "both";
+  const shuffle = body.shuffle ?? false;
+  const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
   const cmsLink = selectedTemplate.cmsLink;
   const cmsSourceId = selectedTemplate.cmsSourceId;
 
@@ -392,7 +393,7 @@ export async function POST(request: NextRequest) {
       number_of_fields_in_popup_form: "",
       show_answers: body.showAnswers ?? true,
       show_scores: body.showScores ?? true,
-      shuffle: body.shuffle ?? false,
+      shuffle,
       next_step_url: "",
       next_step_text: "",
       single_page_mode: false,

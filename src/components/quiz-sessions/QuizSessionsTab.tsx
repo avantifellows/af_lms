@@ -77,10 +77,15 @@ interface BatchDerivation {
 
 const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
-const AUTO_SYNC_INTERVAL_MINUTES = 30;
+const AUTO_SYNC_INTERVAL_MINUTES = 60;
+const QA_GURUKUL_FORMAT = "qa";
 
 function getDefaultSessionName(baseName: string): string {
   return baseName.trim();
+}
+
+function getGurukulFormatForShuffle(gurukulFormatType: string, shuffle: boolean) {
+  return shuffle ? QA_GURUKUL_FORMAT : gurukulFormatType;
 }
 
 function getCompactBatchLabel(values: string[] | undefined): string {
@@ -1158,7 +1163,7 @@ function QuizSessionCreateModal({
         showAnswers,
         showScores,
         shuffle,
-        gurukulFormatType,
+        gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
         startTime: computedStart.toISOString(),
         endTime: computedEnd.toISOString(),
       };
@@ -1480,7 +1485,11 @@ function QuizSessionCreateModal({
                           <input
                             type="checkbox"
                             checked={shuffle}
-                            onChange={(event) => setShuffle(event.target.checked)}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setShuffle(checked);
+                              if (checked) setGurukulFormatType(QA_GURUKUL_FORMAT);
+                            }}
                             className="h-4 w-4 accent-accent"
                           />
                           Shuffle question order
@@ -1497,8 +1506,12 @@ function QuizSessionCreateModal({
                                 <button
                                   key={option.value}
                                   type="button"
-                                  onClick={() => setGurukulFormatType(option.value)}
-                                  className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide ${
+                                  onClick={() => {
+                                    if (shuffle && option.value !== QA_GURUKUL_FORMAT) return;
+                                    setGurukulFormatType(option.value);
+                                  }}
+                                  disabled={shuffle && option.value !== QA_GURUKUL_FORMAT}
+                                  className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
                                     selected
                                       ? "bg-accent text-text-on-accent"
                                       : "bg-bg-card text-text-primary hover:bg-hover-bg"
@@ -1574,9 +1587,13 @@ function QuizSessionEditModal({
   const [showScores, setShowScores] = useState(
     getMetaBoolean(session.meta_data, "show_scores") ?? true
   );
-  const [shuffle, setShuffle] = useState(getMetaBoolean(session.meta_data, "shuffle") ?? false);
+  const initialShuffle = getMetaBoolean(session.meta_data, "shuffle") ?? false;
+  const [shuffle, setShuffle] = useState(initialShuffle);
   const [gurukulFormatType, setGurukulFormatType] = useState(
-    getMetaString(session.meta_data, "gurukul_format_type") || "both"
+    getGurukulFormatForShuffle(
+      getMetaString(session.meta_data, "gurukul_format_type") || "both",
+      initialShuffle
+    )
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1629,7 +1646,7 @@ function QuizSessionEditModal({
       showAnswers,
       showScores,
       shuffle,
-      gurukulFormatType,
+      gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
     };
 
     try {
@@ -1768,7 +1785,11 @@ function QuizSessionEditModal({
                       <input
                         type="checkbox"
                         checked={shuffle}
-                        onChange={(event) => setShuffle(event.target.checked)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setShuffle(checked);
+                          if (checked) setGurukulFormatType(QA_GURUKUL_FORMAT);
+                        }}
                         className="h-4 w-4 accent-accent"
                       />
                       Shuffle question order
@@ -1785,8 +1806,12 @@ function QuizSessionEditModal({
                             <button
                               key={option.value}
                               type="button"
-                              onClick={() => setGurukulFormatType(option.value)}
-                              className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide ${
+                              onClick={() => {
+                                if (shuffle && option.value !== QA_GURUKUL_FORMAT) return;
+                                setGurukulFormatType(option.value);
+                              }}
+                              disabled={shuffle && option.value !== QA_GURUKUL_FORMAT}
+                              className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
                                 selected
                                   ? "bg-accent text-text-on-accent"
                                   : "bg-bg-card text-text-primary hover:bg-hover-bg"
