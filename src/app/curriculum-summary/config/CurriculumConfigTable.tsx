@@ -755,6 +755,7 @@ function EditPanel({
     counts: null,
     warnings: [],
   });
+  const effectiveInSyllabus = row.isInSyllabus || restore;
 
   useEffect(() => {
     let cancelled = false;
@@ -762,9 +763,9 @@ function EditPanel({
       chapter_id: String(row.chapterId),
       exam_track: row.examTrack,
       config_id: String(row.id),
-      coverage_sequence: String(row.coverageSequence),
-      prescribed_minutes: String(row.prescribedMinutes),
-      is_in_syllabus: String(row.isInSyllabus),
+      coverage_sequence: String(coverageSequence),
+      prescribed_minutes: String(prescribedMinutes),
+      is_in_syllabus: String(effectiveInSyllabus),
     });
     void fetch(
       `/api/curriculum/configs/impact?${params.toString()}`
@@ -789,14 +790,13 @@ function EditPanel({
     };
   }, [
     row.chapterId,
-    row.coverageSequence,
     row.examTrack,
     row.id,
-    row.isInSyllabus,
-    row.prescribedMinutes,
+    coverageSequence,
+    effectiveInSyllabus,
+    prescribedMinutes,
   ]);
 
-  const effectiveInSyllabus = row.isInSyllabus || restore;
   const localWarnings: CurriculumConfigWarning[] =
     effectiveInSyllabus && Number(prescribedMinutes) === 0
       ? [

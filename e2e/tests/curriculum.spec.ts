@@ -93,14 +93,16 @@ test.describe("Curriculum read path", () => {
     await expect(adminPage.getByText("1. Fixture Biology")).toBeVisible();
   });
 
-  test("admin sees an empty Curriculum state for an NVS-only school", async ({
+  test("admin sees Curriculum for a school without relying on school program_id", async ({
     adminPage,
   }) => {
     await adminPage.goto("/school/75000000076?tab=curriculum");
 
     await expect(
-      adminPage.getByText("No curriculum-enabled Programs are available for this school.")
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
     ).toBeVisible();
+    await expect(adminPage.getByLabel("Program")).toHaveValue("1");
+    await expect(adminPage.getByText("Fixture Alpha Physics")).toBeVisible();
   });
 
   test("admin can mark and unmark Chapter Completion from a chapter row across reloads", async ({

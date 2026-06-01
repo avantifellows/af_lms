@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -96,6 +96,16 @@ describe("CurriculumConfigTable", () => {
         "This in-syllabus row has zero prescribed minutes and will still appear in Curriculum Summary."
       )
     ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Coverage order"), {
+      target: { value: "3" },
+    });
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        expect.stringContaining("coverage_sequence=3")
+      )
+    );
   });
 
   it("shows stale conflict messaging from PATCH", async () => {

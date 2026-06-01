@@ -1122,7 +1122,7 @@ function buildImpactSql(): string {
     active_logs AS (
       SELECT COUNT(DISTINCT l.id)::int AS active_curriculum_logs
       FROM lms_curriculum_logs l
-      JOIN lms_curriculum_log_topics lclt ON lclt.log_id = l.id
+      JOIN lms_curriculum_log_topics lclt ON lclt.curriculum_log_id = l.id
       JOIN topic t ON t.id = lclt.topic_id
       WHERE t.chapter_id = $1
         AND l.exam_track = $2

@@ -687,6 +687,7 @@ describe("curriculum config edit helpers", () => {
 
     const impactSql = mockQuery.mock.calls[0][0] as string;
     expect(impactSql).toContain("JOIN lms_curriculum_log_topics lclt");
+    expect(impactSql).toContain("lclt.curriculum_log_id = l.id");
     expect(impactSql).toContain("JOIN topic t ON t.id = lclt.topic_id");
     expect(impactSql).toContain("t.chapter_id = $1");
     expect(impactSql).toContain("l.deleted_at IS NULL");
