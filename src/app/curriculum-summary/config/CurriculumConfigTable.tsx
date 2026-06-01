@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { AlertTriangle, CheckCircle2, Pencil, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import type {
+  CurriculumConfigChapterOption,
   CurriculumConfigFilters,
   CurriculumConfigRow,
   CurriculumConfigWarning,
@@ -33,6 +34,7 @@ export default function CurriculumConfigTable({
 }: CurriculumConfigTableProps) {
   const router = useRouter();
   const [editingRow, setEditingRow] = useState<CurriculumConfigRow | null>(null);
+  const [adding, setAdding] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
   function handleSaved(row: CurriculumConfigRow) {
@@ -45,8 +47,31 @@ export default function CurriculumConfigTable({
     router.refresh();
   }
 
+  function handleAdded(row: CurriculumConfigRow) {
+    setAdding(false);
+    setSuccessMessage(
+      rowMatchesFilters(row, activeFilters)
+        ? "Curriculum Config row added."
+        : "Curriculum Config row added but hidden by active filters."
+    );
+    router.refresh();
+  }
+
   return (
     <>
+      <div className="flex justify-end border-b border-border px-4 py-3">
+        <button
+          type="button"
+          onClick={() => {
+            setSuccessMessage("");
+            setAdding(true);
+          }}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add
+        </button>
+      </div>
       {successMessage ? (
         <div
           role="status"
@@ -83,6 +108,16 @@ export default function CurriculumConfigTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border bg-bg-card">
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={11}
+                  className="px-4 py-10 text-sm text-text-secondary"
+                >
+                  No Curriculum Config rows match the selected filters.
+                </td>
+              </tr>
+            ) : null}
             {rows.map((row) => (
               <tr key={row.id}>
                 <td className="px-4 py-3 font-mono text-text-secondary">{row.id}</td>
@@ -134,7 +169,398 @@ export default function CurriculumConfigTable({
           onSaved={handleSaved}
         />
       ) : null}
+      {adding ? (
+        <AddPanel
+          activeFilters={activeFilters}
+          rows={rows}
+          onClose={() => setAdding(false)}
+          onAdded={handleAdded}
+          onOpenRestore={(row) => {
+            setAdding(false);
+            setEditingRow(row);
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+function AddPanel({
+  activeFilters,
+  rows,
+  onClose,
+  onAdded,
+  onOpenRestore,
+}: {
+  activeFilters: CurriculumConfigFilters;
+  rows: CurriculumConfigRow[];
+  onClose: () => void;
+  onAdded: (row: CurriculumConfigRow) => void;
+  onOpenRestore: (row: CurriculumConfigRow) => void;
+}) {
+  const [examTrack, setExamTrack] = useState<ExamTrack>(activeFilters.examTrack);
+  const [grade, setGrade] = useState(activeFilters.grade ? String(activeFilters.grade) : "");
+  const [subject, setSubject] = useState(activeFilters.subject ?? "");
+  const [search, setSearch] = useState(activeFilters.search);
+  const [options, setOptions] = useState<CurriculumConfigChapterOption[]>([]);
+  const [selected, setSelected] = useState<CurriculumConfigChapterOption | null>(null);
+  const [prescribedMinutes, setPrescribedMinutes] = useState(0);
+  const [coverageSequence, setCoverageSequence] = useState(1);
+  const [isInSyllabus, setIsInSyllabus] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [impact, setImpact] = useState<ImpactState>({
+    loading: false,
+    counts: null,
+    warnings: [],
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({
+      exam_track: examTrack,
+      search,
+    });
+    if (grade) params.set("grade", grade);
+    if (subject) params.set("subject", subject);
+    void fetch(`/api/curriculum/configs/chapter-options?${params.toString()}`)
+      .then((response) => response.json())
+      .then((json) => {
+        if (!cancelled) {
+          setOptions(json.options ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOptions([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [examTrack, grade, subject, search]);
+
+  useEffect(() => {
+    if (!selected || selected.configExists) {
+      return;
+    }
+    let cancelled = false;
+    const params = new URLSearchParams({
+      chapter_id: String(selected.chapterId),
+      exam_track: examTrack,
+      coverage_sequence: String(coverageSequence),
+      prescribed_minutes: String(prescribedMinutes),
+      is_in_syllabus: String(isInSyllabus),
+    });
+    void fetch(`/api/curriculum/configs/impact?${params.toString()}`)
+      .then((response) => response.json())
+      .then((json) => {
+        if (!cancelled) {
+          setImpact({
+            loading: false,
+            counts: json.counts ?? null,
+            warnings: json.warnings ?? [],
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImpact({ loading: false, counts: null, warnings: [] });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [coverageSequence, examTrack, isInSyllabus, prescribedMinutes, selected]);
+
+  function selectOption(option: CurriculumConfigChapterOption) {
+    setSelected(option);
+    setError("");
+    setFieldErrors({});
+    setImpact({ loading: !option.configExists, counts: null, warnings: [] });
+    setGrade(String(option.grade));
+    setSubject(String(option.subjectId));
+  }
+
+  async function openRestoreFlow(option: CurriculumConfigChapterOption) {
+    const localRow = rows.find((row) => row.id === option.existingConfigId);
+    if (localRow) {
+      onOpenRestore(localRow);
+      return;
+    }
+
+    const params = new URLSearchParams({
+      exam_track: examTrack,
+      grade: String(option.grade),
+      subject: String(option.subjectId),
+      search: option.chapterCode,
+      syllabus_status: "out_of_syllabus",
+      limit: "10",
+    });
+    const response = await fetch(`/api/curriculum/configs?${params.toString()}`);
+    const json = await response.json();
+    const row = (json.rows ?? []).find(
+      (candidate: CurriculumConfigRow) => candidate.id === option.existingConfigId
+    );
+    if (row) {
+      onOpenRestore(row);
+    } else {
+      setError("Could not load the existing out-of-syllabus row.");
+    }
+  }
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) {
+      setError("Select a chapter before creating a config row.");
+      return;
+    }
+    if (selected.configExists) {
+      setError("A config row already exists for this chapter and Exam Track.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setFieldErrors({});
+    const response = await fetch("/api/curriculum/configs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chapter_id: selected.chapterId,
+        exam_track: examTrack,
+        is_in_syllabus: isInSyllabus,
+        prescribed_minutes: Number(prescribedMinutes),
+        coverage_sequence: Number(coverageSequence),
+      }),
+    });
+    const json = await response.json();
+    setSaving(false);
+
+    if (!response.ok) {
+      setError(json.error ?? "Could not add Curriculum Config row.");
+      setFieldErrors(json.fields ?? {});
+      return;
+    }
+
+    onAdded(json.row);
+  }
+
+  const selectedDuplicate = selected?.configExists ? selected : null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30">
+      <aside className="ml-auto flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-bg-card shadow-xl">
+        <div className="flex items-start justify-between border-b border-border px-5 py-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-text-muted">
+              Add missing LMS Chapter Exam Config
+            </p>
+            <h2 className="text-lg font-bold text-text-primary">
+              Add LMS Chapter Exam Config
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close add panel"
+            className="rounded-md border border-border p-2 text-text-secondary hover:text-text-primary"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <form onSubmit={handleCreate} className="flex flex-1 flex-col">
+          <div className="space-y-5 px-5 py-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
+                Exam Track
+                <select
+                  value={examTrack}
+                  onChange={(event) => {
+                    setExamTrack(event.currentTarget.value as ExamTrack);
+                    setSelected(null);
+                  }}
+                  className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
+                >
+                  <option value="jee_main">JEE Main</option>
+                  <option value="jee_advanced">JEE Advanced</option>
+                  <option value="neet">NEET</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
+                Grade
+                <input
+                  value={grade}
+                  onChange={(event) => {
+                    setGrade(event.currentTarget.value);
+                    setSelected(null);
+                  }}
+                  className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
+                  placeholder="All"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
+                Subject
+                <input
+                  value={subject}
+                  onChange={(event) => {
+                    setSubject(event.currentTarget.value);
+                    setSelected(null);
+                  }}
+                  className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
+                  placeholder="All"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
+                Chapter search
+                <input
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.currentTarget.value);
+                    setSelected(null);
+                  }}
+                  className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
+                  placeholder="Code or name"
+                />
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold text-text-primary">Chapter</h3>
+              {options.length === 0 ? (
+                <p className="rounded-md border border-border bg-bg-muted px-3 py-2 text-sm text-text-secondary">
+                  No chapters match the add filters.
+                </p>
+              ) : (
+                <div className="max-h-64 space-y-2 overflow-y-auto">
+                  {options.map((option) => (
+                    <button
+                      key={option.chapterId}
+                      type="button"
+                      onClick={() => selectOption(option)}
+                      className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+                        selected?.chapterId === option.chapterId
+                          ? "border-accent bg-hover-bg"
+                          : "border-border bg-bg-muted"
+                      }`}
+                    >
+                      <span className="block font-bold text-text-primary">
+                        {option.chapterCode} - {option.chapterName}
+                      </span>
+                      <span className="block text-xs text-text-secondary">
+                        Grade {option.grade} - {option.subjectName} - {option.topicCount}{" "}
+                        {option.topicCount === 1 ? "topic" : "topics"}
+                      </span>
+                      {option.topicWarning ? (
+                        <span className="mt-1 block text-xs font-bold text-warning-text">
+                          {option.topicWarning}
+                        </span>
+                      ) : null}
+                      {option.configExists ? (
+                        <span className="mt-1 block text-xs font-bold text-danger">
+                          Config already exists for {formatExamTrack(examTrack)}
+                        </span>
+                      ) : null}
+                      <span className="sr-only">Select {option.chapterCode}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
+                Prescribed minutes
+                <input
+                  type="number"
+                  min="0"
+                  value={prescribedMinutes}
+                  onChange={(event) =>
+                    setPrescribedMinutes(Number(event.currentTarget.value))
+                  }
+                  className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
+                />
+                {fieldErrors.prescribed_minutes ? (
+                  <span className="text-xs text-danger">{fieldErrors.prescribed_minutes}</span>
+                ) : null}
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
+                Coverage order
+                <input
+                  type="number"
+                  min="1"
+                  value={coverageSequence}
+                  onChange={(event) =>
+                    setCoverageSequence(Number(event.currentTarget.value))
+                  }
+                  className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
+                />
+                {fieldErrors.coverage_sequence ? (
+                  <span className="text-xs text-danger">{fieldErrors.coverage_sequence}</span>
+                ) : null}
+              </label>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm font-bold text-text-primary">
+              <input
+                type="checkbox"
+                checked={isInSyllabus}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setIsInSyllabus(checked);
+                  if (!checked) setPrescribedMinutes(0);
+                }}
+                className="h-4 w-4"
+              />
+              In syllabus
+            </label>
+
+            {selectedDuplicate ? (
+              <div className="rounded-md border border-warning-border bg-warning-bg px-3 py-3 text-sm text-warning-text">
+                <p className="font-bold">
+                  A config row already exists for this chapter and Exam Track.
+                </p>
+                {!selectedDuplicate.existingIsInSyllabus ? (
+                  <button
+                    type="button"
+                    onClick={() => void openRestoreFlow(selectedDuplicate)}
+                    className="mt-2 rounded-md border border-warning-border px-3 py-1.5 text-xs font-bold"
+                  >
+                    Open restore flow
+                  </button>
+                ) : null}
+              </div>
+            ) : selected ? (
+              <ImpactBlock impact={impact} warnings={impact.warnings} />
+            ) : null}
+
+            {error ? (
+              <div className="rounded-md border border-danger bg-danger-bg px-3 py-2 text-sm font-bold text-danger">
+                {error}
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-auto flex justify-end gap-3 border-t border-border px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-4 py-2 text-sm font-bold text-text-secondary hover:text-text-primary"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !selected || Boolean(selectedDuplicate)}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover disabled:opacity-60"
+            >
+              {saving ? "Creating" : "Create"}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </div>
   );
 }
 

@@ -28,6 +28,10 @@ vi.mock("./CurriculumConfigTable", () => ({
     rows: Array<{ id: number; chapterCode: string; chapterName: string; prescribedHoursLabel: string }>;
   }) => (
     <div>
+      <button type="button">Add</button>
+      {rows.length === 0 ? (
+        <div>No Curriculum Config rows match the selected filters.</div>
+      ) : null}
       {rows.map((row) => (
         <div key={row.id}>
           <span>{row.chapterCode}</span>
@@ -151,7 +155,7 @@ describe("CurriculumConfigPage", () => {
     expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
     expect(screen.queryByLabelText("School")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Program")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
   });
 

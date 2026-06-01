@@ -20,7 +20,9 @@ vi.mock("./curriculum-schema", () => ({
 }));
 
 import {
+  createCurriculumConfigRow,
   editCurriculumConfigRow,
+  getCurriculumConfigChapterOptions,
   getCurriculumConfigImpact,
   normalizeCurriculumConfigEditPayload,
   getCurriculumConfigList,
@@ -322,6 +324,172 @@ describe("curriculum config list helpers", () => {
       details: ["lms_chapter_exam_configs.id"],
     });
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("curriculum config chapter option helpers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckCurriculumConfigManagementSchema.mockResolvedValue({ ok: true });
+  });
+
+  it("returns chapter picker rows with topic counts and existing config state", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        chapter_id: "7",
+        chapter_code: "PHY-01",
+        chapter_name: "Motion",
+        grade: "11",
+        subject_id: "4",
+        subject_name: "Physics",
+        topic_count: "0",
+        existing_config_id: "42",
+        existing_is_in_syllabus: false,
+      },
+    ]);
+
+    await expect(
+      getCurriculumConfigChapterOptions({
+        examTrack: "jee_main",
+        grade: 11,
+        subject: "4",
+        search: "motion",
+      })
+    ).resolves.toEqual({
+      ok: true,
+      options: [
+        {
+          chapterId: 7,
+          chapterCode: "PHY-01",
+          chapterName: "Motion",
+          grade: 11,
+          subjectId: 4,
+          subjectName: "Physics",
+          topicCount: 0,
+          hasTopics: false,
+          topicWarning: "This chapter has no topics.",
+          existingConfigId: 42,
+          configExists: true,
+          existingIsInSyllabus: false,
+        },
+      ],
+    });
+
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("LEFT JOIN topic t ON t.chapter_id = ch.id");
+    expect(sql).toContain("cfg.exam_track = $1");
+    expect(sql).toContain("grade = $2::int");
+    expect(sql).toContain("subject_id::text = $3::text");
+    expect(sql).toContain("LOWER(chapter_name) LIKE $4::text");
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      "jee_main",
+      11,
+      "4",
+      "%motion%",
+    ]);
+  });
+});
+
+describe("curriculum config create helpers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckCurriculumConfigManagementSchema.mockResolvedValue({ ok: true });
+  });
+
+  it("creates a unique config row with admin audit fields and no log/completion mutation", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          failure_reason: null,
+          config_id: "50",
+          chapter_id: "7",
+          chapter_code: "PHY-01",
+          chapter_name: "Motion",
+          grade: "11",
+          subject_id: "4",
+          subject_name: "Physics",
+          exam_track: "jee_main",
+          is_in_syllabus: true,
+          prescribed_minutes: "90",
+          coverage_sequence: "2",
+          updated_by_email: "admin@avantifellows.org",
+          updated_at: "2026-06-01T12:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          expected_summary_rows: "12",
+          active_curriculum_logs: "0",
+          active_chapter_completions: "0",
+          duplicate_coverage_count: "1",
+        },
+      ]);
+
+    await expect(
+      createCurriculumConfigRow({
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          chapter_id: 7,
+          exam_track: "jee_main",
+          is_in_syllabus: true,
+          prescribed_minutes: 90,
+          coverage_sequence: 2,
+        },
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      row: {
+        id: 50,
+        chapterId: 7,
+        examTrack: "jee_main",
+        prescribedMinutes: 90,
+        coverageSequence: 2,
+        updatedByEmail: "admin@avantifellows.org",
+      },
+      impact: {
+        expectedSummaryRows: 12,
+        activeCurriculumLogs: 0,
+        activeChapterCompletions: 0,
+      },
+      warnings: [{ code: "duplicate_coverage_sequence" }],
+    });
+
+    const insertSql = mockQuery.mock.calls[0][0] as string;
+    expect(insertSql).toContain("INSERT INTO lms_chapter_exam_configs");
+    expect(insertSql).toContain("inserted_by_email");
+    expect(insertSql).toContain("updated_by_email");
+    expect(insertSql).toContain("NOW() AT TIME ZONE 'UTC'");
+    expect(insertSql).not.toMatch(/UPDATE\s+lms_curriculum_logs/i);
+    expect(insertSql).not.toMatch(/UPDATE\s+lms_curriculum_chapter_completions/i);
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      7,
+      "jee_main",
+      true,
+      90,
+      2,
+      "admin@avantifellows.org",
+    ]);
+  });
+
+  it("maps database unique-constraint races to duplicate conflicts", async () => {
+    mockQuery.mockRejectedValueOnce({ code: "23505" });
+
+    await expect(
+      createCurriculumConfigRow({
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          chapter_id: 7,
+          exam_track: "jee_main",
+          is_in_syllabus: true,
+          prescribed_minutes: 90,
+          coverage_sequence: 2,
+        },
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "LMS Chapter Exam Config already exists for this chapter and Exam Track",
+    });
   });
 });
 

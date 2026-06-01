@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { Download, Plus } from "lucide-react";
+import { Download } from "lucide-react";
 
 import PageHeader from "@/components/PageHeader";
 import { Card } from "@/components/ui";
@@ -81,30 +81,16 @@ export default async function CurriculumConfigPage({ searchParams }: PageProps) 
                     disabled
                     className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-bold text-text-muted"
                   >
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                    Add
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-bold text-text-muted"
-                  >
                     <Download className="h-4 w-4" aria-hidden="true" />
                     Export
                   </button>
                 </div>
               </div>
 
-              {result.rows.length === 0 ? (
-                <div className="px-4 py-10 text-sm text-text-secondary">
-                  No Curriculum Config rows match the selected filters.
-                </div>
-              ) : (
-                <CurriculumConfigTable
-                  rows={result.rows}
-                  activeFilters={result.activeFilters}
-                />
-              )}
+              <CurriculumConfigTable
+                rows={result.rows}
+                activeFilters={result.activeFilters}
+              />
 
               <ConfigPagination result={result} />
             </Card>

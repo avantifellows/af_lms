@@ -125,6 +125,169 @@ describe("CurriculumConfigTable", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
+  it("runs the Add flow with chapter filtering, topicless warning, impact, and hidden success", async () => {
+    const createdRow: CurriculumConfigRow = {
+      ...inSyllabusRow,
+      id: 50,
+      chapterId: 8,
+      chapterCode: "PHY-02",
+      chapterName: "Laws",
+      coverageSequence: 3,
+    };
+    const fetchMock = vi.fn((input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/curriculum/configs/chapter-options")) {
+        return Promise.resolve(
+          jsonResponse({
+            options: [
+              {
+                chapterId: 8,
+                chapterCode: "PHY-02",
+                chapterName: "Laws",
+                grade: 11,
+                subjectId: 4,
+                subjectName: "Physics",
+                topicCount: 0,
+                hasTopics: false,
+                topicWarning: "This chapter has no topics.",
+                existingConfigId: null,
+                configExists: false,
+                existingIsInSyllabus: null,
+              },
+            ],
+          })
+        );
+      }
+      if (url.startsWith("/api/curriculum/configs/impact")) {
+        return Promise.resolve(
+          jsonResponse({
+            counts: {
+              expectedSummaryRows: 12,
+              activeCurriculumLogs: 1,
+              activeChapterCompletions: 2,
+            },
+            warnings: [{ code: "zero_prescribed_minutes", message: "Zero minutes" }],
+          })
+        );
+      }
+      if (url === "/api/curriculum/configs" && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            row: createdRow,
+            warnings: [],
+            impact: {
+              expectedSummaryRows: 12,
+              activeCurriculumLogs: 1,
+              activeChapterCompletions: 2,
+            },
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CurriculumConfigTable
+        rows={[inSyllabusRow]}
+        activeFilters={{ ...baseFilters, search: "motion" }}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Add LMS Chapter Exam Config" })
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
+    expect(screen.getByText(/0 topics/)).toBeInTheDocument();
+    expect(screen.getByText("This chapter has no topics.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await waitFor(() => expect(screen.getByText("Summary rows")).toBeInTheDocument());
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("Zero minutes")).toBeInTheDocument();
+
+    await userEvent.clear(screen.getByLabelText("Coverage order"));
+    await userEvent.type(screen.getByLabelText("Coverage order"), "3");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(
+      await screen.findByText("Curriculum Config row added but hidden by active filters.")
+    ).toBeInTheDocument();
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/curriculum/configs",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"chapter_id":8'),
+      })
+    );
+  });
+
+  it("blocks out-of-syllabus duplicates and opens the restore edit flow", async () => {
+    const outOfSyllabusRow: CurriculumConfigRow = {
+      ...inSyllabusRow,
+      id: 77,
+      chapterId: 8,
+      chapterCode: "PHY-02",
+      chapterName: "Laws",
+      isInSyllabus: false,
+      syllabusStatus: "out_of_syllabus",
+      prescribedMinutes: 0,
+      prescribedHoursLabel: "0h",
+    };
+    const fetchMock = vi.fn((input) => {
+      const url = String(input);
+      if (url.startsWith("/api/curriculum/configs/chapter-options")) {
+        return Promise.resolve(
+          jsonResponse({
+            options: [
+              {
+                chapterId: 8,
+                chapterCode: "PHY-02",
+                chapterName: "Laws",
+                grade: 11,
+                subjectId: 4,
+                subjectName: "Physics",
+                topicCount: 2,
+                hasTopics: true,
+                topicWarning: "",
+                existingConfigId: 77,
+                configExists: true,
+                existingIsInSyllabus: false,
+              },
+            ],
+          })
+        );
+      }
+      if (url.startsWith("/api/curriculum/configs?")) {
+        return Promise.resolve(jsonResponse({ rows: [outOfSyllabusRow] }));
+      }
+      if (url.startsWith("/api/curriculum/configs/impact")) {
+        return Promise.resolve(jsonResponse({ counts: null, warnings: [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+
+    expect(screen.getByText("A config row already exists for this chapter and Exam Track.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Open restore flow" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Laws" })
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Restore to in syllabus")).toBeInTheDocument();
+  });
+
   it("refreshes the current filtered page and reports when a restored row is hidden", async () => {
     const outOfSyllabusRow: CurriculumConfigRow = {
       ...inSyllabusRow,
