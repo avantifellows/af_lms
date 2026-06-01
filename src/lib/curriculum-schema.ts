@@ -38,18 +38,33 @@ const REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "lms_curriculum_chapter_completions", column: "deleted_at" },
 ];
 
+const CONFIG_MANAGEMENT_REQUIRED_COLUMNS: Array<{
+  table: string;
+  column: string;
+}> = [
+  ...REQUIRED_COLUMNS,
+  { table: "lms_chapter_exam_configs", column: "id" },
+  { table: "lms_chapter_exam_configs", column: "inserted_by_email" },
+  { table: "lms_chapter_exam_configs", column: "updated_by_email" },
+  { table: "lms_chapter_exam_configs", column: "inserted_at" },
+  { table: "lms_chapter_exam_configs", column: "updated_at" },
+];
+
 let cachedStatus: Promise<CurriculumSchemaStatus> | null = null;
+let cachedConfigManagementStatus: Promise<CurriculumSchemaStatus> | null = null;
 
 interface MissingColumnRow {
   table_name: string;
   column_name: string;
 }
 
-async function loadCurriculumSchemaStatus(): Promise<CurriculumSchemaStatus> {
-  const values = REQUIRED_COLUMNS.map(
+async function loadCurriculumSchemaStatus(
+  requiredColumns: Array<{ table: string; column: string }>
+): Promise<CurriculumSchemaStatus> {
+  const values = requiredColumns.map(
     (_column, index) => `($${index * 2 + 1}, $${index * 2 + 2})`
   ).join(", ");
-  const params = REQUIRED_COLUMNS.flatMap(({ table, column }) => [table, column]);
+  const params = requiredColumns.flatMap(({ table, column }) => [table, column]);
 
   const missing = await query<MissingColumnRow>(
     `WITH required(table_name, column_name) AS (VALUES ${values})
@@ -77,7 +92,7 @@ async function loadCurriculumSchemaStatus(): Promise<CurriculumSchemaStatus> {
 }
 
 export function checkCurriculumSchema(): Promise<CurriculumSchemaStatus> {
-  cachedStatus ??= loadCurriculumSchemaStatus().then(
+  cachedStatus ??= loadCurriculumSchemaStatus(REQUIRED_COLUMNS).then(
     (status) => {
       if (!status.ok) {
         cachedStatus = null;
@@ -92,6 +107,25 @@ export function checkCurriculumSchema(): Promise<CurriculumSchemaStatus> {
   return cachedStatus;
 }
 
+export function checkCurriculumConfigManagementSchema(): Promise<CurriculumSchemaStatus> {
+  cachedConfigManagementStatus ??= loadCurriculumSchemaStatus(
+    CONFIG_MANAGEMENT_REQUIRED_COLUMNS
+  ).then(
+    (status) => {
+      if (!status.ok) {
+        cachedConfigManagementStatus = null;
+      }
+      return status;
+    },
+    (error) => {
+      cachedConfigManagementStatus = null;
+      throw error;
+    }
+  );
+  return cachedConfigManagementStatus;
+}
+
 export function resetCurriculumSchemaCheckForTests() {
   cachedStatus = null;
+  cachedConfigManagementStatus = null;
 }

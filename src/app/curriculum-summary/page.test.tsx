@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -302,6 +302,55 @@ describe("CurriculumSummaryPage", () => {
       );
     }
   );
+
+  it("shows Manage config only for admin users in the header actions", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue({
+      ...pmPermission,
+      role: "admin",
+    });
+    mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+
+    const adminJsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(adminJsx);
+
+    expect(screen.getByRole("link", { name: "Manage config" })).toHaveAttribute(
+      "href",
+      "/curriculum-summary/config"
+    );
+
+    cleanup();
+    vi.clearAllMocks();
+    mockNormalizeFilters.mockReturnValue(defaultFilters);
+    mockNormalizeSort.mockReturnValue({ sort: "school", dir: "asc" });
+    mockNormalizePage.mockReturnValue(1);
+    mockNormalizePageSize.mockReturnValue(20);
+    mockGetCurriculumSummary.mockResolvedValue(emptySummaryResult);
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+
+    const pmJsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(pmJsx);
+
+    expect(
+      screen.queryByRole("link", { name: "Manage config" })
+    ).not.toBeInTheDocument();
+  });
 
   it("renders expected Curriculum Summary row grain from the helper result", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);

@@ -116,6 +116,16 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
         subtitle="Read-only cross-school Curriculum Progress"
         backHref="/dashboard"
         userEmail={email}
+        actions={
+          permission.role === "admin" ? (
+            <Link
+              href="/curriculum-summary/config"
+              className="rounded-md border border-border px-3 py-1.5 text-sm font-bold text-accent hover:text-accent-hover"
+            >
+              Manage config
+            </Link>
+          ) : undefined
+        }
         containerClassName="w-full px-4 py-3 sm:px-6 lg:px-8"
       />
       <main className="w-full px-4 py-6 sm:px-6 lg:px-8">

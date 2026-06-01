@@ -1,6 +1,38 @@
 import { test, expect } from "../fixtures/auth";
 
 test.describe("Curriculum read path", () => {
+  test("admin can open read-only Curriculum Config while summary users do not see the entry point", async ({
+    adminPage,
+    pmPage,
+    programAdminPage,
+  }) => {
+    await adminPage.goto("/curriculum-summary");
+    await expect(
+      adminPage.getByRole("link", { name: "Manage config" })
+    ).toBeVisible();
+
+    await adminPage.getByRole("link", { name: "Manage config" }).click();
+    await expect(
+      adminPage.getByRole("heading", { name: "Curriculum Config", exact: true })
+    ).toBeVisible();
+    await expect(adminPage.getByLabel("Exam Track")).toHaveValue("jee_main");
+    await expect(adminPage.getByLabel("Syllabus status")).toHaveValue(
+      "in_syllabus"
+    );
+    await expect(adminPage.getByText("Fixture Alpha Physics")).toBeVisible();
+    await expect(adminPage.getByText("Fixture Beta Physics")).toBeVisible();
+
+    await pmPage.goto("/curriculum-summary");
+    await expect(
+      pmPage.getByRole("link", { name: "Manage config" })
+    ).toBeHidden();
+
+    await programAdminPage.goto("/curriculum-summary");
+    await expect(
+      programAdminPage.getByRole("link", { name: "Manage config" })
+    ).toBeHidden();
+  });
+
   test("admin sees Curriculum Summary metrics for logged and zero-progress expected rows", async ({
     adminPage,
   }) => {

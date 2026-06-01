@@ -4,6 +4,7 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 
 import { query } from "./db";
 import {
+  checkCurriculumConfigManagementSchema,
   checkCurriculumSchema,
   resetCurriculumSchemaCheckForTests,
 } from "./curriculum-schema";
@@ -46,6 +47,43 @@ describe("curriculum schema preflight", () => {
         "lms_curriculum_logs",
         "log_date",
         "deleted_at",
+      ])
+    );
+  });
+
+  it("checks config-management id and audit columns separately", async () => {
+    mockQuery.mockResolvedValue([
+      { table_name: "lms_chapter_exam_configs", column_name: "id" },
+      {
+        table_name: "lms_chapter_exam_configs",
+        column_name: "updated_by_email",
+      },
+    ]);
+
+    await expect(checkCurriculumConfigManagementSchema()).resolves.toEqual({
+      ok: false,
+      status: 503,
+      error: "LMS curriculum schema unavailable",
+      details: [
+        "lms_chapter_exam_configs.id",
+        "lms_chapter_exam_configs.updated_by_email",
+      ],
+    });
+  });
+
+  it("does not require config-management audit columns for existing Curriculum Summary checks", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    await expect(checkCurriculumSchema()).resolves.toEqual({ ok: true });
+
+    const [, params] = mockQuery.mock.calls[0] as [string, string[]];
+    expect(params).not.toEqual(
+      expect.arrayContaining([
+        "id",
+        "inserted_by_email",
+        "updated_by_email",
+        "inserted_at",
+        "updated_at",
       ])
     );
   });
