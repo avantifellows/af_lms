@@ -173,6 +173,13 @@ export async function PATCH(
     );
   }
 
+  const nextShuffle =
+    typeof body.shuffle === "boolean" ? body.shuffle : currentMetaData.shuffle === true;
+  const nextGurukulFormatType =
+    typeof body.gurukulFormatType === "string"
+      ? body.gurukulFormatType
+      : undefined;
+
   const payload: Partial<DbServiceSession> = {
     ...(typeof body.name === "string" ? { name: body.name.trim() || currentSession.name } : {}),
     ...(typeof body.isActive === "boolean" ? { is_active: body.isActive } : {}),
@@ -190,8 +197,8 @@ export async function PATCH(
         ? { show_scores: body.showScores }
         : {}),
       ...(typeof body.shuffle === "boolean" ? { shuffle: body.shuffle } : {}),
-      ...(typeof body.gurukulFormatType === "string"
-        ? { gurukul_format_type: body.gurukulFormatType }
+      ...(nextGurukulFormatType || nextShuffle
+        ? { gurukul_format_type: nextShuffle ? "qa" : nextGurukulFormatType }
         : {}),
     },
   };
