@@ -71,6 +71,30 @@ describe("curriculum schema preflight", () => {
     });
   });
 
+  it("checks the config-management chapter and exam track uniqueness contract", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          detail: "lms_chapter_exam_configs.chapter_id_exam_track_unique",
+        },
+      ]);
+
+    await expect(checkCurriculumConfigManagementSchema()).resolves.toEqual({
+      ok: false,
+      status: 503,
+      error: "LMS curriculum schema unavailable",
+      details: ["lms_chapter_exam_configs.chapter_id_exam_track_unique"],
+    });
+  });
+
+  it("returns ready when config-management columns and unique index are present", async () => {
+    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await expect(checkCurriculumConfigManagementSchema()).resolves.toEqual({ ok: true });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
   it("does not require config-management audit columns for existing Curriculum Summary checks", async () => {
     mockQuery.mockResolvedValueOnce([]);
 

@@ -56,6 +56,7 @@ export interface CurriculumConfigListParams {
 
 export interface CurriculumConfigQueryRow {
   config_id: string | number;
+  lock_token?: string | number | null;
   chapter_id: string | number;
   chapter_code: string | null;
   chapter_name: unknown;
@@ -72,6 +73,7 @@ export interface CurriculumConfigQueryRow {
 
 export interface CurriculumConfigRow {
   id: number;
+  lockToken: string;
   chapterId: number;
   chapterCode: string;
   chapterName: string;
@@ -165,6 +167,7 @@ export interface CurriculumConfigEditPayload {
   prescribedMinutes: number;
   coverageSequence: number;
   updatedAt: string;
+  lockToken: string;
 }
 
 export interface CurriculumConfigCreatePayload {
@@ -177,6 +180,7 @@ export interface CurriculumConfigCreatePayload {
 
 export interface CurriculumConfigRemovePayload {
   updatedAt: string;
+  lockToken: string;
 }
 
 export type CurriculumConfigValidationFailure = {
@@ -317,7 +321,7 @@ export async function requireCurriculumConfigAdmin(
   }
 
   const permission = await getUserPermission(email);
-  if (permission?.role !== "admin") {
+  if (permission?.role !== "admin" || permission.read_only) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
 
@@ -362,6 +366,7 @@ export function mapCurriculumConfigRow(
 
   return {
     id: numberFromDb(row.config_id),
+    lockToken: row.lock_token ? String(row.lock_token) : "",
     chapterId: numberFromDb(row.chapter_id),
     chapterCode: String(row.chapter_code ?? ""),
     chapterName: localizedName(row.chapter_name, "chapter", row.chapter_code),
@@ -390,6 +395,7 @@ export function normalizeCurriculumConfigEditPayload(
     "prescribed_minutes",
     "coverage_sequence",
     "updated_at",
+    "lock_token",
   ]);
 
   for (const key of Object.keys(payload)) {
@@ -420,6 +426,8 @@ export function normalizeCurriculumConfigEditPayload(
   const coverageSequence = integerFromPayload(payload.coverage_sequence);
   const updatedAt =
     typeof payload.updated_at === "string" ? payload.updated_at.trim() : "";
+  const lockToken =
+    typeof payload.lock_token === "string" ? payload.lock_token.trim() : "";
 
   if (isInSyllabus === null) {
     fields.is_in_syllabus = "Syllabus status is required";
@@ -456,6 +464,7 @@ export function normalizeCurriculumConfigEditPayload(
       prescribedMinutes: prescribedMinutes ?? 0,
       coverageSequence: coverageSequence ?? 0,
       updatedAt,
+      lockToken: lockToken || updatedAt,
     },
   };
 }
@@ -543,6 +552,8 @@ export function normalizeCurriculumConfigRemovePayload(
   const payload = isPlainObject(body) ? body : {};
   const updatedAt =
     typeof payload.updated_at === "string" ? payload.updated_at.trim() : "";
+  const lockToken =
+    typeof payload.lock_token === "string" ? payload.lock_token.trim() : "";
   const fields: Record<string, string> = {};
 
   if (!updatedAt) {
@@ -560,7 +571,7 @@ export function normalizeCurriculumConfigRemovePayload(
     };
   }
 
-  return { ok: true, payload: { updatedAt } };
+  return { ok: true, payload: { updatedAt, lockToken: lockToken || updatedAt } };
 }
 
 export async function getCurriculumConfigList(
@@ -781,7 +792,7 @@ export async function editCurriculumConfigRow(params: {
     payload.isInSyllabus,
     payload.prescribedMinutes,
     payload.coverageSequence,
-    payload.updatedAt,
+    payload.lockToken,
     params.adminEmail,
   ]);
   const row = rows[0];
@@ -854,7 +865,7 @@ export async function removeCurriculumConfigRowFromSyllabus(params: {
 
   const rows = await query<RemoveMutationRow>(buildRemoveFromSyllabusSql(), [
     params.id,
-    payloadResult.payload.updatedAt,
+    payloadResult.payload.lockToken,
     params.adminEmail,
   ]);
   const row = rows[0];
@@ -961,6 +972,7 @@ function buildBaseListSql(): string {
     WITH config_rows AS (
       SELECT
         cfg.id AS config_id,
+        cfg.xmin::text AS lock_token,
         cfg.chapter_id,
         ch.code AS chapter_code,
         COALESCE(
@@ -1198,6 +1210,7 @@ function buildCreateSql(): string {
         AND NOT EXISTS (SELECT 1 FROM existing_config)
       RETURNING
         id,
+        xmin::text AS lock_token,
         chapter_id,
         exam_track,
         is_in_syllabus,
@@ -1210,6 +1223,7 @@ function buildCreateSql(): string {
       SELECT
         NULL::text AS failure_reason,
         inserted.id AS config_id,
+        inserted.lock_token,
         inserted.chapter_id,
         ch.code AS chapter_code,
         COALESCE(
@@ -1258,6 +1272,7 @@ function buildCreateSql(): string {
     SELECT
       failure_reason,
       NULL::int AS config_id,
+      NULL::text AS lock_token,
       NULL::int AS chapter_id,
       NULL::text AS chapter_code,
       NULL::text AS chapter_name,
@@ -1278,6 +1293,7 @@ function buildEditSql(): string {
     WITH current_config AS (
       SELECT
         cfg.id,
+        cfg.xmin::text AS current_lock_token,
         cfg.is_in_syllabus AS current_is_in_syllabus
       FROM lms_chapter_exam_configs cfg
       WHERE cfg.id = $1
@@ -1291,13 +1307,14 @@ function buildEditSql(): string {
           updated_at = (NOW() AT TIME ZONE 'UTC')
       FROM current_config current_config
       WHERE cfg.id = current_config.id
-        AND cfg.updated_at = $5::timestamp
+        AND cfg.xmin::text = $5
         AND NOT (
           current_config.current_is_in_syllabus = true
           AND $2::boolean = false
         )
       RETURNING
         cfg.id,
+        cfg.xmin::text AS lock_token,
         cfg.chapter_id,
         cfg.exam_track,
         cfg.is_in_syllabus,
@@ -1310,6 +1327,7 @@ function buildEditSql(): string {
       SELECT
         NULL::text AS failure_reason,
         updated.id AS config_id,
+        updated.lock_token,
         updated.chapter_id,
         ch.code AS chapter_code,
         COALESCE(
@@ -1349,6 +1367,11 @@ function buildEditSql(): string {
       SELECT
         CASE
           WHEN NOT EXISTS (SELECT 1 FROM current_config) THEN 'missing'
+          WHEN NOT EXISTS (
+            SELECT 1
+            FROM current_config
+            WHERE current_lock_token = $5
+          ) THEN 'stale'
           WHEN EXISTS (
             SELECT 1
             FROM current_config
@@ -1364,6 +1387,7 @@ function buildEditSql(): string {
     SELECT
       failure_reason,
       NULL::int AS config_id,
+      NULL::text AS lock_token,
       NULL::int AS chapter_id,
       NULL::text AS chapter_code,
       NULL::text AS chapter_name,
@@ -1388,10 +1412,11 @@ function buildRemoveFromSyllabusSql(): string {
           updated_by_email = $3,
           updated_at = (NOW() AT TIME ZONE 'UTC')
       WHERE cfg.id = $1
-        AND cfg.updated_at = $2::timestamp
+        AND cfg.xmin::text = $2
         AND cfg.is_in_syllabus = true
       RETURNING
         cfg.id,
+        cfg.xmin::text AS lock_token,
         cfg.chapter_id,
         cfg.exam_track,
         cfg.is_in_syllabus,
@@ -1404,6 +1429,7 @@ function buildRemoveFromSyllabusSql(): string {
       SELECT
         NULL::text AS failure_reason,
         updated.id AS config_id,
+        updated.lock_token,
         updated.chapter_id,
         ch.code AS chapter_code,
         COALESCE(
@@ -1449,7 +1475,7 @@ function buildRemoveFromSyllabusSql(): string {
             SELECT 1
             FROM lms_chapter_exam_configs cfg
             WHERE cfg.id = $1
-              AND cfg.updated_at = $2::timestamp
+              AND cfg.xmin::text = $2
               AND cfg.is_in_syllabus = false
           ) THEN 'already_out_of_syllabus'
           ELSE 'stale'
@@ -1462,6 +1488,7 @@ function buildRemoveFromSyllabusSql(): string {
     SELECT
       failure_reason,
       NULL::int AS config_id,
+      NULL::text AS lock_token,
       NULL::int AS chapter_id,
       NULL::text AS chapter_code,
       NULL::text AS chapter_name,

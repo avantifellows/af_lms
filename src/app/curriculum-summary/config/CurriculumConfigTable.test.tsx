@@ -23,6 +23,7 @@ const baseFilters: CurriculumConfigFilters = {
 
 const inSyllabusRow: CurriculumConfigRow = {
   id: 42,
+  lockToken: "9001",
   chapterId: 7,
   chapterCode: "PHY-01",
   chapterName: "Motion",
@@ -46,6 +47,16 @@ function jsonResponse(body: unknown, init: { status?: number; ok?: boolean } = {
     ok: init.ok ?? status < 400,
     status,
     json: async () => body,
+  } as Response;
+}
+
+function nonJsonResponse(status = 502) {
+  return {
+    ok: false,
+    status,
+    json: async () => {
+      throw new Error("not json");
+    },
   } as Response;
 }
 
@@ -111,7 +122,7 @@ describe("CurriculumConfigTable", () => {
   it("shows stale conflict messaging from PATCH", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn((input, init) => {
+      vi.fn((_input, init) => {
         if (init?.method === "PATCH") {
           return Promise.resolve(
             jsonResponse(
@@ -132,6 +143,29 @@ describe("CurriculumConfigTable", () => {
     expect(
       await screen.findByText("This row changed since you opened it. Reload and reopen the row.")
     ).toBeInTheDocument();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("shows an error and re-enables save when PATCH fails before JSON parsing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input, init) => {
+        if (init?.method === "PATCH") {
+          return Promise.resolve(nonJsonResponse());
+        }
+        return Promise.resolve(jsonResponse({ counts: null, warnings: [] }));
+      })
+    );
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText("Could not save Curriculum Config row.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
@@ -235,6 +269,55 @@ describe("CurriculumConfigTable", () => {
     );
   });
 
+  it("shows an error and re-enables create when POST returns non-JSON", async () => {
+    const fetchMock = vi.fn((input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/curriculum/configs/chapter-options")) {
+        return Promise.resolve(
+          jsonResponse({
+            options: [
+              {
+                chapterId: 8,
+                chapterCode: "PHY-02",
+                chapterName: "Laws",
+                grade: 11,
+                subjectId: 4,
+                subjectName: "Physics",
+                topicCount: 2,
+                hasTopics: true,
+                topicWarning: "",
+                existingConfigId: null,
+                configExists: false,
+                existingIsInSyllabus: null,
+              },
+            ],
+          })
+        );
+      }
+      if (url.startsWith("/api/curriculum/configs/impact")) {
+        return Promise.resolve(jsonResponse({ counts: null, warnings: [] }));
+      }
+      if (url === "/api/curriculum/configs" && init?.method === "POST") {
+        return Promise.resolve(nonJsonResponse());
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(
+      await screen.findByText("Could not add Curriculum Config row.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).not.toBeDisabled();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
   it("blocks out-of-syllabus duplicates and opens the restore edit flow", async () => {
     const outOfSyllabusRow: CurriculumConfigRow = {
       ...inSyllabusRow,
@@ -296,6 +379,51 @@ describe("CurriculumConfigTable", () => {
       await screen.findByRole("heading", { name: "Laws" })
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Restore to in syllabus")).toBeInTheDocument();
+  });
+
+  it("shows restore-load errors instead of silently ignoring failed restore fetches", async () => {
+    const fetchMock = vi.fn((input) => {
+      const url = String(input);
+      if (url.startsWith("/api/curriculum/configs/chapter-options")) {
+        return Promise.resolve(
+          jsonResponse({
+            options: [
+              {
+                chapterId: 8,
+                chapterCode: "PHY-02",
+                chapterName: "Laws",
+                grade: 11,
+                subjectId: 4,
+                subjectName: "Physics",
+                topicCount: 2,
+                hasTopics: true,
+                topicWarning: "",
+                existingConfigId: 77,
+                configExists: true,
+                existingIsInSyllabus: false,
+              },
+            ],
+          })
+        );
+      }
+      if (url.startsWith("/api/curriculum/configs?")) {
+        return Promise.resolve(nonJsonResponse());
+      }
+      return Promise.resolve(jsonResponse({ counts: null, warnings: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Open restore flow" }));
+
+    expect(
+      await screen.findByText("Could not load the existing out-of-syllabus row.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Laws" })).not.toBeInTheDocument();
   });
 
   it("refreshes the current filtered page and reports when a restored row is hidden", async () => {
@@ -431,6 +559,13 @@ describe("CurriculumConfigTable", () => {
         body: expect.stringContaining('"updated_at":"2026-05-30T10:00:00.000Z"'),
       })
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/curriculum/configs/42/remove-from-syllabus",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"lock_token":"9001"'),
+      })
+    );
   });
 
   it("does not expose remove on out-of-syllabus rows", () => {
@@ -453,7 +588,7 @@ describe("CurriculumConfigTable", () => {
   it("shows stale conflict messaging from remove-from-syllabus", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn((input, init) => {
+      vi.fn((_input, init) => {
         if (init?.method === "POST") {
           return Promise.resolve(
             jsonResponse(
@@ -474,6 +609,31 @@ describe("CurriculumConfigTable", () => {
     expect(
       await screen.findByText("This row changed since you opened it. Reload and reopen the row.")
     ).toBeInTheDocument();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("shows an error and re-enables remove when the remove request fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input, init) => {
+        if (init?.method === "POST") {
+          return Promise.reject(new Error("network down"));
+        }
+        return Promise.resolve(jsonResponse({ counts: null, warnings: [] }));
+      })
+    );
+
+    render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove from syllabus" }));
+
+    expect(
+      await screen.findByText(
+        "Could not remove Curriculum Config row. Check your connection and try again."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove from syllabus" })).not.toBeDisabled();
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 });

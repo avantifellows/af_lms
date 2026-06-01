@@ -99,6 +99,7 @@ const listResult = {
   rows: [
     {
       id: 42,
+      lockToken: "9001",
       chapterId: 7,
       chapterCode: "PHY-01",
       chapterName: "Motion",

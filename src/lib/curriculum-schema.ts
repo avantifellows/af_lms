@@ -58,8 +58,13 @@ interface MissingColumnRow {
   column_name: string;
 }
 
+interface MissingRequirementRow {
+  detail: string;
+}
+
 async function loadCurriculumSchemaStatus(
-  requiredColumns: Array<{ table: string; column: string }>
+  requiredColumns: Array<{ table: string; column: string }>,
+  options: { requireConfigUniqueIndex?: boolean } = {}
 ): Promise<CurriculumSchemaStatus> {
   const values = requiredColumns.map(
     (_column, index) => `($${index * 2 + 1}, $${index * 2 + 2})`
@@ -79,7 +84,35 @@ async function loadCurriculumSchemaStatus(
     params
   );
 
-  if (missing.length === 0) {
+  const details = missing.map((row) => `${row.table_name}.${row.column_name}`);
+
+  if (missing.length === 0 && options.requireConfigUniqueIndex) {
+    const missingRequirements = await query<MissingRequirementRow>(
+      `SELECT 'lms_chapter_exam_configs.chapter_id_exam_track_unique' AS detail
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM pg_index idx
+         JOIN pg_class tbl ON tbl.oid = idx.indrelid
+         JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+         WHERE ns.nspname = 'public'
+           AND tbl.relname = 'lms_chapter_exam_configs'
+           AND idx.indisunique = true
+           AND idx.indpred IS NULL
+           AND (
+             SELECT array_agg(att.attname::text ORDER BY keys.ordinality)
+             FROM unnest(idx.indkey) WITH ORDINALITY AS keys(attnum, ordinality)
+             JOIN pg_attribute att
+               ON att.attrelid = tbl.oid
+              AND att.attnum = keys.attnum
+             WHERE keys.ordinality <= idx.indnkeyatts
+           ) = ARRAY['chapter_id', 'exam_track']::text[]
+       )`,
+      []
+    );
+    details.push(...missingRequirements.map((row) => row.detail));
+  }
+
+  if (details.length === 0) {
     return { ok: true };
   }
 
@@ -87,7 +120,7 @@ async function loadCurriculumSchemaStatus(
     ok: false,
     status: 503,
     error: "LMS curriculum schema unavailable",
-    details: missing.map((row) => `${row.table_name}.${row.column_name}`),
+    details,
   };
 }
 
@@ -109,7 +142,8 @@ export function checkCurriculumSchema(): Promise<CurriculumSchemaStatus> {
 
 export function checkCurriculumConfigManagementSchema(): Promise<CurriculumSchemaStatus> {
   cachedConfigManagementStatus ??= loadCurriculumSchemaStatus(
-    CONFIG_MANAGEMENT_REQUIRED_COLUMNS
+    CONFIG_MANAGEMENT_REQUIRED_COLUMNS,
+    { requireConfigUniqueIndex: true }
   ).then(
     (status) => {
       if (!status.ok) {

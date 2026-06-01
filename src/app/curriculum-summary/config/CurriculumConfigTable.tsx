@@ -28,6 +28,27 @@ interface ImpactState {
   warnings: CurriculumConfigWarning[];
 }
 
+type JsonObject = Record<string, unknown>;
+
+async function readJsonObject(response: Response): Promise<JsonObject> {
+  try {
+    const value = await response.json();
+    return value && typeof value === "object" ? (value as JsonObject) : {};
+  } catch {
+    return {};
+  }
+}
+
+function jsonError(json: JsonObject, fallback: string): string {
+  return typeof json.error === "string" ? json.error : fallback;
+}
+
+function jsonFields(json: JsonObject): Record<string, string> {
+  return json.fields && typeof json.fields === "object"
+    ? (json.fields as Record<string, string>)
+    : {};
+}
+
 export default function CurriculumConfigTable({
   rows,
   activeFilters,
@@ -269,27 +290,36 @@ function RemovePanel({
   async function handleRemove() {
     setRemoving(true);
     setError("");
-    const response = await fetch(
-      `/api/curriculum/configs/${row.id}/remove-from-syllabus`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ updated_at: row.updatedAt }),
+    let completed = false;
+    try {
+      const response = await fetch(
+        `/api/curriculum/configs/${row.id}/remove-from-syllabus`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updated_at: row.updatedAt, lock_token: row.lockToken }),
+        }
+      );
+      const json = await readJsonObject(response);
+
+      if (response.status === 409) {
+        setError("This row changed since you opened it. Reload and reopen the row.");
+        return;
       }
-    );
-    const json = await response.json();
-    setRemoving(false);
+      if (!response.ok) {
+        setError(jsonError(json, "Could not remove Curriculum Config row."));
+        return;
+      }
 
-    if (response.status === 409) {
-      setError("This row changed since you opened it. Reload and reopen the row.");
-      return;
+      completed = true;
+      onRemoved(json.row as CurriculumConfigRow);
+    } catch {
+      setError("Could not remove Curriculum Config row. Check your connection and try again.");
+    } finally {
+      if (!completed) {
+        setRemoving(false);
+      }
     }
-    if (!response.ok) {
-      setError(json.error ?? "Could not remove Curriculum Config row.");
-      return;
-    }
-
-    onRemoved(json.row);
   }
 
   return (
@@ -455,6 +485,7 @@ function AddPanel({
   }
 
   async function openRestoreFlow(option: CurriculumConfigChapterOption) {
+    setError("");
     const localRow = rows.find((row) => row.id === option.existingConfigId);
     if (localRow) {
       onOpenRestore(localRow);
@@ -469,15 +500,26 @@ function AddPanel({
       syllabus_status: "out_of_syllabus",
       limit: "10",
     });
-    const response = await fetch(`/api/curriculum/configs?${params.toString()}`);
-    const json = await response.json();
-    const row = (json.rows ?? []).find(
-      (candidate: CurriculumConfigRow) => candidate.id === option.existingConfigId
-    );
-    if (row) {
-      onOpenRestore(row);
-    } else {
-      setError("Could not load the existing out-of-syllabus row.");
+    try {
+      const response = await fetch(`/api/curriculum/configs?${params.toString()}`);
+      const json = await readJsonObject(response);
+      if (!response.ok) {
+        setError(jsonError(json, "Could not load the existing out-of-syllabus row."));
+        return;
+      }
+      const candidates = Array.isArray(json.rows)
+        ? (json.rows as CurriculumConfigRow[])
+        : [];
+      const row = candidates.find(
+        (candidate) => candidate.id === option.existingConfigId
+      );
+      if (row) {
+        onOpenRestore(row);
+      } else {
+        setError("Could not load the existing out-of-syllabus row.");
+      }
+    } catch {
+      setError("Could not load the existing out-of-syllabus row. Check your connection and try again.");
     }
   }
 
@@ -495,27 +537,36 @@ function AddPanel({
     setSaving(true);
     setError("");
     setFieldErrors({});
-    const response = await fetch("/api/curriculum/configs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chapter_id: selected.chapterId,
-        exam_track: examTrack,
-        is_in_syllabus: isInSyllabus,
-        prescribed_minutes: Number(prescribedMinutes),
-        coverage_sequence: Number(coverageSequence),
-      }),
-    });
-    const json = await response.json();
-    setSaving(false);
+    let completed = false;
+    try {
+      const response = await fetch("/api/curriculum/configs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chapter_id: selected.chapterId,
+          exam_track: examTrack,
+          is_in_syllabus: isInSyllabus,
+          prescribed_minutes: Number(prescribedMinutes),
+          coverage_sequence: Number(coverageSequence),
+        }),
+      });
+      const json = await readJsonObject(response);
 
-    if (!response.ok) {
-      setError(json.error ?? "Could not add Curriculum Config row.");
-      setFieldErrors(json.fields ?? {});
-      return;
+      if (!response.ok) {
+        setError(jsonError(json, "Could not add Curriculum Config row."));
+        setFieldErrors(jsonFields(json));
+        return;
+      }
+
+      completed = true;
+      onAdded(json.row as CurriculumConfigRow);
+    } catch {
+      setError("Could not add Curriculum Config row. Check your connection and try again.");
+    } finally {
+      if (!completed) {
+        setSaving(false);
+      }
     }
-
-    onAdded(json.row);
   }
 
   const selectedDuplicate = selected?.configExists ? selected : null;
@@ -818,30 +869,40 @@ function EditPanel({
     setError("");
     setFieldErrors({});
 
-    const response = await fetch(`/api/curriculum/configs/${row.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        is_in_syllabus: effectiveInSyllabus,
-        prescribed_minutes: Number(prescribedMinutes),
-        coverage_sequence: Number(coverageSequence),
-        updated_at: row.updatedAt,
-      }),
-    });
-    const json = await response.json();
-    setSaving(false);
+    let completed = false;
+    try {
+      const response = await fetch(`/api/curriculum/configs/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          is_in_syllabus: effectiveInSyllabus,
+          prescribed_minutes: Number(prescribedMinutes),
+          coverage_sequence: Number(coverageSequence),
+          updated_at: row.updatedAt,
+          lock_token: row.lockToken,
+        }),
+      });
+      const json = await readJsonObject(response);
 
-    if (response.status === 409) {
-      setError("This row changed since you opened it. Reload and reopen the row.");
-      return;
-    }
-    if (!response.ok) {
-      setError(json.error ?? "Could not save Curriculum Config row.");
-      setFieldErrors(json.fields ?? {});
-      return;
-    }
+      if (response.status === 409) {
+        setError("This row changed since you opened it. Reload and reopen the row.");
+        return;
+      }
+      if (!response.ok) {
+        setError(jsonError(json, "Could not save Curriculum Config row."));
+        setFieldErrors(jsonFields(json));
+        return;
+      }
 
-    onSaved(json.row);
+      completed = true;
+      onSaved(json.row as CurriculumConfigRow);
+    } catch {
+      setError("Could not save Curriculum Config row. Check your connection and try again.");
+    } finally {
+      if (!completed) {
+        setSaving(false);
+      }
+    }
   }
 
   return (

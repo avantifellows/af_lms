@@ -89,6 +89,12 @@ describe("curriculum config admin guard", () => {
       permission: null,
       expected: { ok: false, status: 403, error: "Forbidden" },
     },
+    {
+      label: "read-only admin",
+      session: { user: { email: "readonly@avantifellows.org" } },
+      permission: { ...adminPermission, read_only: true },
+      expected: { ok: false, status: 403, error: "Forbidden" },
+    },
   ])("denies $label", async ({ session, permission, expected }) => {
     mockGetUserPermission.mockResolvedValue(permission);
 
@@ -188,6 +194,7 @@ describe("curriculum config list helpers", () => {
         config_id: "42",
         chapter_id: "7",
         chapter_code: "PHY-01",
+        lock_token: null,
         chapter_name: [{ lang_code: "en", chapter: "Motion" }],
         grade: "11",
         subject_id: "4",
@@ -201,6 +208,7 @@ describe("curriculum config list helpers", () => {
       })
     ).toEqual({
       id: 42,
+      lockToken: "",
       chapterId: 7,
       chapterCode: "PHY-01",
       chapterName: "Motion",
@@ -223,6 +231,7 @@ describe("curriculum config list helpers", () => {
     expect(
       mapCurriculumConfigRow({
         config_id: 1,
+        lock_token: "12345",
         chapter_id: 90007501,
         chapter_code: "LMS75-PH01",
         chapter_name: "Fixture Alpha Physics",
@@ -237,6 +246,7 @@ describe("curriculum config list helpers", () => {
         updated_at: "2026-06-01T17:46:24.000Z",
       })
     ).toMatchObject({
+      lockToken: "12345",
       chapterName: "Fixture Alpha Physics",
       subjectName: "Physics",
     });
@@ -733,6 +743,7 @@ describe("curriculum config edit helpers", () => {
           coverage_sequence: 3,
           is_in_syllabus: true,
           updated_at: "2026-05-30T10:00:00.000Z",
+          lock_token: "9001",
         },
       })
     ).resolves.toMatchObject({
@@ -748,7 +759,7 @@ describe("curriculum config edit helpers", () => {
 
     const updateSql = mockQuery.mock.calls[0][0] as string;
     expect(updateSql).toContain("UPDATE lms_chapter_exam_configs cfg");
-    expect(updateSql).toContain("cfg.updated_at = $5::timestamp");
+    expect(updateSql).toContain("cfg.xmin::text = $5");
     expect(updateSql).toContain("updated_by_email = $6");
     expect(updateSql).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
     expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_logs/i);
@@ -758,7 +769,7 @@ describe("curriculum config edit helpers", () => {
       true,
       120,
       3,
-      "2026-05-30T10:00:00.000Z",
+      "9001",
       "admin@avantifellows.org",
     ]);
   });
@@ -881,7 +892,7 @@ describe("curriculum config remove-from-syllabus helpers", () => {
       removeCurriculumConfigRowFromSyllabus({
         id: 42,
         adminEmail: "admin@avantifellows.org",
-        body: { updated_at: "2026-05-30T10:00:00.000Z" },
+        body: { updated_at: "2026-05-30T10:00:00.000Z", lock_token: "9001" },
       })
     ).resolves.toMatchObject({
       ok: true,
@@ -904,14 +915,14 @@ describe("curriculum config remove-from-syllabus helpers", () => {
     expect(updateSql).toContain("prescribed_minutes = 0");
     expect(updateSql).not.toContain("coverage_sequence =");
     expect(updateSql).toContain("cfg.id = $1");
-    expect(updateSql).toContain("cfg.updated_at = $2::timestamp");
+    expect(updateSql).toContain("cfg.xmin::text = $2");
     expect(updateSql).toContain("updated_by_email = $3");
     expect(updateSql).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
     expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_logs/i);
     expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_chapter_completions/i);
     expect(mockQuery.mock.calls[0][1]).toEqual([
       42,
-      "2026-05-30T10:00:00.000Z",
+      "9001",
       "admin@avantifellows.org",
     ]);
   });
