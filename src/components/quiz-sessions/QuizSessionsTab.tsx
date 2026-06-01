@@ -78,12 +78,9 @@ interface BatchDerivation {
 const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
 const AUTO_SYNC_INTERVAL_MINUTES = 30;
-const LMS_SESSION_PREFIX = "[LMS] ";
 
 function getDefaultSessionName(baseName: string): string {
-  return baseName.startsWith(LMS_SESSION_PREFIX)
-    ? baseName
-    : `${LMS_SESSION_PREFIX}${baseName}`;
+  return baseName.trim();
 }
 
 function getCompactBatchLabel(values: string[] | undefined): string {
