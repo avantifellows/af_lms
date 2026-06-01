@@ -101,6 +101,15 @@ describe("GET /api/curriculum/configs", () => {
           grades: [11, 12],
           subjects: [{ id: 4, name: [{ lang_code: "en", subject: "Physics" }] }],
           exam_tracks: ["jee_main", "neet"],
+          chapters: [
+            {
+              id: 7,
+              code: "PHY-01",
+              name: [{ lang_code: "en", chapter: "Motion" }],
+              grade: 11,
+              subjectName: [{ lang_code: "en", subject: "Physics" }],
+            },
+          ],
         },
       ])
       .mockResolvedValueOnce([{ total_count: "1" }])
@@ -124,7 +133,7 @@ describe("GET /api/curriculum/configs", () => {
 
     const res = await GET(
       nextReq(
-        "/api/curriculum/configs?exam_track=bad&grade=abc&subject=&search=Motion&syllabus_status=all&page=2&limit=10&sort=unknown&dir=desc&school=LMS75&program=2"
+        "/api/curriculum/configs?exam_track=bad&grade=abc&subject=&search=Motion&chapter_id=7&syllabus_status=all&page=2&limit=10&sort=unknown&dir=desc&school=LMS75&program=2"
       )
     );
 
@@ -136,6 +145,7 @@ describe("GET /api/curriculum/configs", () => {
         grade: null,
         subject: null,
         search: "Motion",
+        chapterId: 7,
         syllabusStatus: "all",
       },
       pagination: {
@@ -149,6 +159,7 @@ describe("GET /api/curriculum/configs", () => {
         grades: [11, 12],
         subjects: [{ id: 4, name: "Physics" }],
         examTracks: ["jee_main", "neet"],
+        chapters: [{ id: 7, code: "PHY-01", name: "Motion", grade: 11, subjectName: "Physics" }],
       },
       rows: [{ id: 42, updatedByEmail: "", updatedAt: "" }],
     });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ const baseFilters: CurriculumConfigFilters = {
   grade: null,
   subject: null,
   search: "",
+  chapterId: null,
   syllabusStatus: "in_syllabus",
 };
 
@@ -85,10 +86,9 @@ describe("CurriculumConfigTable", () => {
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     expect(screen.getByRole("heading", { name: "Motion" })).toBeInTheDocument();
-    expect(screen.getAllByText("Config ID")).toHaveLength(2);
-    expect(screen.getAllByText("42").length).toBeGreaterThan(0);
-    expect(screen.getByText("Chapter ID")).toBeInTheDocument();
-    expect(screen.getAllByText("7").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Config ID")).not.toBeInTheDocument();
+    const editPanel = screen.getByRole("complementary");
+    expect(within(editPanel).queryByText("Chapter ID")).not.toBeInTheDocument();
     expect(screen.getAllByText("Exam Track")).toHaveLength(2);
     expect(screen.getAllByText("JEE Main").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Prescribed minutes")).toHaveValue(0);
@@ -243,11 +243,12 @@ describe("CurriculumConfigTable", () => {
     expect(
       screen.getByRole("heading", { name: "Add LMS Chapter Exam Config" })
     ).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("Chapter search"));
     await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
     expect(screen.getByText(/0 topics/)).toBeInTheDocument();
     expect(screen.getByText("This chapter has no topics.")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await userEvent.click(screen.getByRole("option", { name: /PHY-02/ }));
     await waitFor(() => expect(screen.getByText("Summary rows")).toBeInTheDocument());
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("Zero minutes")).toBeInTheDocument();
@@ -307,8 +308,9 @@ describe("CurriculumConfigTable", () => {
     render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByLabelText("Chapter search"));
     await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
-    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await userEvent.click(screen.getByRole("option", { name: /PHY-02/ }));
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
 
     expect(
@@ -367,8 +369,9 @@ describe("CurriculumConfigTable", () => {
     render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByLabelText("Chapter search"));
     await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
-    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await userEvent.click(screen.getByRole("option", { name: /PHY-02/ }));
 
     expect(screen.getByText("A config row already exists for this chapter and Exam Track.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
@@ -416,8 +419,9 @@ describe("CurriculumConfigTable", () => {
     render(<CurriculumConfigTable rows={[inSyllabusRow]} activeFilters={baseFilters} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByLabelText("Chapter search"));
     await waitFor(() => expect(screen.getAllByText(/PHY-02/).length).toBeGreaterThan(0));
-    await userEvent.click(screen.getByRole("button", { name: /Select PHY-02/ }));
+    await userEvent.click(screen.getByRole("option", { name: /PHY-02/ }));
     await userEvent.click(screen.getByRole("button", { name: "Open restore flow" }));
 
     expect(

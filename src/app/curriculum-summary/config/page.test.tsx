@@ -80,6 +80,7 @@ const defaultParams = {
     grade: null,
     subject: null,
     search: "",
+    chapterId: null,
     syllabusStatus: "in_syllabus",
   },
   page: 1,
@@ -95,6 +96,22 @@ const listResult = {
     subjects: [{ id: 4, name: "Physics" }],
     examTracks: ["jee_main", "neet"],
     syllabusStatuses: ["in_syllabus", "out_of_syllabus", "all"],
+    chapters: [
+      {
+        id: 7,
+        code: "PHY-01",
+        name: "Motion",
+        grade: 11,
+        subjectName: "Physics",
+      },
+      {
+        id: 8,
+        code: "CHE-02",
+        name: "Mole Concept",
+        grade: 11,
+        subjectName: "Chemistry",
+      },
+    ],
   },
   rows: [
     {
@@ -151,6 +168,11 @@ describe("CurriculumConfigPage", () => {
     expect(screen.getByLabelText("Subject")).toHaveValue("");
     expect(screen.getByLabelText("Syllabus status")).toHaveValue("in_syllabus");
     expect(screen.getByLabelText("Rows per page")).toHaveValue("50");
+    await userEvent.click(screen.getByLabelText("Chapter search"));
+    await userEvent.type(screen.getByLabelText("Chapter search"), "mol");
+    expect(screen.getByRole("option", { name: /Mole Concept/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: /Mole Concept/ }));
+    expect(screen.getByLabelText("Chapter search")).toHaveValue("Mole Concept (CHE-02)");
     expect(screen.getByText("PHY-01")).toBeInTheDocument();
     expect(screen.getByText("Motion")).toBeInTheDocument();
     expect(screen.getByText(/1h 30m/)).toBeInTheDocument();
@@ -168,6 +190,7 @@ describe("CurriculumConfigPage", () => {
         grade: 12,
         subject: "5",
         search: "organic chemistry",
+        chapterId: null,
         syllabusStatus: "all",
       },
       page: 3,

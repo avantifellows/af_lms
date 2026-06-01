@@ -129,6 +129,7 @@ describe("curriculum config list helpers", () => {
         grade: null,
         subject: null,
         search: "",
+        chapterId: null,
         syllabusStatus: "in_syllabus",
       },
       page: 1,
@@ -155,6 +156,7 @@ describe("curriculum config list helpers", () => {
         grade: null,
         subject: null,
         search: "Work & Energy",
+        chapterId: null,
         syllabusStatus: "in_syllabus",
       },
       page: 1,
@@ -167,6 +169,7 @@ describe("curriculum config list helpers", () => {
       normalizeCurriculumConfigListParams({
         exam_track: "neet",
         grade: "12",
+        chapter_id: "89",
         subject: "Biology",
         syllabus_status: "all",
         page: "3",
@@ -179,6 +182,7 @@ describe("curriculum config list helpers", () => {
         examTrack: "neet",
         grade: 12,
         subject: "Biology",
+        chapterId: 89,
         syllabusStatus: "all",
       },
       page: 3,
@@ -259,6 +263,15 @@ describe("curriculum config list helpers", () => {
           grades: [11, 12],
           subjects: [{ id: 4, name: [{ lang_code: "en", subject: "Physics" }] }],
           exam_tracks: ["jee_main", "neet"],
+          chapters: [
+            {
+              id: 7,
+              code: "PHY-01",
+              name: [{ lang_code: "en", chapter: "Motion" }],
+              grade: 11,
+              subjectName: [{ lang_code: "en", subject: "Physics" }],
+            },
+          ],
         },
       ])
       .mockResolvedValueOnce([{ total_count: "1" }])
@@ -298,6 +311,15 @@ describe("curriculum config list helpers", () => {
         subjects: [{ id: 4, name: "Physics" }],
         examTracks: ["jee_main", "neet"],
         syllabusStatuses: ["in_syllabus", "out_of_syllabus", "all"],
+        chapters: [
+          {
+            id: 7,
+            code: "PHY-01",
+            name: "Motion",
+            grade: 11,
+            subjectName: "Physics",
+          },
+        ],
       },
       rows: [
         {
@@ -411,10 +433,11 @@ describe("curriculum config export helpers", () => {
       "4",
       "%phy%",
       "all",
+      null,
     ]);
     const sql = mockQuery.mock.calls[0][0] as string;
     expect(sql).toContain("ORDER BY coverage_sequence DESC");
-    expect(sql).not.toContain("LIMIT $6");
+    expect(sql).not.toContain("LIMIT $7");
     expect(sql).not.toContain("OFFSET");
   });
 });

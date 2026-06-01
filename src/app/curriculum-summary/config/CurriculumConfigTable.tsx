@@ -117,7 +117,6 @@ export default function CurriculumConfigTable({
           <thead className="bg-bg-muted">
             <tr>
               {[
-                "Config ID",
                 "Chapter",
                 "Grade",
                 "Subject",
@@ -143,7 +142,7 @@ export default function CurriculumConfigTable({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={10}
                   className="px-4 py-10 text-sm text-text-secondary"
                 >
                   No Curriculum Config rows match the selected filters.
@@ -152,7 +151,6 @@ export default function CurriculumConfigTable({
             ) : null}
             {rows.map((row) => (
               <tr key={row.id}>
-                <td className="px-4 py-3 font-mono text-text-secondary">{row.id}</td>
                 <td className="px-4 py-3">
                   <div className="font-bold text-text-primary">{row.chapterCode}</div>
                   <div className="text-text-secondary">{row.chapterName}</div>
@@ -403,6 +401,8 @@ function AddPanel({
   const [grade, setGrade] = useState(activeFilters.grade ? String(activeFilters.grade) : "");
   const [subject, setSubject] = useState(activeFilters.subject ?? "");
   const [search, setSearch] = useState(activeFilters.search);
+  const [chapterDropdownOpen, setChapterDropdownOpen] = useState(false);
+  const [activeChapterIndex, setActiveChapterIndex] = useState(0);
   const [options, setOptions] = useState<CurriculumConfigChapterOption[]>([]);
   const [selected, setSelected] = useState<CurriculumConfigChapterOption | null>(null);
   const [prescribedMinutes, setPrescribedMinutes] = useState(0);
@@ -430,6 +430,7 @@ function AddPanel({
       .then((json) => {
         if (!cancelled) {
           setOptions(json.options ?? []);
+          setActiveChapterIndex(0);
         }
       })
       .catch(() => {
@@ -477,6 +478,9 @@ function AddPanel({
 
   function selectOption(option: CurriculumConfigChapterOption) {
     setSelected(option);
+    setSearch("");
+    setChapterDropdownOpen(false);
+    setActiveChapterIndex(0);
     setError("");
     setFieldErrors({});
     setImpact({ loading: !option.configExists, counts: null, warnings: [] });
@@ -638,10 +642,44 @@ function AddPanel({
               <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
                 Chapter search
                 <input
+                  id="curriculum-config-chapter-search"
                   value={search}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={chapterDropdownOpen}
+                  aria-controls="curriculum-config-chapter-options"
                   onChange={(event) => {
                     setSearch(event.currentTarget.value);
                     setSelected(null);
+                    setChapterDropdownOpen(true);
+                    setActiveChapterIndex(0);
+                  }}
+                  onFocus={() => setChapterDropdownOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setChapterDropdownOpen(false), 100);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setChapterDropdownOpen(true);
+                      setActiveChapterIndex((index) =>
+                        options.length === 0
+                          ? 0
+                          : Math.min(index + 1, options.length - 1)
+                      );
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setActiveChapterIndex((index) => Math.max(index - 1, 0));
+                    } else if (
+                      event.key === "Enter" &&
+                      chapterDropdownOpen &&
+                      options[activeChapterIndex]
+                    ) {
+                      event.preventDefault();
+                      selectOption(options[activeChapterIndex]);
+                    } else if (event.key === "Escape") {
+                      setChapterDropdownOpen(false);
+                    }
                   }}
                   className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
                   placeholder="Code or name"
@@ -651,44 +689,72 @@ function AddPanel({
 
             <div className="space-y-2">
               <h3 className="text-sm font-bold text-text-primary">Chapter</h3>
-              {options.length === 0 ? (
-                <p className="rounded-md border border-border bg-bg-muted px-3 py-2 text-sm text-text-secondary">
-                  No chapters match the add filters.
-                </p>
-              ) : (
-                <div className="max-h-64 space-y-2 overflow-y-auto">
-                  {options.map((option) => (
-                    <button
-                      key={option.chapterId}
-                      type="button"
-                      onClick={() => selectOption(option)}
-                      className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
-                        selected?.chapterId === option.chapterId
-                          ? "border-accent bg-hover-bg"
-                          : "border-border bg-bg-muted"
-                      }`}
-                    >
-                      <span className="block font-bold text-text-primary">
-                        {option.chapterCode} - {option.chapterName}
-                      </span>
-                      <span className="block text-xs text-text-secondary">
-                        Grade {option.grade} - {option.subjectName} - {option.topicCount}{" "}
-                        {option.topicCount === 1 ? "topic" : "topics"}
-                      </span>
-                      {option.topicWarning ? (
-                        <span className="mt-1 block text-xs font-bold text-warning-text">
-                          {option.topicWarning}
-                        </span>
-                      ) : null}
-                      {option.configExists ? (
-                        <span className="mt-1 block text-xs font-bold text-danger">
-                          Config already exists for {formatExamTrack(examTrack)}
-                        </span>
-                      ) : null}
-                      <span className="sr-only">Select {option.chapterCode}</span>
-                    </button>
-                  ))}
+              <div className="relative">
+                {chapterDropdownOpen ? (
+                  <div
+                    id="curriculum-config-chapter-options"
+                    role="listbox"
+                    className="absolute z-20 max-h-72 w-full overflow-y-auto rounded-md border border-border bg-bg-card shadow-lg"
+                  >
+                    {options.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-text-muted">
+                        No chapters match the add filters.
+                      </div>
+                    ) : (
+                      options.map((option) => (
+                        <button
+                          key={option.chapterId}
+                          type="button"
+                          role="option"
+                          aria-selected={selected?.chapterId === option.chapterId}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectOption(option)}
+                          className={`w-full border px-3 py-2 text-left text-sm ${
+                            options[activeChapterIndex]?.chapterId === option.chapterId
+                              ? "border-accent bg-hover-bg"
+                              : "border-transparent bg-bg-card"
+                          }`}
+                        >
+                          <span className="block font-bold text-text-primary">
+                            {option.chapterCode} - {option.chapterName}
+                          </span>
+                          <span className="block text-xs text-text-secondary">
+                            Grade {option.grade} - {option.subjectName} -{" "}
+                            {option.topicCount}{" "}
+                            {option.topicCount === 1 ? "topic" : "topics"}
+                          </span>
+                          {option.topicWarning ? (
+                            <span className="mt-1 block text-xs font-bold text-warning-text">
+                              {option.topicWarning}
+                            </span>
+                          ) : null}
+                          {option.configExists ? (
+                            <span className="mt-1 block text-xs font-bold text-danger">
+                              Config already exists for {formatExamTrack(examTrack)}
+                            </span>
+                          ) : null}
+                          <span className="sr-only">Select {option.chapterCode}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              {selected ? (
+                <div className="rounded-md border border-border bg-bg-muted px-3 py-2 text-sm">
+                  <div className="font-bold text-text-primary">
+                    {selected.chapterCode} - {selected.chapterName}
+                  </div>
+                  <div className="text-xs text-text-secondary">
+                    Grade {selected.grade} - {selected.subjectName} -{" "}
+                    {selected.topicCount}{" "}
+                    {selected.topicCount === 1 ? "topic" : "topics"}
+                  </div>
                 </div>
+              ) : (
+                <p className="rounded-md border border-border bg-bg-muted px-3 py-2 text-sm text-text-secondary">
+                  Search and select a chapter to create a config row.
+                </p>
               )}
             </div>
 
@@ -1009,8 +1075,6 @@ function EditPanel({
 
 function ReadOnlyGrid({ row }: { row: CurriculumConfigRow }) {
   const items = [
-    ["Config ID", String(row.id)],
-    ["Chapter ID", String(row.chapterId)],
     ["Chapter code", row.chapterCode],
     ["Exam Track", formatExamTrack(row.examTrack)],
   ];

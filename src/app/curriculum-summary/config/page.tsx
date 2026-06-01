@@ -13,6 +13,7 @@ import {
   type CurriculumConfigSyllabusStatus,
 } from "@/lib/curriculum-config";
 import type { ExamTrack } from "@/types/curriculum";
+import CurriculumConfigChapterSearchFilter from "./CurriculumConfigChapterSearchFilter";
 import CurriculumConfigExportButton from "./CurriculumConfigExportButton";
 import CurriculumConfigTable from "./CurriculumConfigTable";
 
@@ -189,15 +190,11 @@ function ConfigFilters({
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-sm font-bold text-text-primary md:col-span-2">
-          Chapter search
-          <input
-            name="search"
-            defaultValue={result.activeFilters.search}
-            className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
-            placeholder="Code or name"
-          />
-        </label>
+        <CurriculumConfigChapterSearchFilter
+          options={result.filterOptions.chapters}
+          defaultValue={result.activeFilters.search}
+          defaultChapterId={result.activeFilters.chapterId}
+        />
         <label className="flex flex-col gap-1 text-sm font-bold text-text-primary">
           Rows per page
           <select
@@ -284,6 +281,9 @@ function pageHref(
   if (result.activeFilters.grade) params.set("grade", String(result.activeFilters.grade));
   if (result.activeFilters.subject) params.set("subject", result.activeFilters.subject);
   if (result.activeFilters.search) params.set("search", result.activeFilters.search);
+  if (result.activeFilters.chapterId) {
+    params.set("chapter_id", String(result.activeFilters.chapterId));
+  }
   params.set("syllabus_status", result.activeFilters.syllabusStatus);
   params.set("limit", String(result.limit));
   params.set("sort", result.sort);
@@ -300,6 +300,9 @@ function exportHref(
   if (result.activeFilters.grade) params.set("grade", String(result.activeFilters.grade));
   if (result.activeFilters.subject) params.set("subject", result.activeFilters.subject);
   if (result.activeFilters.search) params.set("search", result.activeFilters.search);
+  if (result.activeFilters.chapterId) {
+    params.set("chapter_id", String(result.activeFilters.chapterId));
+  }
   params.set("syllabus_status", result.activeFilters.syllabusStatus);
   params.set("sort", result.sort);
   params.set("dir", result.dir);

@@ -43,6 +43,7 @@ export interface CurriculumConfigFilters {
   grade: number | null;
   subject: string | null;
   search: string;
+  chapterId: number | null;
   syllabusStatus: CurriculumConfigSyllabusStatus;
 }
 
@@ -96,6 +97,7 @@ export interface CurriculumConfigFilterOptions {
   subjects: Array<{ id: number; name: string }>;
   examTracks: ExamTrack[];
   syllabusStatuses: CurriculumConfigSyllabusStatus[];
+  chapters: Array<{ id: number; code: string; name: string; grade: number; subjectName: string }>;
 }
 
 export interface CurriculumConfigChapterOptionsParams {
@@ -265,6 +267,7 @@ interface ConfigOptionsQueryRow {
   grades: unknown;
   subjects: unknown;
   exam_tracks: unknown;
+  chapters: unknown;
 }
 
 interface CountQueryRow {
@@ -338,6 +341,7 @@ export function normalizeCurriculumConfigListParams(
   const sort = isSortKey(searchParams.sort) ? searchParams.sort : "curriculum";
   const dir = searchParams.dir === "desc" ? "desc" : "asc";
   const grade = positiveInteger(searchParams.grade);
+  const chapterId = positiveInteger(searchParams.chapter_id);
   const subject = searchParams.subject?.trim() || null;
 
   return {
@@ -346,6 +350,7 @@ export function normalizeCurriculumConfigListParams(
       grade,
       subject,
       search: searchParams.search?.trim() ?? "",
+      chapterId,
       syllabusStatus: isSyllabusStatus(requestedSyllabusStatus)
         ? requestedSyllabusStatus
         : "in_syllabus",
@@ -933,6 +938,7 @@ function buildListQueryParams(filters: CurriculumConfigFilters): unknown[] {
     filters.subject,
     filters.search ? `%${filters.search.toLowerCase()}%` : null,
     filters.syllabusStatus,
+    filters.chapterId,
   ];
 }
 
@@ -940,6 +946,18 @@ function buildOptionsSql(): string {
   return `
     WITH config_options AS (
       SELECT DISTINCT
+        ch.id AS chapter_id,
+        ch.code AS chapter_code,
+        COALESCE(
+          (
+            SELECT item->>'chapter'
+            FROM jsonb_array_elements(ch.name::jsonb) item
+            WHERE item->>'lang_code' = 'en'
+            LIMIT 1
+          ),
+          ch.code,
+          'Unknown chapter'
+        ) AS chapter_name,
         g.number AS grade,
         s.id AS subject_id,
         COALESCE(
@@ -963,7 +981,14 @@ function buildOptionsSql(): string {
         'id', subject_id,
         'name', subject_name
       )) FILTER (WHERE subject_id IS NOT NULL), '[]'::jsonb) AS subjects,
-      COALESCE(jsonb_agg(DISTINCT exam_track) FILTER (WHERE exam_track IS NOT NULL), '[]'::jsonb) AS exam_tracks
+      COALESCE(jsonb_agg(DISTINCT exam_track) FILTER (WHERE exam_track IS NOT NULL), '[]'::jsonb) AS exam_tracks,
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
+        'id', chapter_id,
+        'code', chapter_code,
+        'name', chapter_name,
+        'grade', grade,
+        'subjectName', subject_name
+      )) FILTER (WHERE chapter_id IS NOT NULL), '[]'::jsonb) AS chapters
     FROM config_options`;
 }
 
@@ -1025,7 +1050,8 @@ function buildBaseListSql(): string {
         $5::text = 'all'
         OR ($5::text = 'in_syllabus' AND is_in_syllabus = true)
         OR ($5::text = 'out_of_syllabus' AND is_in_syllabus = false)
-      )`;
+      )
+      AND ($6::int IS NULL OR chapter_id = $6::int)`;
 }
 
 function buildCountSql(): string {
@@ -1038,7 +1064,7 @@ function buildRowsSql(
 ): string {
   return `${buildBaseListSql()}
     ORDER BY ${buildOrderClause(sort, dir)}
-    LIMIT $6 OFFSET $7`;
+    LIMIT $7 OFFSET $8`;
 }
 
 function buildExportRowsSql(
@@ -1623,6 +1649,27 @@ function mapFilterOptions(row: ConfigOptionsQueryRow | undefined): CurriculumCon
       name: localizedName(subject.name, "subject", subject.name),
     }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+  const chapters = parseJsonArray<{
+    id: unknown;
+    code: unknown;
+    name: unknown;
+    grade: unknown;
+    subjectName: unknown;
+  }>(row?.chapters)
+    .map((chapter) => ({
+      id: numberFromDb(chapter.id as string | number | null | undefined),
+      code: String(chapter.code ?? ""),
+      name: localizedName(chapter.name, "chapter", chapter.code),
+      grade: numberFromDb(chapter.grade as string | number | null | undefined),
+      subjectName: localizedName(chapter.subjectName, "subject", chapter.subjectName),
+    }))
+    .sort(
+      (a, b) =>
+        a.grade - b.grade ||
+        a.subjectName.localeCompare(b.subjectName) ||
+        a.code.localeCompare(b.code) ||
+        a.name.localeCompare(b.name)
+    );
 
   return {
     grades: parseJsonArray<number>(row?.grades).map(Number).sort((a, b) => a - b),
@@ -1631,6 +1678,7 @@ function mapFilterOptions(row: ConfigOptionsQueryRow | undefined): CurriculumCon
       parseJsonArray<string>(row?.exam_tracks).includes(track)
     ),
     syllabusStatuses: ["in_syllabus", "out_of_syllabus", "all"],
+    chapters,
   };
 }
 
