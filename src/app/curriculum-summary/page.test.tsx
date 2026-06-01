@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -800,6 +800,109 @@ describe("CurriculumSummaryPage", () => {
     );
   });
 
+  it("resets controlled filter state after clear-filter navigation", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+
+    const filterOptions = {
+      ...emptySummaryResult.filterOptions,
+      schools: [
+        {
+          code: "64037",
+          name: "JNV Agra",
+          region: "Lucknow",
+          state: "Uttar Pradesh",
+          district: "Agra",
+        },
+      ],
+      programs: [{ id: 1, name: "JNV CoE" }],
+      grades: [11],
+      subjects: [{ id: 4, name: "Physics" }],
+      examTracks: ["jee_main"],
+      regions: ["Lucknow"],
+      states: ["Uttar Pradesh"],
+      districts: ["Agra"],
+    };
+    mockGetCurriculumSummary.mockResolvedValueOnce({
+      ...emptySummaryResult,
+      activeFilters: {
+        ...defaultFilters,
+        schools: ["64037"],
+        programs: [1],
+        grades: [11],
+        subjects: [4],
+        examTracks: ["jee_main"],
+        regions: ["Lucknow"],
+        states: ["Uttar Pradesh"],
+        districts: ["Agra"],
+      },
+      filterOptions,
+    });
+
+    const filteredJsx = await CurriculumSummaryPage({
+      searchParams: Promise.resolve({
+        schools: "64037",
+        programs: "1",
+        grades: "11",
+        subjects: "4",
+        exam_tracks: "jee_main",
+        regions: "Lucknow",
+        states: "Uttar Pradesh",
+        districts: "Agra",
+      }),
+    });
+    const { rerender } = render(filteredJsx);
+
+    expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe(
+      "64037"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="programs"]')?.value).toBe(
+      "1"
+    );
+
+    mockGetCurriculumSummary.mockResolvedValueOnce({
+      ...emptySummaryResult,
+      filterOptions,
+    });
+    const clearedJsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    rerender(clearedJsx);
+
+    await waitFor(() => {
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="schools"]')?.value
+      ).toBe("");
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="programs"]')?.value
+      ).toBe("");
+      expect(document.querySelector<HTMLInputElement>('input[name="grades"]')?.value).toBe(
+        ""
+      );
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="subjects"]')?.value
+      ).toBe("");
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value
+      ).toBe("");
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="regions"]')?.value
+      ).toBe("");
+      expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+        ""
+      );
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="districts"]')?.value
+      ).toBe("");
+    });
+  });
+
   it("lets users search schools by name or code and keeps the schools query value comma-separated", async () => {
     const user = userEvent.setup();
     mockGetServerSession.mockResolvedValue(pmSession);
@@ -997,6 +1100,137 @@ describe("CurriculumSummaryPage", () => {
     );
   });
 
+  it("cascades geography filters before applying them", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "Lucknow",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+          {
+            code: "59525",
+            name: "JNV Adilabad",
+            region: "Hyderabad",
+            state: "Telangana",
+            district: "Adilabad",
+          },
+          {
+            code: "14042",
+            name: "JNV Bhavnagar",
+            region: "Pune",
+            state: "Gujarat",
+            district: "Bhavnagar",
+          },
+        ],
+        regions: ["Hyderabad", "Lucknow", "Pune"],
+        states: ["Gujarat", "Telangana", "Uttar Pradesh"],
+        districts: ["Adilabad", "Agra", "Bhavnagar"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "Districts" }), "adil");
+    await user.click(screen.getByRole("option", { name: "Adilabad" }));
+
+    expect(document.querySelector<HTMLInputElement>('input[name="districts"]')?.value).toBe(
+      "Adilabad"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+      "Telangana"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe(
+      "Hyderabad"
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Schools" }), "jnv");
+    expect(screen.getByRole("option", { name: "JNV Adilabad (59525)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "JNV Agra (64037)" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "JNV Bhavnagar (14042)" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("narrows district and school choices when a state is selected", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "Lucknow",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+          {
+            code: "59525",
+            name: "JNV Adilabad",
+            region: "Hyderabad",
+            state: "Telangana",
+            district: "Adilabad",
+          },
+        ],
+        regions: ["Hyderabad", "Lucknow"],
+        states: ["Telangana", "Uttar Pradesh"],
+        districts: ["Adilabad", "Agra"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "States" }), "uttar");
+    await user.click(screen.getByRole("option", { name: "Uttar Pradesh" }));
+
+    expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+      "Uttar Pradesh"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe(
+      "Lucknow"
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Districts" }), "a");
+    expect(screen.getByRole("option", { name: "Agra" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Adilabad" })).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("combobox", { name: "Schools" }), "jnv");
+    expect(screen.getByRole("option", { name: "JNV Agra (64037)" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "JNV Adilabad (59525)" })
+    ).not.toBeInTheDocument();
+  });
+
   it("derives read-only geography filters from selected schools", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
     mockGetUserPermission.mockResolvedValue(pmPermission);
@@ -1179,6 +1413,88 @@ describe("CurriculumSummaryPage", () => {
     expect(
       document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value
     ).toBe("jee_main");
+  });
+
+  it("clears client-side auto-filled filters before they are applied", async () => {
+    const user = userEvent.setup();
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      filterOptions: {
+        ...emptySummaryResult.filterOptions,
+        schools: [
+          {
+            code: "64037",
+            name: "JNV Agra",
+            region: "Lucknow",
+            state: "Uttar Pradesh",
+            district: "Agra",
+          },
+        ],
+        programs: [{ id: 1, name: "JNV CoE" }],
+        grades: [11],
+        subjects: [{ id: 4, name: "Physics" }],
+        examTracks: ["jee_main"],
+        regions: ["Lucknow"],
+        states: ["Uttar Pradesh"],
+        districts: ["Agra"],
+      },
+    });
+
+    const jsx = await CurriculumSummaryPage({
+      searchParams: defaultSearchParams,
+    });
+    render(jsx);
+
+    await user.type(screen.getByRole("combobox", { name: "Schools" }), "agra");
+    await user.click(screen.getByRole("option", { name: "JNV Agra (64037)" }));
+
+    expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe(
+      "64037"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="programs"]')?.value).toBe(
+      "1"
+    );
+    expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe(
+      "Lucknow"
+    );
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    await waitFor(() => {
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="schools"]')?.value
+      ).toBe("");
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="programs"]')?.value
+      ).toBe("");
+      expect(document.querySelector<HTMLInputElement>('input[name="grades"]')?.value).toBe(
+        ""
+      );
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="subjects"]')?.value
+      ).toBe("");
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value
+      ).toBe("");
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="regions"]')?.value
+      ).toBe("");
+      expect(document.querySelector<HTMLInputElement>('input[name="states"]')?.value).toBe(
+        ""
+      );
+      expect(
+        document.querySelector<HTMLInputElement>('input[name="districts"]')?.value
+      ).toBe("");
+    });
+    expect(mockRouterPush).toHaveBeenCalledWith("/curriculum-summary");
   });
 
   it("does not override existing primary filter choices when a school is selected", async () => {

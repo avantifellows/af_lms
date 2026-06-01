@@ -116,8 +116,9 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
         subtitle="Read-only cross-school Curriculum Progress"
         backHref="/dashboard"
         userEmail={email}
+        containerClassName="w-full px-4 py-3 sm:px-6 lg:px-8"
       />
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {!summary.ok ? (
           <Card className="border-l-4 border-l-warning-border p-6">
             <div className="flex flex-col gap-3">
@@ -260,7 +261,11 @@ function CurriculumSummaryFiltersCard({
         <summary className="cursor-pointer text-sm font-bold text-text-primary">
           Filters
         </summary>
-        <CurriculumSummaryFiltersForm filters={filters} options={options} />
+        <CurriculumSummaryFiltersForm
+          key={JSON.stringify(filters)}
+          filters={filters}
+          options={options}
+        />
       </details>
     </Card>
   );

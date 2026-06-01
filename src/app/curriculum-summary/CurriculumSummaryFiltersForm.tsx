@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useRef, useState } from "react";
 
 import type {
   CurriculumSummaryFilterOptions,
@@ -26,6 +26,8 @@ export default function CurriculumSummaryFiltersForm({
   filters,
   options,
 }: CurriculumSummaryFiltersFormProps) {
+  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
   const [selectedSchoolCodes, setSelectedSchoolCodes] = useState(filters.schools);
   const [selectedProgramIds, setSelectedProgramIds] = useState(filters.programs);
   const [selectedGrades, setSelectedGrades] = useState(filters.grades);
@@ -33,9 +35,58 @@ export default function CurriculumSummaryFiltersForm({
   const [selectedExamTracks, setSelectedExamTracks] = useState<ExamTrack[]>(
     filters.examTracks
   );
+  const [selectedRegions, setSelectedRegions] = useState(filters.regions);
+  const [selectedStates, setSelectedStates] = useState(filters.states);
+  const [selectedDistricts, setSelectedDistricts] = useState(filters.districts);
   const derivedLocationFilters = useMemo(
     () => deriveLocationFiltersFromSelectedSchools(selectedSchoolCodes, options),
     [selectedSchoolCodes, options]
+  );
+  const manuallyFilteredSchools = useMemo(
+    () =>
+      filterSchoolsByLocation(options.schools, {
+        regions: selectedRegions,
+        states: selectedStates,
+        districts: selectedDistricts,
+      }),
+    [options.schools, selectedDistricts, selectedRegions, selectedStates]
+  );
+  const schoolOptions = derivedLocationFilters ? options.schools : manuallyFilteredSchools;
+  const regionOptions = useMemo(
+    () =>
+      locationValuesForSchools(
+        filterSchoolsByLocation(options.schools, {
+          states: selectedStates,
+          districts: selectedDistricts,
+        }),
+        "region",
+        options.regions
+      ),
+    [options.regions, options.schools, selectedDistricts, selectedStates]
+  );
+  const stateOptions = useMemo(
+    () =>
+      locationValuesForSchools(
+        filterSchoolsByLocation(options.schools, {
+          regions: selectedRegions,
+          districts: selectedDistricts,
+        }),
+        "state",
+        options.states
+      ),
+    [options.schools, options.states, selectedDistricts, selectedRegions]
+  );
+  const districtOptions = useMemo(
+    () =>
+      locationValuesForSchools(
+        filterSchoolsByLocation(options.schools, {
+          regions: selectedRegions,
+          states: selectedStates,
+        }),
+        "district",
+        options.districts
+      ),
+    [options.districts, options.schools, selectedRegions, selectedStates]
   );
 
   function handleSelectedSchoolCodesChange(nextSchoolCodes: string[]) {
@@ -59,13 +110,77 @@ export default function CurriculumSummaryFiltersForm({
     );
   }
 
+  function handleRegionsChange(nextRegions: string[]) {
+    setSelectedRegions(nextRegions);
+
+    const matchingSchools = filterSchoolsByLocation(options.schools, {
+      regions: nextRegions,
+    });
+    setSelectedStates((current) => pruneLocationValues(current, matchingSchools, "state"));
+    setSelectedDistricts((current) =>
+      pruneLocationValues(current, matchingSchools, "district")
+    );
+  }
+
+  function handleStatesChange(nextStates: string[]) {
+    setSelectedStates(nextStates);
+
+    const matchingSchools = filterSchoolsByLocation(options.schools, {
+      states: nextStates,
+      districts: selectedDistricts,
+    });
+    const derivedRegions = uniqueSorted(matchingSchools.map((school) => school.region));
+    if (nextStates.length > 0 || selectedDistricts.length > 0) {
+      setSelectedRegions(derivedRegions);
+    }
+    setSelectedDistricts((current) =>
+      pruneLocationValues(
+        current,
+        filterSchoolsByLocation(options.schools, { states: nextStates }),
+        "district"
+      )
+    );
+  }
+
+  function handleDistrictsChange(nextDistricts: string[]) {
+    setSelectedDistricts(nextDistricts);
+
+    if (nextDistricts.length === 0) {
+      return;
+    }
+
+    const matchingSchools = filterSchoolsByLocation(options.schools, {
+      districts: nextDistricts,
+    });
+    setSelectedStates(uniqueSorted(matchingSchools.map((school) => school.state)));
+    setSelectedRegions(uniqueSorted(matchingSchools.map((school) => school.region)));
+  }
+
+  function handleClearFilters() {
+    setSelectedSchoolCodes([]);
+    setSelectedProgramIds([]);
+    setSelectedGrades([]);
+    setSelectedSubjectIds([]);
+    setSelectedExamTracks([]);
+    setSelectedRegions([]);
+    setSelectedStates([]);
+    setSelectedDistricts([]);
+    formRef.current?.reset();
+    router.push("/curriculum-summary");
+  }
+
   return (
-    <form action="/curriculum-summary" method="get" className="mt-4 space-y-4">
+    <form
+      ref={formRef}
+      action="/curriculum-summary"
+      method="get"
+      className="mt-4 space-y-4"
+    >
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         <SchoolFilterSelect
           key={`schools:${filters.schools.join(",")}`}
-          options={options.schools}
-          selectedCodes={filters.schools}
+          options={schoolOptions}
+          selectedCodes={selectedSchoolCodes}
           onSelectedCodesChange={handleSelectedSchoolCodesChange}
         />
         <ProgramFilterSelect
@@ -115,28 +230,29 @@ export default function CurriculumSummaryFiltersForm({
               inputId="curriculum-summary-region-filter"
               placeholder="Search region"
               noMatchesText="No matching regions"
-              options={options.regions}
-              selectedValues={filters.regions}
+              options={regionOptions}
+              selectedValues={selectedRegions}
+              onSelectedValuesChange={handleRegionsChange}
             />
             <StringFilterSelect
-              key={`states:${filters.states.join(",")}`}
               label="States"
               name="states"
               inputId="curriculum-summary-state-filter"
               placeholder="Search state"
               noMatchesText="No matching states"
-              options={options.states}
-              selectedValues={filters.states}
+              options={stateOptions}
+              selectedValues={selectedStates}
+              onSelectedValuesChange={handleStatesChange}
             />
             <StringFilterSelect
-              key={`districts:${filters.districts.join(",")}`}
               label="Districts"
               name="districts"
               inputId="curriculum-summary-district-filter"
               placeholder="Search district"
               noMatchesText="No matching districts"
-              options={options.districts}
-              selectedValues={filters.districts}
+              options={districtOptions}
+              selectedValues={selectedDistricts}
+              onSelectedValuesChange={handleDistrictsChange}
             />
           </>
         )}
@@ -175,15 +291,59 @@ export default function CurriculumSummaryFiltersForm({
         >
           Apply filters
         </button>
-        <Link
-          href="/curriculum-summary"
+        <button
+          type="button"
+          onClick={handleClearFilters}
           className="text-sm font-bold text-accent hover:text-accent-hover"
         >
           Clear filters
-        </Link>
+        </button>
       </div>
     </form>
   );
+}
+
+function filterSchoolsByLocation(
+  schools: CurriculumSummaryFilterOptions["schools"],
+  filters: Partial<Pick<CurriculumSummaryFilters, "regions" | "states" | "districts">>
+) {
+  const regions = new Set(filters.regions ?? []);
+  const states = new Set(filters.states ?? []);
+  const districts = new Set(filters.districts ?? []);
+
+  return schools.filter((school) => {
+    if (regions.size > 0 && (!school.region || !regions.has(school.region))) {
+      return false;
+    }
+    if (states.size > 0 && (!school.state || !states.has(school.state))) {
+      return false;
+    }
+    if (
+      districts.size > 0 &&
+      (!school.district || !districts.has(school.district))
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function locationValuesForSchools(
+  schools: CurriculumSummaryFilterOptions["schools"],
+  key: "region" | "state" | "district",
+  fallbackValues: string[]
+) {
+  const values = uniqueSorted(schools.map((school) => school[key]));
+  return values.length > 0 ? values : fallbackValues;
+}
+
+function pruneLocationValues(
+  values: string[],
+  schools: CurriculumSummaryFilterOptions["schools"],
+  key: "region" | "state" | "district"
+) {
+  const allowedValues = new Set(uniqueSorted(schools.map((school) => school[key])));
+  return values.filter((value) => allowedValues.has(value));
 }
 
 function deriveLocationFiltersFromSelectedSchools(

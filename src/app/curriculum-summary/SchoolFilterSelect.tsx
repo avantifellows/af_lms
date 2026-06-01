@@ -47,6 +47,7 @@ interface StringFilterSelectProps {
   noMatchesText: string;
   options: string[];
   selectedValues: string[];
+  onSelectedValuesChange?: (selectedValues: string[]) => void;
 }
 
 interface DerivedFilterChipsProps {
@@ -245,6 +246,7 @@ export function StringFilterSelect({
   noMatchesText,
   options,
   selectedValues,
+  onSelectedValuesChange,
 }: StringFilterSelectProps) {
   const selectOptions = useMemo(
     () =>
@@ -265,6 +267,7 @@ export function StringFilterSelect({
       noMatchesText={noMatchesText}
       options={selectOptions}
       selectedValues={selectedValues}
+      onSelectedValuesChange={onSelectedValuesChange}
     />
   );
 }
