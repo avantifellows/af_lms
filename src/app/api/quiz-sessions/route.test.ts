@@ -358,9 +358,11 @@ describe("POST /api/quiz-sessions", () => {
         show_answers: false,
         show_scores: true,
         shuffle: true,
-        gurukul_format_type: "omr",
+        gurukul_format_type: "qa",
         status: "pending",
         has_synced_to_bq: false,
+        created_by: ADMIN_SESSION.user.email,
+        created_from: "lms",
       },
     });
     expect(mocks.mockPublishMessage).toHaveBeenCalledWith({
