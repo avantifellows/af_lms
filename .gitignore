@@ -72,3 +72,9 @@ graphify-out/
 # Discord bot scripts
 start-discord-bot.sh
 stop-discord-bot.sh
+
+# Local uploaded centre export data
+.discord-attachments/
+centres-for-crud-ui/
+centre_name_table.csv
+centre_name_mapping_template.csv
