@@ -238,6 +238,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const canViewVisitSummary =
     (permission.role === "admin" || permission.role === "program_admin") &&
     getFeatureAccess(permission, "visits").canView;
+  const showCurriculumSummary =
+    (permission.role === "program_manager" ||
+      permission.role === "program_admin" ||
+      permission.role === "admin") &&
+    programContext.hasCoEOrNodal &&
+    getFeatureAccess(permission, "curriculum").canView;
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
@@ -285,7 +291,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                       : `${totalCount} school(s)`}
               </p>
             </div>
-            {(hasPMAccess || canViewVisitSummary) && (
+            {(hasPMAccess || canViewVisitSummary || showCurriculumSummary) && (
               <nav className="flex gap-3 sm:gap-4">
                 <Link
                   href="/dashboard"
@@ -299,6 +305,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                     className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
                   >
                     Visit Summary
+                  </Link>
+                )}
+                {showCurriculumSummary && (
+                  <Link
+                    href="/curriculum-summary"
+                    className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
+                  >
+                    Curriculum Summary
                   </Link>
                 )}
               </nav>

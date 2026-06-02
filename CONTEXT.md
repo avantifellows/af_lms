@@ -18,6 +18,10 @@ _Avoid_: Learner, pupil
 A grouping of students within a school for program delivery.
 _Avoid_: Cohort, section
 
+**Program**:
+An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
+_Avoid_: Course, stream
+
 **UDISE Code**:
 A unique government-issued identifier for a school.
 _Avoid_: School ID, school code (internally `school.code` is a separate field)
@@ -25,6 +29,36 @@ _Avoid_: School ID, school code (internally `school.code` is a separate field)
 **Passcode**:
 An 8-digit code granting single-school access without Google OAuth. Format: `{schoolCode}XXX`.
 _Avoid_: PIN, access code
+
+### Curriculum
+
+**LMS Curriculum Log**:
+A soft-deletable dated record of curriculum teaching for a school, program, grade, subject, and exam track, with duration and covered topics.
+_Avoid_: Teaching Session, Session, Class Log
+
+**Chapter Completion**:
+The current state that a chapter is complete for a school, program, and exam track.
+_Avoid_: Completed log, topic coverage
+
+**Curriculum Progress**:
+A summary of covered topics, teaching time, and chapter completion for a school-program-grade-subject-exam-track selection.
+_Avoid_: Progress record, saved progress
+
+**Curriculum Summary**:
+A top-level read-only dashboard for reviewing curriculum progress across schools, grades, subjects, and exam tracks.
+_Avoid_: Curriculum tab, curriculum report, curriculum overview
+
+**Exam Track**:
+The exam-specific curriculum lens selected by a user, such as JEE Main, JEE Advanced, or NEET.
+_Avoid_: Stream, orientation
+
+**LMS Chapter Exam Config**:
+An exam-track-specific configuration for a chapter that records whether it is in syllabus, the prescribed lecture time, and the coverage order.
+_Avoid_: Timemap, chapter requirement
+
+**Curriculum Config Management**:
+An admin-only workflow for changing LMS Chapter Exam Config values that affect all schools using the configured chapter and exam track.
+_Avoid_: Curriculum logging, school curriculum setup
 
 ### Visits & Actions
 
@@ -48,15 +82,13 @@ _Avoid_: Group (overloaded — `group` is a DB table and `group_student_discussi
 Setting `deleted_at` timestamp instead of removing the row. Used for actions and (issue #35) visits.
 _Avoid_: Archive, deactivate
 
-### Staff
+**School Visit Summary**:
+An admin-facing read-only dashboard for reviewing all visits across schools. Two pages: a filterable list view (`/school-visit-summary`) and a per-visit detail view (`/school-visit-summary/[id]`). Distinct from the PM's operational workspace at `/visits/[id]`.
+_Avoid_: Visit dashboard, visit report, visit overview
 
-**Staff**:
-AF employees assigned to a school — teachers, program managers, and others. Sourced from the external Centres API, not from the LMS database.
-_Avoid_: Teachers & Staff, AF Team (tab label is "Staff")
-
-**Centres API**:
-External service (`centres.avantifellows.org`) that provides staff assignments per school. Queried by `school.name`. Returns staff grouped by program (CoE / Nodal) and role (teachers / program_managers / others).
-_Avoid_: Budget API (legacy name from when it lived under `budget.avantifellows.org`)
+**Remark**:
+A freeform text note attached to a question answer within an action's JSONB `data` payload. Used as "visit notes" on the summary detail page.
+_Avoid_: Note, comment (these imply a separate entity; remarks live inside action data)
 
 ### Roles & Access
 
@@ -101,8 +133,39 @@ _Avoid_: Remove, delete (implies hard delete)
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
-- A **School** has many **Staff** (via **Centres API**, keyed by `school.name`)
 - A **School** has many **Batches**
+- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program** and **Exam Track**
+- An **LMS Curriculum Log** has many covered topics
+- **Chapter Completion** is stored independently from **LMS Curriculum Logs**
+- **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
+- **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
+- Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
+- **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
+- **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
+- In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
+- A chapter has one **LMS Chapter Exam Config** per configured exam track
+- **LMS Chapter Exam Config** is global per chapter and exam track, not scoped to a school or program
+- **Curriculum Config Management** changes global **LMS Chapter Exam Config** values and is restricted to **Admins**
+- In v1, **Curriculum Config Management** edits the live **LMS Chapter Exam Config** rows directly rather than using draft or versioned configs
+- In v1, existing **LMS Chapter Exam Config** rows can change syllabus inclusion, prescribed lecture time, and coverage order, but not chapter or exam-track identity
+- Adding a new **LMS Chapter Exam Config** row is the controlled path for introducing a new chapter and exam-track pair
+- In an add-config flow, grade and subject help admins find the correct chapter; the saved config identity remains chapter and exam track
+- In v1, **Curriculum Config Management** does not delete config rows; removing a chapter from syllabus sets it out of syllabus with zero prescribed lecture time after admin confirmation
+- In v1, **Curriculum Config Management** supports exporting config rows for review or backup, but not bulk CSV import
+- **Curriculum Config Management** changes do not mutate existing **LMS Curriculum Logs** or **Chapter Completion** records
+- Before saving a live **Curriculum Config Management** change, admins should see lightweight impact counts rather than a full per-school simulation
+- **Curriculum Config Management** may warn about duplicate coverage order values, but duplicate coverage order remains valid in v1
+- In-syllabus **LMS Chapter Exam Config** rows may have zero prescribed lecture time; out-of-syllabus rows must have zero prescribed lecture time
+- **Curriculum Config Management** is global and is filtered by curriculum structure, not by school or program
+- **Curriculum Config Management** uses filters for Exam Track, grade, subject, chapter search, and syllabus status rather than Exam Track tabs
+- **Curriculum Config Management** loads data by default, focused on JEE Main in-syllabus rows with grade and subject set to all
+- **Curriculum Config Management** edits happen in a modal or side panel, not by inline table editing
+- The db-service LMS Chapter Exam Config loader is a one-time bootstrap path; after **Curriculum Config Management** ships, the live config table is maintained through the admin UI
+- **Curriculum Config Management** does not reset, reload, or bulk replace config from source CSVs or embedded loader data in v1
+- In v1, users select the **Exam Track** explicitly in Curriculum instead of deriving it from teacher, school, or program
+- In Curriculum, **Exam Track** is selected before grade and subject; available subjects are filtered by the selected **Exam Track**
+- Curriculum chapter order follows **LMS Chapter Exam Config** coverage order before falling back to chapter code
+- Deleting an **LMS Curriculum Log** means soft deletion, so covered-topic and teaching-time progress ignores it without losing audit history
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
 - A **Visit** can only be completed when all 7 **Action Types** have at least one completed **Action**

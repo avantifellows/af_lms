@@ -635,3 +635,180 @@ describe("getProgramContext", () => {
     expect(result.programIds).toEqual([]);
   });
 });
+
+describe("getStudentSchool", () => {
+  let getStudentSchool: typeof import("./permissions").getStudentSchool;
+
+  beforeEach(async () => {
+    const mod = await import("./permissions");
+    getStudentSchool = mod.getStudentSchool;
+  });
+
+  it("returns the student's school code, region, and program_id", async () => {
+    mockQuery.mockResolvedValueOnce([{ code: "70705", region: "West", program_id: 1 }]);
+    const result = await getStudentSchool(42);
+    expect(result).toEqual({ code: "70705", region: "West", program_id: 1 });
+  });
+
+  it("returns program_id null for an unassigned student", async () => {
+    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: null }]);
+    const result = await getStudentSchool(42);
+    expect(result).toEqual({ code: "70705", region: null, program_id: null });
+  });
+
+  it("returns null when student has no school membership", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    const result = await getStudentSchool(999);
+    expect(result).toBeNull();
+  });
+});
+
+describe("canAccessStudent", () => {
+  let canAccessStudent: typeof import("./permissions").canAccessStudent;
+
+  beforeEach(async () => {
+    const mod = await import("./permissions");
+    canAccessStudent = mod.canAccessStudent;
+  });
+
+  it("returns false for null session", async () => {
+    const result = await canAccessStudent(null, 1);
+    expect(result).toBe(false);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("returns false when student has no school", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    const result = await canAccessStudent(
+      { user: { email: "t@af.org" } },
+      1,
+    );
+    expect(result).toBe(false);
+  });
+
+  it("passcode user can access student in their school", async () => {
+    mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: null }]);
+    const result = await canAccessStudent(
+      { isPasscodeUser: true, schoolCode: "70705" },
+      42,
+    );
+    expect(result).toBe(true);
+  });
+
+  it("passcode user cannot access student in a different school", async () => {
+    mockQuery.mockResolvedValueOnce([{ code: "99999", region: null, program_id: null }]);
+    const result = await canAccessStudent(
+      { isPasscodeUser: true, schoolCode: "70705" },
+      42,
+    );
+    expect(result).toBe(false);
+  });
+
+  it("Google user with level-3 admin gets access", async () => {
+    // student-school lookup
+    mockQuery.mockResolvedValueOnce([{ code: "12345", region: "West", program_id: 1 }]);
+    // canAccessSchool → getUserPermission
+    mockQuery.mockResolvedValueOnce([
+      { email: "admin@af.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
+    ]);
+
+    const result = await canAccessStudent(
+      { user: { email: "admin@af.org" } },
+      42,
+    );
+    expect(result).toBe(true);
+  });
+
+  it("Google user without permission row gets no access", async () => {
+    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: null }]);
+    mockQuery.mockResolvedValueOnce([]); // no permission row
+    const result = await canAccessStudent(
+      { user: { email: "unknown@af.org" } },
+      42,
+    );
+    expect(result).toBe(false);
+  });
+
+  it("Google session with no email returns false", async () => {
+    mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: null }]);
+    const result = await canAccessStudent({ user: null }, 42);
+    expect(result).toBe(false);
+  });
+
+  describe("requireEdit", () => {
+    it("rejects a read-only user with school access (feature-edit gate)", async () => {
+      mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: 1 }]);
+      mockQuery.mockResolvedValueOnce([
+        { email: "ro@af.org", level: 3, role: "program_admin", school_codes: null, regions: null, program_ids: [1], read_only: true },
+      ]);
+      const result = await canAccessStudent(
+        { user: { email: "ro@af.org" } },
+        42,
+        { requireEdit: true },
+      );
+      expect(result).toBe(false);
+    });
+
+    it("rejects a non-admin user whose program_ids don't include the student's program", async () => {
+      mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: 64 }]); // NVS student
+      mockQuery.mockResolvedValueOnce([
+        { email: "coe@af.org", level: 1, role: "teacher", school_codes: ["12345"], regions: null, program_ids: [1], read_only: false }, // CoE-only
+      ]);
+      const result = await canAccessStudent(
+        { user: { email: "coe@af.org" } },
+        42,
+        { requireEdit: true },
+      );
+      expect(result).toBe(false);
+    });
+
+    it("allows a teacher when program_ids includes the student's program", async () => {
+      mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: 1 }]); // CoE student
+      mockQuery.mockResolvedValueOnce([
+        { email: "coe@af.org", level: 1, role: "teacher", school_codes: ["12345"], regions: null, program_ids: [1], read_only: false }, // CoE
+      ]);
+      const result = await canAccessStudent(
+        { user: { email: "coe@af.org" } },
+        42,
+        { requireEdit: true },
+      );
+      expect(result).toBe(true);
+    });
+
+    it("allows a teacher for unassigned (program_id=null) students", async () => {
+      mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: null }]);
+      mockQuery.mockResolvedValueOnce([
+        { email: "coe@af.org", level: 1, role: "teacher", school_codes: ["12345"], regions: null, program_ids: [1], read_only: false },
+      ]);
+      const result = await canAccessStudent(
+        { user: { email: "coe@af.org" } },
+        42,
+        { requireEdit: true },
+      );
+      expect(result).toBe(true);
+    });
+
+    it("allows admins regardless of program_ids", async () => {
+      mockQuery.mockResolvedValueOnce([{ code: "12345", region: null, program_id: 64 }]); // NVS student
+      mockQuery.mockResolvedValueOnce([
+        { email: "admin@af.org", level: 3, role: "admin", school_codes: null, regions: null, program_ids: null, read_only: false },
+      ]);
+      const result = await canAccessStudent(
+        { user: { email: "admin@af.org" } },
+        42,
+        { requireEdit: true },
+      );
+      expect(result).toBe(true);
+    });
+
+    it("passcode user bypasses program check (school match is sufficient)", async () => {
+      mockQuery.mockResolvedValueOnce([{ code: "70705", region: null, program_id: 64 }]);
+      const result = await canAccessStudent(
+        { isPasscodeUser: true, schoolCode: "70705" },
+        42,
+        { requireEdit: true },
+      );
+      expect(result).toBe(true);
+    });
+  });
+});

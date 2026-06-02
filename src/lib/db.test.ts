@@ -63,3 +63,55 @@ describe("query", () => {
     expect(result).toEqual([]);
   });
 });
+
+describe("withTransaction", () => {
+  it("commits on success, returns the callback value, and releases the client", async () => {
+    mocks.mockClientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const { withTransaction } = await import("./db");
+    const result = await withTransaction(async (client) => {
+      expect(client.query).toBe(mocks.mockClientQuery);
+      return "saved";
+    });
+
+    expect(result).toBe("saved");
+    expect(mocks.mockClientQuery).toHaveBeenNthCalledWith(1, "BEGIN");
+    expect(mocks.mockClientQuery).toHaveBeenNthCalledWith(2, "COMMIT");
+    expect(mocks.mockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("rolls back on callback error and releases the client", async () => {
+    mocks.mockClientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const { withTransaction } = await import("./db");
+    await expect(
+      withTransaction(async () => {
+        throw new Error("insert failed");
+      })
+    ).rejects.toThrow("insert failed");
+
+    expect(mocks.mockClientQuery).toHaveBeenNthCalledWith(1, "BEGIN");
+    expect(mocks.mockClientQuery).toHaveBeenNthCalledWith(2, "ROLLBACK");
+    expect(mocks.mockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects nested transactions", async () => {
+    mocks.mockClientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const { withTransaction } = await import("./db");
+    await expect(
+      withTransaction(() => withTransaction(async () => "nested"))
+    ).rejects.toThrow("Nested transactions are not supported");
+
+    expect(mocks.mockConnect).toHaveBeenCalledTimes(1);
+    expect(mocks.mockClientQuery).toHaveBeenNthCalledWith(1, "BEGIN");
+    expect(mocks.mockClientQuery).toHaveBeenNthCalledWith(2, "ROLLBACK");
+    expect(mocks.mockRelease).toHaveBeenCalledTimes(1);
+  });
+});

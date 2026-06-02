@@ -186,6 +186,16 @@ Visit tables:
 - Visit completion requires all 7 action types: at least one completed `classroom_observation` (with strict-valid rubric), at least one completed `af_team_interaction`, at least one completed `individual_af_teacher_interaction`, at least one completed `principal_interaction`, at least one completed `group_student_discussion`, at least one completed `individual_student_discussion`, and at least one completed `school_staff_interaction`
 - Checks are sequential and short-circuit on first missing type (classroom → AF team → individual teacher → principal → group student → individual student → school staff)
 
+### Curriculum Config Management (v1)
+- Admin-only surface at `/curriculum-summary/config`; the `Manage config` entry point is shown from Curriculum Summary only when `user_permission.role = "admin"`
+- Config API routes live under `/api/curriculum/configs` and use the dedicated `requireCurriculumConfigAdmin(session)` guard from `src/lib/curriculum-config.ts`; passcode users and non-admin Google roles are blocked even if they can view Curriculum Summary
+- Shared service module: `src/lib/curriculum-config.ts` owns filter normalization, row mapping, validation, warnings, impact counts, mutation SQL, and CSV formatting; route handlers should stay thin
+- Config-management schema readiness extends the regular Curriculum schema check with `lms_chapter_exam_configs.id`, `inserted_by_email`, `updated_by_email`, `inserted_at`, and `updated_at` via `checkCurriculumConfigManagementSchema()`
+- Existing config rows can edit only `is_in_syllabus`, `prescribed_minutes`, and `coverage_sequence`; row identity (`id`, `chapter_id`, `exam_track`) is immutable
+- In-syllabus removal uses the dedicated `/remove-from-syllabus` route, forces `prescribed_minutes = 0`, preserves `coverage_sequence`, and does not mutate LMS Curriculum Logs or Chapter Completion records
+- Edit/remove mutations use single-statement optimistic concurrency with the last-seen `updated_at`; stale writes return `409`
+- CSV export reuses list filter normalization, ignores pagination, and formula-escapes spreadsheet-dangerous cells
+
 
 ### Key Patterns
 - Server components for data fetching (`getServerSession` + direct DB queries)

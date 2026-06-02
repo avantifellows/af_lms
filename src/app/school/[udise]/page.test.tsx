@@ -420,6 +420,9 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Curriculum Summary" })
+    ).not.toBeInTheDocument();
   });
 
   // --- Google user permission checks ---
@@ -612,6 +615,37 @@ describe("SchoolPage (server component)", () => {
 
     const header = screen.getByTestId("page-header");
     expect(header).toHaveAttribute("data-back-href", "");
+  });
+
+  it("shows Curriculum Summary top-level link for eligible one-school users", async () => {
+    setupAdminDefaults();
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        level: 1,
+        role: "program_manager",
+        school_codes: ["70705"],
+        program_ids: [1],
+      })
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [1],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    await renderPage();
+
+    const curriculumSummaryLink = screen.getByRole("link", {
+      name: "Curriculum Summary",
+    });
+    expect(curriculumSummaryLink).toHaveAttribute(
+      "href",
+      "/curriculum-summary"
+    );
+    expect(screen.getByTestId("page-header")).not.toHaveTextContent(
+      "Curriculum Summary"
+    );
   });
 
   it("renders backHref for level 1 user with multiple school codes", async () => {

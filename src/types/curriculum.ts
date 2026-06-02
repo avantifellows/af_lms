@@ -14,20 +14,31 @@ export interface Chapter {
   grade: number;
   subjectId: number;
   subjectName: string;
+  examTrack?: ExamTrack;
+  prescribedMinutes?: number;
+  coverageSequence?: number;
   topics: Topic[];
 }
 
-export interface TeachingSession {
-  id: string;
-  date: string; // ISO date string (YYYY-MM-DD)
+export interface LmsCurriculumLogTopic {
+  topicId: number;
+  topicName: string;
+  chapterId: number;
+  chapterName: string;
+}
+
+export interface LmsCurriculumLog {
+  id: number;
+  logDate: string;
   durationMinutes: number;
-  topicIds: number[];
-  // Derived for display
-  topics: {
-    topicId: number;
-    topicName: string;
-    chapterName: string;
-  }[];
+  programId: number;
+  gradeId: number;
+  subjectId: number;
+  examTrack: ExamTrack;
+  topics: LmsCurriculumLogTopic[];
+  isEditable: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ChapterProgress {
@@ -40,27 +51,35 @@ export interface ChapterProgress {
   chapterCompletedDate: string | null; // when chapter was marked complete
 }
 
-export type SubjectName = "Physics" | "Chemistry" | "Maths";
+export type SubjectName = "Physics" | "Chemistry" | "Maths" | "Biology";
 export type GradeNumber = 11 | 12;
+export type ExamTrack = "jee_main" | "jee_advanced" | "neet";
 
-export interface CurriculumTrackerState {
-  // Filters
-  selectedGrade: GradeNumber;
-  selectedSubject: SubjectName;
+export interface CurriculumProgramOption {
+  id: number;
+  name: string;
+}
 
-  // Data (fetched from API)
-  chapters: Chapter[];
-  isLoading: boolean;
-  error: string | null;
+export interface CurriculumGradeSubjectOption {
+  examTrack: ExamTrack;
+  grade: GradeNumber;
+  gradeId: number;
+  subject: SubjectName;
+  subjectId: number;
+}
 
-  // Progress (persisted to localStorage)
-  sessions: TeachingSession[];
-  progress: Record<number, ChapterProgress>; // chapterId -> progress
-
-  // UI state
-  expandedChapterIds: number[];
-  activeTab: "chapters" | "history";
-  isLogSessionModalOpen: boolean;
+export interface CurriculumOptionsResponse {
+  programs: CurriculumProgramOption[];
+  examTracks: ExamTrack[];
+  gradeSubjects: CurriculumGradeSubjectOption[];
+  defaults: {
+    programId: number | null;
+    examTrack: ExamTrack | null;
+    grade: GradeNumber | null;
+    gradeId: number | null;
+    subject: SubjectName | null;
+    subjectId: number | null;
+  };
 }
 
 // API response types
@@ -72,6 +91,7 @@ export interface ChaptersApiResponse {
 export const SUBJECT_IDS: Record<SubjectName, number> = {
   Maths: 1,
   Chemistry: 2,
+  Biology: 3,
   Physics: 4,
 };
 

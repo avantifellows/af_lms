@@ -1,26 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
   Chapter,
-  TeachingSession,
   ChapterProgress,
-  SubjectName,
+  CurriculumGradeSubjectOption,
+  CurriculumOptionsResponse,
+  ExamTrack,
   GradeNumber,
+  LmsCurriculumLog,
+  SubjectName,
 } from "@/types/curriculum";
-import {
-  loadSessions,
-  saveSessions,
-  loadProgress,
-  saveProgress,
-  calculateAllProgress,
-  generateSessionId,
-} from "@/lib/curriculum-helpers";
-import ProgressSummary from "./ProgressSummary";
 import ChapterAccordion from "./ChapterAccordion";
-import SessionHistory from "./SessionHistory";
 import LogSessionModal from "./LogSessionModal";
+import ProgressSummary from "./ProgressSummary";
+import SessionHistory from "./SessionHistory";
 
 interface CurriculumTabProps {
   schoolCode: string;
@@ -28,86 +23,237 @@ interface CurriculumTabProps {
   canEdit: boolean;
 }
 
+function examTrackLabel(track: ExamTrack | null): string {
+  switch (track) {
+    case "jee_main":
+      return "JEE Main";
+    case "jee_advanced":
+      return "JEE Advanced";
+    case "neet":
+      return "NEET";
+    default:
+      return "Curriculum";
+  }
+}
+
+function selectFirstGradeSubject(
+  gradeSubjects: CurriculumGradeSubjectOption[],
+  examTrack: ExamTrack | null,
+  grade?: GradeNumber | null
+) {
+  return gradeSubjects.find(
+    (option) =>
+      option.examTrack === examTrack && (grade == null || option.grade === grade)
+  ) ?? null;
+}
+
 export default function CurriculumTab({
   schoolCode,
   schoolName,
   canEdit,
 }: CurriculumTabProps) {
-  // Filter state
-  const [selectedGrade, setSelectedGrade] = useState<GradeNumber>(11);
-  const [selectedSubject, setSelectedSubject] = useState<SubjectName>("Physics");
-
-  // Data state
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Progress state (school-scoped)
-  const [sessions, setSessions] = useState<TeachingSession[]>([]);
-  const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
-
-  // UI state
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const [options, setOptions] = useState<CurriculumOptionsResponse | null>(null);
+  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(null);
+  const [selectedExamTrack, setSelectedExamTrack] = useState<ExamTrack | null>(null);
+  const [selectedGrade, setSelectedGrade] = useState<GradeNumber | null>(null);
+  const [selectedSubject, setSelectedSubject] = useState<SubjectName | null>(null);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
+  const [subjectTotalTimeMinutes, setSubjectTotalTimeMinutes] = useState(0);
+  const [logs, setLogs] = useState<LmsCurriculumLog[]>([]);
+  const [isOptionsLoading, setIsOptionsLoading] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isLogSessionModalOpen, setIsLogSessionModalOpen] = useState(false);
+  const [editingLog, setEditingLog] = useState<LmsCurriculumLog | null>(null);
+  const [isSavingLog, setIsSavingLog] = useState(false);
+  const [updatingCompletionChapterId, setUpdatingCompletionChapterId] = useState<number | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([]);
-  const [activeTab, setActiveTabState] = useState<"chapters" | "history">(
-    searchParams.get("curriculum") === "history" ? "history" : "chapters"
+  const [activeTab, setActiveTabState] = useState<"chapters" | "logs">(
+    searchParams.get("curriculum") === "logs" ||
+      searchParams.get("curriculum") === "history"
+      ? "logs"
+      : "chapters"
   );
-  const setActiveTab = (tab: "chapters" | "history") => {
-    setActiveTabState(tab);
-    const params = new URLSearchParams(searchParams.toString());
-    if (tab === "chapters") params.delete("curriculum");
-    else params.set("curriculum", tab);
-    const qs = params.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
-  };
-  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Load sessions and progress from localStorage on mount (school-scoped)
   useEffect(() => {
-    const storedSessions = loadSessions(schoolCode);
-    const storedProgress = loadProgress(schoolCode);
-    setSessions(storedSessions);
-    setProgress(storedProgress);
-  }, [schoolCode]);
+    let isCancelled = false;
 
-  // Fetch chapters when grade or subject changes
-  useEffect(() => {
-    async function fetchChapters() {
-      setIsLoading(true);
+    async function fetchOptions() {
+      setIsOptionsLoading(true);
       setError(null);
+      setChapters([]);
+      setLogs([]);
+      setProgress({});
+      setSubjectTotalTimeMinutes(0);
 
       try {
         const response = await fetch(
-          `/api/curriculum/chapters?grade=${selectedGrade}&subject=${selectedSubject}`
+          `/api/curriculum/options?school_code=${encodeURIComponent(schoolCode)}`
         );
-
         if (!response.ok) {
-          throw new Error("Failed to fetch chapters");
+          throw new Error("Failed to fetch Curriculum options");
         }
 
-        const data = await response.json();
-        setChapters(data.chapters);
+        const data = (await response.json()) as CurriculumOptionsResponse;
+        if (isCancelled) return;
 
-        // Recalculate progress for new chapters
-        const storedProgress = loadProgress(schoolCode);
-        const newProgress = calculateAllProgress(
-          data.chapters,
-          sessions,
-          storedProgress
-        );
-        setProgress(newProgress);
+        setOptions(data);
+        setSelectedProgramId(data.defaults.programId);
+        setSelectedExamTrack(data.defaults.examTrack);
+        setSelectedGrade(data.defaults.grade);
+        setSelectedSubject(data.defaults.subject);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : "An error occurred");
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsOptionsLoading(false);
+        }
       }
     }
 
-    fetchChapters();
-  }, [selectedGrade, selectedSubject, sessions, schoolCode]);
+    fetchOptions();
+    return () => {
+      isCancelled = true;
+    };
+  }, [schoolCode]);
 
-  // Toggle chapter expansion
+  useEffect(() => {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      setChapters([]);
+      setLogs([]);
+      setProgress({});
+      setSubjectTotalTimeMinutes(0);
+      return;
+    }
+
+    const programId = selectedProgramId;
+    const examTrack = selectedExamTrack;
+    const grade = selectedGrade;
+    const subject = selectedSubject;
+    let isCancelled = false;
+
+    async function fetchCurriculumData() {
+      setIsDataLoading(true);
+      setError(null);
+      setLogError(null);
+      setCompletionError(null);
+
+      const params = new URLSearchParams({
+        school_code: schoolCode,
+        program_id: String(programId),
+        exam_track: examTrack,
+        grade: String(grade),
+        subject,
+      });
+
+      try {
+        const [chaptersResponse, logsResponse, progressResponse] = await Promise.all([
+          fetch(`/api/curriculum/chapters?${params.toString()}`),
+          fetch(`/api/curriculum/logs?${params.toString()}`),
+          fetch(`/api/curriculum/progress?${params.toString()}`),
+        ]);
+        if (!chaptersResponse.ok || !logsResponse.ok || !progressResponse.ok) {
+          throw new Error("Failed to fetch chapters");
+        }
+        const chaptersData = (await chaptersResponse.json()) as { chapters: Chapter[] };
+        const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
+        const progressData = (await progressResponse.json()) as {
+          subjectTotalTimeMinutes: number;
+          progress: Record<number, ChapterProgress>;
+        };
+        if (!isCancelled) {
+          setChapters(chaptersData.chapters);
+          setLogs(logsData.logs);
+          setProgress(progressData.progress);
+          setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : "An error occurred");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsDataLoading(false);
+        }
+      }
+    }
+
+    fetchCurriculumData();
+    return () => {
+      isCancelled = true;
+    };
+  }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
+
+  const refetchLogsAndProgress = useCallback(async () => {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      return;
+    }
+
+    const programId = selectedProgramId;
+    const examTrack = selectedExamTrack;
+    const grade = selectedGrade;
+    const subject = selectedSubject;
+    const params = new URLSearchParams({
+      school_code: schoolCode,
+      program_id: String(programId),
+      exam_track: examTrack,
+      grade: String(grade),
+      subject,
+    });
+
+    const [logsResponse, progressResponse] = await Promise.all([
+      fetch(`/api/curriculum/logs?${params.toString()}`),
+      fetch(`/api/curriculum/progress?${params.toString()}`),
+    ]);
+    if (!logsResponse.ok || !progressResponse.ok) {
+      throw new Error("Failed to refresh Curriculum Progress");
+    }
+    const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
+    const progressData = (await progressResponse.json()) as {
+      subjectTotalTimeMinutes: number;
+      progress: Record<number, ChapterProgress>;
+    };
+    setLogs(logsData.logs);
+    setProgress(progressData.progress);
+    setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
+  }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
+
+  const gradeOptions = useMemo(() => {
+    if (!options || !selectedExamTrack) return [];
+    return Array.from(
+      new Map(
+        options.gradeSubjects
+          .filter((option) => option.examTrack === selectedExamTrack)
+          .map((option) => [option.grade, option])
+      ).values()
+    );
+  }, [options, selectedExamTrack]);
+
+  const subjectOptions = useMemo(() => {
+    if (!options || !selectedExamTrack || !selectedGrade) return [];
+    return options.gradeSubjects.filter(
+      (option) =>
+        option.examTrack === selectedExamTrack && option.grade === selectedGrade
+    );
+  }, [options, selectedExamTrack, selectedGrade]);
+
+  const setActiveTab = (tab: "chapters" | "logs") => {
+    setActiveTabState(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "chapters") params.delete("curriculum");
+    else params.set("curriculum", "logs");
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  };
+
   const toggleChapter = useCallback((chapterId: number) => {
     setExpandedChapterIds((prev) =>
       prev.includes(chapterId)
@@ -116,82 +262,185 @@ export default function CurriculumTab({
     );
   }, []);
 
-  // Save a new teaching session
-  const handleSaveSession = useCallback(
-    (date: string, durationMinutes: number, topicIds: number[], completedChapterIds: number[]) => {
-      if (!canEdit) return;
+  function handleExamTrackChange(track: ExamTrack) {
+    const first = selectFirstGradeSubject(options?.gradeSubjects ?? [], track);
+    setSelectedExamTrack(track);
+    setSelectedGrade(first?.grade ?? null);
+    setSelectedSubject(first?.subject ?? null);
+  }
 
-      // Build topic details for display
-      const topicDetails = topicIds.map((topicId) => {
-        for (const chapter of chapters) {
-          const topic = chapter.topics.find((t) => t.id === topicId);
-          if (topic) {
-            return {
-              topicId: topic.id,
-              topicName: topic.name,
-              chapterName: chapter.name,
-            };
-          }
+  function handleGradeChange(grade: GradeNumber) {
+    const first = selectFirstGradeSubject(
+      options?.gradeSubjects ?? [],
+      selectedExamTrack,
+      grade
+    );
+    setSelectedGrade(grade);
+    setSelectedSubject(first?.subject ?? null);
+  }
+
+  async function handleSaveLog(payload: {
+    date: string;
+    durationMinutes: number;
+    topicIds: number[];
+    completeChapterIds: number[];
+    uncompleteChapterIds: number[];
+  }) {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      return;
+    }
+
+    setIsSavingLog(true);
+    setLogError(null);
+    try {
+      const isEditMode = editingLog != null;
+      const response = await fetch(
+        isEditMode ? `/api/curriculum/logs/${editingLog.id}` : "/api/curriculum/logs",
+        {
+          method: isEditMode ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isEditMode
+              ? {
+                  log_date: payload.date,
+                  duration_minutes: payload.durationMinutes,
+                  topic_ids: payload.topicIds,
+                }
+              : {
+                  school_code: schoolCode,
+                  program_id: selectedProgramId,
+                  exam_track: selectedExamTrack,
+                  grade: selectedGrade,
+                  subject: selectedSubject,
+                  ...(payload.topicIds.length > 0
+                    ? {
+                        log_date: payload.date,
+                        duration_minutes: payload.durationMinutes,
+                      }
+                    : {}),
+                  topic_ids: payload.topicIds,
+                  complete_chapter_ids: payload.completeChapterIds,
+                  uncomplete_chapter_ids: payload.uncompleteChapterIds,
+                }
+          ),
         }
-        return { topicId, topicName: "Unknown", chapterName: "Unknown" };
-      });
+      );
 
-      const newSession: TeachingSession = {
-        id: generateSessionId(),
-        date,
-        durationMinutes,
-        topicIds,
-        topics: topicDetails,
-      };
-
-      setSessions((prev) => {
-        const updated = [newSession, ...prev];
-        saveSessions(schoolCode, updated);
-        return updated;
-      });
-
-      // Recalculate progress and mark completed chapters
-      setProgress((prev) => {
-        const updated = calculateAllProgress(chapters, [newSession, ...sessions], prev);
-
-        // Mark chapters as complete
-        for (const chapterId of completedChapterIds) {
-          if (updated[chapterId]) {
-            updated[chapterId] = {
-              ...updated[chapterId],
-              isChapterComplete: true,
-              chapterCompletedDate: date,
-            };
-          } else {
-            updated[chapterId] = {
-              chapterId,
-              completedTopicIds: [],
-              totalTimeMinutes: 0,
-              lastTaughtDate: null,
-              allTopicsCovered: false,
-              isChapterComplete: true,
-              chapterCompletedDate: date,
-            };
-          }
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Your permissions changed. Reload the page before trying again.");
         }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to save LMS Curriculum Log");
+      }
 
-        saveProgress(schoolCode, updated);
-        return updated;
+      setIsLogSessionModalOpen(false);
+      setEditingLog(null);
+      try {
+        await refetchLogsAndProgress();
+      } catch {
+        setLogError(
+          "Saved, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+        );
+      }
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : "Failed to save LMS Curriculum Log");
+    } finally {
+      setIsSavingLog(false);
+    }
+  }
+
+  async function handleToggleChapterCompletion(chapterId: number, completed: boolean) {
+    if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
+      return;
+    }
+
+    setUpdatingCompletionChapterId(chapterId);
+    setCompletionError(null);
+    try {
+      const response = await fetch(`/api/curriculum/chapters/${chapterId}/completion`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          program_id: selectedProgramId,
+          exam_track: selectedExamTrack,
+          grade: selectedGrade,
+          subject: selectedSubject,
+          completed,
+        }),
       });
 
-      setIsModalOpen(false);
-    },
-    [canEdit, chapters, sessions, schoolCode]
-  );
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Your permissions changed. Reload the page before trying again.");
+        }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to update Chapter Completion");
+      }
+
+      try {
+        await refetchLogsAndProgress();
+      } catch {
+        setCompletionError(
+          "Chapter Completion was updated, but refresh failed. Reload the page to see the latest data."
+        );
+      }
+    } catch (err) {
+      setCompletionError(
+        err instanceof Error ? err.message : "Failed to update Chapter Completion"
+      );
+    } finally {
+      setUpdatingCompletionChapterId(null);
+    }
+  }
+
+  async function handleDeleteLog(log: LmsCurriculumLog) {
+    setLogError(null);
+    try {
+      const response = await fetch(`/api/curriculum/logs/${log.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Your permissions changed. Reload the page before trying again.");
+        }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to delete LMS Curriculum Log");
+      }
+
+    } catch (err) {
+      setLogError(
+        err instanceof Error ? err.message : "Failed to delete LMS Curriculum Log"
+      );
+      return;
+    }
+
+    try {
+      await refetchLogsAndProgress();
+    } catch {
+      setLogError(
+        "Deleted LMS Curriculum Log, but failed to refresh Curriculum Progress. Reload the page to see the latest data."
+      );
+    }
+  }
+
+  const hasEmptyConfig =
+    !isOptionsLoading &&
+    options != null &&
+    options.programs.length > 0 &&
+    options.examTracks.length === 0;
+  const hasNoPrograms =
+    !isOptionsLoading && options != null && options.programs.length === 0;
 
   return (
     <div>
-      {/* School Context Header */}
       <div className="mb-4 pb-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              JEE Curriculum Progress
+              {examTrackLabel(selectedExamTrack)} Curriculum Progress
             </h2>
             <p className="text-sm text-gray-500">{schoolName}</p>
           </div>
@@ -203,10 +452,53 @@ export default function CurriculumTab({
         </div>
       </div>
 
-      {/* Filters */}
       <div className="bg-gray-50 rounded-lg p-4 mb-6">
         <div className="flex flex-wrap gap-4 items-center">
-          {/* Grade Select */}
+          {options && options.programs.length > 1 && (
+            <div>
+              <label
+                htmlFor="curriculum-program"
+                className="block text-xs font-medium text-gray-700 mb-1"
+              >
+                Program
+              </label>
+              <select
+                id="curriculum-program"
+                value={selectedProgramId ?? ""}
+                onChange={(event) => setSelectedProgramId(Number(event.target.value))}
+                className="block w-36 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
+              >
+                {options.programs.map((program) => (
+                  <option key={program.id} value={program.id}>
+                    {program.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label
+              htmlFor="exam-track"
+              className="block text-xs font-medium text-gray-700 mb-1"
+            >
+              Exam Track
+            </label>
+            <select
+              id="exam-track"
+              value={selectedExamTrack ?? ""}
+              disabled={!options || options.examTracks.length === 0}
+              onChange={(event) => handleExamTrackChange(event.target.value as ExamTrack)}
+              className="block w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
+            >
+              {options?.examTracks.map((track) => (
+                <option key={track} value={track}>
+                  {examTrackLabel(track)}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label
               htmlFor="grade"
@@ -216,16 +508,21 @@ export default function CurriculumTab({
             </label>
             <select
               id="grade"
-              value={selectedGrade}
-              onChange={(e) => setSelectedGrade(parseInt(e.target.value) as GradeNumber)}
-              className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
+              value={selectedGrade ?? ""}
+              disabled={gradeOptions.length === 0}
+              onChange={(event) =>
+                handleGradeChange(Number(event.target.value) as GradeNumber)
+              }
+              className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              <option value={11}>11</option>
-              <option value={12}>12</option>
+              {gradeOptions.map((option) => (
+                <option key={option.grade} value={option.grade}>
+                  {option.grade}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Subject Select */}
           <div>
             <label
               htmlFor="subject"
@@ -235,86 +532,140 @@ export default function CurriculumTab({
             </label>
             <select
               id="subject"
-              value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value as SubjectName)}
-              className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
+              value={selectedSubject ?? ""}
+              disabled={subjectOptions.length === 0}
+              onChange={(event) => setSelectedSubject(event.target.value as SubjectName)}
+              className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              <option value="Physics">Physics</option>
-              <option value="Chemistry">Chemistry</option>
-              <option value="Maths">Maths</option>
+              {subjectOptions.map((option) => (
+                <option key={option.subject} value={option.subject}>
+                  {option.subject}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Log Session Button (only if canEdit) */}
           {canEdit && (
             <button
-              onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover transition-colors"
+              disabled={!selectedProgramId || chapters.length === 0}
+              onClick={() => {
+                setLogError(null);
+                setEditingLog(null);
+                setIsLogSessionModalOpen(true);
+              }}
+              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
             >
-              + Log Session
+              + Add Log
             </button>
           )}
         </div>
       </div>
 
-      {/* Progress Summary */}
-      <ProgressSummary chapters={chapters} progress={progress} />
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200 mb-4">
-        <nav className="flex space-x-8">
-          <button
-            onClick={() => setActiveTab("chapters")}
-            className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-              activeTab === "chapters"
-                ? "border-accent text-accent"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Chapters
-          </button>
-          <button
-            onClick={() => setActiveTab("history")}
-            className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-              activeTab === "history"
-                ? "border-accent text-accent"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            History
-          </button>
-        </nav>
-      </div>
-
-      {/* Content */}
-      {isLoading ? (
+      {isOptionsLoading ? (
         <div className="flex justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
         </div>
       ) : error ? (
         <div className="bg-red-50 text-red-700 p-4 rounded-lg">{error}</div>
-      ) : activeTab === "chapters" ? (
-        <ChapterAccordion
-          chapters={chapters}
-          progress={progress}
-          expandedChapterIds={expandedChapterIds}
-          onToggleChapter={toggleChapter}
-        />
+      ) : hasNoPrograms ? (
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+          No curriculum-enabled Programs are available for this school.
+        </div>
+      ) : hasEmptyConfig ? (
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+          No Curriculum configuration is available for this school.
+        </div>
       ) : (
-        <SessionHistory sessions={sessions} />
-      )}
+        <>
+          <div className="border-b border-gray-200 mb-4">
+            <nav className="flex space-x-8">
+              <button
+                onClick={() => setActiveTab("chapters")}
+                className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
+                  activeTab === "chapters"
+                    ? "border-accent text-accent"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Chapters
+              </button>
+              <button
+                onClick={() => setActiveTab("logs")}
+                className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
+                  activeTab === "logs"
+                    ? "border-accent text-accent"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Logs
+              </button>
+            </nav>
+          </div>
 
-      {/* Log Session Modal */}
-      {isModalOpen && canEdit && (
-        <LogSessionModal
-          chapters={chapters}
-          progress={progress}
-          onClose={() => setIsModalOpen(false)}
-          onSave={handleSaveSession}
-        />
+          {logError && !isLogSessionModalOpen && (
+            <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+              {logError}
+            </div>
+          )}
+          {isDataLoading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-accent" />
+            </div>
+          ) : activeTab === "chapters" ? (
+            <>
+              {completionError && (
+                <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+                  {completionError}
+                </div>
+              )}
+              <ProgressSummary
+                chapters={chapters}
+                progress={progress}
+                subjectTotalTimeMinutes={subjectTotalTimeMinutes}
+              />
+              <ChapterAccordion
+                chapters={chapters}
+                progress={progress}
+                expandedChapterIds={expandedChapterIds}
+                onToggleChapter={toggleChapter}
+                canEdit={canEdit}
+                onToggleChapterCompletion={handleToggleChapterCompletion}
+                updatingChapterId={updatingCompletionChapterId}
+              />
+            </>
+          ) : (
+            <>
+              <SessionHistory
+                logs={logs}
+                canEdit={canEdit}
+                onEditLog={(log) => {
+                  setLogError(null);
+                  setEditingLog(log);
+                  setIsLogSessionModalOpen(true);
+                }}
+                onDeleteLog={handleDeleteLog}
+              />
+            </>
+          )}
+
+          {isLogSessionModalOpen && (
+            <LogSessionModal
+              chapters={chapters}
+              progress={progress}
+              onClose={() => {
+                setIsLogSessionModalOpen(false);
+                setEditingLog(null);
+                setLogError(null);
+              }}
+              onSave={handleSaveLog}
+              isSaving={isSavingLog}
+              error={logError}
+              editLog={editingLog}
+            />
+          )}
+        </>
       )}
     </div>
   );

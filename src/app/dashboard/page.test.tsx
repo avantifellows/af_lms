@@ -510,6 +510,7 @@ describe("DashboardPage (server component)", () => {
     render(jsx);
 
     expect(screen.queryByRole("link", { name: "Visit Summary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Curriculum Summary" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
   });
 
@@ -524,6 +525,21 @@ describe("DashboardPage (server component)", () => {
     expect(screen.queryByRole("link", { name: "Visit Summary" })).not.toBeInTheDocument();
   });
 
+  it("shows Curriculum Summary nav for eligible PM users", async () => {
+    setupPM([], 0);
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    const curriculumSummaryLink = screen.getByRole("link", {
+      name: "Curriculum Summary",
+    });
+    expect(curriculumSummaryLink).toHaveAttribute(
+      "href",
+      "/curriculum-summary"
+    );
+  });
+
   it("does not show Visits nav for non-PM users", async () => {
     setupTeacher([], 0);
 
@@ -531,6 +547,7 @@ describe("DashboardPage (server component)", () => {
     render(jsx);
 
     expect(screen.queryByText("Visits")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Curriculum Summary" })).not.toBeInTheDocument();
   });
 
   // --- PM stats cards ---

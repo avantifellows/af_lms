@@ -27,6 +27,14 @@ interface AddUserModalProps {
   regions: string[];
   onClose: () => void;
   onSave: () => void;
+  /**
+   * Code → display name for every JNV school. Used to render chips for
+   * pre-existing school_codes when editing a user (the search-results path
+   * already knows the name; this fills the gap for codes that came in from
+   * the user_permission row). Codes missing from the map fall back to the
+   * raw code (e.g. a school that's since been deleted).
+   */
+  schoolCodeToName: Record<string, string>;
 }
 
 interface School {
@@ -37,7 +45,11 @@ interface School {
 
 const labelClassName = "block text-sm font-medium text-gray-700";
 
-export default function AddUserModal({ user, regions, onClose, onSave }: AddUserModalProps) {
+export default function AddUserModal({ user, regions, schoolCodeToName, onClose, onSave }: AddUserModalProps) {
+  const labelForSchool = (code: string) => {
+    const name = schoolCodeToName[code];
+    return name ? `${name} (${code})` : code;
+  };
   const [email, setEmail] = useState(user?.email || "");
   const [fullName, setFullName] = useState(user?.full_name || "");
   const [level, setLevel] = useState(user?.level || 1);
@@ -351,10 +363,11 @@ export default function AddUserModal({ user, regions, onClose, onSave }: AddUser
                         key={code}
                         className="inline-flex items-center rounded-full bg-hover-bg px-3 py-1 text-sm text-accent-hover"
                       >
-                        {code}
+                        {labelForSchool(code)}
                         <button
                           type="button"
                           onClick={() => removeSchool(code)}
+                          aria-label={`Remove ${labelForSchool(code)}`}
                           className="ml-2 text-accent hover:text-accent-hover"
                         >
                           &times;

@@ -1,4 +1,6 @@
 import { Pool } from "pg";
+import type { PoolClient } from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const globalForDb = globalThis as unknown as { pool: Pool | undefined };
 
@@ -20,6 +22,8 @@ if (process.env.NODE_ENV !== "production") {
   globalForDb.pool = pool;
 }
 
+const transactionContext = new AsyncLocalStorage<boolean>();
+
 export async function query<T>(text: string, params?: unknown[]): Promise<T[]> {
   const client = await pool.connect();
   try {
@@ -28,6 +32,35 @@ export async function query<T>(text: string, params?: unknown[]): Promise<T[]> {
   } finally {
     client.release();
   }
+}
+
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  if (transactionContext.getStore()) {
+    throw new Error("Nested transactions are not supported");
+  }
+
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  return transactionContext.run(true, async () => {
+    try {
+      await client.query("BEGIN");
+      transactionStarted = true;
+
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query("ROLLBACK");
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
 }
 
 export default pool;

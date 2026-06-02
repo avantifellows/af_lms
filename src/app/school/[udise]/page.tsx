@@ -389,6 +389,14 @@ export default async function SchoolPage({ params }: PageProps) {
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 
+  const showCurriculumSummary =
+    !isPasscodeUser &&
+    (permission?.role === "program_manager" ||
+      permission?.role === "program_admin" ||
+      permission?.role === "admin") &&
+    programContext.hasCoEOrNodal &&
+    curriculumAccess.canView;
+
   return (
     <div className="min-h-screen bg-bg">
       <PageHeader
@@ -399,6 +407,16 @@ export default async function SchoolPage({ params }: PageProps) {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {showCurriculumSummary && (
+          <nav className="mb-4 flex flex-wrap items-center gap-3 border-b border-border pb-3">
+            <Link
+              href="/curriculum-summary"
+              className="text-sm font-bold uppercase tracking-wide text-accent hover:text-accent-hover"
+            >
+              Curriculum Summary
+            </Link>
+          </nav>
+        )}
         <SchoolTabs tabs={tabs} defaultTab="enrollment" />
       </main>
     </div>
