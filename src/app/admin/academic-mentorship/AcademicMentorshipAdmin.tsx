@@ -208,7 +208,11 @@ export default function AcademicMentorshipAdmin({
       .then((data) => {
         if (ignore) return;
         setReassignMentorOptions(
-          (data.mentors ?? []).filter((mentor) => mentor.id !== reassignTarget.mentor_id)
+          (data.mentors ?? []).filter(
+            (mentor) =>
+              mentor.id !== reassignTarget.mentor_id &&
+              (mentor.full_name?.trim() || mentor.email) !== reassignTarget.mentor_name
+          )
         );
         setReassignFormState("ready");
       })
@@ -376,6 +380,7 @@ export default function AcademicMentorshipAdmin({
       if (!response.ok) {
         if (Array.isArray(data.errors)) {
           setCsvErrors(data.errors);
+          setCsvFileError("Upload failed. 0 rows were saved.");
           return;
         }
         throw new Error(data.error || "Unable to upload CSV");
@@ -766,6 +771,9 @@ export default function AcademicMentorshipAdmin({
         >
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border bg-bg-card p-5 shadow-xl">
             <h2 className="text-lg font-bold text-text-primary">Upload CSV</h2>
+            <p className="mt-2 text-sm text-text-muted">
+              CSV must contain exactly these required columns: mentor_email, student_id.
+            </p>
             <label className="mt-4 block">
               <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
                 CSV file
@@ -853,7 +861,12 @@ export default function AcademicMentorshipAdmin({
               <button
                 type="button"
                 onClick={handleCsvUpload}
-                disabled={isUploadSubmitting || csvRows.length === 0}
+                disabled={
+                  isUploadSubmitting ||
+                  csvRows.length === 0 ||
+                  csvErrors.length > 0 ||
+                  Boolean(csvFileError)
+                }
                 className="min-h-[40px] rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isUploadSubmitting ? "Uploading..." : "Upload"}

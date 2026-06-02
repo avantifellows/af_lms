@@ -88,6 +88,7 @@ async function getCandidateMentees(schoolCode: string): Promise<CandidateMenteeR
        AND er.is_current = true
      LEFT JOIN grade gr ON gr.id = er.group_id
      WHERE (s.status IS NULL OR s.status != 'dropout')
+       AND gr.number IN (11, 12)
      GROUP BY u.id, u.first_name, u.last_name, gr.number, s.student_id
      ORDER BY gr.number NULLS LAST, name NULLS LAST`,
     [schoolCode]
@@ -135,6 +136,9 @@ export async function GET(request: NextRequest) {
           id: student.id,
           school_membership_count: schoolMembershipCount,
         });
+        return [];
+      }
+      if (student.grade !== 11 && student.grade !== 12) {
         return [];
       }
       if (assignedMenteeIds.has(student.id)) {

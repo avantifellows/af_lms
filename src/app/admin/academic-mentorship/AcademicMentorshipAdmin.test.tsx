@@ -199,6 +199,23 @@ describe("AcademicMentorshipAdmin", () => {
     expect(await screen.findByText("Ravi Kumar")).toBeInTheDocument();
   });
 
+  it("shows CSV format guidance in the upload modal", async () => {
+    render(
+      <AcademicMentorshipAdmin
+        schools={schools}
+        canView={true}
+        canEdit={true}
+        role="admin"
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    expect(
+      screen.getByText("CSV must contain exactly these required columns: mentor_email, student_id.")
+    ).toBeInTheDocument();
+  });
+
   it("shows a client-side error when required CSV columns are missing", async () => {
     render(
       <AcademicMentorshipAdmin
@@ -264,6 +281,8 @@ describe("AcademicMentorshipAdmin", () => {
 
     expect(await screen.findByText("Mentor is not eligible at this school")).toBeInTheDocument();
     expect(screen.getByText("Duplicate student_id in upload")).toBeInTheDocument();
+    expect(screen.getByText("Upload failed. 0 rows were saved.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
     expect(screen.getByRole("dialog", { name: "Upload CSV" })).toBeInTheDocument();
   });
 
@@ -303,6 +322,7 @@ describe("AcademicMentorshipAdmin", () => {
     await userEvent.click(screen.getByRole("button", { name: "Upload" }));
 
     expect(await screen.findByText(raceMessage)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
     expect(screen.getByRole("dialog", { name: "Upload CSV" })).toBeInTheDocument();
   });
 

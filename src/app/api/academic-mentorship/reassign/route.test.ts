@@ -268,6 +268,43 @@ describe("POST /api/academic-mentorship/reassign", () => {
     });
   });
 
+  it("rejects reassignment to the current mentor without calling db-service reassign", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockGetUserPermission.mockResolvedValue(makePermission());
+    mocks.mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        mapping: {
+          id: 10,
+          mentor_id: 21,
+          mentee_id: 1001,
+          academic_year: "2026-2027",
+          deleted_at: null,
+        },
+      })
+    );
+    mocks.mockQuery
+      .mockResolvedValueOnce([{ school_codes: ["SCH001"] }])
+      .mockResolvedValueOnce([
+        { id: 21, email: "same@avantifellows.org", full_name: "Same Mentor" },
+      ]);
+
+    const res = await POST(
+      postRequest({
+        school_code: "SCH001",
+        old_mapping_id: 10,
+        new_mentor_email: "same@avantifellows.org",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(mocks.mockFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.mockQuery).toHaveBeenCalledTimes(2);
+    await expect(res.json()).resolves.toEqual({
+      error: "Select a different mentor for reassignment",
+    });
+  });
+
   it("rejects a mentee with multiple school memberships", async () => {
     const { POST } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);

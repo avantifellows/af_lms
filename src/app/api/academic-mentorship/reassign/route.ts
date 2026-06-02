@@ -207,6 +207,9 @@ export async function POST(request: NextRequest) {
     if (!newMentor) {
       return apiError(400, "Mentor is not eligible for academic mentorship at this school");
     }
+    if (newMentor.id === mapping.mentor_id) {
+      return apiError(400, "Select a different mentor for reassignment");
+    }
 
     const menteeError = await validateMenteeSchool(mapping.mentee_id, schoolCode);
     if (menteeError) {

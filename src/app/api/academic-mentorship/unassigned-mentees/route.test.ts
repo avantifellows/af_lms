@@ -135,6 +135,13 @@ describe("GET /api/academic-mentorship/unassigned-mentees", () => {
           student_id: "STU-003",
           school_membership_count: 2,
         },
+        {
+          id: 1004,
+          name: "Grade Ten Student",
+          grade: 10,
+          student_id: "STU-004",
+          school_membership_count: 1,
+        },
       ]);
     mocks.mockFetch.mockResolvedValue(
       jsonResponse({
@@ -156,6 +163,7 @@ describe("GET /api/academic-mentorship/unassigned-mentees", () => {
     expect(res.status).toBe(200);
     expect(mocks.mockFetch.mock.calls[0]?.[0]).toContain("mentor_ids=21%2C22");
     expect(mocks.mockQuery.mock.calls[1]?.[0]).toContain("s.status IS NULL OR s.status != 'dropout'");
+    expect(mocks.mockQuery.mock.calls[1]?.[0]).toContain("gr.number IN (11, 12)");
     expect(errorSpy).toHaveBeenCalledWith(
       "Skipping academic mentorship mentee with school membership anomaly:",
       expect.objectContaining({ id: 1003, school_membership_count: 2 })
