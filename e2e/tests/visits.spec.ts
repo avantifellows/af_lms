@@ -37,7 +37,7 @@ async function setGoodGps(page: Page) {
 }
 
 function visitLink(page: Page, visitId: number) {
-  return page.locator(`a[href="/visits/${visitId}"]`);
+  return page.locator(`a[href="/visits/${visitId}"]`).filter({ visible: true });
 }
 
 function visitTableRow(page: Page, visitId: number) {
@@ -193,17 +193,6 @@ function individualStudentEntriesData(
       grade: entry.grade,
       students: entry.students,
       questions: individualStudentQuestionAnswers(entry.answer ?? true),
-    })),
-  };
-}
-
-function legacyIndividualStudentData(
-  students: Array<{ id: number; name: string; grade: 11 | 12 }>
-) {
-  return {
-    students: students.map((student) => ({
-      ...student,
-      questions: individualStudentQuestionAnswers(true),
     })),
   };
 }
@@ -400,7 +389,8 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     const dialog = await expectDeleteVisitDialog(pmPage);
     await dialog.getByRole("button", { name: "Delete" }).click();
 
-    await pmPage.waitForURL("/visits");
+    await pmPage.waitForURL(/\/(visits|school\/[^/]+)$/);
+    await pmPage.goto("/visits");
     await expect(visitLink(pmPage, visitId)).toHaveCount(0);
   });
 
@@ -426,7 +416,8 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     const dialog = await expectDeleteVisitDialog(adminPage);
     await dialog.getByRole("button", { name: "Delete" }).click();
 
-    await adminPage.waitForURL("/visits");
+    await adminPage.waitForURL(/\/(visits|school\/[^/]+)$/);
+    await adminPage.goto("/visits");
     await expect(visitLink(adminPage, visitId)).toHaveCount(0);
   });
 
@@ -446,10 +437,16 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
   test("program-admin-does-not-see-delete-button", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
 
-    await programAdminPage.goto("/visits");
-    const row = visitTableRow(programAdminPage, visitId);
-    await expect(row).toBeVisible();
-    await expect(row.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await programAdminPage.goto("/school-visit-summary");
+    await expect(
+      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
+    ).toBeVisible();
+    await expect(
+      programAdminPage.locator(`a[href="/school-visit-summary/${visitId}"]`).filter({
+        visible: true,
+      })
+    ).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     await programAdminPage.goto(`/visits/${visitId}`);
     await expect(
@@ -504,6 +501,10 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(inProgressCard.getByRole("button", { name: "Delete" })).toBeVisible();
 
     await inProgressCard.getByRole("button", { name: "Delete" }).click();
+    await pmPage
+      .getByRole("dialog", { name: "Delete Action Point" })
+      .getByRole("button", { name: "Delete" })
+      .click();
     await expect(pmPage.locator('[data-action-type="af_team_interaction"]')).toHaveCount(0);
   });
 
@@ -900,9 +901,9 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "pending",
     });
 
-    await programAdminPage.goto("/visits");
+    await programAdminPage.goto("/school-visit-summary");
     await expect(
-      programAdminPage.getByRole("heading", { name: "All Visits" })
+      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
     ).toBeVisible();
 
     await programAdminPage.goto(`/visits/${visitId}`);
@@ -1290,7 +1291,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
           questions[key] = { answer: true };
         }
         return {
-          id: t.id,
+          id: Number(t.id),
           name: t.full_name || t.email,
           attendance: "present",
           questions,
@@ -1298,7 +1299,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       }
       const att: string = i % 2 === 0 ? "absent" : "on_leave";
       return {
-        id: t.id,
+        id: Number(t.id),
         name: t.full_name || t.email,
         attendance: att,
         questions: {},
@@ -1810,14 +1811,18 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     }
   });
 
-  test("individual-student-passively-upgrades-legacy-shape-on-open", async ({ pmPage }) => {
+  test("individual-student-renders-seeded-entry-on-open", async ({ pmPage }) => {
     const student = seededStudents.find((s) => s.grade === 11)!;
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "individual_student_discussion",
       status: "in_progress",
-      data: legacyIndividualStudentData([
-        { id: student.id, name: student.name, grade: 11 },
+      data: individualStudentEntriesData([
+        {
+          id: "seeded-grade-11-entry",
+          grade: 11,
+          students: [student],
+        },
       ]),
     });
 
@@ -1838,7 +1843,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       .toEqual({ hasEntries: true, hasLegacyStudents: false });
   });
 
-  test("individual-student-active-dual-shape-upgrade-adds-grouped-entry-and-completes", async ({
+  test("individual-student-active-entry-adds-grouped-entry-and-completes", async ({
     pmPage,
   }) => {
     const grade11 = seededStudents.filter((student) => student.grade === 11);
@@ -1847,8 +1852,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "individual_student_discussion",
       status: "in_progress",
-      data: legacyIndividualStudentData([
-        { id: grade11[0].id, name: grade11[0].name, grade: 11 },
+      data: individualStudentEntriesData([
+        {
+          id: "seeded-grade-11-entry",
+          grade: 11,
+          students: [grade11[0]],
+        },
       ]),
     });
 

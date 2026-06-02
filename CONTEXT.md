@@ -101,12 +101,34 @@ Has scoped read/write access to all visits (same validation rules as PM). Determ
 _Avoid_: Superuser, root
 
 **Program Admin**:
-Read-only access to visits within their scope. Cannot create, edit, or delete.
+Read-only access to visits within their scope. Edit access for academic mentorship mappings.
 _Avoid_: Viewer, observer
 
 **Permission Level**:
 Numeric access scope: Level 3 = all schools, Level 2 = region, Level 1 = specific school codes.
 _Avoid_: Access tier, role level
+
+### Academic Mentorship
+
+**Academic Mentorship**:
+A mentor-mentee mapping system where teachers are assigned students within their school for academic guidance. Distinct from the future "Holistic Mentorship" feature — the two are separate in code and data, though they may share UI space cosmetically.
+_Avoid_: Mentorship (ambiguous — always qualify as "academic" or "holistic")
+
+**Mentor**:
+A teacher who is assigned students (mentees) for academic mentorship. Identified by `user_permission.id` (not the `teacher` table, which is currently unconnected to LMS).
+_Avoid_: Teacher (overloaded — not all teachers are mentors), tutor, guide
+
+**Mentee**:
+A student assigned to a mentor for academic mentorship. Identified by `user.id`. Not all students are mentees — selection is performance-based and can change mid-year.
+_Avoid_: Student (overloaded — not all students are mentees), advisee
+
+**Academic Year**:
+String in `"YYYY-YYYY"` format (e.g. `"2025-2026"`). Indian academic year runs April to March. Inferred by system: `month < 4 ? (year-1)-(year) : (year)-(year+1)`. Matches format used in `enrollment_record`.
+_Avoid_: Year, school year, term
+
+**Unassign**:
+Soft-deleting a mentor-mentee mapping (`deleted_at` set). The mentor-mentee relationship ends but the historical record is preserved. `inserted_at` marks assignment start, `deleted_at` marks end.
+_Avoid_: Remove, delete (implies hard delete)
 
 ## Relationships
 
@@ -148,6 +170,9 @@ _Avoid_: Access tier, role level
 - A **Visit** has many **Actions** (each with an **Action Type**)
 - A **Visit** can only be completed when all 7 **Action Types** have at least one completed **Action**
 - **Soft Delete** on a **Visit** cascades to its child **Actions**
+- A **Mentor** has many **Mentees** (via `academic_mentorship_mentor_mentee_mapping`)
+- A **Mentee** has one active **Mentor** per **Academic Year**
+- A **Mentor** can only mentor **Mentees** at their own **School**
 
 ## Example dialogue
 
@@ -163,5 +188,5 @@ _Avoid_: Access tier, role level
 ## Flagged ambiguities
 
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
-- "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
+- "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only for visits. For academic mentorship, `program_admin` has edit access (subject to the `read_only` flag). The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).

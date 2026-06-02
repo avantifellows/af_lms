@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { getFeatureAccess, getUserPermission, isAdmin } from "@/lib/permissions";
 import Link from "next/link";
 import { Card } from "@/components/ui";
 
@@ -12,10 +12,19 @@ export default async function AdminPage() {
     redirect("/");
   }
 
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
+  const [admin, permission] = await Promise.all([
+    isAdmin(session.user.email),
+    getUserPermission(session.user.email),
+  ]);
+  const academicMentorshipAccess = getFeatureAccess(permission, "academic_mentorship");
+
+  if (!admin && !academicMentorshipAccess.canView) {
     redirect("/dashboard");
   }
+
+  const headerCopy = admin
+    ? "Manage users, school settings, and mentorship"
+    : "Manage academic mentorship";
 
   return (
     <div className="min-h-screen bg-bg">
@@ -23,7 +32,7 @@ export default async function AdminPage() {
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">Admin</h1>
-            <p className="text-xs text-text-muted">Manage users and permissions</p>
+            <p className="text-xs text-text-muted">{headerCopy}</p>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/dashboard" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">
@@ -42,32 +51,51 @@ export default async function AdminPage() {
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <Link href="/admin/users">
-            <Card className="block p-6">
-              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">User Management</h3>
-              <p className="mt-2 text-sm text-text-muted">
-                Add, edit, and remove users. Assign permission levels.
-              </p>
-            </Card>
-          </Link>
+          {admin ? (
+            <Link href="/admin/users">
+              <Card className="block p-6">
+                <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">User Management</h3>
+                <p className="mt-2 text-sm text-text-muted">
+                  Add, edit, and remove users. Assign permission levels.
+                </p>
+              </Card>
+            </Link>
+          ) : null}
 
-          <Link href="/admin/batches">
-            <Card className="block p-6">
-              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Batch Metadata</h3>
-              <p className="mt-2 text-sm text-text-muted">
-                Configure stream and grade metadata for program batches.
-              </p>
-            </Card>
-          </Link>
+          {admin ? (
+            <Link href="/admin/batches">
+              <Card className="block p-6">
+                <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Batch Metadata</h3>
+                <p className="mt-2 text-sm text-text-muted">
+                  Configure stream and grade metadata for program batches.
+                </p>
+              </Card>
+            </Link>
+          ) : null}
 
-          <Link href="/admin/schools">
-            <Card className="block p-6">
-              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">School Programs</h3>
-              <p className="mt-2 text-sm text-text-muted">
-                Assign programs (CoE, Nodal, NVS) to schools.
-              </p>
-            </Card>
-          </Link>
+          {admin ? (
+            <Link href="/admin/schools">
+              <Card className="block p-6">
+                <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">School Programs</h3>
+                <p className="mt-2 text-sm text-text-muted">
+                  Assign programs (CoE, Nodal, NVS) to schools.
+                </p>
+              </Card>
+            </Link>
+          ) : null}
+
+          {academicMentorshipAccess.canView ? (
+            <Link href="/admin/academic-mentorship">
+              <Card className="block p-6">
+                <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">
+                  Academic Mentorship
+                </h3>
+                <p className="mt-2 text-sm text-text-muted">
+                  Manage mentor-mentee mappings
+                </p>
+              </Card>
+            </Link>
+          ) : null}
         </div>
       </main>
     </div>

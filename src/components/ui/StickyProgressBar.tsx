@@ -2,7 +2,7 @@
 
 import { HTMLAttributes, forwardRef } from "react";
 
-interface StickyProgressBarProps extends HTMLAttributes<HTMLDivElement> {}
+type StickyProgressBarProps = HTMLAttributes<HTMLDivElement>;
 
 export const StickyProgressBar = forwardRef<HTMLDivElement, StickyProgressBarProps>(
   ({ className = "", children, ...props }, ref) => {

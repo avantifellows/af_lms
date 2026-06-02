@@ -183,6 +183,31 @@ vi.mock("@/components/VisitsTab", () => ({
   ),
 }));
 
+vi.mock("@/components/AcademicMentorshipTab", () => ({
+  __esModule: true,
+  default: ({
+    schoolCode,
+    canView,
+    canEdit,
+    role,
+  }: {
+    schoolCode: string;
+    canView: boolean;
+    canEdit: boolean;
+    role: string;
+  }) => (
+    <div
+      data-testid="academic-mentorship-tab"
+      data-school-code={schoolCode}
+      data-can-view={String(canView)}
+      data-can-edit={String(canEdit)}
+      data-role={role}
+    >
+      AcademicMentorshipTab
+    </div>
+  ),
+}));
+
 vi.mock("@/components/EditStudentModal", () => ({
   __esModule: true,
   default: () => null,
@@ -228,7 +253,9 @@ const makeStudent = (overrides = {}) => ({
 });
 
 const makePermission = (overrides = {}) => ({
+  id: 1,
   email: "user@avantifellows.org",
+  full_name: null,
   level: 3 as const,
   role: "admin" as const,
   school_codes: null,
@@ -660,7 +687,7 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-curriculum")).toBeInTheDocument();
     expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
     expect(screen.getByTestId("tab-quiz_sessions")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-academic_mentorship")).toBeInTheDocument();
     expect(screen.getByTestId("tab-visits")).toBeInTheDocument();
   });
 
@@ -678,7 +705,7 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-performance")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-academic_mentorship")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
   });
 
@@ -1170,17 +1197,21 @@ describe("SchoolPage (server component)", () => {
     expect(batchQuery![1]).toEqual([64]); // PROGRAM_IDS.NVS
   });
 
-  // --- Mentorship tab content ---
+  // --- Academic Mentorship tab content ---
 
-  it("renders mentorship tab with coming soon message", async () => {
+  it("renders academic mentorship tab component with correct props", async () => {
     setupAdminDefaults();
 
     await renderPage();
 
-    expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
-    expect(
-      screen.getByText("Mentorship data coming soon.")
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("tab-academic_mentorship")).toBeInTheDocument();
+    expect(screen.queryByText("Academic Mentorship data coming soon.")).not.toBeInTheDocument();
+
+    const tab = screen.getByTestId("academic-mentorship-tab");
+    expect(tab).toHaveAttribute("data-school-code", "70705");
+    expect(tab).toHaveAttribute("data-can-view", "true");
+    expect(tab).toHaveAttribute("data-can-edit", "true");
+    expect(tab).toHaveAttribute("data-role", "admin");
   });
 
   // --- level 2 region check with null school region ---

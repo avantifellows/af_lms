@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import { test as base, type Page, type TestInfo } from "@playwright/test";
 import { addCoverageReport } from "monocart-reporter";
 import { encode } from "next-auth/jwt";
@@ -73,7 +74,9 @@ export const test = base.extend<{
   adminPage: Page;
   pmPage: Page;
   programAdminPage: Page;
+  readOnlyProgramAdminPage: Page;
   teacherPage: Page;
+  mentorshipTeacherPage: Page;
   passcodePage: Page;
 }>({
   // Auto-fixture: collects V8 JS coverage for default page (Chromium only)
@@ -108,10 +111,28 @@ export const test = base.extend<{
     await stopCoverage(page, testInfo);
     await context.close();
   },
+  readOnlyProgramAdminPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("readOnlyProgramAdmin"));
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
   teacherPage: async ({ browser }, use, testInfo) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, googleUserPayload("teacher"));
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
+  mentorshipTeacherPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, googleUserPayload("mentorshipTeacher"));
     await startCoverage(page, testInfo);
     await use(page);
     await stopCoverage(page, testInfo);

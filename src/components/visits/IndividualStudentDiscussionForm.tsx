@@ -79,6 +79,7 @@ function SearchableStudentSelect({
   }, [students, query]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHighlightIndex(-1);
   }, [filtered]);
 

@@ -192,7 +192,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
             <div className="flex items-center gap-4">
               <span className="text-sm text-gray-500">{session.user.email}</span>
-              <a href="/api/auth/signout" className="text-sm font-bold text-red-600 hover:text-red-500">Sign out</a>
+              <Link href="/api/auth/signout" className="text-sm font-bold text-red-600 hover:text-red-500">Sign out</Link>
             </div>
           </div>
         </header>
@@ -218,7 +218,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
             <div className="flex items-center gap-4">
               <span className="text-sm text-gray-500">{session.user.email}</span>
-              <a href="/api/auth/signout" className="text-sm font-bold text-red-600 hover:text-red-500">Sign out</a>
+              <Link href="/api/auth/signout" className="text-sm font-bold text-red-600 hover:text-red-500">Sign out</Link>
             </div>
           </div>
         </header>

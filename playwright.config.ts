@@ -69,6 +69,8 @@ export default defineConfig({
       GOOGLE_CLIENT_ID: "fake-client-id",
       GOOGLE_CLIENT_SECRET: "fake-client-secret",
       NEXT_TEST_MODE: "1",
+      DB_SERVICE_URL: "http://localhost:4567",
+      DB_SERVICE_TOKEN: "e2e-test-token",
     },
   },
 });

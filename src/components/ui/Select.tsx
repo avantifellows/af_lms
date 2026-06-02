@@ -3,7 +3,7 @@
 import { SelectHTMLAttributes, forwardRef } from "react";
 import { baseInputClasses } from "./styles";
 
-interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {}
+type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ className = "", ...props }, ref) => {
