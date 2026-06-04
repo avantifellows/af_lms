@@ -14,6 +14,7 @@ import {
 } from "@/lib/permissions";
 import { type Grade, type Student } from "@/components/StudentTable";
 import { processStudents } from "@/lib/school-student-list-data-issues";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Card } from "@/components/ui";
@@ -113,9 +114,14 @@ async function getStudents(schoolId: string): Promise<Student[]> {
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
-    LEFT JOIN enrollment_record er_grade ON er_grade.user_id = u.id
+    -- Restrict the roster to students enrolled for the current academic year.
+    -- Inner join (not LEFT) so students whose only grade enrollment is from a
+    -- prior year (e.g. graduated cohorts still attached to old batches) are
+    -- excluded rather than shown with a blank grade.
+    JOIN enrollment_record er_grade ON er_grade.user_id = u.id
       AND er_grade.group_type = 'grade'
       AND er_grade.is_current = true
+      AND er_grade.academic_year = $2
     LEFT JOIN grade gr ON er_grade.group_id = gr.id
     LEFT JOIN LATERAL (
       SELECT p.name as program_name, p.id as program_id
@@ -132,7 +138,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
     ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
-    [schoolId],
+    [schoolId, CURRENT_ACADEMIC_YEAR],
   );
 }
 

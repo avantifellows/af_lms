@@ -1,4 +1,4 @@
-import { PROGRAM_ID_TO_LABEL } from "./permissions";
+import { PROGRAM_ID_TO_LABEL } from "./constants";
 
 export interface ProgramStats {
   id: number;

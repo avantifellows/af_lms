@@ -1,4 +1,13 @@
 import { query } from "./db";
+import {
+  PROGRAM_IDS,
+  PROGRAM_IDS_ORDERED,
+  PROGRAM_ID_TO_LABEL,
+} from "./constants";
+
+// Re-exported from constants so existing `@/lib/permissions` imports keep
+// working while the definitions live in a client-safe module.
+export { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
 
 // Permission levels (school scope only)
 export type AccessLevel = 1 | 2 | 3;
@@ -8,24 +17,6 @@ export type AccessLevel = 1 | 2 | 3;
 
 // User roles
 export type UserRole = "teacher" | "program_manager" | "program_admin" | "admin";
-
-// Program IDs
-export const PROGRAM_IDS = {
-  COE: 1,
-  NODAL: 2,
-  NVS: 64,
-} as const;
-
-// Canonical display order for program IDs.
-export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
-
-// Maps program_ids to the BigQuery `student_program` label.
-// Keep in sync with AddUserModal's PROGRAMS list.
-export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
-  [PROGRAM_IDS.COE]: "JNV CoE",
-  [PROGRAM_IDS.NODAL]: "JNV Nodal",
-  [PROGRAM_IDS.NVS]: "JNV NVS",
-};
 
 // Feature types for permission checking
 export type Feature =

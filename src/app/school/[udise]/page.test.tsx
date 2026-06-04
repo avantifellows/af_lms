@@ -1153,7 +1153,7 @@ describe("SchoolPage (server component)", () => {
         typeof call[0] === "string" && call[0].includes("group_user gu")
     );
     expect(studentQuery).toBeDefined();
-    expect(studentQuery![1]).toEqual(["school-42"]);
+    expect(studentQuery![1]).toEqual(["school-42", "2026-2027"]);
   });
 
   it("queries batches with PROGRAM_IDS.NVS", async () => {

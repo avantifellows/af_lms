@@ -44,6 +44,13 @@ interface StudentTableProps {
   grades: Grade[];
   batches?: Batch[];
   nvsStreams?: string[];
+  // Optional controlled grade filter. When provided, the parent owns the
+  // selected grade (e.g. to also scope summary pills); otherwise the table
+  // manages it internally. `hideGradeFilterUI` hides the in-table dropdown
+  // when the parent renders its own filter control above.
+  selectedGrade?: string;
+  onGradeChange?: (grade: string) => void;
+  hideGradeFilterUI?: boolean;
 }
 
 function formatDate(dateString: string | null): string {
@@ -356,10 +363,17 @@ export default function StudentTable({
   grades,
   batches = [],
   nvsStreams = [],
+  selectedGrade: controlledGrade,
+  onGradeChange,
+  hideGradeFilterUI = false,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
-  const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  // Grade filter can be controlled by the parent (to also scope summary pills)
+  // or managed internally when used standalone.
+  const [internalGrade, setInternalGrade] = useState<string>("all");
+  const selectedGrade = controlledGrade ?? internalGrade;
+  const setSelectedGrade = onGradeChange ?? setInternalGrade;
   // Bumped when something inside EditStudentModal (e.g. an upload or a
   // delete) may have changed any open card's documents. Forwarded to each
   // StudentCard so its inline DocumentsList refetches.
@@ -448,33 +462,36 @@ export default function StudentTable({
         </div>
       )}
 
-      {/* Grade filter - centered */}
-      <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
-        <label
-          htmlFor="gradeFilter"
-          className="text-sm font-medium text-gray-700"
-        >
-          Filter by Grade:
-        </label>
-        <select
-          id="gradeFilter"
-          value={selectedGrade}
-          onChange={(e) => setSelectedGrade(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
-        >
-          <option value="all">All Grades ({currentStudents.length})</option>
-          {studentGrades.map((grade) => (
-            <option key={grade} value={grade}>
-              Grade {grade} ({currentStudents.filter((s) => s.grade === grade).length})
-            </option>
-          ))}
-        </select>
-        {selectedGrade !== "all" && (
-          <span className="text-sm text-gray-500">
-            Showing {filteredStudents.length} of {currentStudents.length} students
-          </span>
-        )}
-      </div>
+      {/* Grade filter - centered. Hidden when the parent renders its own
+          filter control above (controlled mode). */}
+      {!hideGradeFilterUI && (
+        <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+          <label
+            htmlFor="gradeFilter"
+            className="text-sm font-medium text-gray-700"
+          >
+            Filter by Grade:
+          </label>
+          <select
+            id="gradeFilter"
+            value={selectedGrade}
+            onChange={(e) => setSelectedGrade(e.target.value)}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
+          >
+            <option value="all">All Grades ({currentStudents.length})</option>
+            {studentGrades.map((grade) => (
+              <option key={grade} value={grade}>
+                Grade {grade} ({currentStudents.filter((s) => s.grade === grade).length})
+              </option>
+            ))}
+          </select>
+          {selectedGrade !== "all" && (
+            <span className="text-sm text-gray-500">
+              Showing {filteredStudents.length} of {currentStudents.length} students
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Student cards */}
       <div className="max-w-3xl mx-auto space-y-3">
