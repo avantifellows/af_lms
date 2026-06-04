@@ -70,6 +70,8 @@ function formatDateForInput(dateString: string | null): string {
 const inputClassName =
   "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20";
 const labelClassName = "block text-sm font-medium text-gray-700";
+const sectionHeadingClassName =
+  "text-xs font-bold uppercase tracking-wide text-text-muted pt-2";
 
 export default function EditStudentModal({
   student,
@@ -95,13 +97,38 @@ export default function EditStudentModal({
     first_name: student.first_name || "",
     last_name: student.last_name || "",
     phone: student.phone || "",
+    whatsapp_phone: student.whatsapp_phone || "",
     gender: student.gender || "",
     date_of_birth: formatDateForInput(student.date_of_birth),
     baseCategory: baseCategory,
     isPWD: isPWD,
     stream: student.stream || "",
+    board_stream: student.board_stream || "",
+    school_medium: student.school_medium || "",
     group_id: initialGroupId,
     batch_group_id: "", // Will be set when stream changes
+    // Address (user table)
+    address: student.address || "",
+    city: student.city || "",
+    district: student.district || "",
+    state: student.state || "",
+    pincode: student.pincode || "",
+    // Family / guardian (student table)
+    father_name: student.father_name || "",
+    father_phone: student.father_phone || "",
+    father_profession: student.father_profession || "",
+    father_education_level: student.father_education_level || "",
+    mother_name: student.mother_name || "",
+    mother_phone: student.mother_phone || "",
+    mother_profession: student.mother_profession || "",
+    mother_education_level: student.mother_education_level || "",
+    guardian_name: student.guardian_name || "",
+    guardian_relation: student.guardian_relation || "",
+    guardian_phone: student.guardian_phone || "",
+    guardian_education_level: student.guardian_education_level || "",
+    guardian_profession: student.guardian_profession || "",
+    family_income: student.family_income || "",
+    monthly_family_income: student.monthly_family_income || "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -158,11 +185,20 @@ export default function EditStudentModal({
       return;
     }
 
-    // Validate phone number (10 digits if provided)
-    if (formData.phone && !/^\d{10}$/.test(formData.phone.replace(/\s/g, ""))) {
-      setError("Phone number must be exactly 10 digits");
-      setLoading(false);
-      return;
+    // Validate phone numbers (10 digits if provided)
+    const phoneFields: { label: string; value: string }[] = [
+      { label: "Phone number", value: formData.phone },
+      { label: "WhatsApp number", value: formData.whatsapp_phone },
+      { label: "Father's phone", value: formData.father_phone },
+      { label: "Mother's phone", value: formData.mother_phone },
+      { label: "Guardian's phone", value: formData.guardian_phone },
+    ];
+    for (const { label, value } of phoneFields) {
+      if (value && !/^\d{10}$/.test(value.replace(/\s/g, ""))) {
+        setError(`${label} must be exactly 10 digits`);
+        setLoading(false);
+        return;
+      }
     }
 
     // Validate: if stream or grade changed, batch must be selected
@@ -229,6 +265,26 @@ export default function EditStudentModal({
       setFormData((prev) => ({ ...prev, [name]: value }));
     }
   };
+
+  // Labeled text input bound to a formData key. Keeps the many optional
+  // profile fields below concise without diverging from the inline style above.
+  const textField = (
+    name: keyof typeof formData,
+    label: string,
+    inputMode?: "text" | "numeric" | "tel",
+  ) => (
+    <div>
+      <label className={labelClassName}>{label}</label>
+      <input
+        type="text"
+        name={name}
+        inputMode={inputMode}
+        value={String(formData[name] ?? "")}
+        onChange={handleChange}
+        className={inputClassName}
+      />
+    </div>
+  );
 
   return (
     <Modal open={isOpen} onClose={onClose} className="p-6">
@@ -510,6 +566,61 @@ export default function EditStudentModal({
                   Person with Disability (PWD)
                 </span>
               </label>
+            </div>
+
+            {/* Academic */}
+            <h3 className={sectionHeadingClassName}>Academic</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {textField("board_stream", "Board Stream")}
+              {textField("school_medium", "School Medium")}
+            </div>
+
+            {/* Contact & Address */}
+            <h3 className={sectionHeadingClassName}>Contact & Address</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {textField("whatsapp_phone", "WhatsApp Number", "tel")}
+              {textField("pincode", "Pincode", "numeric")}
+            </div>
+            {textField("address", "Address")}
+            <div className="grid grid-cols-2 gap-4">
+              {textField("city", "City")}
+              {textField("district", "District")}
+            </div>
+            {textField("state", "State")}
+
+            {/* Father */}
+            <h3 className={sectionHeadingClassName}>Father</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {textField("father_name", "Name")}
+              {textField("father_phone", "Phone", "tel")}
+              {textField("father_profession", "Profession")}
+              {textField("father_education_level", "Education Level")}
+            </div>
+
+            {/* Mother */}
+            <h3 className={sectionHeadingClassName}>Mother</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {textField("mother_name", "Name")}
+              {textField("mother_phone", "Phone", "tel")}
+              {textField("mother_profession", "Profession")}
+              {textField("mother_education_level", "Education Level")}
+            </div>
+
+            {/* Guardian */}
+            <h3 className={sectionHeadingClassName}>Guardian</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {textField("guardian_name", "Name")}
+              {textField("guardian_relation", "Relation")}
+              {textField("guardian_phone", "Phone", "tel")}
+              {textField("guardian_education_level", "Education Level")}
+            </div>
+            {textField("guardian_profession", "Profession")}
+
+            {/* Socio-economic */}
+            <h3 className={sectionHeadingClassName}>Socio-economic</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {textField("family_income", "Annual Family Income")}
+              {textField("monthly_family_income", "Monthly Family Income")}
             </div>
 
             <div className="mt-6 flex justify-end gap-3">

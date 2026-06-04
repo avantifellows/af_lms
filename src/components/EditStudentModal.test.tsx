@@ -14,13 +14,36 @@ const baseStudent = {
   first_name: "Ravi",
   last_name: "Kumar",
   phone: "9876543210",
+  whatsapp_phone: "9876543211",
   email: "ravi@example.com",
   date_of_birth: "2008-05-15T00:00:00.000Z",
+  gender: "Male",
+  address: "12 MG Road",
+  city: "Pune",
+  district: "Pune",
+  state: "Maharashtra",
+  pincode: "411001",
   student_id: "STU001",
   apaar_id: "APAAR001",
   category: "OBC",
   stream: "science",
-  gender: "Male",
+  board_stream: "PCM",
+  school_medium: "English",
+  father_name: "Suresh Kumar",
+  father_phone: "9000000001",
+  father_profession: "Farmer",
+  father_education_level: "Grade 10",
+  mother_name: "Sunita Kumar",
+  mother_phone: "9000000002",
+  mother_profession: "Homemaker",
+  mother_education_level: "Grade 8",
+  guardian_name: "Ramesh Kumar",
+  guardian_relation: "Uncle",
+  guardian_phone: "9000000003",
+  guardian_education_level: "Graduate",
+  guardian_profession: "Teacher",
+  family_income: "200000",
+  monthly_family_income: "16000",
   program_name: "JNV Programme",
   program_id: 1,
   grade: 10,
@@ -382,6 +405,65 @@ describe("EditStudentModal", () => {
       expect(body.user_id).toBe("u-1");
       expect(body.group_id).toBe("grp-10");
       expect(body.grade_id).toBe("g-10");
+    });
+
+    it("renders the additional editable profile fields with existing values", () => {
+      renderModal();
+      expect((getByName("whatsapp_phone") as HTMLInputElement).value).toBe("9876543211");
+      expect((getByName("board_stream") as HTMLInputElement).value).toBe("PCM");
+      expect((getByName("school_medium") as HTMLInputElement).value).toBe("English");
+      expect((getByName("address") as HTMLInputElement).value).toBe("12 MG Road");
+      expect((getByName("city") as HTMLInputElement).value).toBe("Pune");
+      expect((getByName("district") as HTMLInputElement).value).toBe("Pune");
+      expect((getByName("state") as HTMLInputElement).value).toBe("Maharashtra");
+      expect((getByName("pincode") as HTMLInputElement).value).toBe("411001");
+      expect((getByName("father_name") as HTMLInputElement).value).toBe("Suresh Kumar");
+      expect((getByName("mother_name") as HTMLInputElement).value).toBe("Sunita Kumar");
+      expect((getByName("guardian_name") as HTMLInputElement).value).toBe("Ramesh Kumar");
+      expect((getByName("guardian_relation") as HTMLInputElement).value).toBe("Uncle");
+      expect((getByName("family_income") as HTMLInputElement).value).toBe("200000");
+      expect((getByName("monthly_family_income") as HTMLInputElement).value).toBe("16000");
+    });
+
+    it("includes the additional editable fields in the PATCH body", async () => {
+      const user = userEvent.setup();
+      renderModal();
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+
+      const districtInput = getByName("district") as HTMLInputElement;
+      await user.clear(districtInput);
+      await user.type(districtInput, "Mumbai");
+
+      await user.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.district).toBe("Mumbai");
+      expect(body.whatsapp_phone).toBe("9876543211");
+      expect(body.board_stream).toBe("PCM");
+      expect(body.school_medium).toBe("English");
+      expect(body.father_name).toBe("Suresh Kumar");
+      expect(body.mother_phone).toBe("9000000002");
+      expect(body.guardian_profession).toBe("Teacher");
+      expect(body.family_income).toBe("200000");
+      expect(body.monthly_family_income).toBe("16000");
+    });
+
+    it("rejects an invalid father's phone number", async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      const fatherPhone = getByName("father_phone") as HTMLInputElement;
+      await user.clear(fatherPhone);
+      await user.type(fatherPhone, "123");
+
+      await user.click(screen.getByText("Save Changes"));
+
+      expect(await screen.findByText("Father's phone must be exactly 10 digits")).toBeInTheDocument();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it("calls onSave and onClose on success", async () => {

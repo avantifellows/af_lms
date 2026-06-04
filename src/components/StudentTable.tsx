@@ -20,6 +20,31 @@ export interface Student {
   category: string | null;
   stream: string | null;
   gender: string | null;
+  // Additional editable profile fields. Optional because not every consumer
+  // (or test fixture) selects them; the school roster query populates them.
+  whatsapp_phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  district?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  board_stream?: string | null;
+  school_medium?: string | null;
+  father_name?: string | null;
+  father_phone?: string | null;
+  father_profession?: string | null;
+  father_education_level?: string | null;
+  mother_name?: string | null;
+  mother_phone?: string | null;
+  mother_profession?: string | null;
+  mother_education_level?: string | null;
+  guardian_name?: string | null;
+  guardian_relation?: string | null;
+  guardian_phone?: string | null;
+  guardian_education_level?: string | null;
+  guardian_profession?: string | null;
+  family_income?: string | null;
+  monthly_family_income?: string | null;
   program_name: string | null;
   program_id: number | null;
   grade: number | null;
