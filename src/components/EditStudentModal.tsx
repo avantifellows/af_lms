@@ -359,7 +359,7 @@ export default function EditStudentModal({
   };
 
   return (
-    <Modal open={isOpen} onClose={onClose} className="p-6">
+    <Modal open={isOpen} onClose={onClose} className="max-w-4xl p-6">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-gray-900">
           Edit Student
@@ -444,7 +444,7 @@ export default function EditStudentModal({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
               <div>
                 <label className={labelClassName}>First Name</label>
                 <input
@@ -465,9 +465,19 @@ export default function EditStudentModal({
                   className={inputClassName}
                 />
               </div>
+              <div>
+                <label className={labelClassName}>Date of Birth</label>
+                <input
+                  type="date"
+                  name="date_of_birth"
+                  value={formData.date_of_birth}
+                  onChange={handleChange}
+                  className={inputClassName}
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
               <div>
                 <label className={labelClassName}>Student ID</label>
                 <input
@@ -486,19 +496,18 @@ export default function EditStudentModal({
                   className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
                 />
               </div>
+              <div>
+                <label className={labelClassName}>Program</label>
+                <input
+                  type="text"
+                  value={student.program_name || "—"}
+                  disabled
+                  className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
+                />
+              </div>
             </div>
 
-            <div>
-              <label className={labelClassName}>Program</label>
-              <input
-                type="text"
-                value={student.program_name || "—"}
-                disabled
-                className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
               <div>
                 <label className={labelClassName}>Grade</label>
                 <select
@@ -515,19 +524,6 @@ export default function EditStudentModal({
                   ))}
                 </select>
               </div>
-              <div>
-                <label className={labelClassName}>Date of Birth</label>
-                <input
-                  type="date"
-                  name="date_of_birth"
-                  value={formData.date_of_birth}
-                  onChange={handleChange}
-                  className={inputClassName}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelClassName}>Phone</label>
                 <input
@@ -556,7 +552,7 @@ export default function EditStudentModal({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
               <div>
                 <label className={labelClassName}>Category</label>
                 <select
@@ -588,6 +584,20 @@ export default function EditStudentModal({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="flex items-end">
+                <label className="flex min-h-[42px] items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="isPWD"
+                    checked={formData.isPWD}
+                    onChange={handleChange}
+                    className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
+                  />
+                  <span className={labelClassName}>
+                    Person with Disability (PWD)
+                  </span>
+                </label>
               </div>
             </div>
 
@@ -625,21 +635,6 @@ export default function EditStudentModal({
               </div>
             )}
 
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  name="isPWD"
-                  checked={formData.isPWD}
-                  onChange={handleChange}
-                  className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
-                />
-                <span className={labelClassName}>
-                  Person with Disability (PWD)
-                </span>
-              </label>
-            </div>
-
             {/* Academic */}
             <h3 className={sectionHeadingClassName}>Academic</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -662,7 +657,7 @@ export default function EditStudentModal({
 
             {/* Father */}
             <h3 className={sectionHeadingClassName}>Father</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               {textField("father_name", "Name")}
               {textField("father_phone", "Phone", "tel")}
               {textField("father_profession", "Profession")}
@@ -671,7 +666,7 @@ export default function EditStudentModal({
 
             {/* Mother */}
             <h3 className={sectionHeadingClassName}>Mother</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               {textField("mother_name", "Name")}
               {textField("mother_phone", "Phone", "tel")}
               {textField("mother_profession", "Profession")}
@@ -680,13 +675,13 @@ export default function EditStudentModal({
 
             {/* Guardian */}
             <h3 className={sectionHeadingClassName}>Guardian</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               {textField("guardian_name", "Name")}
               {textField("guardian_relation", "Relation")}
               {textField("guardian_phone", "Phone", "tel")}
               {textField("guardian_education_level", "Education Level")}
+              {textField("guardian_profession", "Profession")}
             </div>
-            {textField("guardian_profession", "Profession")}
 
             {/* Socio-economic */}
             <h3 className={sectionHeadingClassName}>Socio-economic</h3>
