@@ -24,8 +24,8 @@ const columnClasses: Record<NonNullable<DetailGroupProps["columns"]>, string> = 
  */
 export function DetailGroup({ title, columns = 3, className = "", children }: DetailGroupProps) {
   return (
-    <section className={`rounded-lg border border-border bg-bg-card p-4 shadow-sm ${className}`}>
-      <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+    <section className={`rounded-lg border border-gray-100 bg-white p-4 shadow-sm ${className}`}>
+      <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
         {title}
       </h4>
       <div className={`grid grid-cols-2 ${columnClasses[columns]} gap-x-6 gap-y-4 text-sm`}>

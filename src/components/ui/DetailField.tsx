@@ -20,13 +20,13 @@ interface DetailFieldProps {
 export function DetailField({ label, value, className = "", children }: DetailFieldProps) {
   return (
     <div>
-      <span className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
+      <span className="block text-[11px] font-medium uppercase tracking-wide text-gray-400">
         {label}
       </span>
       {children ? (
         <div className="mt-1">{children}</div>
       ) : (
-        <p className={`mt-1 text-text-primary ${className}`}>{value || "—"}</p>
+        <p className={`mt-1 text-gray-900 ${className}`}>{value || "—"}</p>
       )}
     </div>
   );

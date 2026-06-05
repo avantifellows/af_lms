@@ -1069,10 +1069,10 @@ describe("StudentTable - helper function behaviors", () => {
 
       await user.click(screen.getByLabelText("Expand"));
       // Target the category badge specifically: the only pill-shaped span
-      // inside the expanded (.bg-bg-card-alt) area. A null category renders
-      // "—", which now also appears in other empty fields, and the grade badge
-      // in the header is also pill-shaped — so both need to be excluded.
-      const badge = document.querySelector(".bg-bg-card-alt span.inline-flex.rounded-full");
+      // inside the expanded (.bg-gray-50) area. A null category renders "—",
+      // which now also appears in other empty fields, and the grade badge in
+      // the header is also pill-shaped — so both need to be excluded.
+      const badge = document.querySelector(".bg-gray-50 span.inline-flex.rounded-full");
       expect(badge?.textContent).toBe(categories[i] || "—");
       expect(badge?.className).toContain(expectedClasses[i]);
       unmount();
