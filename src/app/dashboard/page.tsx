@@ -42,15 +42,33 @@ async function getSchools(
   const searchPattern = search ? `%${search}%` : null;
   const offset = (page - 1) * SCHOOLS_PER_PAGE;
 
+  // Stopgap: hide duplicate placeholder school rows. A stale bulk import left a
+  // second JNV row (null udise_code, 0 students) for ~190 schools, so they
+  // double-listed on the dashboard. Exclude a row only when its udise is null
+  // AND a same-named JNV row carries a real udise — that pins it as the dup.
+  // Single schools that legitimately lack a udise (a few Telangana/WB rows with
+  // real students) have no udise-bearing namesake and are kept. The data team
+  // will purge the placeholder rows; remove this filter once they have.
+  const excludeDupPlaceholders = `
+    AND NOT (
+      s.udise_code IS NULL
+      AND EXISTS (
+        SELECT 1 FROM school s2
+        WHERE s2.af_school_category = 'JNV'
+          AND s2.name = s.name
+          AND s2.udise_code IS NOT NULL
+      )
+    )`;
+
   const baseQuery = `
     SELECT s.id, s.code, s.name, s.district, s.state, s.region
     FROM school s
-    WHERE s.af_school_category = 'JNV'`;
+    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
 
   const countBaseQuery = `
     SELECT COUNT(DISTINCT s.id) as total
     FROM school s
-    WHERE s.af_school_category = 'JNV'`;
+    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
 
   if (codes === "all") {
     if (searchPattern) {
