@@ -43,7 +43,7 @@ export interface Student {
   guardian_phone?: string | null;
   guardian_education_level?: string | null;
   guardian_profession?: string | null;
-  family_income?: string | null;
+  annual_family_income?: string | null;
   monthly_family_income?: string | null;
   program_name: string | null;
   program_id: number | null;
@@ -270,7 +270,7 @@ function StudentCard({
           </DetailGroup>
 
           <DetailGroup title="Socio-economic">
-            <DetailField label="Family Income" value={student.family_income} />
+            <DetailField label="Annual Family Income" value={student.annual_family_income} />
             <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
           </DetailGroup>
 

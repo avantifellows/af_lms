@@ -36,7 +36,7 @@ interface StudentUpdatePayload {
   guardian_phone?: string;
   guardian_education_level?: string;
   guardian_profession?: string;
-  family_income?: string;
+  annual_family_income?: string;
   monthly_family_income?: string;
   student_id?: string;
   apaar_id?: string;

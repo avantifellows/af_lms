@@ -125,7 +125,7 @@ async function getStudents(schoolId: string): Promise<Student[]> {
       s.guardian_phone,
       s.guardian_education_level,
       s.guardian_profession,
-      s.family_income,
+      s.annual_family_income,
       s.monthly_family_income,
       s.status,
       er_grade.group_id as grade_id,

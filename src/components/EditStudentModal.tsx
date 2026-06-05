@@ -127,7 +127,7 @@ export default function EditStudentModal({
     guardian_phone: student.guardian_phone || "",
     guardian_education_level: student.guardian_education_level || "",
     guardian_profession: student.guardian_profession || "",
-    family_income: student.family_income || "",
+    annual_family_income: student.annual_family_income || "",
     monthly_family_income: student.monthly_family_income || "",
   });
   const [loading, setLoading] = useState(false);
@@ -619,7 +619,7 @@ export default function EditStudentModal({
             {/* Socio-economic */}
             <h3 className={sectionHeadingClassName}>Socio-economic</h3>
             <div className="grid grid-cols-2 gap-4">
-              {textField("family_income", "Family Income")}
+              {textField("annual_family_income", "Annual Family Income")}
               {textField("monthly_family_income", "Monthly Family Income")}
             </div>
 

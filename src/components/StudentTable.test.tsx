@@ -394,7 +394,7 @@ describe("StudentTable - expand/collapse", () => {
       mother_name: "Sunita Kumar",
       guardian_name: "Ramesh Kumar",
       guardian_relation: "Uncle",
-      family_income: "200000",
+      annual_family_income: "200000",
       monthly_family_income: "16000",
     };
     render(<StudentTable students={[student]} grades={defaultGrades} />);

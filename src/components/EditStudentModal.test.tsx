@@ -42,7 +42,7 @@ const baseStudent = {
   guardian_phone: "9000000003",
   guardian_education_level: "Graduate",
   guardian_profession: "Teacher",
-  family_income: "200000",
+  annual_family_income: "200000",
   monthly_family_income: "16000",
   program_name: "JNV Programme",
   program_id: 1,
@@ -421,7 +421,7 @@ describe("EditStudentModal", () => {
       expect((getByName("mother_name") as HTMLInputElement).value).toBe("Sunita Kumar");
       expect((getByName("guardian_name") as HTMLInputElement).value).toBe("Ramesh Kumar");
       expect((getByName("guardian_relation") as HTMLInputElement).value).toBe("Uncle");
-      expect((getByName("family_income") as HTMLInputElement).value).toBe("200000");
+      expect((getByName("annual_family_income") as HTMLInputElement).value).toBe("200000");
       expect((getByName("monthly_family_income") as HTMLInputElement).value).toBe("16000");
     });
 
@@ -448,7 +448,7 @@ describe("EditStudentModal", () => {
       expect(body.father_name).toBe("Suresh Kumar");
       expect(body.mother_phone).toBe("9000000002");
       expect(body.guardian_profession).toBe("Teacher");
-      expect(body.family_income).toBe("200000");
+      expect(body.annual_family_income).toBe("200000");
       expect(body.monthly_family_income).toBe("16000");
     });
 
