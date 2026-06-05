@@ -619,7 +619,7 @@ export default function EditStudentModal({
             {/* Socio-economic */}
             <h3 className={sectionHeadingClassName}>Socio-economic</h3>
             <div className="grid grid-cols-2 gap-4">
-              {textField("family_income", "Annual Family Income")}
+              {textField("family_income", "Family Income")}
               {textField("monthly_family_income", "Monthly Family Income")}
             </div>
 

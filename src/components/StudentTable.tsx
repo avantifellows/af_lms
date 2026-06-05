@@ -270,7 +270,7 @@ function StudentCard({
           </DetailGroup>
 
           <DetailGroup title="Socio-economic">
-            <DetailField label="Annual Family Income" value={student.family_income} />
+            <DetailField label="Family Income" value={student.family_income} />
             <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
           </DetailGroup>
 
