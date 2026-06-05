@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { type Grade, type Student } from "./StudentTable";
-import { Modal, Button } from "@/components/ui";
+import { Modal, Button, FormSection } from "@/components/ui";
 import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 
@@ -110,10 +110,10 @@ function formatDateForInput(dateString: string | null): string {
 }
 
 const inputClassName =
-  "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20";
-const labelClassName = "block text-sm font-medium text-gray-700";
-const sectionHeadingClassName =
-  "text-xs font-bold uppercase tracking-wide text-text-muted pt-2";
+  "mt-1 block w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted transition-colors";
+const labelClassName = "block text-sm font-medium text-text-secondary";
+// Heading shown at the top of each FormSection card.
+const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 
 export default function EditStudentModal({
   student,
@@ -359,11 +359,20 @@ export default function EditStudentModal({
   };
 
   return (
-    <Modal open={isOpen} onClose={onClose} className="max-w-4xl p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">
-          Edit Student
-        </h2>
+    <Modal
+      open={isOpen}
+      onClose={onClose}
+      className="flex max-h-[90vh] max-w-4xl flex-col overflow-hidden p-0"
+    >
+      <div className="flex items-start justify-between border-b border-border px-6 py-4">
+        <div>
+          <h2 className="text-xl font-semibold text-text-primary">
+            Edit Student
+          </h2>
+          {studentName && (
+            <p className="mt-0.5 text-sm text-text-muted">{studentName}</p>
+          )}
+        </div>
         <Button variant="icon" onClick={onClose}>
           <svg
             className="h-6 w-6"
@@ -381,7 +390,7 @@ export default function EditStudentModal({
         </Button>
       </div>
 
-      <div role="tablist" aria-label="Edit student sections" className="mb-4 flex border-b border-border">
+      <div role="tablist" aria-label="Edit student sections" className="flex border-b border-border px-6">
         <button
           type="button"
           role="tab"
@@ -412,7 +421,7 @@ export default function EditStudentModal({
       </div>
 
       {activeTab === "documents" && studentPkId !== null ? (
-        <div className="space-y-6">
+        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
           <UploadDocumentForm
             studentId={studentPkId}
             studentName={studentName || "this student"}
@@ -436,290 +445,305 @@ export default function EditStudentModal({
           </div>
         </div>
       ) : (
-        <>
-          {error && (
-            <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              <div>
-                <label className={labelClassName}>First Name</label>
-                <input
-                  type="text"
-                  name="first_name"
-                  value={formData.first_name}
-                  onChange={handleChange}
-                  className={inputClassName}
-                />
-              </div>
-              <div>
-                <label className={labelClassName}>Last Name</label>
-                <input
-                  type="text"
-                  name="last_name"
-                  value={formData.last_name}
-                  onChange={handleChange}
-                  className={inputClassName}
-                />
-              </div>
-              <div>
-                <label className={labelClassName}>Date of Birth</label>
-                <input
-                  type="date"
-                  name="date_of_birth"
-                  value={formData.date_of_birth}
-                  onChange={handleChange}
-                  className={inputClassName}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              <div>
-                <label className={labelClassName}>Student ID</label>
-                <input
-                  type="text"
-                  value={student.student_id || "—"}
-                  disabled
-                  className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
-                />
-              </div>
-              <div>
-                <label className={labelClassName}>APAAR ID</label>
-                <input
-                  type="text"
-                  value={student.apaar_id || "—"}
-                  disabled
-                  className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
-                />
-              </div>
-              <div>
-                <label className={labelClassName}>Program</label>
-                <input
-                  type="text"
-                  value={student.program_name || "—"}
-                  disabled
-                  className={`${inputClassName} bg-gray-100 text-gray-500 cursor-not-allowed`}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              <div>
-                <label className={labelClassName}>Grade</label>
-                <select
-                  name="group_id"
-                  value={formData.group_id}
-                  onChange={handleChange}
-                  className={inputClassName}
-                >
-                  <option value="">Select...</option>
-                  {grades.map((grade) => (
-                    <option key={grade.id} value={grade.group_id}>
-                      Grade {grade.number}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelClassName}>Phone</label>
-                <input
-                  type="text"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  className={inputClassName}
-                />
-              </div>
-              <div>
-                <label className={labelClassName}>Gender</label>
-                <select
-                  name="gender"
-                  value={formData.gender}
-                  onChange={handleChange}
-                  className={inputClassName}
-                >
-                  <option value="">Select...</option>
-                  {GENDER_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-              <div>
-                <label className={labelClassName}>Category</label>
-                <select
-                  name="baseCategory"
-                  value={formData.baseCategory}
-                  onChange={handleChange}
-                  className={inputClassName}
-                >
-                  <option value="">Select...</option>
-                  {CATEGORY_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelClassName}>Stream</label>
-                <select
-                  name="stream"
-                  value={formData.stream}
-                  onChange={handleChange}
-                  className={inputClassName}
-                >
-                  <option value="">Select...</option>
-                  {nvsStreams.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-end">
-                <label className="flex min-h-[42px] items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    name="isPWD"
-                    checked={formData.isPWD}
-                    onChange={handleChange}
-                    className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
-                  />
-                  <span className={labelClassName}>
-                    Person with Disability (PWD)
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            {/* Batch selection - shown when stream or grade changes */}
-            {needsBatchUpdate && batches.length > 0 && (
-              <div className="bg-hover-bg border border-accent rounded-md p-4">
-                <label className={`${labelClassName} text-accent-hover`}>
-                  New Batch (required for {streamChanged && gradeChanged ? "stream and grade change" : streamChanged ? "stream change" : "grade change"})
-                </label>
-                {availableBatches.length === 0 ? (
-                  <p className="mt-1 text-sm text-red-600">
-                    No batch found for Grade {currentGradeNumber} + {formData.stream}.
-                    Please contact admin.
-                  </p>
-                ) : (
-                  <select
-                    name="batch_group_id"
-                    value={formData.batch_group_id}
-                    onChange={handleChange}
-                    className={`${inputClassName} mt-1`}
-                  >
-                    <option value="">Select batch...</option>
-                    {availableBatches.map((batch) => (
-                      <option key={batch.id} value={batch.group_id}>
-                        {batch.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {availableBatches.length === 1 && (
-                  <p className="mt-1 text-xs text-accent">
-                    Auto-selected: {availableBatches[0].name}
-                  </p>
-                )}
+        <form
+          onSubmit={handleSubmit}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+            {error && (
+              <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
+                {error}
               </div>
             )}
 
+            {/* Basic Information */}
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Basic Information</h3>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                <div>
+                  <label className={labelClassName}>First Name</label>
+                  <input
+                    type="text"
+                    name="first_name"
+                    value={formData.first_name}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  />
+                </div>
+                <div>
+                  <label className={labelClassName}>Last Name</label>
+                  <input
+                    type="text"
+                    name="last_name"
+                    value={formData.last_name}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  />
+                </div>
+                <div>
+                  <label className={labelClassName}>Date of Birth</label>
+                  <input
+                    type="date"
+                    name="date_of_birth"
+                    value={formData.date_of_birth}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  />
+                </div>
+                <div>
+                  <label className={labelClassName}>Gender</label>
+                  <select
+                    name="gender"
+                    value={formData.gender}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  >
+                    <option value="">Select...</option>
+                    {GENDER_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClassName}>Phone</label>
+                  <input
+                    type="text"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  />
+                </div>
+                <div>
+                  <label className={labelClassName}>Category</label>
+                  <select
+                    name="baseCategory"
+                    value={formData.baseCategory}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  >
+                    <option value="">Select...</option>
+                    {CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <label className="mt-4 flex w-fit cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="isPWD"
+                  checked={formData.isPWD}
+                  onChange={handleChange}
+                  className="h-4 w-4 rounded border-2 border-border text-accent focus:ring-accent/20"
+                />
+                <span className={labelClassName}>
+                  Person with Disability (PWD)
+                </span>
+              </label>
+
+              <div className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-4 md:grid-cols-3">
+                <div>
+                  <label className={labelClassName}>Student ID</label>
+                  <input
+                    type="text"
+                    value={student.student_id || "—"}
+                    disabled
+                    className={inputClassName}
+                  />
+                </div>
+                <div>
+                  <label className={labelClassName}>APAAR ID</label>
+                  <input
+                    type="text"
+                    value={student.apaar_id || "—"}
+                    disabled
+                    className={inputClassName}
+                  />
+                </div>
+                <div>
+                  <label className={labelClassName}>Program</label>
+                  <input
+                    type="text"
+                    value={student.program_name || "—"}
+                    disabled
+                    className={inputClassName}
+                  />
+                </div>
+              </div>
+            </FormSection>
+
+            {/* Enrollment */}
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Enrollment</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClassName}>Grade</label>
+                  <select
+                    name="group_id"
+                    value={formData.group_id}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  >
+                    <option value="">Select...</option>
+                    {grades.map((grade) => (
+                      <option key={grade.id} value={grade.group_id}>
+                        Grade {grade.number}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClassName}>Stream</label>
+                  <select
+                    name="stream"
+                    value={formData.stream}
+                    onChange={handleChange}
+                    className={inputClassName}
+                  >
+                    <option value="">Select...</option>
+                    {nvsStreams.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Batch selection - shown when stream or grade changes */}
+              {needsBatchUpdate && batches.length > 0 && (
+                <div className="mt-4 rounded-lg border border-accent bg-hover-bg p-4">
+                  <label className={`${labelClassName} text-accent-hover`}>
+                    New Batch (required for {streamChanged && gradeChanged ? "stream and grade change" : streamChanged ? "stream change" : "grade change"})
+                  </label>
+                  {availableBatches.length === 0 ? (
+                    <p className="mt-1 text-sm text-danger">
+                      No batch found for Grade {currentGradeNumber} + {formData.stream}.
+                      Please contact admin.
+                    </p>
+                  ) : (
+                    <select
+                      name="batch_group_id"
+                      value={formData.batch_group_id}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    >
+                      <option value="">Select batch...</option>
+                      {availableBatches.map((batch) => (
+                        <option key={batch.id} value={batch.group_id}>
+                          {batch.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {availableBatches.length === 1 && (
+                    <p className="mt-1 text-xs text-accent">
+                      Auto-selected: {availableBatches[0].name}
+                    </p>
+                  )}
+                </div>
+              )}
+            </FormSection>
+
             {/* Academic */}
-            <h3 className={sectionHeadingClassName}>Academic</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
-              {selectField("school_medium", "School Medium", SCHOOL_MEDIUM_OPTIONS)}
-            </div>
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Academic</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
+                {selectField("school_medium", "School Medium", SCHOOL_MEDIUM_OPTIONS)}
+              </div>
+            </FormSection>
 
             {/* Contact & Address */}
-            <h3 className={sectionHeadingClassName}>Contact & Address</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {textField("whatsapp_phone", "WhatsApp Number", "tel")}
-              {textField("pincode", "Pincode", "numeric")}
-            </div>
-            {textField("address", "Address")}
-            <div className="grid grid-cols-2 gap-4">
-              {textField("city", "City")}
-              {textField("district", "District")}
-            </div>
-            {selectField("state", "State", INDIAN_STATE_OPTIONS)}
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Contact &amp; Address</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {textField("whatsapp_phone", "WhatsApp Number", "tel")}
+                {textField("pincode", "Pincode", "numeric")}
+              </div>
+              <div className="mt-4">{textField("address", "Address")}</div>
+              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3">
+                {textField("city", "City")}
+                {textField("district", "District")}
+                {selectField("state", "State", INDIAN_STATE_OPTIONS)}
+              </div>
+            </FormSection>
 
             {/* Father */}
-            <h3 className={sectionHeadingClassName}>Father</h3>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              {textField("father_name", "Name")}
-              {textField("father_phone", "Phone", "tel")}
-              {textField("father_profession", "Profession")}
-              {textField("father_education_level", "Education Level")}
-            </div>
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Father</h3>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {textField("father_name", "Name")}
+                {textField("father_phone", "Phone", "tel")}
+                {textField("father_profession", "Profession")}
+                {textField("father_education_level", "Education Level")}
+              </div>
+            </FormSection>
 
             {/* Mother */}
-            <h3 className={sectionHeadingClassName}>Mother</h3>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              {textField("mother_name", "Name")}
-              {textField("mother_phone", "Phone", "tel")}
-              {textField("mother_profession", "Profession")}
-              {textField("mother_education_level", "Education Level")}
-            </div>
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Mother</h3>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {textField("mother_name", "Name")}
+                {textField("mother_phone", "Phone", "tel")}
+                {textField("mother_profession", "Profession")}
+                {textField("mother_education_level", "Education Level")}
+              </div>
+            </FormSection>
 
             {/* Guardian */}
-            <h3 className={sectionHeadingClassName}>Guardian</h3>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              {textField("guardian_name", "Name")}
-              {textField("guardian_relation", "Relation")}
-              {textField("guardian_phone", "Phone", "tel")}
-              {textField("guardian_education_level", "Education Level")}
-              {textField("guardian_profession", "Profession")}
-            </div>
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Guardian</h3>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {textField("guardian_name", "Name")}
+                {textField("guardian_relation", "Relation")}
+                {textField("guardian_phone", "Phone", "tel")}
+                {textField("guardian_education_level", "Education Level")}
+                {textField("guardian_profession", "Profession")}
+              </div>
+            </FormSection>
 
             {/* Socio-economic */}
-            <h3 className={sectionHeadingClassName}>Socio-economic</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {textField("annual_family_income", "Annual Family Income")}
-              {textField("monthly_family_income", "Monthly Family Income")}
-            </div>
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Socio-economic</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {textField("annual_family_income", "Annual Family Income")}
+                {textField("monthly_family_income", "Monthly Family Income")}
+              </div>
+            </FormSection>
 
-            <div className="mt-6 flex justify-end gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onClose}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading || (needsBatchUpdate && availableBatches.length === 0)}
-              >
-                {loading ? "Saving..." : "Save Changes"}
-              </Button>
-            </div>
-          </form>
+            {/* Last Updated */}
+            {student.updated_at && (
+              <p className="text-right text-xs text-text-muted">
+                Last updated: {new Date(student.updated_at).toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+            )}
+          </div>
 
-      {/* Last Updated */}
-      {student.updated_at && (
-        <p className="mt-4 text-xs text-gray-400 text-right">
-          Last updated: {new Date(student.updated_at).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </p>
-      )}
-        </>
+          <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading || (needsBatchUpdate && availableBatches.length === 0)}
+            >
+              {loading ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </form>
       )}
     </Modal>
   );
