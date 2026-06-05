@@ -22,6 +22,13 @@ export const Modal = forwardRef<HTMLDivElement, ModalProps>(
 
     if (!open) return null;
 
+    // Only apply the default max-width when the caller hasn't supplied its own
+    // `max-w-*` utility. Two competing `max-w-*` classes both compile and the
+    // winner is decided by CSS source order, not class-attribute order, so a
+    // hardcoded default can't be reliably overridden by appending.
+    const hasMaxWidth = /(^|\s)(sm:|md:|lg:|xl:|2xl:)?max-w-/.test(className);
+    const maxWidthClass = hasMaxWidth ? "" : "max-w-lg";
+
     return (
       <div
         ref={ref}
@@ -36,7 +43,7 @@ export const Modal = forwardRef<HTMLDivElement, ModalProps>(
         />
         {/* Content */}
         <div className="flex min-h-full items-center justify-center p-4">
-          <div className={`relative w-full max-w-lg rounded-lg bg-bg-card shadow-xl ${className}`}>
+          <div className={`relative w-full ${maxWidthClass} rounded-lg bg-bg-card shadow-xl ${className}`}>
             {children}
           </div>
         </div>
