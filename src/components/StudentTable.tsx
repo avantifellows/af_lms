@@ -100,30 +100,50 @@ function getCategoryColor(category: string | null): string {
   }
 }
 
-// A labelled value cell used in the expanded student detail view.
+// A labelled value cell used in the expanded student detail view. Pass
+// `children` to render custom content (e.g. a badge) instead of a plain value.
 function DetailField({
   label,
   value,
   className = "",
+  children,
 }: {
   label: string;
-  value: string | null | undefined;
+  value?: string | null;
   className?: string;
+  children?: React.ReactNode;
 }) {
   return (
     <div>
-      <span className="text-gray-400 text-xs uppercase tracking-wide">{label}</span>
-      <p className={`text-gray-900 ${className}`}>{value || "—"}</p>
+      <span className="block text-[11px] font-medium uppercase tracking-wide text-gray-400">
+        {label}
+      </span>
+      {children ? (
+        <div className="mt-1">{children}</div>
+      ) : (
+        <p className={`mt-1 text-gray-900 ${className}`}>{value || "—"}</p>
+      )}
     </div>
   );
 }
 
-// Section heading inside the expanded detail view.
-function DetailSection({ title }: { title: string }) {
+// A titled card grouping related fields in the expanded detail view.
+function DetailGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <h4 className="mt-4 mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
-      {title}
-    </h4>
+    <section className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+      <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+        {title}
+      </h4>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4 text-sm">
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -246,88 +266,64 @@ function StudentCard({
 
       {/* Expanded content */}
       {expanded && (
-        <div className="px-4 pb-3 pt-3 border-t border-gray-100 bg-gray-50">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Phone</span>
-              <p className="text-gray-900 font-medium">{student.phone || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Gender</span>
-              <p className="text-gray-900">{student.gender || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Category</span>
-              <p>
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}>
-                  {student.category || "—"}
-                </span>
-              </p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Stream</span>
-              <p className="text-gray-900 capitalize">{student.stream || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Program</span>
-              <p className="text-gray-900">{student.program_name || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Email</span>
-              <p className="text-gray-900 truncate">{student.email || "—"}</p>
-            </div>
-          </div>
+        <div className="space-y-3 border-t border-gray-100 bg-gray-50 px-4 pb-4 pt-4">
+          <DetailGroup title="Personal">
+            <DetailField label="Phone" value={student.phone} className="font-medium" />
+            <DetailField label="Gender" value={student.gender} />
+            <DetailField label="Category">
+              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}>
+                {student.category || "—"}
+              </span>
+            </DetailField>
+            <DetailField label="Stream" value={student.stream} className="capitalize" />
+            <DetailField label="Program" value={student.program_name} />
+            <DetailField label="Email" value={student.email} className="truncate" />
+          </DetailGroup>
 
-          <DetailSection title="Academic" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <DetailGroup title="Academic">
             <DetailField label="Board Stream" value={student.board_stream} />
             <DetailField label="School Medium" value={student.school_medium} />
-          </div>
+          </DetailGroup>
 
-          <DetailSection title="Contact & Address" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <DetailGroup title="Contact & Address">
             <DetailField label="WhatsApp" value={student.whatsapp_phone} />
             <DetailField label="Address" value={student.address} />
             <DetailField label="City" value={student.city} />
             <DetailField label="District" value={student.district} />
             <DetailField label="State" value={student.state} />
             <DetailField label="Pincode" value={student.pincode} />
-          </div>
+          </DetailGroup>
 
-          <DetailSection title="Father" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <DetailGroup title="Father">
             <DetailField label="Name" value={student.father_name} />
             <DetailField label="Phone" value={student.father_phone} />
             <DetailField label="Profession" value={student.father_profession} />
             <DetailField label="Education Level" value={student.father_education_level} />
-          </div>
+          </DetailGroup>
 
-          <DetailSection title="Mother" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <DetailGroup title="Mother">
             <DetailField label="Name" value={student.mother_name} />
             <DetailField label="Phone" value={student.mother_phone} />
             <DetailField label="Profession" value={student.mother_profession} />
             <DetailField label="Education Level" value={student.mother_education_level} />
-          </div>
+          </DetailGroup>
 
-          <DetailSection title="Guardian" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <DetailGroup title="Guardian">
             <DetailField label="Name" value={student.guardian_name} />
             <DetailField label="Relation" value={student.guardian_relation} />
             <DetailField label="Phone" value={student.guardian_phone} />
             <DetailField label="Profession" value={student.guardian_profession} />
             <DetailField label="Education Level" value={student.guardian_education_level} />
-          </div>
+          </DetailGroup>
 
-          <DetailSection title="Socio-economic" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          <DetailGroup title="Socio-economic">
             <DetailField label="Annual Family Income" value={student.family_income} />
             <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
-          </div>
+          </DetailGroup>
 
           {studentPkId !== null && (
-            <div className="mt-4 border-t border-border pt-3">
-              <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+            <section className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+              <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents
               </h4>
               <DocumentsList
@@ -335,7 +331,7 @@ function StudentCard({
                 canDelete={canEdit}
                 refreshNonce={documentsRefreshNonce}
               />
-            </div>
+            </section>
           )}
         </div>
       )}
