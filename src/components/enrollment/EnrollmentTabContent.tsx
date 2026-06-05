@@ -18,7 +18,6 @@ interface Props {
   isAdmin: boolean;
   grades: Grade[];
   batches: Batch[];
-  nvsStreams: string[];
 }
 
 export default function EnrollmentTabContent({
@@ -31,7 +30,6 @@ export default function EnrollmentTabContent({
   isAdmin,
   grades,
   batches,
-  nvsStreams,
 }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null
@@ -130,7 +128,6 @@ export default function EnrollmentTabContent({
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
-        nvsStreams={nvsStreams}
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         hideGradeFilterUI

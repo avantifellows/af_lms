@@ -26,7 +26,7 @@ const baseStudent = {
   student_id: "STU001",
   apaar_id: "APAAR001",
   category: "OBC",
-  stream: "science",
+  stream: "engineering",
   board_stream: "PCM",
   school_medium: "English",
   father_name: "Suresh Kumar",
@@ -59,14 +59,12 @@ const grades: Grade[] = [
 ];
 
 const batches: Batch[] = [
-  { id: 1, name: "10-Science-A", batch_id: "b1", program_id: 1, group_id: "bg-1", metadata: { stream: "science", grade: 10 } },
-  { id: 2, name: "10-Commerce-A", batch_id: "b2", program_id: 1, group_id: "bg-2", metadata: { stream: "commerce", grade: 10 } },
-  { id: 3, name: "11-Science-A", batch_id: "b3", program_id: 1, group_id: "bg-3", metadata: { stream: "science", grade: 11 } },
-  { id: 4, name: "11-Science-B", batch_id: "b4", program_id: 1, group_id: "bg-4", metadata: { stream: "science", grade: 11 } },
-  { id: 5, name: "9-Science-A", batch_id: "b5", program_id: 1, group_id: "bg-5", metadata: { stream: "science", grade: 9 } },
+  { id: 1, name: "10-Engineering-A", batch_id: "b1", program_id: 1, group_id: "bg-1", metadata: { stream: "engineering", grade: 10 } },
+  { id: 2, name: "10-Medical-A", batch_id: "b2", program_id: 1, group_id: "bg-2", metadata: { stream: "medical", grade: 10 } },
+  { id: 3, name: "11-Engineering-A", batch_id: "b3", program_id: 1, group_id: "bg-3", metadata: { stream: "engineering", grade: 11 } },
+  { id: 4, name: "11-Engineering-B", batch_id: "b4", program_id: 1, group_id: "bg-4", metadata: { stream: "engineering", grade: 11 } },
+  { id: 5, name: "9-Engineering-A", batch_id: "b5", program_id: 1, group_id: "bg-5", metadata: { stream: "engineering", grade: 9 } },
 ];
-
-const nvsStreams = ["science", "commerce", "humanities"];
 
 const defaultProps = {
   student: baseStudent,
@@ -75,7 +73,6 @@ const defaultProps = {
   onSave: vi.fn(),
   grades,
   batches,
-  nvsStreams,
 };
 
 /** Helper: query a form element by its name attribute. */
@@ -161,7 +158,7 @@ describe("EditStudentModal", () => {
     it("shows stream select with current value", () => {
       renderModal();
       const streamSelect = getByName("stream") as HTMLSelectElement;
-      expect(streamSelect.value).toBe("science");
+      expect(streamSelect.value).toBe("engineering");
     });
 
     it("shows grade select with current group_id value", () => {
@@ -281,8 +278,8 @@ describe("EditStudentModal", () => {
     it("changes stream select", () => {
       renderModal();
       const select = getByName("stream") as HTMLSelectElement;
-      fireEvent.change(select, { target: { value: "commerce" } });
-      expect(select.value).toBe("commerce");
+      fireEvent.change(select, { target: { value: "medical" } });
+      expect(select.value).toBe("medical");
     });
 
     it("changes grade select", () => {
@@ -401,7 +398,7 @@ describe("EditStudentModal", () => {
       expect(body.phone).toBe("9876543210");
       expect(body.gender).toBe("Male");
       expect(body.category).toBe("OBC");
-      expect(body.stream).toBe("science");
+      expect(body.stream).toBe("engineering");
       expect(body.user_id).toBe("u-1");
       expect(body.group_id).toBe("grp-10");
       expect(body.grade_id).toBe("g-10");
@@ -618,7 +615,7 @@ describe("EditStudentModal", () => {
     it("shows batch selector when stream changes", () => {
       renderModal();
       const streamSelect = getByName("stream") as HTMLSelectElement;
-      fireEvent.change(streamSelect, { target: { value: "commerce" } });
+      fireEvent.change(streamSelect, { target: { value: "medical" } });
 
       expect(screen.getByText(/New Batch/)).toBeInTheDocument();
       expect(screen.getByText(/stream change/)).toBeInTheDocument();
@@ -627,22 +624,22 @@ describe("EditStudentModal", () => {
     it("shows matching batches for the new stream + current grade", () => {
       renderModal();
       const streamSelect = getByName("stream") as HTMLSelectElement;
-      fireEvent.change(streamSelect, { target: { value: "commerce" } });
+      fireEvent.change(streamSelect, { target: { value: "medical" } });
 
-      // Only batch matching grade=10 + commerce should appear
-      expect(screen.getByText("10-Commerce-A")).toBeInTheDocument();
-      expect(screen.queryByText("10-Science-A")).not.toBeInTheDocument();
+      // Only batch matching grade=10 + medical should appear
+      expect(screen.getByText("10-Medical-A")).toBeInTheDocument();
+      expect(screen.queryByText("10-Engineering-A")).not.toBeInTheDocument();
     });
 
     it("does not show batch selector when stream set back to original", () => {
       renderModal();
       const streamSelect = getByName("stream") as HTMLSelectElement;
 
-      fireEvent.change(streamSelect, { target: { value: "commerce" } });
+      fireEvent.change(streamSelect, { target: { value: "medical" } });
       expect(screen.getByText(/New Batch/)).toBeInTheDocument();
 
       // Change back to original
-      fireEvent.change(streamSelect, { target: { value: "science" } });
+      fireEvent.change(streamSelect, { target: { value: "engineering" } });
       expect(screen.queryByText(/New Batch/)).not.toBeInTheDocument();
     });
   });
@@ -665,14 +662,14 @@ describe("EditStudentModal", () => {
       const gradeSelect = getByName("group_id") as HTMLSelectElement;
       fireEvent.change(gradeSelect, { target: { value: "grp-11" } });
 
-      // Grade 11 + science has two batches
-      expect(screen.getByText("11-Science-A")).toBeInTheDocument();
-      expect(screen.getByText("11-Science-B")).toBeInTheDocument();
+      // Grade 11 + engineering has two batches
+      expect(screen.getByText("11-Engineering-A")).toBeInTheDocument();
+      expect(screen.getByText("11-Engineering-B")).toBeInTheDocument();
     });
 
     it("shows label for both stream and grade change", () => {
       renderModal();
-      fireEvent.change(getByName("stream"), { target: { value: "commerce" } });
+      fireEvent.change(getByName("stream"), { target: { value: "medical" } });
       fireEvent.change(getByName("group_id"), { target: { value: "grp-11" } });
 
       expect(screen.getByText(/stream and grade change/)).toBeInTheDocument();
@@ -685,10 +682,10 @@ describe("EditStudentModal", () => {
   describe("auto-select single batch", () => {
     it("auto-selects the batch and shows auto-selected message", () => {
       renderModal();
-      // Changing stream to commerce for grade 10 yields exactly one batch
-      fireEvent.change(getByName("stream"), { target: { value: "commerce" } });
+      // Changing stream to medical for grade 10 yields exactly one batch
+      fireEvent.change(getByName("stream"), { target: { value: "medical" } });
 
-      expect(screen.getByText(/Auto-selected: 10-Commerce-A/)).toBeInTheDocument();
+      expect(screen.getByText(/Auto-selected: 10-Medical-A/)).toBeInTheDocument();
     });
 
     it("includes batch_group_id in submission when auto-selected", async () => {
@@ -696,7 +693,7 @@ describe("EditStudentModal", () => {
       renderModal();
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
-      fireEvent.change(getByName("stream"), { target: { value: "commerce" } });
+      fireEvent.change(getByName("stream"), { target: { value: "medical" } });
 
       expect(screen.getByText(/Auto-selected/)).toBeInTheDocument();
 
@@ -717,15 +714,15 @@ describe("EditStudentModal", () => {
   describe("no batch available for stream/grade", () => {
     it("shows error message when no batch matches", () => {
       renderModal();
-      // Change stream to humanities -- no batch for grade 10 + humanities
-      fireEvent.change(getByName("stream"), { target: { value: "humanities" } });
+      // Change stream to foundation -- no batch for grade 10 + foundation
+      fireEvent.change(getByName("stream"), { target: { value: "foundation" } });
 
-      expect(screen.getByText(/No batch found for Grade 10 \+ humanities/)).toBeInTheDocument();
+      expect(screen.getByText(/No batch found for Grade 10 \+ foundation/)).toBeInTheDocument();
     });
 
     it("disables Save button when no batch available", () => {
       renderModal();
-      fireEvent.change(getByName("stream"), { target: { value: "humanities" } });
+      fireEvent.change(getByName("stream"), { target: { value: "foundation" } });
 
       expect(screen.getByText("Save Changes")).toBeDisabled();
     });
@@ -734,12 +731,12 @@ describe("EditStudentModal", () => {
       const user = userEvent.setup();
       renderModal();
 
-      // Change grade to 11 with science => 2 batches, no auto-select
+      // Change grade to 11 with engineering => 2 batches, no auto-select
       fireEvent.change(getByName("group_id"), { target: { value: "grp-11" } });
 
       // Two batches available, none auto-selected => batch_group_id is ""
-      expect(screen.getByText("11-Science-A")).toBeInTheDocument();
-      expect(screen.getByText("11-Science-B")).toBeInTheDocument();
+      expect(screen.getByText("11-Engineering-A")).toBeInTheDocument();
+      expect(screen.getByText("11-Engineering-B")).toBeInTheDocument();
 
       // Don't select a batch; try to submit
       await user.click(screen.getByText("Save Changes"));
@@ -935,14 +932,9 @@ describe("EditStudentModal", () => {
       expect(screen.getByText("Edit Student")).toBeInTheDocument();
     });
 
-    it("renders without nvsStreams prop", () => {
-      renderModal({ nvsStreams: undefined });
-      expect(screen.getByText("Edit Student")).toBeInTheDocument();
-    });
-
     it("does not show batch selector when batches array is empty even if stream changes", () => {
       renderModal({ batches: [] });
-      fireEvent.change(getByName("stream"), { target: { value: "commerce" } });
+      fireEvent.change(getByName("stream"), { target: { value: "medical" } });
 
       // needsBatchUpdate is true but batches.length === 0, so section is hidden
       expect(screen.queryByText(/New Batch/)).not.toBeInTheDocument();
@@ -977,11 +969,11 @@ describe("EditStudentModal", () => {
       renderModal();
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
-      // Change grade to 11 => 2 science batches
+      // Change grade to 11 => 2 engineering batches
       fireEvent.change(getByName("group_id"), { target: { value: "grp-11" } });
 
-      expect(screen.getByText("11-Science-A")).toBeInTheDocument();
-      expect(screen.getByText("11-Science-B")).toBeInTheDocument();
+      expect(screen.getByText("11-Engineering-A")).toBeInTheDocument();
+      expect(screen.getByText("11-Engineering-B")).toBeInTheDocument();
 
       // Select second batch
       fireEvent.change(getByName("batch_group_id"), { target: { value: "bg-4" } });

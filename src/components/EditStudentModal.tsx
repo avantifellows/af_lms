@@ -22,7 +22,6 @@ interface EditStudentModalProps {
   onSave: () => void;
   grades: Grade[];
   batches?: Batch[];
-  nvsStreams?: string[];
 }
 
 const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
@@ -50,6 +49,15 @@ function combineCategory(baseCategory: string, isPWD: boolean): string {
   return isPWD ? `PWD-${baseCategory}` : baseCategory;
 }
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
+// student.stream values are stored lowercase in the DB; labels render nicely.
+const STREAM_OPTIONS = ["ca", "clat", "engineering", "foundation", "medical"];
+const STREAM_LABELS: Record<string, string> = {
+  ca: "CA",
+  clat: "CLAT",
+  engineering: "Engineering",
+  foundation: "Foundation",
+  medical: "Medical",
+};
 const BOARD_STREAM_OPTIONS = ["PCM", "PCB", "PCMB"];
 const SCHOOL_MEDIUM_OPTIONS = ["English", "Hindi", "Others"];
 // Canonical Indian states + union territories. Free-form legacy values in the
@@ -122,7 +130,6 @@ export default function EditStudentModal({
   onSave,
   grades,
   batches = [],
-  nvsStreams = [],
 }: EditStudentModalProps) {
   const { baseCategory, isPWD } = parseCategory(student.category);
 
@@ -335,6 +342,7 @@ export default function EditStudentModal({
     name: keyof typeof formData,
     label: string,
     options: readonly string[],
+    labels?: Record<string, string>,
   ) => {
     const current = String(formData[name] ?? "");
     const opts = current && !options.includes(current) ? [current, ...options] : options;
@@ -350,7 +358,7 @@ export default function EditStudentModal({
           <option value="">Select...</option>
           {opts.map((opt) => (
             <option key={opt} value={opt}>
-              {opt}
+              {labels?.[opt] ?? opt}
             </option>
           ))}
         </select>
@@ -573,22 +581,7 @@ export default function EditStudentModal({
                   ))}
                 </select>
               </div>
-              <div>
-                <label className={labelClassName}>Stream</label>
-                <select
-                  name="stream"
-                  value={formData.stream}
-                  onChange={handleChange}
-                  className={inputClassName}
-                >
-                  <option value="">Select...</option>
-                  {nvsStreams.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {selectField("stream", "Stream", STREAM_OPTIONS, STREAM_LABELS)}
             </div>
 
             {/* Batch selection - shown when stream or grade changes */}

@@ -68,7 +68,6 @@ interface StudentTableProps {
   isAdmin?: boolean;
   grades: Grade[];
   batches?: Batch[];
-  nvsStreams?: string[];
   // Optional controlled grade filter. When provided, the parent owns the
   // selected grade (e.g. to also scope summary pills); otherwise the table
   // manages it internally. `hideGradeFilterUI` hides the in-table dropdown
@@ -410,7 +409,6 @@ export default function StudentTable({
   isAdmin = false,
   grades,
   batches = [],
-  nvsStreams = [],
   selectedGrade: controlledGrade,
   onGradeChange,
   hideGradeFilterUI = false,
@@ -574,7 +572,6 @@ export default function StudentTable({
           onSave={handleSave}
           grades={grades}
           batches={batches}
-          nvsStreams={nvsStreams}
         />
       )}
 

@@ -77,17 +77,6 @@ async function getBatchesWithMetadata(): Promise<Batch[]> {
   return batches;
 }
 
-// Extract distinct streams from NVS program batches
-function getDistinctNVSStreams(batches: Batch[]): string[] {
-  const streams = new Set<string>();
-  batches.forEach((b) => {
-    if (b.metadata?.stream) {
-      streams.add(b.metadata.stream);
-    }
-  });
-  return Array.from(streams).sort();
-}
-
 async function getStudents(schoolId: string): Promise<Student[]> {
   return query<Student>(
     `SELECT
@@ -305,9 +294,6 @@ export default async function SchoolPage({ params }: PageProps) {
   const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
   const dropoutStudents = dedupedStudents.filter((s) => s.status === "dropout");
 
-  // Extract distinct streams from NVS batches
-  const nvsStreams = getDistinctNVSStreams(batches);
-
   // Programs that have at least one active student at this school
   const programsWithStudents = new Set(
     activeStudents
@@ -373,7 +359,6 @@ export default async function SchoolPage({ params }: PageProps) {
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
-        nvsStreams={nvsStreams}
       />
     </div>
   );
