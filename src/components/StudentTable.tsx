@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
-import { Card, Badge, Button, Modal, Input } from "@/components/ui";
+import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 
 export interface Student {
@@ -98,53 +98,6 @@ function getCategoryColor(category: string | null): string {
     default:
       return "bg-gray-100 text-gray-800";
   }
-}
-
-// A labelled value cell used in the expanded student detail view. Pass
-// `children` to render custom content (e.g. a badge) instead of a plain value.
-function DetailField({
-  label,
-  value,
-  className = "",
-  children,
-}: {
-  label: string;
-  value?: string | null;
-  className?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div>
-      <span className="block text-[11px] font-medium uppercase tracking-wide text-gray-400">
-        {label}
-      </span>
-      {children ? (
-        <div className="mt-1">{children}</div>
-      ) : (
-        <p className={`mt-1 text-gray-900 ${className}`}>{value || "—"}</p>
-      )}
-    </div>
-  );
-}
-
-// A titled card grouping related fields in the expanded detail view.
-function DetailGroup({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
-      <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
-        {title}
-      </h4>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4 text-sm">
-        {children}
-      </div>
-    </section>
-  );
 }
 
 function getCurrentAcademicYear(): string {
@@ -266,7 +219,7 @@ function StudentCard({
 
       {/* Expanded content */}
       {expanded && (
-        <div className="space-y-3 border-t border-gray-100 bg-gray-50 px-4 pb-4 pt-4">
+        <div className="space-y-3 border-t border-border bg-bg-card-alt px-4 pb-4 pt-4">
           <DetailGroup title="Personal">
             <DetailField label="Phone" value={student.phone} className="font-medium" />
             <DetailField label="Gender" value={student.gender} />
@@ -322,8 +275,8 @@ function StudentCard({
           </DetailGroup>
 
           {studentPkId !== null && (
-            <section className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
-              <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+            <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">
+              <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents
               </h4>
               <DocumentsList
