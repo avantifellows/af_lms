@@ -10,6 +10,8 @@ export { Modal } from "./Modal";
 export { StickyProgressBar } from "./StickyProgressBar";
 export { FormSection } from "./FormSection";
 export { FormLabel } from "./FormLabel";
+export { DetailField } from "./DetailField";
+export { DetailGroup } from "./DetailGroup";
 export { RadioPair } from "./RadioPair";
 export { RemarkField } from "./RemarkField";
 export { baseInputClasses, touchTarget } from "./styles";

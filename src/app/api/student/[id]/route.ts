@@ -6,13 +6,38 @@ const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
 const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
 
 interface StudentUpdatePayload {
+  // user-table fields
   first_name?: string;
   last_name?: string;
   phone?: string;
+  whatsapp_phone?: string;
   gender?: string;
   date_of_birth?: string;
+  address?: string;
+  city?: string;
+  district?: string;
+  state?: string;
+  pincode?: string;
+  // student-table fields
   category?: string;
   stream?: string;
+  board_stream?: string;
+  school_medium?: string;
+  father_name?: string;
+  father_phone?: string;
+  father_profession?: string;
+  father_education_level?: string;
+  mother_name?: string;
+  mother_phone?: string;
+  mother_profession?: string;
+  mother_education_level?: string;
+  guardian_name?: string;
+  guardian_relation?: string;
+  guardian_phone?: string;
+  guardian_education_level?: string;
+  guardian_profession?: string;
+  annual_family_income?: string;
+  monthly_family_income?: string;
   student_id?: string;
   apaar_id?: string;
   grade_id?: string | null; // grade_id for student table (from grade table)
