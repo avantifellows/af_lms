@@ -50,7 +50,7 @@ function combineCategory(baseCategory: string, isPWD: boolean): string {
   return isPWD ? `PWD-${baseCategory}` : baseCategory;
 }
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
-const BOARD_STREAM_OPTIONS = ["PCM", "PCB", "PCMB"];
+const BOARD_STREAM_OPTIONS = ["PCM", "PCB", "PCMB", "Commerce", "Arts"];
 const SCHOOL_MEDIUM_OPTIONS = ["English", "Hindi", "Others"];
 // Canonical Indian states + union territories. Free-form legacy values in the
 // data are preserved by selectField() rather than forced into this list.
