@@ -8,6 +8,7 @@ import {
   getFeatureAccess,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
@@ -116,7 +117,9 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise student counts for loaded schools (all programs)
+// Get grade-wise student counts for loaded schools (all programs).
+// Scoped to the current academic year so the dashboard summary cards match
+// the school roster, which is also restricted to CURRENT_ACADEMIC_YEAR.
 async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
   if (schoolIds.length === 0) return new Map();
 
@@ -130,11 +133,12 @@ async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, Gr
      JOIN group_user gu_school ON gu_school.group_id = g_school.id
      LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
        AND er.group_type = 'grade' AND er.is_current = true
+       AND er.academic_year = $2
      LEFT JOIN grade gr ON er.group_id = gr.id
      WHERE s.id = ANY($1) AND gr.number IS NOT NULL
      GROUP BY s.id, gr.number
      ORDER BY gr.number`,
-    [schoolIds]
+    [schoolIds, CURRENT_ACADEMIC_YEAR]
   );
 
   const gradeMap = new Map<string, GradeCount[]>();

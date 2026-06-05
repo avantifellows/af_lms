@@ -929,7 +929,9 @@ describe("DashboardPage (server component)", () => {
     const gradeCountsCall = mockQuery.mock.calls[2];
     const [sql, params] = gradeCountsCall;
     expect(sql).toContain("grade");
+    expect(sql).toContain("er.academic_year = $2");
     expect(params[0]).toEqual(["s99"]);
+    expect(params[1]).toBe("2026-2027");
   });
 
   it("skips grade count query when no schools found", async () => {
