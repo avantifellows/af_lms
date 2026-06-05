@@ -16,6 +16,20 @@ const pool =
       rejectUnauthorized: false,
     },
     min: 1,
+    // Connection ceiling per running instance. Explicit (pg defaults to 10) so
+    // the limit is visible alongside the shared-Postgres max_connections budget.
+    max: 10,
+    // Fail fast instead of hanging forever if the pool can't hand out a
+    // connection (e.g. all 10 busy or the DB is unreachable). The request
+    // errors in 5s rather than blocking a server worker indefinitely.
+    connectionTimeoutMillis: 5000,
+    // Cap any single query at 15s. Without this a stuck query never settles, so
+    // the `finally { client.release() }` below never runs and the connection
+    // leaks out of the pool for good — repeat that and the pool is exhausted.
+    // The timeout turns a hang into a normal error, so the connection is freed.
+    statement_timeout: 15000,
+    // Same idea for a transaction left open mid-flight (BEGIN without COMMIT).
+    idle_in_transaction_session_timeout: 15000,
   });
 
 if (process.env.NODE_ENV !== "production") {
