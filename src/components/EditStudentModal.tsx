@@ -50,6 +50,48 @@ function combineCategory(baseCategory: string, isPWD: boolean): string {
   return isPWD ? `PWD-${baseCategory}` : baseCategory;
 }
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
+const BOARD_STREAM_OPTIONS = ["PCM", "PCB", "PCMB"];
+const SCHOOL_MEDIUM_OPTIONS = ["English", "Hindi", "Others"];
+// Canonical Indian states + union territories. Free-form legacy values in the
+// data are preserved by selectField() rather than forced into this list.
+const INDIAN_STATE_OPTIONS = [
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+  "Andaman and Nicobar Islands",
+  "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Jammu and Kashmir",
+  "Ladakh",
+  "Lakshadweep",
+  "Puducherry",
+];
 
 // Format a date string from the database to YYYY-MM-DD for HTML date input
 function formatDateForInput(dateString: string | null): string {
@@ -285,6 +327,36 @@ export default function EditStudentModal({
       />
     </div>
   );
+
+  // Labeled dropdown bound to a formData key. Any existing value that isn't in
+  // `options` is preserved as a leading option so legacy data is never silently
+  // dropped or overwritten on save.
+  const selectField = (
+    name: keyof typeof formData,
+    label: string,
+    options: readonly string[],
+  ) => {
+    const current = String(formData[name] ?? "");
+    const opts = current && !options.includes(current) ? [current, ...options] : options;
+    return (
+      <div>
+        <label className={labelClassName}>{label}</label>
+        <select
+          name={name}
+          value={current}
+          onChange={handleChange}
+          className={inputClassName}
+        >
+          <option value="">Select...</option>
+          {opts.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  };
 
   return (
     <Modal open={isOpen} onClose={onClose} className="p-6">
@@ -571,8 +643,8 @@ export default function EditStudentModal({
             {/* Academic */}
             <h3 className={sectionHeadingClassName}>Academic</h3>
             <div className="grid grid-cols-2 gap-4">
-              {textField("board_stream", "Board Stream")}
-              {textField("school_medium", "School Medium")}
+              {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
+              {selectField("school_medium", "School Medium", SCHOOL_MEDIUM_OPTIONS)}
             </div>
 
             {/* Contact & Address */}
@@ -586,7 +658,7 @@ export default function EditStudentModal({
               {textField("city", "City")}
               {textField("district", "District")}
             </div>
-            {textField("state", "State")}
+            {selectField("state", "State", INDIAN_STATE_OPTIONS)}
 
             {/* Father */}
             <h3 className={sectionHeadingClassName}>Father</h3>

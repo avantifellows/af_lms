@@ -466,6 +466,36 @@ describe("EditStudentModal", () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it("renders Board Stream, School Medium and State as dropdowns with the expected options", () => {
+      renderModal();
+
+      const boardStream = getByName("board_stream") as HTMLSelectElement;
+      expect(boardStream.tagName).toBe("SELECT");
+      expect([...boardStream.options].map((o) => o.value)).toEqual(
+        expect.arrayContaining(["PCM", "PCB", "PCMB"]),
+      );
+
+      const medium = getByName("school_medium") as HTMLSelectElement;
+      expect(medium.tagName).toBe("SELECT");
+      expect([...medium.options].map((o) => o.value)).toEqual(
+        expect.arrayContaining(["English", "Hindi", "Others"]),
+      );
+
+      const state = getByName("state") as HTMLSelectElement;
+      expect(state.tagName).toBe("SELECT");
+      const stateValues = [...state.options].map((o) => o.value);
+      expect(stateValues).toContain("Maharashtra");
+      expect(stateValues).toContain("Delhi");
+    });
+
+    it("preserves a legacy dropdown value not in the canonical option list", () => {
+      renderModal({ student: { ...baseStudent, state: "Gujrat" } });
+      const state = getByName("state") as HTMLSelectElement;
+      // The misspelled legacy value is kept and selected, not dropped.
+      expect(state.value).toBe("Gujrat");
+      expect([...state.options].map((o) => o.value)).toContain("Gujrat");
+    });
+
     it("calls onSave and onClose on success", async () => {
       const user = userEvent.setup();
       const { props } = renderModal();
