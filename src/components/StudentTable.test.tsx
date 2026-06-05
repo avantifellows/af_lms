@@ -377,6 +377,48 @@ describe("StudentTable - expand/collapse", () => {
     expect(screen.getByText("expanded@test.com")).toBeInTheDocument();
   });
 
+  it("shows the additional profile fields when expanded", async () => {
+    const user = userEvent.setup();
+    const student = {
+      ...makeStudent(),
+      whatsapp_phone: "9876500000",
+      address: "12 MG Road",
+      city: "Pune",
+      district: "Pune City",
+      state: "Maharashtra",
+      pincode: "411001",
+      board_stream: "PCM",
+      school_medium: "English",
+      father_name: "Suresh Kumar",
+      father_phone: "9000000001",
+      mother_name: "Sunita Kumar",
+      guardian_name: "Ramesh Kumar",
+      guardian_relation: "Uncle",
+      family_income: "200000",
+      monthly_family_income: "16000",
+    };
+    render(<StudentTable students={[student]} grades={defaultGrades} />);
+
+    await user.click(screen.getByLabelText("Expand"));
+
+    expect(screen.getByText("9876500000")).toBeInTheDocument();
+    expect(screen.getByText("12 MG Road")).toBeInTheDocument();
+    expect(screen.getByText("Pune City")).toBeInTheDocument();
+    expect(screen.getByText("Maharashtra")).toBeInTheDocument();
+    expect(screen.getByText("411001")).toBeInTheDocument();
+    expect(screen.getByText("PCM")).toBeInTheDocument();
+    expect(screen.getByText("English")).toBeInTheDocument();
+    expect(screen.getByText("Suresh Kumar")).toBeInTheDocument();
+    expect(screen.getByText("Sunita Kumar")).toBeInTheDocument();
+    expect(screen.getByText("Ramesh Kumar")).toBeInTheDocument();
+    expect(screen.getByText("Uncle")).toBeInTheDocument();
+    expect(screen.getByText("200000")).toBeInTheDocument();
+    expect(screen.getByText("16000")).toBeInTheDocument();
+    // Section headings render too
+    expect(screen.getByText("Father")).toBeInTheDocument();
+    expect(screen.getByText("Guardian")).toBeInTheDocument();
+  });
+
   it("hides details after collapsing", async () => {
     const user = userEvent.setup();
     const student = makeStudent({ phone: "9999999999" });
@@ -1026,7 +1068,12 @@ describe("StudentTable - helper function behaviors", () => {
       );
 
       await user.click(screen.getByLabelText("Expand"));
-      const badge = screen.getByText(categories[i] || "—").closest("span");
+      // Target the category badge specifically: the only pill-shaped span
+      // inside the expanded (.bg-gray-50) area. A null category renders "—",
+      // which now also appears in other empty fields, and the grade badge in
+      // the header is also pill-shaped — so both need to be excluded.
+      const badge = document.querySelector(".bg-gray-50 span.inline-flex.rounded-full");
+      expect(badge?.textContent).toBe(categories[i] || "—");
       expect(badge?.className).toContain(expectedClasses[i]);
       unmount();
     }

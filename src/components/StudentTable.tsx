@@ -100,6 +100,33 @@ function getCategoryColor(category: string | null): string {
   }
 }
 
+// A labelled value cell used in the expanded student detail view.
+function DetailField({
+  label,
+  value,
+  className = "",
+}: {
+  label: string;
+  value: string | null | undefined;
+  className?: string;
+}) {
+  return (
+    <div>
+      <span className="text-gray-400 text-xs uppercase tracking-wide">{label}</span>
+      <p className={`text-gray-900 ${className}`}>{value || "—"}</p>
+    </div>
+  );
+}
+
+// Section heading inside the expanded detail view.
+function DetailSection({ title }: { title: string }) {
+  return (
+    <h4 className="mt-4 mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+      {title}
+    </h4>
+  );
+}
+
 function getCurrentAcademicYear(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -249,6 +276,53 @@ function StudentCard({
               <span className="text-gray-400 text-xs uppercase tracking-wide">Email</span>
               <p className="text-gray-900 truncate">{student.email || "—"}</p>
             </div>
+          </div>
+
+          <DetailSection title="Academic" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+            <DetailField label="Board Stream" value={student.board_stream} />
+            <DetailField label="School Medium" value={student.school_medium} />
+          </div>
+
+          <DetailSection title="Contact & Address" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+            <DetailField label="WhatsApp" value={student.whatsapp_phone} />
+            <DetailField label="Address" value={student.address} />
+            <DetailField label="City" value={student.city} />
+            <DetailField label="District" value={student.district} />
+            <DetailField label="State" value={student.state} />
+            <DetailField label="Pincode" value={student.pincode} />
+          </div>
+
+          <DetailSection title="Father" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+            <DetailField label="Name" value={student.father_name} />
+            <DetailField label="Phone" value={student.father_phone} />
+            <DetailField label="Profession" value={student.father_profession} />
+            <DetailField label="Education Level" value={student.father_education_level} />
+          </div>
+
+          <DetailSection title="Mother" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+            <DetailField label="Name" value={student.mother_name} />
+            <DetailField label="Phone" value={student.mother_phone} />
+            <DetailField label="Profession" value={student.mother_profession} />
+            <DetailField label="Education Level" value={student.mother_education_level} />
+          </div>
+
+          <DetailSection title="Guardian" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+            <DetailField label="Name" value={student.guardian_name} />
+            <DetailField label="Relation" value={student.guardian_relation} />
+            <DetailField label="Phone" value={student.guardian_phone} />
+            <DetailField label="Profession" value={student.guardian_profession} />
+            <DetailField label="Education Level" value={student.guardian_education_level} />
+          </div>
+
+          <DetailSection title="Socio-economic" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+            <DetailField label="Annual Family Income" value={student.family_income} />
+            <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
           </div>
 
           {studentPkId !== null && (
