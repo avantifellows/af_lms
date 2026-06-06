@@ -16,8 +16,6 @@ export const TestFormatOptions: Option[] = [
   { value: "chapter_test", label: "Chapter Test" },
   { value: "combined_chapter_test", label: "Combined Chapter Test" },
   { value: "full_syllabus_test", label: "Full Syllabus Test" },
-  { value: "evaluation_test", label: "Evaluation Test" },
-  { value: "hiring_test", label: "Hiring Test" },
   { value: "mock_test", label: "Mock Test" },
   { value: "homework", label: "Homework" },
   { value: "questionnaire", label: "Questionnaire" },
