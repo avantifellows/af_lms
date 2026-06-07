@@ -27,7 +27,7 @@ export default async function CentresPage() {
   return (
     <div className="min-h-screen bg-bg">
       <header className="bg-bg-card border-b border-border shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
+        <div className="flex w-full justify-between px-4 py-4 sm:px-6 lg:px-8 items-center">
           <div className="flex items-center gap-3">
             <Link href="/admin" className="text-text-muted hover:text-text-primary p-1 -m-1">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -56,10 +56,11 @@ export default async function CentresPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+      <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {centresResult.ok && optionSetsResult.ok ? (
           <CentreGrid
             initialRows={centresResult.rows}
+            initialSummary={centresResult.summary}
             initialFilters={centresResult.filters}
             initialPagination={centresResult.pagination}
             optionSets={optionSetsResult.optionSets}

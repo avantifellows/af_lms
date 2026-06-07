@@ -41,6 +41,7 @@ export type CentreSchoolLinkFilter = "all" | "linked" | "unlinked";
 
 export interface CentreListFilters {
   search: string;
+  searchTerms: string[];
   active: CentreBooleanFilter;
   schoolLink: CentreSchoolLinkFilter;
   typeCode: string | null;
@@ -122,12 +123,34 @@ export type CentreListResult =
       ok: true;
       filters: CentreListFilters;
       rows: CentreListRow[];
+      summary: CentreListSummary;
       pagination: {
         page: number;
         limit: number;
         totalRows: number;
         totalPages: number;
       };
+    }
+  | CentreSchemaUnavailable;
+
+export interface CentreListSummary {
+  totalCentres: number;
+  activeCentres: number;
+  linkedCentres: number;
+  physicalCentres: number;
+}
+
+export interface CentreSearchSuggestion {
+  kind: "centre_name" | "school_name" | "school_code" | "udise";
+  value: string;
+  label: string;
+  detail: string;
+}
+
+export type CentreSearchSuggestionsResult =
+  | {
+      ok: true;
+      suggestions: CentreSearchSuggestion[];
     }
   | CentreSchemaUnavailable;
 
@@ -248,6 +271,9 @@ interface CentreListQueryRow {
   school_state: string | null;
   school_district: string | null;
   total_count: string | number | null;
+  active_count?: string | number | null;
+  linked_count?: string | number | null;
+  physical_count?: string | number | null;
 }
 
 const FIXED_OPTION_SET_CODES: CentreOptionSetCode[] = [
@@ -400,6 +426,7 @@ export function normalizeCentreListParams(searchParams: {
     offset: (page - 1) * limit,
     filters: {
       search: stringParam(searchParams.search),
+      searchTerms: stringArrayParam(searchParams.search_terms),
       active: booleanFilter(searchParams.active),
       schoolLink: schoolLinkFilter(searchParams.school_link),
       typeCode: nullableCodeParam(searchParams.type),
@@ -427,14 +454,19 @@ export async function getCentreList(params: {
     return `$${values.length}`;
   };
 
-  if (normalized.filters.search) {
-    const placeholder = addParam(`%${normalized.filters.search}%`);
-    whereClauses.push(
-      `(centres.name ILIKE ${placeholder}
+  const searchTerms = [
+    ...normalized.filters.searchTerms,
+    normalized.filters.search,
+  ].filter(Boolean);
+  if (searchTerms.length > 0) {
+    const termClauses = searchTerms.map((term) => {
+      const placeholder = addParam(`%${term}%`);
+      return `(centres.name ILIKE ${placeholder}
         OR schools.name ILIKE ${placeholder}
         OR schools.code ILIKE ${placeholder}
-        OR schools.udise_code ILIKE ${placeholder})`
-    );
+        OR schools.udise_code ILIKE ${placeholder})`;
+    });
+    whereClauses.push(`(${termClauses.join(" OR ")})`);
   }
   if (normalized.filters.active !== "all") {
     whereClauses.push(
@@ -506,7 +538,10 @@ export async function getCentreList(params: {
        schools.region AS school_region,
        schools.state AS school_state,
        schools.district AS school_district,
-       COUNT(*) OVER() AS total_count
+       COUNT(*) OVER() AS total_count,
+       COUNT(*) FILTER (WHERE centres.is_active) OVER() AS active_count,
+       COUNT(*) FILTER (WHERE centres.school_id IS NOT NULL) OVER() AS linked_count,
+       COUNT(*) FILTER (WHERE centres.is_physical) OVER() AS physical_count
      FROM centres
      LEFT JOIN school schools
        ON schools.id = centres.school_id
@@ -549,17 +584,115 @@ export async function getCentreList(params: {
   );
 
   const totalRows = numberFromDb(rows[0]?.total_count ?? 0);
+  const summary: CentreListSummary = {
+    totalCentres: totalRows,
+    activeCentres: numberFromDb(rows[0]?.active_count ?? 0),
+    linkedCentres: numberFromDb(rows[0]?.linked_count ?? 0),
+    physicalCentres: numberFromDb(rows[0]?.physical_count ?? 0),
+  };
 
   return {
     ok: true,
     filters: normalized.filters,
     rows: rows.map(mapCentreListRow),
+    summary,
     pagination: {
       page: normalized.page,
       limit: normalized.limit,
       totalRows,
       totalPages: Math.ceil(totalRows / normalized.limit),
     },
+  };
+}
+
+export async function getCentreSearchSuggestions(params: {
+  search: string;
+  limit?: number;
+}): Promise<CentreSearchSuggestionsResult> {
+  const schema = await checkCentreManagementSchema();
+  if (!schema.ok) {
+    return schema;
+  }
+
+  const search = params.search.trim();
+  if (!search) {
+    return { ok: true, suggestions: [] };
+  }
+
+  const limit = clamp(params.limit ?? 8, 1, 20);
+  const rows = await query<{
+    kind: CentreSearchSuggestion["kind"];
+    value: string | null;
+    label: string | null;
+    detail: string | null;
+  }>(
+    `WITH candidates AS (
+       SELECT 'centre_name'::text AS kind,
+              centres.name AS value,
+              centres.name AS label,
+              'Centre name'::text AS detail
+       FROM centres
+       WHERE centres.name ILIKE $1
+
+       UNION ALL
+
+       SELECT 'school_name'::text AS kind,
+              schools.name AS value,
+              schools.name AS label,
+              'School name'::text AS detail
+       FROM centres
+       JOIN school schools
+         ON schools.id = centres.school_id
+       WHERE schools.name ILIKE $1
+
+       UNION ALL
+
+       SELECT 'school_code'::text AS kind,
+              schools.code AS value,
+              schools.code AS label,
+              COALESCE(schools.name, 'School code') AS detail
+       FROM centres
+       JOIN school schools
+         ON schools.id = centres.school_id
+       WHERE schools.code ILIKE $1
+
+       UNION ALL
+
+       SELECT 'udise'::text AS kind,
+              schools.udise_code AS value,
+              schools.udise_code AS label,
+              COALESCE(schools.name, 'UDISE') AS detail
+       FROM centres
+       JOIN school schools
+         ON schools.id = centres.school_id
+       WHERE schools.udise_code ILIKE $1
+     )
+     SELECT kind, value, label, detail
+     FROM candidates
+     WHERE value IS NOT NULL AND value <> ''
+     GROUP BY kind, value, label, detail
+     ORDER BY
+       CASE
+         WHEN lower(value) = lower($2) THEN 0
+         WHEN lower(value) LIKE lower($3) THEN 1
+         ELSE 2
+       END,
+       length(value) ASC,
+       value ASC
+     LIMIT $4`,
+    [`%${search}%`, search, `${search}%`, limit]
+  );
+
+  return {
+    ok: true,
+    suggestions: rows
+      .filter((row) => row.value && row.label)
+      .map((row) => ({
+        kind: row.kind,
+        value: row.value!,
+        label: row.label!,
+        detail: row.detail ?? "",
+      })),
   };
 }
 
@@ -1503,6 +1636,23 @@ function clamp(value: number, min: number, max: number): number {
 function stringParam(value: string | string[] | undefined): string {
   const raw = Array.isArray(value) ? value[0] : value;
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+function stringArrayParam(value: string | string[] | undefined): string[] {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" || !raw.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 function nullableCodeParam(value: string | string[] | undefined): string | null {

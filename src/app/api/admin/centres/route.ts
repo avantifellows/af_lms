@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     filters: result.filters,
     rows: result.rows,
+    summary: result.summary,
     pagination: result.pagination,
   });
 }

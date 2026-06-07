@@ -5,6 +5,7 @@ import CentreGrid from "./CentreGrid";
 import type {
   CentreListFilters,
   CentreListRow,
+  CentreListSummary,
   CentreOptionSet,
 } from "@/lib/centres";
 
@@ -98,6 +99,7 @@ const optionSets: CentreOptionSet[] = [
 
 const filters: CentreListFilters = {
   search: "",
+  searchTerms: [],
   active: "all",
   schoolLink: "all",
   typeCode: null,
@@ -160,6 +162,13 @@ const rows: CentreListRow[] = [
   },
 ];
 
+const summary: CentreListSummary = {
+  totalCentres: 2,
+  activeCentres: 1,
+  linkedCentres: 1,
+  physicalCentres: 1,
+};
+
 function renderGrid({
   initialPagination = { page: 1, limit: 25, totalRows: 2, totalPages: 1 },
 }: {
@@ -173,6 +182,7 @@ function renderGrid({
   return render(
     <CentreGrid
       initialRows={rows}
+      initialSummary={summary}
       initialFilters={filters}
       initialPagination={initialPagination}
       optionSets={optionSets}
@@ -194,6 +204,10 @@ describe("CentreGrid", () => {
 
     expect(screen.getByRole("heading", { name: "Centres" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New Centre" })).toBeInTheDocument();
+    expect(screen.getByText("Total Centres")).toBeInTheDocument();
+    expect(screen.getByText("Active Centres")).toBeInTheDocument();
+    expect(screen.getByText("Centres linked to Schools")).toBeInTheDocument();
+    expect(screen.getByText("Total Physical Centres")).toBeInTheDocument();
     for (const header of [
       "Centre",
       "Linked School",
@@ -203,13 +217,10 @@ describe("CentreGrid", () => {
       "State",
       "District",
       "Type",
+      "Centre Streams",
       "Category",
       "Sub-category",
-      "Centre Streams",
-      "Physical",
-      "Active",
       "Updated",
-      "Actions",
     ]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
@@ -262,6 +273,50 @@ describe("CentreGrid", () => {
     expect(url).not.toContain("type=");
     expect(await screen.findByText("Bench Teacher Bucket")).toBeInTheDocument();
     expect(screen.queryByText("JNV Bhavnagar CoE")).not.toBeInTheDocument();
+  });
+
+  it("debounces search suggestions and applies checked suggestion terms", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("/api/admin/centres/search-suggestions")) {
+        return {
+          ok: true,
+          json: async () => ({
+            suggestions: [
+              {
+                kind: "centre_name",
+                value: "JNV Barwani",
+                label: "JNV Barwani",
+                detail: "Centre name",
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          filters: { ...filters, search: "", searchTerms: ["JNV Barwani"] },
+          summary,
+          rows: [rows[0]],
+          pagination: { page: 1, limit: 25, totalRows: 1, totalPages: 1 },
+        }),
+      } as Response;
+    });
+    renderGrid();
+
+    await user.type(screen.getByLabelText("Search"), "bar");
+    expect(await screen.findByText("JNV Barwani")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /JNV Barwani/ }));
+
+    const centreListCall = mockFetch.mock.calls.find(([url]) =>
+      String(url).startsWith("/api/admin/centres?")
+    );
+    expect(String(centreListCall?.[0])).toContain("search_terms=");
+    expect(await screen.findByText("JNV Bhavnagar CoE")).toBeInTheDocument();
   });
 
   it("loads later Centre pages without resetting filters", async () => {

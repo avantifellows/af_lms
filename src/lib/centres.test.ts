@@ -8,6 +8,7 @@ import {
   createCentreOption,
   getCentreList,
   getCentreOptionSets,
+  getCentreSearchSuggestions,
   isActiveCentreOptionCode,
   resetCentreSchemaCheckForTests,
   updateCentre,
@@ -323,6 +324,9 @@ describe("Centre grid contracts", () => {
           school_state: "Maharashtra",
           school_district: "Pune",
           total_count: "1",
+          active_count: "1",
+          linked_count: "1",
+          physical_count: "1",
         },
       ]);
 
@@ -334,6 +338,7 @@ describe("Centre grid contracts", () => {
       ok: true,
       filters: {
         search: "pune",
+        searchTerms: [],
         active: "all",
         schoolLink: "all",
         typeCode: null,
@@ -376,6 +381,12 @@ describe("Centre grid contracts", () => {
           },
         },
       ],
+      summary: {
+        totalCentres: 1,
+        activeCentres: 1,
+        linkedCentres: 1,
+        physicalCentres: 1,
+      },
       pagination: {
         page: 1,
         limit: 25,
@@ -383,6 +394,49 @@ describe("Centre grid contracts", () => {
         totalPages: 1,
       },
     });
+  });
+
+  it("returns fast Centre search suggestions across Centre and linked School fields", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          kind: "centre_name",
+          value: "JNV Barwani",
+          label: "JNV Barwani",
+          detail: "Centre name",
+        },
+        {
+          kind: "school_code",
+          value: "54059",
+          label: "54059",
+          detail: "JNV Barwani",
+        },
+      ]);
+
+    const result = await getCentreSearchSuggestions({ search: "bar", limit: 8 });
+
+    expect(result).toEqual({
+      ok: true,
+      suggestions: [
+        {
+          kind: "centre_name",
+          value: "JNV Barwani",
+          label: "JNV Barwani",
+          detail: "Centre name",
+        },
+        {
+          kind: "school_code",
+          value: "54059",
+          label: "54059",
+          detail: "JNV Barwani",
+        },
+      ],
+    });
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining("WITH candidates AS"),
+      ["%bar%", "bar", "bar%", 8]
+    );
   });
 
   it("creates Centres only with active option codes and a valid optional School", async () => {

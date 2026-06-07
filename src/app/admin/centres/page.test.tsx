@@ -73,6 +73,7 @@ describe("CentresPage (server component)", () => {
       ok: true,
       filters: {
         search: "",
+        searchTerms: [],
         active: "all",
         schoolLink: "all",
         typeCode: null,
@@ -112,6 +113,12 @@ describe("CentresPage (server component)", () => {
           },
         },
       ],
+      summary: {
+        totalCentres: 1,
+        activeCentres: 1,
+        linkedCentres: 1,
+        physicalCentres: 1,
+      },
       pagination: { page: 1, limit: 25, totalRows: 1, totalPages: 1 },
     });
     mockGetCentreOptionSets.mockResolvedValue({
@@ -141,6 +148,7 @@ describe("CentresPage (server component)", () => {
     const props = JSON.parse(grid.getAttribute("data-props")!);
     expect(props.initialRows).toHaveLength(1);
     expect(props.initialRows[0].name).toBe("JNV Bhavnagar CoE");
+    expect(props.initialSummary.totalCentres).toBe(1);
     expect(props.initialPagination.totalRows).toBe(1);
     expect(props.optionSets[0].code).toBe("type");
   });

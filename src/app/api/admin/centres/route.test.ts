@@ -86,6 +86,9 @@ describe("GET /api/admin/centres", () => {
           school_state: null,
           school_district: null,
           total_count: "1",
+          active_count: "1",
+          linked_count: "0",
+          physical_count: "0",
         },
       ]);
 
@@ -103,6 +106,12 @@ describe("GET /api/admin/centres", () => {
         page: 1,
         limit: 25,
         totalRows: 1,
+      },
+      summary: {
+        totalCentres: 1,
+        activeCentres: 1,
+        linkedCentres: 0,
+        physicalCentres: 0,
       },
       rows: [
         {
