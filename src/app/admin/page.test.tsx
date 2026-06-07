@@ -76,6 +76,7 @@ describe("AdminPage (server component)", () => {
     expect(screen.getByText("User Management")).toBeInTheDocument();
     expect(screen.getByText("Batch Metadata")).toBeInTheDocument();
     expect(screen.getByText("School Programs")).toBeInTheDocument();
+    expect(screen.getByText("Centre Management")).toBeInTheDocument();
 
     // verify links
     expect(screen.getByText("User Management").closest("a")).toHaveAttribute(
@@ -89,6 +90,10 @@ describe("AdminPage (server component)", () => {
     expect(screen.getByText("School Programs").closest("a")).toHaveAttribute(
       "href",
       "/admin/schools"
+    );
+    expect(screen.getByText("Centre Management").closest("a")).toHaveAttribute(
+      "href",
+      "/admin/centres"
     );
   });
 

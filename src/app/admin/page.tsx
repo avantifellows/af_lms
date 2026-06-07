@@ -68,6 +68,15 @@ export default async function AdminPage() {
               </p>
             </Card>
           </Link>
+
+          <Link href="/admin/centres">
+            <Card className="block p-6">
+              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Centre Management</h3>
+              <p className="mt-2 text-sm text-text-muted">
+                Manage Centres, School links, streams, and active status.
+              </p>
+            </Card>
+          </Link>
         </div>
       </main>
     </div>

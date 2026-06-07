@@ -47,24 +47,36 @@ describe("GET /api/admin/schools", () => {
     const json = await res.json();
     expect(json).toEqual(schools);
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("SELECT id, code, name, region, program_ids"),
+      expect.stringContaining("SELECT id, code, name, udise_code, region, state, district, program_ids"),
     );
   });
 
-  it("searches schools by name or code when q is provided", async () => {
+  it("searches schools by name, code, or UDISE when q is provided", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
-    const schools = [{ code: "70705", name: "JNV Test", region: "R1" }];
+    const schools = [
+      {
+        id: 1,
+        code: "70705",
+        name: "JNV Test",
+        udise_code: "24010100101",
+        region: "R1",
+        state: "Gujarat",
+        district: "Bhavnagar",
+      },
+    ];
     mockQuery.mockResolvedValue(schools);
 
-    const req = new Request("http://localhost/api/admin/schools?q=test");
+    const req = new Request("http://localhost/api/admin/schools?q=240101");
     const res = await GET(req as never);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual(schools);
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("udise_code ILIKE $1");
     expect(mockQuery).toHaveBeenCalledWith(
       expect.stringContaining("ILIKE"),
-      ["%test%"],
+      ["%240101%"],
     );
   });
 
