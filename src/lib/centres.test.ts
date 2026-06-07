@@ -4,10 +4,13 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 
 import { query } from "./db";
 import {
+  createCentre,
   createCentreOption,
+  getCentreList,
   getCentreOptionSets,
   isActiveCentreOptionCode,
   resetCentreSchemaCheckForTests,
+  updateCentre,
   updateCentreOption,
 } from "./centres";
 
@@ -278,5 +281,381 @@ describe("Centre option contracts", () => {
     expect(isActiveCentreOptionCode(optionSets, "type", "coe")).toBe(true);
     expect(isActiveCentreOptionCode(optionSets, "type", "old")).toBe(false);
     expect(isActiveCentreOptionCode(optionSets, "stream", "coe")).toBe(false);
+  });
+});
+
+describe("Centre grid contracts", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetCentreSchemaCheckForTests();
+  });
+
+  it("lists paginated Centres with School display fields and resolved option labels", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "91",
+          name: "JNV Pune CoE",
+          school_id: "44",
+          type_code: "coe",
+          type_label: "CoE",
+          type_is_active: false,
+          category_code: "cat_1_coe",
+          category_label: "Cat 1 CoE",
+          category_is_active: true,
+          sub_category_code: null,
+          sub_category_label: null,
+          sub_category_is_active: null,
+          stream_codes: ["jee", "neet"],
+          stream_options: [
+            { code: "jee", label: "JEE", is_active: true },
+            { code: "neet", label: "NEET", is_active: false },
+          ],
+          is_physical: true,
+          is_active: true,
+          inserted_at: "2026-01-05T00:00:00.000Z",
+          updated_at: "2026-01-06T00:00:00.000Z",
+          school_name: "JNV Pune",
+          school_code: "PN01",
+          school_udise_code: "27250100101",
+          school_region: "West",
+          school_state: "Maharashtra",
+          school_district: "Pune",
+          total_count: "1",
+        },
+      ]);
+
+    const result = await getCentreList({
+      searchParams: { page: "1", limit: "25", search: "pune" },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      filters: {
+        search: "pune",
+        active: "all",
+        schoolLink: "all",
+        typeCode: null,
+        categoryCode: null,
+        subCategoryCode: null,
+        streamCode: null,
+        isPhysical: "all",
+      },
+      rows: [
+        {
+          id: 91,
+          name: "JNV Pune CoE",
+          schoolId: 44,
+          typeCode: "coe",
+          typeLabel: "CoE",
+          typeOptionActive: false,
+          categoryCode: "cat_1_coe",
+          categoryLabel: "Cat 1 CoE",
+          categoryOptionActive: true,
+          subCategoryCode: null,
+          subCategoryLabel: null,
+          subCategoryOptionActive: null,
+          streamCodes: ["jee", "neet"],
+          streams: [
+            { code: "jee", label: "JEE", isActive: true },
+            { code: "neet", label: "NEET", isActive: false },
+          ],
+          isPhysical: true,
+          isActive: true,
+          insertedAt: "2026-01-05T00:00:00.000Z",
+          updatedAt: "2026-01-06T00:00:00.000Z",
+          school: {
+            id: 44,
+            name: "JNV Pune",
+            code: "PN01",
+            udiseCode: "27250100101",
+            region: "West",
+            state: "Maharashtra",
+            district: "Pune",
+          },
+        },
+      ],
+      pagination: {
+        page: 1,
+        limit: 25,
+        totalRows: 1,
+        totalPages: 1,
+      },
+    });
+  });
+
+  it("creates Centres only with active option codes and a valid optional School", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          option_set_id: "1",
+          option_set_code: "type",
+          option_set_label: "Centre Type",
+          allow_multi: false,
+          option_set_sort_order: "1",
+          option_id: "11",
+          option_code: "coe",
+          option_label: "CoE",
+          option_sort_order: "1",
+          option_is_active: true,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+        {
+          option_set_id: "4",
+          option_set_code: "stream",
+          option_set_label: "Centre Stream",
+          allow_multi: true,
+          option_set_sort_order: "4",
+          option_id: "41",
+          option_code: "jee",
+          option_label: "JEE",
+          option_sort_order: "1",
+          option_is_active: true,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+      ])
+      .mockResolvedValueOnce([{ id: "44" }])
+      .mockResolvedValueOnce([
+        {
+          id: "92",
+          name: "New Centre",
+          school_id: "44",
+          type_code: "coe",
+          type_label: "CoE",
+          type_is_active: true,
+          category_code: null,
+          category_label: null,
+          category_is_active: null,
+          sub_category_code: null,
+          sub_category_label: null,
+          sub_category_is_active: null,
+          stream_codes: ["jee"],
+          stream_options: [{ code: "jee", label: "JEE", is_active: true }],
+          is_physical: false,
+          is_active: true,
+          inserted_at: "2026-01-07T00:00:00.000Z",
+          updated_at: "2026-01-07T00:00:00.000Z",
+          school_name: "JNV Pune",
+          school_code: "PN01",
+          school_udise_code: "27250100101",
+          school_region: "West",
+          school_state: "Maharashtra",
+          school_district: "Pune",
+          total_count: "1",
+        },
+      ]);
+
+    const result = await createCentre({
+      body: {
+        name: "New Centre",
+        school_id: 44,
+        type_code: "coe",
+        category_code: null,
+        sub_category_code: null,
+        stream_codes: ["jee"],
+        is_physical: false,
+        is_active: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      centre: {
+        id: 92,
+        name: "New Centre",
+        schoolId: 44,
+        typeCode: "coe",
+        streamCodes: ["jee"],
+        isPhysical: false,
+        isActive: true,
+      },
+    });
+    expect(mockQuery).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO centres"), [
+      "New Centre",
+      44,
+      "coe",
+      null,
+      null,
+      ["jee"],
+      false,
+      true,
+    ]);
+  });
+
+  it("updates Centres while allowing unchanged inactive options to remain", async () => {
+    const existingCentreRow = {
+      id: "93",
+      name: "Legacy Centre",
+      school_id: null,
+      type_code: "legacy",
+      type_label: "Legacy",
+      type_is_active: false,
+      category_code: null,
+      category_label: null,
+      category_is_active: null,
+      sub_category_code: null,
+      sub_category_label: null,
+      sub_category_is_active: null,
+      stream_codes: ["old_stream"],
+      stream_options: [{ code: "old_stream", label: "Old Stream", is_active: false }],
+      is_physical: true,
+      is_active: true,
+      inserted_at: "2026-01-08T00:00:00.000Z",
+      updated_at: "2026-01-08T00:00:00.000Z",
+      school_name: null,
+      school_code: null,
+      school_udise_code: null,
+      school_region: null,
+      school_state: null,
+      school_district: null,
+      total_count: "1",
+    };
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([existingCentreRow])
+      .mockResolvedValueOnce([
+        {
+          option_set_id: "1",
+          option_set_code: "type",
+          option_set_label: "Centre Type",
+          allow_multi: false,
+          option_set_sort_order: "1",
+          option_id: "12",
+          option_code: "legacy",
+          option_label: "Legacy",
+          option_sort_order: "9",
+          option_is_active: false,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+        {
+          option_set_id: "4",
+          option_set_code: "stream",
+          option_set_label: "Centre Stream",
+          allow_multi: true,
+          option_set_sort_order: "4",
+          option_id: "42",
+          option_code: "old_stream",
+          option_label: "Old Stream",
+          option_sort_order: "9",
+          option_is_active: false,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+      ])
+      .mockResolvedValueOnce([{ ...existingCentreRow, name: "Legacy Centre Updated", is_active: false }]);
+
+    const result = await updateCentre({
+      id: 93,
+      body: {
+        name: "Legacy Centre Updated",
+        type_code: "legacy",
+        stream_codes: ["old_stream"],
+        is_active: false,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      centre: {
+        id: 93,
+        name: "Legacy Centre Updated",
+        typeCode: "legacy",
+        typeOptionActive: false,
+        streamCodes: ["old_stream"],
+        streams: [{ code: "old_stream", label: "Old Stream", isActive: false }],
+        isActive: false,
+      },
+    });
+    expect(mockQuery).toHaveBeenLastCalledWith(expect.stringContaining("UPDATE centres"), [
+      93,
+      "Legacy Centre Updated",
+      null,
+      "legacy",
+      null,
+      null,
+      ["old_stream"],
+      true,
+      false,
+    ]);
+  });
+
+  it("rejects unknown, inactive, and wrong-set options for new Centre selections", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          option_set_id: "1",
+          option_set_code: "type",
+          option_set_label: "Centre Type",
+          allow_multi: false,
+          option_set_sort_order: "1",
+          option_id: "11",
+          option_code: "coe",
+          option_label: "CoE",
+          option_sort_order: "1",
+          option_is_active: true,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+        {
+          option_set_id: "2",
+          option_set_code: "category",
+          option_set_label: "Centre Category",
+          allow_multi: false,
+          option_set_sort_order: "2",
+          option_id: "21",
+          option_code: "cat_1_coe",
+          option_label: "Cat 1 CoE",
+          option_sort_order: "1",
+          option_is_active: true,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+        {
+          option_set_id: "4",
+          option_set_code: "stream",
+          option_set_label: "Centre Stream",
+          allow_multi: true,
+          option_set_sort_order: "4",
+          option_id: "41",
+          option_code: "old_stream",
+          option_label: "Old Stream",
+          option_sort_order: "9",
+          option_is_active: false,
+          option_inserted_at: null,
+          option_updated_at: null,
+        },
+      ]);
+
+    const result = await createCentre({
+      body: {
+        name: "Invalid Centre",
+        school_id: null,
+        type_code: "cat_1_coe",
+        category_code: null,
+        sub_category_code: "missing",
+        stream_codes: ["old_stream"],
+        is_physical: true,
+        is_active: true,
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      status: 422,
+      error: "Invalid Centre payload",
+      fields: {
+        type_code: "Centre type_code must be an active type option",
+        sub_category_code:
+          "Centre sub_category_code must be an active sub_category option",
+        stream_codes: "Centre Stream codes must be active stream options",
+      },
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 });
