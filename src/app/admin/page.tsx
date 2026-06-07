@@ -77,6 +77,15 @@ export default async function AdminPage() {
               </p>
             </Card>
           </Link>
+
+          <Link href="/admin/centres/config">
+            <Card className="block p-6">
+              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Centre Option Configuration</h3>
+              <p className="mt-2 text-sm text-text-muted">
+                Manage Centre type, category, sub-category, and Centre Stream options.
+              </p>
+            </Card>
+          </Link>
         </div>
       </main>
     </div>

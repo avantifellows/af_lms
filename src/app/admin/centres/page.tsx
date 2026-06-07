@@ -39,12 +39,20 @@ export default async function CentresPage() {
               <p className="text-xs text-text-muted font-mono">{session.user.email}</p>
             </div>
           </div>
-          <Link
-            href="/api/auth/signout"
-            className="text-sm font-bold text-danger hover:text-danger/80"
-          >
-            Sign out
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/admin/centres/config"
+              className="text-sm font-bold uppercase text-accent hover:text-accent-hover"
+            >
+              Configure options
+            </Link>
+            <Link
+              href="/api/auth/signout"
+              className="text-sm font-bold text-danger hover:text-danger/80"
+            >
+              Sign out
+            </Link>
+          </div>
         </div>
       </header>
 

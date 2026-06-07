@@ -133,6 +133,10 @@ describe("CentresPage (server component)", () => {
 
     expect(screen.getByText("Centre Management")).toBeInTheDocument();
     expect(screen.getByText("admin@avantifellows.org")).toBeInTheDocument();
+    expect(screen.getByText("Configure options")).toHaveAttribute(
+      "href",
+      "/admin/centres/config"
+    );
     const grid = screen.getByTestId("centre-grid");
     const props = JSON.parse(grid.getAttribute("data-props")!);
     expect(props.initialRows).toHaveLength(1);
