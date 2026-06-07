@@ -96,6 +96,7 @@ describe("GET /api/curriculum/configs/export", () => {
       "4",
       "%motion%",
       "all",
+      null,
     ]);
     const sql = mockQuery.mock.calls[0][0] as string;
     expect(sql).toContain("ORDER BY coverage_sequence DESC");
