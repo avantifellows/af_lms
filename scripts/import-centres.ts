@@ -80,13 +80,22 @@ function printReport(report: CentreCsvImportReport): void {
     `Physical rows: ${report.counts.physicalRows}; non-physical rows: ${report.counts.nonPhysicalRows}`
   );
   console.log(`Existing Centre rows: ${report.counts.existingCentreRows}`);
+  console.log(
+    `School links: approved ${report.counts.approvedSchoolRows}, auto-matched ${report.counts.autoMatchedSchoolRows}, unlinked ${report.counts.unlinkedSchoolRows}`
+  );
   console.log(`Rows that would be inserted: ${report.counts.rowsThatWouldBeInserted}`);
 
   printList("Missing mapping source ids", report.issues.missingMappingSourceIds);
   printList("Duplicate mapping source ids", report.issues.duplicateMappingSourceIds);
   printIssueRefs("Invalid mapping rows", report.issues.invalidMappingRows);
-  printIssueRefs("Unresolved mappings", report.issues.unresolvedMappings);
-  printIssueRefs("Ambiguous mappings", report.issues.ambiguousMappings);
+  printIssueRefs(
+    "Unresolved school name matches",
+    report.issues.unresolvedSchoolNameMatches
+  );
+  printIssueRefs(
+    "Ambiguous school name matches",
+    report.issues.ambiguousSchoolNameMatches
+  );
   printIssueRefs("Invalid school ids", report.issues.invalidSchoolIds);
   printIssueRefs("Invalid option codes", report.issues.invalidOptionCodes);
   printList("Blockers", report.blockers);
@@ -112,6 +121,7 @@ function printIssueRefs(
     status?: string;
     field?: string;
     code?: string;
+    candidates?: string;
   }>
 ): void {
   if (issues.length === 0) return;
@@ -122,6 +132,7 @@ function printIssueRefs(
       issue.status ? `status=${issue.status}` : "",
       issue.field ? `field=${issue.field}` : "",
       issue.code ? `code=${issue.code}` : "",
+      issue.candidates ? `candidates=${issue.candidates}` : "",
     ].filter(Boolean);
     console.log(`- ${issue.sourceId}: ${details.join(", ")}`);
   }

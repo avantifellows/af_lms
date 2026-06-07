@@ -77,6 +77,40 @@ describe("Centre CSV import", () => {
     ).toBe(true);
   });
 
+  it("auto-matches unresolved mappings by exact school name", async () => {
+    const { sourcePath, mappingPath } = await writeImportFiles(
+      `id,name,cost_centre_type,count_as_physical_2627,school_name,program,coe_type_2526,category_2627,vg_notes,is_active
+1,JNV Barwani,CoE,1,JNV Barwani,JEE,Regional CoE,Cat 1 CoE,,1
+`,
+      `source_id,centre_name,status,school_id
+1,JNV Barwani,unresolved,
+`
+    );
+    const db = new FakeImportDb([
+      [],
+      optionRows(),
+      [{ count: "0" }],
+      [{ id: 60, name: "JNV Barwani" }],
+      [],
+    ]);
+
+    const result = await runCentreCsvImport({
+      mode: "apply",
+      db,
+      sourcePath,
+      mappingPath,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.counts.autoMatchedSchoolRows).toBe(1);
+    expect(result.issues.unresolvedSchoolNameMatches).toEqual([]);
+
+    const insertCall = db.calls.find((call) =>
+      /\bINSERT\s+INTO\s+centres\b/i.test(call.sql)
+    );
+    expect(insertCall?.params?.[1]).toBe(60);
+  });
+
   it("applies valid approved and intentionally unlinked Centre rows insert-only", async () => {
     const { sourcePath, mappingPath } = await writeImportFiles(
       `id,name,cost_centre_type,count_as_physical_2627,school_name,program,coe_type_2526,category_2627,vg_notes,is_active

@@ -31,6 +31,7 @@ export interface CentreImportIssueRef {
   status?: string;
   field?: string;
   code?: string;
+  candidates?: string;
 }
 
 export interface CentreCsvImportReport {
@@ -46,6 +47,9 @@ export interface CentreCsvImportReport {
     nonPhysicalRows: number;
     rowsThatWouldBeInserted: number;
     existingCentreRows: number;
+    approvedSchoolRows: number;
+    autoMatchedSchoolRows: number;
+    unlinkedSchoolRows: number;
   };
   blockers: string[];
   issues: {
@@ -54,6 +58,8 @@ export interface CentreCsvImportReport {
     invalidMappingRows: CentreImportIssueRef[];
     unresolvedMappings: CentreImportIssueRef[];
     ambiguousMappings: CentreImportIssueRef[];
+    unresolvedSchoolNameMatches: CentreImportIssueRef[];
+    ambiguousSchoolNameMatches: CentreImportIssueRef[];
     invalidOptionCodes: CentreImportIssueRef[];
     invalidSchoolIds: CentreImportIssueRef[];
   };
@@ -98,12 +104,22 @@ interface SchoolIdRow {
   id: string | number;
 }
 
+interface SchoolNameMatchRow {
+  id: string | number;
+  name: string;
+}
+
 type CentreMappingStatus = "approved" | "unlinked" | "ambiguous" | "unresolved";
 
 interface CentreMappingRow {
   sourceId: string;
   centreName: string;
   status: CentreMappingStatus | string;
+  schoolId: number | null;
+}
+
+interface ResolvedCentreMapping {
+  sourceId: string;
   schoolId: number | null;
 }
 
@@ -221,6 +237,21 @@ export async function runCentreCsvImport(params: {
       }
     }
   }
+  const schoolMappingResolution = await resolveSchoolMappings(
+    db,
+    sourceRows,
+    mappings
+  );
+  report.counts.approvedSchoolRows =
+    schoolMappingResolution.counts.approvedSchoolRows;
+  report.counts.autoMatchedSchoolRows =
+    schoolMappingResolution.counts.autoMatchedSchoolRows;
+  report.counts.unlinkedSchoolRows =
+    schoolMappingResolution.counts.unlinkedSchoolRows;
+  report.issues.unresolvedSchoolNameMatches =
+    schoolMappingResolution.unresolvedSchoolNameMatches;
+  report.issues.ambiguousSchoolNameMatches =
+    schoolMappingResolution.ambiguousSchoolNameMatches;
   report.issues.invalidOptionCodes = validateOptionCodes(
     sourceRows,
     activeOptionCodes
@@ -239,7 +270,7 @@ export async function runCentreCsvImport(params: {
   }
 
   if (mode === "apply") {
-    await insertCentreRows(db, sourceRows, mappings);
+    await insertCentreRows(db, sourceRows, schoolMappingResolution.mappings);
   }
 
   return report;
@@ -356,10 +387,35 @@ async function loadExistingSchoolIds(
   return new Set(rows.map((row) => numberFromDb(row.id)));
 }
 
+async function loadSchoolNameMatches(
+  db: CentreImportDb,
+  schoolNames: string[]
+): Promise<Map<string, SchoolNameMatchRow[]>> {
+  const normalizedNames = [...new Set(schoolNames.map(normalizeNameForMatch))]
+    .filter(Boolean);
+  if (normalizedNames.length === 0) return new Map();
+
+  const rows = await db.query<SchoolNameMatchRow>(
+    `SELECT id, name
+     FROM school
+     WHERE LOWER(TRIM(name)) = ANY($1::text[])
+     ORDER BY name, id`,
+    [normalizedNames]
+  );
+  const matches = new Map<string, SchoolNameMatchRow[]>();
+  for (const row of rows) {
+    const key = normalizeNameForMatch(row.name);
+    const existing = matches.get(key) ?? [];
+    existing.push(row);
+    matches.set(key, existing);
+  }
+  return matches;
+}
+
 async function insertCentreRows(
   db: CentreImportDb,
   sourceRows: CentreImportSourceRow[],
-  mappings: CentreMappingRow[]
+  mappings: ResolvedCentreMapping[]
 ): Promise<void> {
   if (sourceRows.length === 0) return;
 
@@ -370,7 +426,7 @@ async function insertCentreRows(
     const mapping = mappingsBySourceId.get(row.sourceId);
     return [
       row.name,
-      mapping?.status === "approved" ? mapping.schoolId : null,
+      mapping?.schoolId ?? null,
       row.typeCode,
       row.categoryCode,
       row.subCategoryCode,
@@ -394,6 +450,97 @@ async function insertCentreRows(
      VALUES ${values}`,
     params
   );
+}
+
+async function resolveSchoolMappings(
+  db: CentreImportDb,
+  sourceRows: CentreImportSourceRow[],
+  mappings: CentreMappingRow[]
+): Promise<{
+  mappings: ResolvedCentreMapping[];
+  counts: {
+    approvedSchoolRows: number;
+    autoMatchedSchoolRows: number;
+    unlinkedSchoolRows: number;
+  };
+  unresolvedSchoolNameMatches: CentreImportIssueRef[];
+  ambiguousSchoolNameMatches: CentreImportIssueRef[];
+}> {
+  const mappingsBySourceId = new Map(
+    mappings.map((mapping) => [mapping.sourceId, mapping])
+  );
+  const namesToMatch = sourceRows
+    .filter((row) => {
+      const mapping = mappingsBySourceId.get(row.sourceId);
+      return mapping?.status !== "approved" && mapping?.status !== "unlinked";
+    })
+    .map((row) => row.schoolName ?? row.name)
+    .filter((name): name is string => Boolean(name));
+  const schoolMatches = await loadSchoolNameMatches(db, namesToMatch);
+  const resolvedMappings: ResolvedCentreMapping[] = [];
+  const unresolvedSchoolNameMatches: CentreImportIssueRef[] = [];
+  const ambiguousSchoolNameMatches: CentreImportIssueRef[] = [];
+  let approvedSchoolRows = 0;
+  let autoMatchedSchoolRows = 0;
+  let unlinkedSchoolRows = 0;
+
+  for (const row of sourceRows) {
+    const mapping = mappingsBySourceId.get(row.sourceId);
+    if (mapping?.status === "approved" && mapping.schoolId !== null) {
+      approvedSchoolRows += 1;
+      resolvedMappings.push({ sourceId: row.sourceId, schoolId: mapping.schoolId });
+      continue;
+    }
+
+    if (mapping?.status === "unlinked") {
+      unlinkedSchoolRows += 1;
+      resolvedMappings.push({ sourceId: row.sourceId, schoolId: null });
+      continue;
+    }
+
+    const matchName = row.schoolName ?? row.name;
+    const matches = schoolMatches.get(normalizeNameForMatch(matchName)) ?? [];
+    if (matches.length === 1) {
+      autoMatchedSchoolRows += 1;
+      resolvedMappings.push({
+        sourceId: row.sourceId,
+        schoolId: numberFromDb(matches[0].id),
+      });
+    } else {
+      resolvedMappings.push({ sourceId: row.sourceId, schoolId: null });
+      if (matches.length === 0) {
+        unresolvedSchoolNameMatches.push({
+          sourceId: row.sourceId,
+          name: row.name,
+          status: mapping?.status,
+          field: "school_name",
+          code: matchName,
+        });
+      } else {
+        ambiguousSchoolNameMatches.push({
+          sourceId: row.sourceId,
+          name: row.name,
+          status: mapping?.status,
+          field: "school_name",
+          code: matchName,
+          candidates: matches
+            .map((match) => `${numberFromDb(match.id)}:${match.name}`)
+            .join(" | "),
+        });
+      }
+    }
+  }
+
+  return {
+    mappings: resolvedMappings,
+    counts: {
+      approvedSchoolRows,
+      autoMatchedSchoolRows,
+      unlinkedSchoolRows,
+    },
+    unresolvedSchoolNameMatches,
+    ambiguousSchoolNameMatches,
+  };
 }
 
 function validateMappings(
@@ -557,6 +704,9 @@ function emptyReport(mode: CentreImportMode): CentreCsvImportReport {
       nonPhysicalRows: 0,
       rowsThatWouldBeInserted: 0,
       existingCentreRows: 0,
+      approvedSchoolRows: 0,
+      autoMatchedSchoolRows: 0,
+      unlinkedSchoolRows: 0,
     },
     blockers: [],
     issues: {
@@ -565,6 +715,8 @@ function emptyReport(mode: CentreImportMode): CentreCsvImportReport {
       invalidMappingRows: [],
       unresolvedMappings: [],
       ambiguousMappings: [],
+      unresolvedSchoolNameMatches: [],
+      ambiguousSchoolNameMatches: [],
       invalidOptionCodes: [],
       invalidSchoolIds: [],
     },
@@ -608,6 +760,10 @@ function codeFromLabel(
 function nullableText(value: string | undefined): string | null {
   const normalized = String(value ?? "").trim();
   return normalized ? normalized : null;
+}
+
+function normalizeNameForMatch(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function nullableInteger(value: string | undefined): number | null {
