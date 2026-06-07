@@ -40,7 +40,13 @@ describe("Centre CSV import", () => {
   });
 
   it("dry-runs the checked-in source and mapping without writing Centre rows", async () => {
-    const db = new FakeImportDb([[], optionRows(), [{ count: "0" }]]);
+    const db = new FakeImportDb([
+      [],
+      optionRows(),
+      [{ count: "0" }],
+      approvedSchoolIdRows(),
+      [],
+    ]);
 
     const result = await runCentreCsvImport({ db });
 
@@ -57,7 +63,7 @@ describe("Centre CSV import", () => {
     expect(result.issues.missingMappingSourceIds).toEqual([]);
     expect(result.issues.duplicateMappingSourceIds).toEqual([]);
     expect(result.issues.invalidOptionCodes).toEqual([]);
-    expect(result.issues.unresolvedMappings).toHaveLength(47);
+    expect(result.issues.unresolvedMappings).toHaveLength(42);
     expect(result.issues.ambiguousMappings).toEqual([]);
     expect(result.blockers).toEqual([]);
     expect(
@@ -66,12 +72,19 @@ describe("Centre CSV import", () => {
   });
 
   it("applies unresolved mappings with null school_id for later cleanup", async () => {
-    const db = new FakeImportDb([[], optionRows(), [{ count: "0" }]]);
+    const db = new FakeImportDb([
+      [],
+      optionRows(),
+      [{ count: "0" }],
+      approvedSchoolIdRows(),
+      [],
+      [],
+    ]);
 
     const result = await runCentreCsvImport({ mode: "apply", db });
 
     expect(result.ok).toBe(true);
-    expect(result.issues.unresolvedMappings).toHaveLength(47);
+    expect(result.issues.unresolvedMappings).toHaveLength(42);
     expect(
       db.calls.some((call) => /\bINSERT\s+INTO\s+centres\b/i.test(call.sql))
     ).toBe(true);
@@ -302,6 +315,10 @@ function optionRows() {
     option_code: option.code,
     option_is_active: option.isActive,
   }));
+}
+
+function approvedSchoolIdRows() {
+  return [{ id: 51 }, { id: 294 }, { id: 173 }, { id: 405 }, { id: 9590 }];
 }
 
 async function writeImportFiles(sourceCsv: string, mappingCsv: string) {

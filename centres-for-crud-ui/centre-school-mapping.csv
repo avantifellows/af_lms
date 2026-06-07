@@ -1,6 +1,6 @@
 source_id,centre_name,cost_centre_type,source_school_name,status,school_id,notes
 1,JNV Barwani,CoE,JNV Barwani,unresolved,,Needs approved school_id before apply
-2,JNV Ujjain 2,CoE,JNV Ujjain 2,unresolved,,Needs approved school_id before apply
+2,JNV Ujjain 2,CoE,JNV Ujjain 2,approved,51,Matched to JNV Ujjain-2 by normalized name
 3,EMRS Bhopal,CoE,EMRS Bhopal,unresolved,,Needs approved school_id before apply
 4,JNV Cuttack,CoE,JNV Cuttack,unresolved,,Needs approved school_id before apply
 5,JNV Puri,CoE,JNV Puri,unresolved,,Needs approved school_id before apply
@@ -12,7 +12,7 @@ source_id,centre_name,cost_centre_type,source_school_name,status,school_id,notes
 11,JNV Adilabad,Nodal,JNV Adilabad,unresolved,,Needs approved school_id before apply
 12,JNV Kurnool,CoE,JNV Kurnool,unresolved,,Needs approved school_id before apply
 13,JNV Nellore,CoE,JNV Nellore,unresolved,,Needs approved school_id before apply
-14,JNV Kokrajhar,CoE,JNV Kokrajhar,unresolved,,Needs approved school_id before apply
+14,JNV Kokrajhar,CoE,JNV Kokrajhar,approved,294,Duplicate exact match; selected row with UDISE
 15,JNV Kohima,CoE,JNV Kohima,unresolved,,Needs approved school_id before apply
 16,Nagaland Foundation,,Nagaland Foundation,unlinked,,Special non-school Centre row
 17,Mumbai Foundation,,Mumbai Foundation,unlinked,,Special non-school Centre row
@@ -22,11 +22,11 @@ source_id,centre_name,cost_centre_type,source_school_name,status,school_id,notes
 21,JNV Bellary,CoE,JNV Bellary,unresolved,,Needs approved school_id before apply
 22,JNV Hassan,CoE,JNV Hassan,unresolved,,Needs approved school_id before apply
 23,JNV Bundi,CoE,JNV Bundi,unresolved,,Needs approved school_id before apply
-24,JNV Lucknow,CoE,JNV Lucknow,unresolved,,Needs approved school_id before apply
+24,JNV Lucknow,CoE,JNV Lucknow,approved,173,Duplicate exact match; selected row with UDISE
 25,JNV Mahisagar,CoE,JNV Mahisagar,unresolved,,Needs approved school_id before apply
-26,JNV Nandurbar 2,CoE,JNV Nandurbar 2,unresolved,,Needs approved school_id before apply
+26,JNV Nandurbar 2,CoE,JNV Nandurbar 2,approved,405,Matched to JNV Nandurbar-2 by normalized name
 27,JNV Bharuch,Nodal,JNV Bharuch,unresolved,,Needs approved school_id before apply
-28,JNV Chandigarh,CoE,JNV Chandigarh,unresolved,,Needs approved school_id before apply
+28,JNV Chandigarh,CoE,JNV Chandigarh,approved,9590,Duplicate exact match; selected row with UDISE
 29,"Live Class - Punjab, Himachal, Uttarakhand, Delhi",,"Live Class - Punjab, Himachal, Uttarakhand, Delhi",unlinked,,Special non-school Centre row
 30,Meritorious School Bhatinda,CoE,Meritorious School Bhatinda,unresolved,,Needs approved school_id before apply
 31,Meritorious School Mohali,CoE,Meritorious School Mohali,unresolved,,Needs approved school_id before apply
