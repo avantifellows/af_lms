@@ -75,7 +75,6 @@ describe("GET /api/admin/centres/options", () => {
       ok: false,
       status: 503,
       error: "Centre management schema unavailable",
-      details: ["centre_options.option_set_id"],
     });
   });
 

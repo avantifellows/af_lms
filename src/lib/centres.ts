@@ -156,6 +156,14 @@ export type CentreOptionMutationResult =
   | CentreSchemaUnavailable
   | { ok: false; status: 404 | 409; error: string };
 
+export function safeCentreApiError<T extends { ok: false; details?: unknown }>(
+  result: T
+): Omit<T, "details"> {
+  const { details, ...safeResult } = result;
+  void details;
+  return safeResult;
+}
+
 interface CentreOptionCreatePayload {
   optionSetCode: CentreOptionSetCode;
   code: string;
@@ -745,6 +753,10 @@ export async function updateCentreOption(params: {
   id: number;
   body: unknown;
 }): Promise<CentreOptionMutationResult> {
+  if (!Number.isInteger(params.id) || params.id < 1) {
+    return { ok: false, status: 404, error: "Centre option not found" };
+  }
+
   const schema = await checkCentreManagementSchema();
   if (!schema.ok) {
     return schema;
@@ -1061,9 +1073,17 @@ function normalizeCentreCreatePayload(
 
   const name = typeof payload.name === "string" ? payload.name.trim() : "";
   const schoolId = nullablePositiveIntegerFromPayload(payload.school_id);
-  const typeCode = nullableStringFromPayload(payload.type_code);
-  const categoryCode = nullableStringFromPayload(payload.category_code);
-  const subCategoryCode = nullableStringFromPayload(payload.sub_category_code);
+  const typeCode = nullableStringFromPayload(payload.type_code, "type_code", fields);
+  const categoryCode = nullableStringFromPayload(
+    payload.category_code,
+    "category_code",
+    fields
+  );
+  const subCategoryCode = nullableStringFromPayload(
+    payload.sub_category_code,
+    "sub_category_code",
+    fields
+  );
   const streamCodes = stringArrayFromPayload(payload.stream_codes);
   const isPhysical =
     typeof payload.is_physical === "boolean" ? payload.is_physical : null;
@@ -1157,6 +1177,22 @@ function normalizeCentreEditPayload(
         ? payload.is_active
         : null
       : existing.isActive;
+  const typeCode =
+    "type_code" in payload
+      ? nullableStringFromPayload(payload.type_code, "type_code", fields)
+      : existing.typeCode;
+  const categoryCode =
+    "category_code" in payload
+      ? nullableStringFromPayload(payload.category_code, "category_code", fields)
+      : existing.categoryCode;
+  const subCategoryCode =
+    "sub_category_code" in payload
+      ? nullableStringFromPayload(
+          payload.sub_category_code,
+          "sub_category_code",
+          fields
+        )
+      : existing.subCategoryCode;
 
   if ("name" in payload && !name) {
     fields.name = "Centre name is required";
@@ -1188,18 +1224,9 @@ function normalizeCentreEditPayload(
     payload: {
       name,
       schoolId: schoolId ?? null,
-      typeCode:
-        "type_code" in payload
-          ? nullableStringFromPayload(payload.type_code)
-          : existing.typeCode,
-      categoryCode:
-        "category_code" in payload
-          ? nullableStringFromPayload(payload.category_code)
-          : existing.categoryCode,
-      subCategoryCode:
-        "sub_category_code" in payload
-          ? nullableStringFromPayload(payload.sub_category_code)
-          : existing.subCategoryCode,
+      typeCode,
+      categoryCode,
+      subCategoryCode,
       streamCodes: streamCodes ?? [],
       isPhysical: isPhysical ?? existing.isPhysical,
       isActive: isActive ?? existing.isActive,
@@ -1483,9 +1510,16 @@ function nullableCodeParam(value: string | string[] | undefined): string | null 
   return normalized || null;
 }
 
-function nullableStringFromPayload(value: unknown): string | null {
+function nullableStringFromPayload(
+  value: unknown,
+  field: string,
+  fields: Record<string, string>
+): string | null {
   if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return null;
+  if (typeof value !== "string") {
+    fields[field] = "Centre option code must be a string or null";
+    return null;
+  }
   const normalized = value.trim();
   return normalized || null;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Edit2, Plus, RotateCcw, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Edit2, Plus, RotateCcw, Search, X } from "lucide-react";
 
 import { Button, Input, Select } from "@/components/ui";
 import type {
@@ -95,14 +95,14 @@ export default function CentreGrid({
     setFieldErrors({});
   };
 
-  const applyFilters = async (nextFilters = filters) => {
+  const applyFilters = async (nextFilters = filters, page = 1) => {
     setLoading(true);
     setTableError("");
 
     try {
       const params = new URLSearchParams();
       appendFilterParams(params, nextFilters);
-      params.set("page", "1");
+      params.set("page", String(page));
       params.set("limit", String(pagination.limit));
       const response = await fetch(`/api/admin/centres?${params.toString()}`);
       const data = await response.json();
@@ -110,7 +110,7 @@ export default function CentreGrid({
         throw new Error(data.error || "Failed to load Centres");
       }
       setRows(data.rows ?? []);
-      setPagination(data.pagination ?? pagination);
+      setPagination(data.pagination ?? { ...pagination, page });
       setFilters(data.filters ?? nextFilters);
     } catch (error) {
       setTableError(error instanceof Error ? error.message : "Failed to load Centres");
@@ -122,6 +122,12 @@ export default function CentreGrid({
   const resetFilters = async () => {
     setFilters(EMPTY_FILTERS);
     await applyFilters(EMPTY_FILTERS);
+  };
+
+  const goToPage = async (page: number) => {
+    const nextPage = Math.min(Math.max(page, 1), Math.max(pagination.totalPages, 1));
+    if (nextPage === pagination.page) return;
+    await applyFilters(filters, nextPage);
   };
 
   const openCreate = () => {
@@ -179,7 +185,9 @@ export default function CentreGrid({
     }
     setSchoolSearching(true);
     try {
-      const response = await fetch(`/api/admin/schools?q=${encodeURIComponent(query)}`);
+      const response = await fetch(
+        `/api/admin/schools?scope=centres&q=${encodeURIComponent(query)}`
+      );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to search Schools");
       setSchoolResults(Array.isArray(data) ? data : []);
@@ -242,6 +250,9 @@ export default function CentreGrid({
   };
 
   const activeRows = rows.filter((row) => row.isActive).length;
+  const pageStart =
+    pagination.totalRows === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1;
+  const pageEnd = Math.min(pagination.page * pagination.limit, pagination.totalRows);
 
   return (
     <section className="space-y-4">
@@ -435,6 +446,46 @@ export default function CentreGrid({
           </tbody>
         </table>
       </div>
+
+      {pagination.totalPages > 1 && (
+        <div
+          className="flex flex-col gap-3 rounded-md border border-border bg-white px-4 py-3 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-between"
+          aria-label="Centre pagination"
+        >
+          <p className="text-gray-600">
+            Showing <span className="font-semibold text-gray-900">{pageStart}</span>-
+            <span className="font-semibold text-gray-900">{pageEnd}</span> of{" "}
+            <span className="font-semibold text-gray-900">{pagination.totalRows}</span>
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => goToPage(pagination.page - 1)}
+              disabled={loading || pagination.page <= 1}
+              aria-label="Previous Centre page"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              Previous
+            </Button>
+            <span className="min-w-28 text-center text-xs font-semibold uppercase text-gray-600">
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => goToPage(pagination.page + 1)}
+              disabled={loading || pagination.page >= pagination.totalPages}
+              aria-label="Next Centre page"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">

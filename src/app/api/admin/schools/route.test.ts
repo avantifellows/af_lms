@@ -74,10 +74,37 @@ describe("GET /api/admin/schools", () => {
     expect(json).toEqual(schools);
     const sql = String(mockQuery.mock.calls[0][0]);
     expect(sql).toContain("udise_code ILIKE $1");
+    expect(sql).toContain("af_school_category = 'JNV'");
     expect(mockQuery).toHaveBeenCalledWith(
       expect.stringContaining("ILIKE"),
       ["%240101%"],
     );
+  });
+
+  it("searches all school categories for Centre linking when scope=centres", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    const schools = [
+      {
+        id: 2,
+        code: "EMRS01",
+        name: "EMRS Test",
+        udise_code: "24020200202",
+        region: "R2",
+        state: "Gujarat",
+        district: "Dahod",
+      },
+    ];
+    mockQuery.mockResolvedValue(schools);
+
+    const req = new Request("http://localhost/api/admin/schools?scope=centres&q=EMRS");
+    const res = await GET(req as never);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual(schools);
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("name ILIKE $1");
+    expect(sql).not.toContain("af_school_category = 'JNV'");
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("ILIKE"), ["%EMRS%"]);
   });
 
   it("defaults to empty search when no q param", async () => {

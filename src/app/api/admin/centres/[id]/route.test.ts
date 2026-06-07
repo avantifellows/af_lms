@@ -59,6 +59,27 @@ describe("PATCH /api/admin/centres/[id]", () => {
     });
   });
 
+  it("returns controlled schema errors without raw schema details", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { table_name: "centres", column_name: "stream_codes" },
+    ]);
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/admin/centres/93", {
+        method: "PATCH",
+        body: { is_active: false },
+      }) as never,
+      routeParams({ id: "93" })
+    );
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      status: 503,
+      error: "Centre management schema unavailable",
+    });
+  });
+
   it("patches editable Centre fields for admin users", async () => {
     const centreRow = {
       id: "93",

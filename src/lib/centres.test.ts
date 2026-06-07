@@ -584,6 +584,61 @@ describe("Centre grid contracts", () => {
     ]);
   });
 
+  it("rejects non-string single-select option codes on Centre updates", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "93",
+          name: "Legacy Centre",
+          school_id: null,
+          type_code: "legacy",
+          type_label: "Legacy",
+          type_is_active: false,
+          category_code: null,
+          category_label: null,
+          category_is_active: null,
+          sub_category_code: null,
+          sub_category_label: null,
+          sub_category_is_active: null,
+          stream_codes: [],
+          stream_options: [],
+          is_physical: true,
+          is_active: true,
+          inserted_at: "2026-01-08T00:00:00.000Z",
+          updated_at: "2026-01-08T00:00:00.000Z",
+          school_name: null,
+          school_code: null,
+          school_udise_code: null,
+          school_region: null,
+          school_state: null,
+          school_district: null,
+          total_count: "1",
+        },
+      ]);
+
+    const result = await updateCentre({
+      id: 93,
+      body: {
+        type_code: 123,
+        category_code: ["school"],
+        sub_category_code: { code: "coe" },
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      status: 422,
+      error: "Invalid Centre payload",
+      fields: {
+        type_code: "Centre option code must be a string or null",
+        category_code: "Centre option code must be a string or null",
+        sub_category_code: "Centre option code must be a string or null",
+      },
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects unknown, inactive, and wrong-set options for new Centre selections", async () => {
     mockQuery
       .mockResolvedValueOnce([])

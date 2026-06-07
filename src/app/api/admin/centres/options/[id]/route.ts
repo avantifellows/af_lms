@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
-import { requireCentreAdmin, updateCentreOption } from "@/lib/centres";
+import {
+  requireCentreAdmin,
+  safeCentreApiError,
+  updateCentreOption,
+} from "@/lib/centres";
 
 export async function PATCH(
   request: NextRequest,
@@ -24,12 +28,12 @@ export async function PATCH(
   }
 
   const result = await updateCentreOption({
-    id: Number.parseInt(id, 10),
+    id: Number(id),
     body,
   });
 
   if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
+    return NextResponse.json(safeCentreApiError(result), { status: result.status });
   }
 
   return NextResponse.json({ option: result.option });

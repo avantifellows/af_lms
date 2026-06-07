@@ -126,7 +126,6 @@ describe("GET /api/admin/centres", () => {
       ok: false,
       status: 503,
       error: "Centre management schema unavailable",
-      details: ["centres.stream_codes"],
     });
   });
 });
@@ -163,6 +162,36 @@ describe("POST /api/admin/centres", () => {
         name: "Centre name is required",
         stream_codes: "Centre Stream codes must be an array of strings",
         is_physical: "Physical status is required",
+      },
+    });
+  });
+
+  it("returns 422 when single-select option codes are not strings", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    const res = await POST(
+      jsonRequest("http://localhost/api/admin/centres", {
+        method: "POST",
+        body: {
+          name: "Bad Option Payload",
+          type_code: 123,
+          category_code: ["school"],
+          sub_category_code: { code: "coe" },
+          stream_codes: [],
+          is_physical: false,
+          is_active: true,
+        },
+      }) as never
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: false,
+      error: "Invalid Centre payload",
+      fields: {
+        type_code: "Centre option code must be a string or null",
+        category_code: "Centre option code must be a string or null",
+        sub_category_code: "Centre option code must be a string or null",
       },
     });
   });

@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
-import { createCentre, getCentreList, requireCentreAdmin } from "@/lib/centres";
+import {
+  createCentre,
+  getCentreList,
+  requireCentreAdmin,
+  safeCentreApiError,
+} from "@/lib/centres";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -17,7 +22,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
+    return NextResponse.json(safeCentreApiError(result), { status: result.status });
   }
 
   return NextResponse.json({
@@ -45,7 +50,7 @@ export async function POST(request: NextRequest) {
   const result = await createCentre({ body });
 
   if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
+    return NextResponse.json(safeCentreApiError(result), { status: result.status });
   }
 
   return NextResponse.json({ centre: result.centre });

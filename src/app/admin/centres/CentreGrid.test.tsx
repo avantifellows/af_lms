@@ -160,12 +160,21 @@ const rows: CentreListRow[] = [
   },
 ];
 
-function renderGrid() {
+function renderGrid({
+  initialPagination = { page: 1, limit: 25, totalRows: 2, totalPages: 1 },
+}: {
+  initialPagination?: {
+    page: number;
+    limit: number;
+    totalRows: number;
+    totalPages: number;
+  };
+} = {}) {
   return render(
     <CentreGrid
       initialRows={rows}
       initialFilters={filters}
-      initialPagination={{ page: 1, limit: 25, totalRows: 2, totalPages: 1 }}
+      initialPagination={initialPagination}
       optionSets={optionSets}
     />
   );
@@ -255,6 +264,33 @@ describe("CentreGrid", () => {
     expect(screen.queryByText("JNV Bhavnagar CoE")).not.toBeInTheDocument();
   });
 
+  it("loads later Centre pages without resetting filters", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        filters: { ...filters, search: "bench" },
+        rows: [rows[1]],
+        pagination: { page: 2, limit: 25, totalRows: 54, totalPages: 3 },
+      }),
+    } as Response);
+    renderGrid({
+      initialPagination: { page: 1, limit: 25, totalRows: 54, totalPages: 3 },
+    });
+
+    await user.type(screen.getByLabelText("Search"), "bench");
+    await user.click(screen.getByRole("button", { name: "Next Centre page" }));
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const url = String(mockFetch.mock.calls[0][0]);
+    expect(url).toContain("search=bench");
+    expect(url).toContain("page=2");
+    expect(url).toContain("limit=25");
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 26-50 of 54");
+  });
+
   it("creates a Centre with active options and a School selected from search", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.mocked(fetch);
@@ -313,7 +349,10 @@ describe("CentreGrid", () => {
     await user.click(screen.getByRole("checkbox", { name: "Physical Centre" }));
     await user.click(screen.getByRole("button", { name: "Save Centre" }));
 
-    expect(mockFetch).toHaveBeenNthCalledWith(1, "/api/admin/schools?q=080101");
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/admin/schools?scope=centres&q=080101"
+    );
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,
       "/api/admin/centres",

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
-import { requireCentreAdmin, updateCentre } from "@/lib/centres";
+import { requireCentreAdmin, safeCentreApiError, updateCentre } from "@/lib/centres";
 
 export async function PATCH(
   request: NextRequest,
@@ -29,7 +29,7 @@ export async function PATCH(
   });
 
   if (!result.ok) {
-    return NextResponse.json(result, { status: result.status });
+    return NextResponse.json(safeCentreApiError(result), { status: result.status });
   }
 
   return NextResponse.json({ centre: result.centre });

@@ -159,6 +159,31 @@ describe("PATCH /api/admin/centres/options/[id]", () => {
     });
   });
 
+  it("returns controlled schema errors without raw schema details", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { table_name: "centre_options", column_name: "option_set_id" },
+    ]);
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/admin/centres/options/31", {
+        method: "PATCH",
+        body: {
+          label: "Residential Updated",
+          sort_order: 9,
+          is_active: false,
+        },
+      }) as never,
+      routeParams({ id: "31" })
+    );
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      status: 503,
+      error: "Centre management schema unavailable",
+    });
+  });
+
   it("returns 404 when the option id does not exist", async () => {
     mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
@@ -180,5 +205,27 @@ describe("PATCH /api/admin/centres/options/[id]", () => {
       status: 404,
       error: "Centre option not found",
     });
+  });
+
+  it("returns 404 for malformed option ids before querying Centre tables", async () => {
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/admin/centres/options/not-a-number", {
+        method: "PATCH",
+        body: {
+          label: "Bad Id",
+          sort_order: 1,
+          is_active: true,
+        },
+      }) as never,
+      routeParams({ id: "not-a-number" })
+    );
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({
+      ok: false,
+      status: 404,
+      error: "Centre option not found",
+    });
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 });
