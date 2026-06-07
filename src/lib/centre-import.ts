@@ -518,14 +518,6 @@ function addBlockers(report: CentreCsvImportReport): void {
   if (report.issues.invalidMappingRows.length > 0) {
     report.blockers.push("Fix invalid Centre mapping rows before apply.");
   }
-  if (
-    report.issues.unresolvedMappings.length > 0 ||
-    report.issues.ambiguousMappings.length > 0
-  ) {
-    report.blockers.push(
-      "Resolve or intentionally unlink all ambiguous/unresolved mappings before apply."
-    );
-  }
   if (report.issues.invalidSchoolIds.length > 0) {
     report.blockers.push(
       "Approved mappings require school_id; unlinked mappings must leave school_id blank."

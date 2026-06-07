@@ -459,9 +459,9 @@ async function applySeedOptions(db: CentreOptionSeedDb): Promise<void> {
   ]);
   const values = CENTRE_OPTION_SEED_OPTIONS.map(
     (_option, index) =>
-      `($${index * 5 + 1}, $${index * 5 + 2}, $${index * 5 + 3}, $${
+      `($${index * 5 + 1}::text, $${index * 5 + 2}::text, $${index * 5 + 3}::text, $${
         index * 5 + 4
-      }, $${index * 5 + 5})`
+      }::integer, $${index * 5 + 5}::boolean)`
   ).join(", ");
 
   await db.query(

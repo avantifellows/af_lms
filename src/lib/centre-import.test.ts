@@ -52,35 +52,29 @@ describe("Centre CSV import", () => {
       mappedRows: 54,
       physicalRows: 42,
       nonPhysicalRows: 12,
-      rowsThatWouldBeInserted: 0,
+      rowsThatWouldBeInserted: 54,
     });
     expect(result.issues.missingMappingSourceIds).toEqual([]);
     expect(result.issues.duplicateMappingSourceIds).toEqual([]);
     expect(result.issues.invalidOptionCodes).toEqual([]);
     expect(result.issues.unresolvedMappings).toHaveLength(47);
     expect(result.issues.ambiguousMappings).toEqual([]);
-    expect(result.blockers).toContain(
-      "Resolve or intentionally unlink all ambiguous/unresolved mappings before apply."
-    );
+    expect(result.blockers).toEqual([]);
     expect(
       db.calls.some((call) => /\b(insert|update|delete)\b/i.test(call.sql))
     ).toBe(false);
   });
 
-  it("blocks apply when mappings are unresolved or ambiguous", async () => {
+  it("applies unresolved mappings with null school_id for later cleanup", async () => {
     const db = new FakeImportDb([[], optionRows(), [{ count: "0" }]]);
 
     const result = await runCentreCsvImport({ mode: "apply", db });
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("Centre CSV import is not ready to apply.");
+    expect(result.ok).toBe(true);
     expect(result.issues.unresolvedMappings).toHaveLength(47);
-    expect(result.blockers).toContain(
-      "Resolve or intentionally unlink all ambiguous/unresolved mappings before apply."
-    );
     expect(
       db.calls.some((call) => /\bINSERT\s+INTO\s+centres\b/i.test(call.sql))
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("applies valid approved and intentionally unlinked Centre rows insert-only", async () => {
