@@ -135,7 +135,14 @@ describe("CentresPage (server component)", () => {
       ],
     });
 
-    const jsx = await CentresPage();
+    const jsx = await CentresPage({
+      searchParams: {
+        search: "barwani",
+        active: "true",
+        school_link: "linked",
+        page: "2",
+      },
+    });
     render(jsx);
 
     expect(screen.getByText("Centre Management")).toBeInTheDocument();
@@ -151,5 +158,13 @@ describe("CentresPage (server component)", () => {
     expect(props.initialSummary.totalCentres).toBe(1);
     expect(props.initialPagination.totalRows).toBe(1);
     expect(props.optionSets[0].code).toBe("type");
+    expect(mockGetCentreList).toHaveBeenCalledWith({
+      searchParams: {
+        search: "barwani",
+        active: "true",
+        school_link: "linked",
+        page: "2",
+      },
+    });
   });
 });

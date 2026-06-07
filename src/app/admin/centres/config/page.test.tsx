@@ -83,7 +83,7 @@ describe("CentreOptionConfigPage (server component)", () => {
     const jsx = await CentreOptionConfigPage();
     render(jsx);
 
-    expect(screen.getByText("Centre Option Configuration")).toBeInTheDocument();
+    expect(screen.getByText("Centre Options")).toBeInTheDocument();
     expect(screen.getByText("admin@avantifellows.org")).toBeInTheDocument();
     expect(screen.getByText("Centres")).toHaveAttribute("href", "/admin/centres");
     const config = screen.getByTestId("centre-option-config");

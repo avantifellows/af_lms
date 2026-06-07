@@ -12,7 +12,9 @@ import {
   Link2,
   Plus,
   RotateCcw,
+  Save,
   Search,
+  School,
   SlidersHorizontal,
   X,
 } from "lucide-react";
@@ -103,7 +105,9 @@ export default function CentreGrid({
   const [searchingSuggestions, setSearchingSuggestions] = useState(false);
   const [schoolSearch, setSchoolSearch] = useState("");
   const [schoolResults, setSchoolResults] = useState<SchoolSearchResult[]>([]);
+  const [schoolSuggestionsOpen, setSchoolSuggestionsOpen] = useState(false);
   const [schoolSearching, setSchoolSearching] = useState(false);
+  const modalOpen = modal !== null;
 
   const optionsBySet = useMemo(() => {
     const map = new Map<CentreOptionSetCode, CentreOption[]>();
@@ -156,6 +160,45 @@ export default function CentreGrid({
     };
   }, [filters.search]);
 
+  useEffect(() => {
+    const query = schoolSearch.trim();
+    if (!modalOpen || query.length < 2) {
+      setSchoolResults([]);
+      setSchoolSuggestionsOpen(false);
+      setSchoolSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setSchoolSearching(true);
+      try {
+        const response = await fetch(
+          `/api/admin/schools?scope=centres&q=${encodeURIComponent(query)}`,
+          { signal: controller.signal }
+        );
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to search Schools");
+        setSchoolResults(Array.isArray(data) ? data : []);
+        setSchoolSuggestionsOpen(true);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSchoolResults([]);
+        setSchoolSuggestionsOpen(false);
+        setSaveError(error instanceof Error ? error.message : "Failed to search Schools");
+      } finally {
+        if (!controller.signal.aborted) {
+          setSchoolSearching(false);
+        }
+      }
+    }, 180);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [schoolSearch, modalOpen]);
+
   const applyFilters = async (nextFilters = filters, page = 1) => {
     setLoading(true);
     setTableError("");
@@ -174,6 +217,7 @@ export default function CentreGrid({
       setSummary(data.summary ?? deriveSummary(data.rows ?? [], data.pagination?.totalRows ?? 0));
       setPagination(data.pagination ?? { ...pagination, page });
       setFilters(data.filters ?? nextFilters);
+      syncCentreGridUrl(data.filters ?? nextFilters, data.pagination?.page ?? page);
     } catch (error) {
       setTableError(error instanceof Error ? error.message : "Failed to load Centres");
     } finally {
@@ -196,6 +240,9 @@ export default function CentreGrid({
 
   const openCreate = () => {
     setModal({ mode: "create", form: emptyForm() });
+    setSchoolSearch("");
+    setSchoolResults([]);
+    setSchoolSuggestionsOpen(false);
     resetSaveState();
   };
 
@@ -217,6 +264,7 @@ export default function CentreGrid({
     });
     setSchoolSearch("");
     setSchoolResults([]);
+    setSchoolSuggestionsOpen(false);
     resetSaveState();
   };
 
@@ -224,6 +272,7 @@ export default function CentreGrid({
     setModal(null);
     setSchoolSearch("");
     setSchoolResults([]);
+    setSchoolSuggestionsOpen(false);
     resetSaveState();
   };
 
@@ -265,27 +314,6 @@ export default function CentreGrid({
     await applyFilters(nextFilters);
   };
 
-  const searchSchools = async () => {
-    const query = schoolSearch.trim();
-    if (!query) {
-      setSchoolResults([]);
-      return;
-    }
-    setSchoolSearching(true);
-    try {
-      const response = await fetch(
-        `/api/admin/schools?scope=centres&q=${encodeURIComponent(query)}`
-      );
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to search Schools");
-      setSchoolResults(Array.isArray(data) ? data : []);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Failed to search Schools");
-    } finally {
-      setSchoolSearching(false);
-    }
-  };
-
   const chooseSchool = (school: SchoolSearchResult) => {
     patchForm({
       schoolId: school.id,
@@ -293,6 +321,7 @@ export default function CentreGrid({
     });
     setSchoolSearch("");
     setSchoolResults([]);
+    setSchoolSuggestionsOpen(false);
   };
 
   const saveCentre = async () => {
@@ -704,165 +733,272 @@ export default function CentreGrid({
 
       {modal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="fixed inset-0 bg-black/30" onClick={closeModal} aria-hidden="true" />
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative w-full max-w-3xl rounded-md bg-white p-5 shadow-xl">
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-base font-bold uppercase text-gray-900">
+          <div className="fixed inset-0 bg-text-primary/35" onClick={closeModal} aria-hidden="true" />
+          <div className="flex min-h-full items-center justify-center p-3 sm:p-6">
+            <div
+              className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-bg-card shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="centre-form-title"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-border bg-bg-card px-5 py-4">
+                <div className="min-w-0">
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-border bg-bg-card-alt px-2.5 py-1 text-xs font-semibold uppercase text-text-muted">
+                    <Building2 className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+                    Centre record
+                  </div>
+                  <h3
+                    id="centre-form-title"
+                    className="text-lg font-bold uppercase text-text-primary"
+                  >
                     {modal.mode === "create" ? "New Centre" : "Edit Centre"}
                   </h3>
-                  <p className="text-xs text-gray-500">School metadata is derived from the selected School.</p>
+                  <p className="mt-1 text-sm text-text-muted">
+                    {modal.form.schoolLabel || "No School linked"}
+                  </p>
                 </div>
                 <Button variant="icon" aria-label="Close Centre form" onClick={closeModal}>
                   <X className="h-5 w-5" aria-hidden="true" />
                 </Button>
               </div>
 
-              {saveError && (
-                <div className="mb-4 rounded-md border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
-                  {saveError}
-                </div>
-              )}
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                {saveError && (
+                  <div className="mb-4 rounded-md border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
+                    {saveError}
+                  </div>
+                )}
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Centre name" error={fieldErrors.name}>
-                  <Input
-                    value={modal.form.name}
-                    onChange={(event) => patchForm({ name: event.target.value })}
-                  />
-                </Field>
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
+                      <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase text-text-primary">
+                        <Building2 className="h-4 w-4 text-accent" aria-hidden="true" />
+                        Centre details
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="Centre name" error={fieldErrors.name} className="md:col-span-2">
+                          <Input
+                            value={modal.form.name}
+                            onChange={(event) => patchForm({ name: event.target.value })}
+                          />
+                        </Field>
 
-                <div>
-                  <div className="mb-1 text-xs font-semibold uppercase text-gray-600">Linked School</div>
-                  <div className="rounded-md border border-border p-3">
-                    <div className="mb-2 min-h-5 text-sm text-gray-700">
-                      {modal.form.schoolLabel || <span className="text-gray-400">Unlinked</span>}
+                        <OptionSelectField
+                          label="Type"
+                          value={modal.form.typeCode}
+                          options={selectOptions({
+                            options: optionsBySet.get("type") ?? [],
+                            currentCode: modal.form.typeCode,
+                            includeInactiveCurrent: modal.mode === "edit",
+                          })}
+                          error={fieldErrors.type_code}
+                          onChange={(typeCode) => patchForm({ typeCode })}
+                        />
+                        <OptionSelectField
+                          label="Category"
+                          value={modal.form.categoryCode}
+                          options={selectOptions({
+                            options: optionsBySet.get("category") ?? [],
+                            currentCode: modal.form.categoryCode,
+                            includeInactiveCurrent: modal.mode === "edit",
+                          })}
+                          error={fieldErrors.category_code}
+                          onChange={(categoryCode) => patchForm({ categoryCode })}
+                        />
+                        <OptionSelectField
+                          label="Sub-category"
+                          value={modal.form.subCategoryCode}
+                          options={selectOptions({
+                            options: optionsBySet.get("sub_category") ?? [],
+                            currentCode: modal.form.subCategoryCode,
+                            includeInactiveCurrent: modal.mode === "edit",
+                          })}
+                          error={fieldErrors.sub_category_code}
+                          onChange={(subCategoryCode) => patchForm({ subCategoryCode })}
+                        />
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Input
-                        value={schoolSearch}
-                        onChange={(event) => setSchoolSearch(event.target.value)}
-                        placeholder="Search name, code, UDISE"
-                      />
-                      <Button type="button" size="sm" onClick={searchSchools} disabled={schoolSearching}>
-                        <Search className="h-4 w-4" aria-hidden="true" />
-                        {schoolSearching ? "Searching" : "Search"}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => patchForm({ schoolId: null, schoolLabel: "" })}
-                      >
-                        Unlink
-                      </Button>
-                    </div>
-                    {schoolResults.length > 0 && (
-                      <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border">
-                        {schoolResults.map((school) => (
-                          <button
-                            key={school.id}
-                            type="button"
-                            className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-                            onClick={() => chooseSchool(school)}
+
+                    <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
+                      <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase text-text-primary">
+                        <Link2 className="h-4 w-4 text-accent" aria-hidden="true" />
+                        Centre streams
+                      </div>
+                      <div className="grid max-h-44 gap-2 overflow-y-auto rounded-lg border border-border bg-bg-input p-3 sm:grid-cols-2">
+                        {selectOptions({
+                          options: optionsBySet.get("stream") ?? [],
+                          currentCodes: modal.form.streamCodes,
+                          includeInactiveCurrent: modal.mode === "edit",
+                        }).map((option) => (
+                          <label
+                            key={option.code}
+                            className="inline-flex min-h-[38px] cursor-pointer items-center gap-2 rounded-md px-2 text-sm font-medium text-text-primary hover:bg-hover-bg"
                           >
-                            <span className="font-medium">{school.name}</span>
-                            <span className="ml-2 font-mono text-xs text-gray-500">
-                              {school.code}
-                              {schoolUdise(school) ? ` / ${schoolUdise(school)}` : ""}
-                            </span>
-                          </button>
+                            <input
+                              type="checkbox"
+                              checked={modal.form.streamCodes.includes(option.code)}
+                              onChange={() => toggleStream(option.code)}
+                              className="h-4 w-4 accent-[var(--color-accent)]"
+                            />
+                            <span>{option.label}</span>
+                            {!option.isActive && (
+                              <span className="rounded-full bg-warning-bg px-2 py-0.5 text-xs text-warning-text">
+                                inactive
+                              </span>
+                            )}
+                          </label>
                         ))}
                       </div>
-                    )}
+                      {fieldErrors.stream_codes && (
+                        <p className="mt-1 text-xs text-danger">{fieldErrors.stream_codes}</p>
+                      )}
+                    </div>
                   </div>
-                  {fieldErrors.school_id && (
-                    <p className="mt-1 text-xs text-danger">{fieldErrors.school_id}</p>
-                  )}
-                </div>
 
-                <OptionSelectField
-                  label="Type"
-                  value={modal.form.typeCode}
-                  options={selectOptions({
-                    options: optionsBySet.get("type") ?? [],
-                    currentCode: modal.form.typeCode,
-                    includeInactiveCurrent: modal.mode === "edit",
-                  })}
-                  error={fieldErrors.type_code}
-                  onChange={(typeCode) => patchForm({ typeCode })}
-                />
-                <OptionSelectField
-                  label="Category"
-                  value={modal.form.categoryCode}
-                  options={selectOptions({
-                    options: optionsBySet.get("category") ?? [],
-                    currentCode: modal.form.categoryCode,
-                    includeInactiveCurrent: modal.mode === "edit",
-                  })}
-                  error={fieldErrors.category_code}
-                  onChange={(categoryCode) => patchForm({ categoryCode })}
-                />
-                <OptionSelectField
-                  label="Sub-category"
-                  value={modal.form.subCategoryCode}
-                  options={selectOptions({
-                    options: optionsBySet.get("sub_category") ?? [],
-                    currentCode: modal.form.subCategoryCode,
-                    includeInactiveCurrent: modal.mode === "edit",
-                  })}
-                  error={fieldErrors.sub_category_code}
-                  onChange={(subCategoryCode) => patchForm({ subCategoryCode })}
-                />
+                  <aside className="space-y-4">
+                    <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-sm font-bold uppercase text-text-primary">
+                          <School className="h-4 w-4 text-accent" aria-hidden="true" />
+                          Linked School
+                        </div>
+                        {modal.form.schoolId ? (
+                          <span className="rounded-full bg-success-bg px-2.5 py-1 text-xs font-semibold text-success">
+                            Linked
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-warning-bg px-2.5 py-1 text-xs font-semibold text-warning-text">
+                            Unlinked
+                          </span>
+                        )}
+                      </div>
 
-                <div>
-                  <div className="mb-2 text-xs font-semibold uppercase text-gray-600">Centre Streams</div>
-                  <div className="grid max-h-40 gap-2 overflow-y-auto rounded-md border border-border p-3 sm:grid-cols-2">
-                    {selectOptions({
-                      options: optionsBySet.get("stream") ?? [],
-                      currentCodes: modal.form.streamCodes,
-                      includeInactiveCurrent: modal.mode === "edit",
-                    }).map((option) => (
-                      <label key={option.code} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={modal.form.streamCodes.includes(option.code)}
-                          onChange={() => toggleStream(option.code)}
+                      <div className="mb-3 rounded-lg border border-border bg-bg-card-alt px-3 py-3">
+                        <div className="text-xs font-semibold uppercase text-text-muted">Current School</div>
+                        <div className="mt-1 min-h-6 text-sm font-semibold text-text-primary">
+                          {modal.form.schoolLabel || (
+                            <span className="font-normal text-text-muted">Unlinked</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <Search
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
+                            aria-hidden="true"
+                          />
+                          <Input
+                            value={schoolSearch}
+                            onChange={(event) => {
+                              setSchoolSearch(event.target.value);
+                              setSchoolSuggestionsOpen(true);
+                            }}
+                            onFocus={() => {
+                              if (schoolSearch.trim().length >= 2) {
+                                setSchoolSuggestionsOpen(true);
+                              }
+                            }}
+                            placeholder="Search name, code, UDISE"
+                            className="pl-9"
+                          />
+                          {schoolSuggestionsOpen &&
+                            schoolSearch.trim().length >= 2 &&
+                            (schoolResults.length > 0 || schoolSearching) && (
+                              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-lg border border-border bg-bg-card shadow-xl">
+                                <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase text-text-muted">
+                                  {schoolSearching ? "Searching" : "Best matches"}
+                                </div>
+                                <div className="max-h-60 overflow-y-auto">
+                                  {schoolResults.map((school) => (
+                                    <button
+                                      key={school.id}
+                                      type="button"
+                                      className="flex w-full items-start gap-3 border-b border-border px-3 py-2.5 text-left text-sm last:border-b-0 hover:bg-hover-bg"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => chooseSchool(school)}
+                                    >
+                                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-hover-bg text-accent">
+                                        <School className="h-4 w-4" aria-hidden="true" />
+                                      </span>
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate font-semibold text-text-primary">
+                                          {school.name}
+                                        </span>
+                                        <span className="mt-0.5 block truncate font-mono text-xs text-text-muted">
+                                          {school.code}
+                                          {schoolUdise(school) ? ` / ${schoolUdise(school)}` : ""}
+                                        </span>
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                        </div>
+                        <Button
+                          type="button"
+                          size="md"
+                          variant="secondary"
+                          onClick={() => {
+                            patchForm({ schoolId: null, schoolLabel: "" });
+                            setSchoolSearch("");
+                            setSchoolResults([]);
+                            setSchoolSuggestionsOpen(false);
+                          }}
+                          className="w-full"
+                        >
+                          <CircleOff className="h-4 w-4" aria-hidden="true" />
+                          Unlink
+                        </Button>
+                        {schoolSearching && (
+                          <div className="text-xs font-semibold uppercase text-text-muted">
+                            Searching Schools
+                          </div>
+                        )}
+                        {schoolSuggestionsOpen &&
+                          schoolSearch.trim().length >= 2 &&
+                          !schoolSearching &&
+                          schoolResults.length === 0 && (
+                            <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-2 text-sm text-text-muted">
+                              No matching Schools found
+                            </div>
+                          )}
+                        </div>
+                      {fieldErrors.school_id && (
+                        <p className="mt-1 text-xs text-danger">{fieldErrors.school_id}</p>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
+                      <div className="mb-3 text-sm font-bold uppercase text-text-primary">
+                        Status
+                      </div>
+                      <div className="grid gap-2">
+                        <ToggleField
+                          label="Physical Centre"
+                          checked={modal.form.isPhysical}
+                          onChange={(isPhysical) => patchForm({ isPhysical })}
                         />
-                        <span>{option.label}</span>
-                        {!option.isActive && <span className="text-xs text-gray-400">inactive</span>}
-                      </label>
-                    ))}
-                  </div>
-                  {fieldErrors.stream_codes && (
-                    <p className="mt-1 text-xs text-danger">{fieldErrors.stream_codes}</p>
-                  )}
+                        <ToggleField
+                          label="Active Centre"
+                          checked={modal.form.isActive}
+                          onChange={(isActive) => patchForm({ isActive })}
+                        />
+                      </div>
+                    </div>
+                  </aside>
                 </div>
-
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={modal.form.isPhysical}
-                    onChange={(event) => patchForm({ isPhysical: event.target.checked })}
-                  />
-                  Physical Centre
-                </label>
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={modal.form.isActive}
-                    onChange={(event) => patchForm({ isActive: event.target.checked })}
-                  />
-                  Active Centre
-                </label>
               </div>
 
-              <div className="mt-5 flex justify-end gap-2">
+              <div className="flex flex-col gap-2 border-t border-border bg-bg-card-alt px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
                 <Button variant="secondary" onClick={closeModal} disabled={saving}>
+                  <X className="h-4 w-4" aria-hidden="true" />
                   Cancel
                 </Button>
-                <Button onClick={saveCentre} disabled={saving}>
+                <Button onClick={saveCentre} disabled={saving} className="min-w-36">
+                  <Save className="h-4 w-4" aria-hidden="true" />
                   {saving ? "Saving" : "Save Centre"}
                 </Button>
               </div>
@@ -1004,16 +1140,50 @@ function Field({
   label,
   error,
   children,
+  className = "",
 }: {
   label: string;
   error?: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <label className="text-xs font-semibold uppercase text-gray-600">
+    <label className={`text-xs font-semibold uppercase text-text-muted ${className}`}>
       {label}
       <div className="mt-1">{children}</div>
       {error && <p className="mt-1 text-xs normal-case text-danger">{error}</p>}
+    </label>
+  );
+}
+
+function ToggleField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex min-h-[44px] cursor-pointer items-center justify-between gap-3 rounded-lg border border-border bg-bg-input px-3 text-sm font-semibold text-text-primary hover:bg-hover-bg">
+      <span>{label}</span>
+      <span className="inline-flex items-center gap-2">
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+            checked ? "bg-success-bg text-success" : "bg-bg-card-alt text-text-muted"
+          }`}
+        >
+          {checked ? "Yes" : "No"}
+        </span>
+        <input
+          type="checkbox"
+          checked={checked}
+          aria-label={label}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-4 w-4 accent-[var(--color-accent)]"
+        />
+      </span>
     </label>
   );
 }
@@ -1111,6 +1281,21 @@ function appendFilterParams(params: URLSearchParams, filters: CentreListFilters)
   if (filters.subCategoryCode) params.set("sub_category", filters.subCategoryCode);
   if (filters.streamCode) params.set("stream", filters.streamCode);
   if (filters.isPhysical !== "all") params.set("is_physical", filters.isPhysical);
+}
+
+function syncCentreGridUrl(filters: CentreListFilters, page: number) {
+  if (typeof window === "undefined") return;
+
+  const params = new URLSearchParams();
+  appendFilterParams(params, filters);
+  if (page > 1) params.set("page", String(page));
+
+  const queryString = params.toString();
+  const nextUrl = queryString ? `/admin/centres?${queryString}` : "/admin/centres";
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+  if (currentUrl !== nextUrl) {
+    window.history.pushState(null, "", nextUrl);
+  }
 }
 
 function emptyForm(): CentreFormState {

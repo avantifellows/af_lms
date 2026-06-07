@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ChevronLeft } from "lucide-react";
 
 import { authOptions } from "@/lib/auth";
 import { getCentreOptionSets } from "@/lib/centres";
@@ -24,16 +25,14 @@ export default async function CentreOptionConfigPage() {
   return (
     <div className="min-h-screen bg-bg">
       <header className="border-b border-border bg-bg-card shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex w-full items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <Link href="/admin/centres" className="-m-1 p-1 text-text-muted hover:text-text-primary">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
+              <ChevronLeft className="h-5 w-5" aria-hidden="true" />
             </Link>
             <div>
               <h1 className="text-xl font-bold uppercase tracking-tight text-text-primary sm:text-2xl">
-                Centre Option Configuration
+                Centre Options
               </h1>
               <p className="text-xs font-mono text-text-muted">{session.user.email}</p>
             </div>
@@ -49,7 +48,7 @@ export default async function CentreOptionConfigPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <main className="w-full px-4 py-6 sm:px-6 lg:px-8">
         {optionSetsResult.ok ? (
           <CentreOptionConfig initialOptionSets={optionSetsResult.optionSets} />
         ) : (

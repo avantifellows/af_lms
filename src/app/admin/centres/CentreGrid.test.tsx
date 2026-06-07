@@ -193,6 +193,7 @@ function renderGrid({
 describe("CentreGrid", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    window.history.replaceState(null, "", "/admin/centres");
   });
 
   afterEach(() => {
@@ -273,6 +274,10 @@ describe("CentreGrid", () => {
     expect(url).not.toContain("type=");
     expect(await screen.findByText("Bench Teacher Bucket")).toBeInTheDocument();
     expect(screen.queryByText("JNV Bhavnagar CoE")).not.toBeInTheDocument();
+    expect(window.location.pathname).toBe("/admin/centres");
+    expect(window.location.search).toContain("search=bench");
+    expect(window.location.search).toContain("active=false");
+    expect(window.location.search).toContain("school_link=unlinked");
   });
 
   it("debounces search suggestions and applies checked suggestion terms", async () => {
@@ -317,6 +322,10 @@ describe("CentreGrid", () => {
     );
     expect(String(centreListCall?.[0])).toContain("search_terms=");
     expect(await screen.findByText("JNV Bhavnagar CoE")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/admin/centres");
+    expect(new URLSearchParams(window.location.search).get("search_terms")).toBe(
+      "[\"JNV Barwani\"]"
+    );
   });
 
   it("loads later Centre pages without resetting filters", async () => {
@@ -344,6 +353,9 @@ describe("CentreGrid", () => {
     expect(url).toContain("limit=25");
     expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
     expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 26-50 of 54");
+    expect(window.location.pathname).toBe("/admin/centres");
+    expect(window.location.search).toContain("search=bench");
+    expect(window.location.search).toContain("page=2");
   });
 
   it("creates a Centre with active options and a School selected from search", async () => {
@@ -398,7 +410,6 @@ describe("CentreGrid", () => {
     await user.click(screen.getByRole("checkbox", { name: "JEE" }));
 
     await user.type(screen.getByPlaceholderText("Search name, code, UDISE"), "080101");
-    await user.click(screen.getAllByRole("button", { name: /Search/ }).at(-1)!);
     await user.click(await screen.findByRole("button", { name: /JNV Jaipur/ }));
 
     await user.click(screen.getByRole("checkbox", { name: "Physical Centre" }));
@@ -406,7 +417,8 @@ describe("CentreGrid", () => {
 
     expect(mockFetch).toHaveBeenNthCalledWith(
       1,
-      "/api/admin/schools?scope=centres&q=080101"
+      "/api/admin/schools?scope=centres&q=080101",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,

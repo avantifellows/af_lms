@@ -7,7 +7,13 @@ import { isAdmin } from "@/lib/permissions";
 import { getCentreList, getCentreOptionSets } from "@/lib/centres";
 import CentreGrid from "./CentreGrid";
 
-export default async function CentresPage() {
+interface CentresPageProps {
+  searchParams?:
+    | Promise<{ [key: string]: string | string[] | undefined }>
+    | { [key: string]: string | string[] | undefined };
+}
+
+export default async function CentresPage({ searchParams }: CentresPageProps = {}) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
@@ -19,8 +25,12 @@ export default async function CentresPage() {
     redirect("/dashboard");
   }
 
+  const resolvedSearchParams = searchParams
+    ? await Promise.resolve(searchParams)
+    : {};
+
   const [centresResult, optionSetsResult] = await Promise.all([
-    getCentreList({ searchParams: {} }),
+    getCentreList({ searchParams: resolvedSearchParams }),
     getCentreOptionSets(),
   ]);
 
