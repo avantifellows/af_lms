@@ -1272,3 +1272,66 @@ describe("StudentTable - Dropout modal error edge cases", () => {
     });
   });
 });
+
+// ─── Grade-11 consent flag ───────────────────────────────────────────────────
+
+describe("StudentTable - consent flag", () => {
+  it("shows no consent flag when consentByStudentId is absent", () => {
+    const student = makeStudent({ grade: 11, student_pk_id: "1" });
+    render(<StudentTable students={[student]} grades={defaultGrades} />);
+    expect(screen.queryByText(/Consent/)).not.toBeInTheDocument();
+  });
+
+  it("does not flag non-grade-11 students even when consent data is present", () => {
+    const student = makeStudent({ grade: 10, student_pk_id: "1" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        consentByStudentId={{ "1": [] }}
+      />,
+    );
+    expect(screen.queryByText(/Consent/)).not.toBeInTheDocument();
+  });
+
+  it("shows a green flag for a reported grade-11 student", () => {
+    const student = makeStudent({ grade: 11, student_pk_id: "1" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        consentByStudentId={{
+          "1": ["parent_undertaking", "wise_research_consent"],
+        }}
+      />,
+    );
+    expect(screen.getByText("Consent ✓")).toBeInTheDocument();
+  });
+
+  it("shows a red flag listing missing docs when consent is incomplete", () => {
+    const student = makeStudent({ grade: 11, student_pk_id: "1" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        consentByStudentId={{ "1": ["parent_undertaking"] }}
+      />,
+    );
+    const flag = screen.getByText("Consent ✕");
+    expect(flag).toBeInTheDocument();
+    expect(flag).toHaveAttribute("title", expect.stringContaining("WISE Research Consent"));
+  });
+
+  it("shows a pending flag while consent is loading", () => {
+    const student = makeStudent({ grade: 11, student_pk_id: "1" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        consentByStudentId={{}}
+        consentLoading
+      />,
+    );
+    expect(screen.getByText("Consent …")).toBeInTheDocument();
+  });
+});

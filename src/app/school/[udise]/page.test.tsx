@@ -301,6 +301,15 @@ describe("SchoolPage (server component)", () => {
     mockNotFound.mockImplementation(() => {
       throw new Error("NOT_FOUND");
     });
+    // EnrollmentTabContent fetches grade-11 consent status on mount; stub it so
+    // the post-render state update doesn't trigger act() warnings here.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ consent: {} }),
+      }),
+    );
   });
 
   // --- Auth redirects ---

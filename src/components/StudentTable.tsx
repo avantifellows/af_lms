@@ -5,6 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import {
+  ADMISSION_GRADE,
+  isReported,
+  missingConsentDocs,
+  type ConsentByStudentId,
+} from "@/lib/enrollment-readiness";
+import { labelFor, type DocumentType } from "@/lib/document-types";
 
 export interface Student {
   group_user_id: string;
@@ -76,6 +83,10 @@ interface StudentTableProps {
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
   hideGradeFilterUI?: boolean;
+  // Grade-11 consent status keyed by student_pk_id, used to flag each card's
+  // admission/consent state. Absent for non-admission contexts.
+  consentByStudentId?: ConsentByStudentId;
+  consentLoading?: boolean;
 }
 
 function formatDate(dateString: string | null): string {
@@ -125,6 +136,12 @@ interface StudentCardProps {
    * to the inline DocumentsList so it refetches.
    */
   documentsRefreshNonce?: number;
+  /**
+   * Grade-11 consent flag state. `present` is the list of required consent
+   * doc types uploaded for this student; `show` gates rendering (grade-11
+   * only); `loading` shows a neutral pending state until data arrives.
+   */
+  consent?: { show: boolean; present: string[]; loading: boolean };
 }
 
 // Coerce a `string | null` PK into a safe positive integer; rejects NaN +
@@ -137,12 +154,38 @@ function parseStudentPkId(raw: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Renders the grade-11 admission consent flag: green when reported (all
+// required consent docs uploaded), red with the missing docs otherwise.
+function ConsentFlag({
+  present,
+  loading,
+}: {
+  present: string[];
+  loading: boolean;
+}) {
+  if (loading) {
+    return <Badge variant="default">Consent …</Badge>;
+  }
+  if (isReported(present)) {
+    return <Badge variant="success">Consent ✓</Badge>;
+  }
+  const missing = missingConsentDocs(present)
+    .map((t) => labelFor(t as DocumentType))
+    .join(", ");
+  return (
+    <Badge variant="danger" title={`Missing: ${missing}`}>
+      Consent ✕
+    </Badge>
+  );
+}
+
 function StudentCard({
   student,
   canEdit,
   onEdit,
   onDropout,
   documentsRefreshNonce,
+  consent,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = student.status === "dropout";
@@ -168,6 +211,9 @@ function StudentCard({
                 <Badge variant="danger">
                   Dropout
                 </Badge>
+              )}
+              {consent?.show && !isDropout && (
+                <ConsentFlag present={consent.present} loading={consent.loading} />
               )}
             </div>
           </div>
@@ -414,6 +460,8 @@ export default function StudentTable({
   selectedGrade: controlledGrade,
   onGradeChange,
   hideGradeFilterUI = false,
+  consentByStudentId,
+  consentLoading = false,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -560,6 +608,16 @@ export default function StudentTable({
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
               documentsRefreshNonce={documentsRefresh}
+              consent={
+                consentByStudentId
+                  ? {
+                      show: student.grade === ADMISSION_GRADE,
+                      present:
+                        consentByStudentId[student.student_pk_id ?? ""] ?? [],
+                      loading: consentLoading,
+                    }
+                  : undefined
+              }
             />
           ))
         )}

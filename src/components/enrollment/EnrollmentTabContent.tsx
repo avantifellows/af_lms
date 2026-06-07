@@ -1,11 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
+import AdmissionReadinessCard from "./AdmissionReadinessCard";
 import { buildProgramStats } from "@/lib/enrollment-stats";
+import {
+  ADMISSION_GRADE,
+  buildAdmissionSummary,
+  type ConsentByStudentId,
+} from "@/lib/enrollment-readiness";
 import type { Batch } from "@/components/EditStudentModal";
 
 interface Props {
@@ -19,6 +25,8 @@ interface Props {
   grades: Grade[];
   batches: Batch[];
   nvsStreams: string[];
+  /** School code/UDISE used to fetch grade-11 consent status. */
+  schoolCode: string;
 }
 
 export default function EnrollmentTabContent({
@@ -32,11 +40,47 @@ export default function EnrollmentTabContent({
   grades,
   batches,
   nvsStreams,
+  schoolCode,
 }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+
+  // Consent status for the school's grade-11 students, keyed by student_pk_id.
+  // Fetched client-side so the (default) enrollment tab isn't blocked on the
+  // per-student document lookups.
+  const [consent, setConsent] = useState<ConsentByStudentId>({});
+  const [consentLoading, setConsentLoading] = useState(true);
+  const [consentError, setConsentError] = useState(false);
+
+  // Reset to a loading state whenever the school changes, then fetch. State is
+  // only mutated inside async callbacks (not synchronously in the effect body)
+  // to avoid cascading renders.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(
+      `/api/schools/${encodeURIComponent(schoolCode)}/consent-status?grade=${ADMISSION_GRADE}`,
+    )
+      .then((res) => {
+        if (!res.ok) throw new Error(`consent-status ${res.status}`);
+        return res.json();
+      })
+      .then((data: { consent: ConsentByStudentId }) => {
+        if (cancelled) return;
+        setConsent(data.consent ?? {});
+        setConsentError(false);
+      })
+      .catch(() => {
+        if (!cancelled) setConsentError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setConsentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schoolCode]);
 
   const filteredActive = useMemo(() => {
     if (selectedId == null) return [];
@@ -78,6 +122,12 @@ export default function EnrollmentTabContent({
       .length;
   }, [filteredActive, selectedGrade]);
 
+  // Grade-11 admission summary for the selected program's roster.
+  const admissionSummary = useMemo(() => {
+    const grade11 = filteredActive.filter((s) => s.grade === ADMISSION_GRADE);
+    return buildAdmissionSummary(grade11, consent);
+  }, [filteredActive, consent]);
+
   return (
     <>
       {/* Grade filter — placed above the summary so it's clear the pills react
@@ -110,6 +160,12 @@ export default function EnrollmentTabContent({
         )}
       </div>
 
+      <AdmissionReadinessCard
+        summary={admissionSummary}
+        loading={consentLoading}
+        error={consentError}
+      />
+
       {selectedId != null && (
         <EnrollmentStatsCards
           programs={scopedPrograms}
@@ -134,6 +190,8 @@ export default function EnrollmentTabContent({
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         hideGradeFilterUI
+        consentByStudentId={consent}
+        consentLoading={consentLoading}
       />
     </>
   );

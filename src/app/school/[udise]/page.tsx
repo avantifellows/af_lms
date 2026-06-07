@@ -374,6 +374,7 @@ export default async function SchoolPage({ params }: PageProps) {
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
+        schoolCode={school.code}
       />
     </div>
   );
