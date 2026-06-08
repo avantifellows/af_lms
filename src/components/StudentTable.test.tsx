@@ -935,6 +935,31 @@ describe("StudentTable - Dropout modal", () => {
     expect(mockRefresh).toHaveBeenCalled();
   });
 
+  it("fires onDataChanged on save so the parent can refetch consent", async () => {
+    const user = userEvent.setup();
+    const onDataChanged = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) }),
+    );
+
+    render(
+      <StudentTable
+        students={[makeStudent({ student_id: "STU-DROP" })]}
+        grades={defaultGrades}
+        isAdmin={true}
+        onDataChanged={onDataChanged}
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout"));
+    await user.click(screen.getByText("Confirm Dropout"));
+
+    await vi.waitFor(() => {
+      expect(onDataChanged).toHaveBeenCalled();
+    });
+  });
+
   it("shows error when dropout API fails", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.fn().mockResolvedValueOnce({

@@ -87,6 +87,9 @@ interface StudentTableProps {
   // admission/consent state. Absent for non-admission contexts.
   consentByStudentId?: ConsentByStudentId;
   consentLoading?: boolean;
+  // Called after a save/upload (in addition to the internal router.refresh) so
+  // the parent can refetch data it owns — e.g. the consent map for the flags.
+  onDataChanged?: () => void;
 }
 
 function formatDate(dateString: string | null): string {
@@ -462,6 +465,7 @@ export default function StudentTable({
   hideGradeFilterUI = false,
   consentByStudentId,
   consentLoading = false,
+  onDataChanged,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -524,6 +528,9 @@ export default function StudentTable({
   const handleSave = () => {
     router.refresh();
     setDocumentsRefresh((n) => n + 1);
+    // Lets the parent refetch data it owns (e.g. consent flags/summary) so an
+    // uploaded consent doc reflects without a full page reload.
+    onDataChanged?.();
   };
 
   const showTabs = dropoutStudents.length > 0;

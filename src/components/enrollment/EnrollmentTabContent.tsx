@@ -54,10 +54,13 @@ export default function EnrollmentTabContent({
   const [consent, setConsent] = useState<ConsentByStudentId>({});
   const [consentLoading, setConsentLoading] = useState(true);
   const [consentError, setConsentError] = useState(false);
+  // Bumped after a save/upload in the roster so the consent map refetches and
+  // the flags/summary update without a full page reload.
+  const [consentReloadKey, setConsentReloadKey] = useState(0);
 
-  // Reset to a loading state whenever the school changes, then fetch. State is
-  // only mutated inside async callbacks (not synchronously in the effect body)
-  // to avoid cascading renders.
+  // Refetch when the school changes or after an upload. State is only mutated
+  // inside async callbacks (not synchronously in the effect body) to avoid
+  // cascading renders.
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/schools/${encodeURIComponent(schoolCode)}/consent-status`)
@@ -79,7 +82,7 @@ export default function EnrollmentTabContent({
     return () => {
       cancelled = true;
     };
-  }, [schoolCode]);
+  }, [schoolCode, consentReloadKey]);
 
   const filteredActive = useMemo(() => {
     if (selectedId == null) return [];
@@ -201,6 +204,7 @@ export default function EnrollmentTabContent({
         hideGradeFilterUI
         consentByStudentId={consent}
         consentLoading={consentLoading}
+        onDataChanged={() => setConsentReloadKey((k) => k + 1)}
       />
     </>
   );
