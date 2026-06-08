@@ -348,11 +348,13 @@ describe("StudentTable - expand/collapse", () => {
     });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
 
-    // Expanded details should not be visible
-    expect(screen.queryByText("1234567890")).not.toBeInTheDocument();
-    expect(screen.queryByText("Female")).not.toBeInTheDocument();
+    // Summary fields show in the collapsed card...
+    expect(screen.getByText("1234567890")).toBeInTheDocument();
+    expect(screen.getByText("Female")).toBeInTheDocument();
+    expect(screen.getByText("Nodal")).toBeInTheDocument();
+    // ...but the deeper expanded-only fields (stream, email) are hidden.
     expect(screen.queryByText("commerce")).not.toBeInTheDocument();
-    expect(screen.queryByText("Nodal")).not.toBeInTheDocument();
+    expect(screen.queryByText("test@example.com")).not.toBeInTheDocument();
   });
 
   it("shows expanded details after clicking expand button", async () => {
@@ -421,14 +423,16 @@ describe("StudentTable - expand/collapse", () => {
 
   it("hides details after collapsing", async () => {
     const user = userEvent.setup();
-    const student = makeStudent({ phone: "9999999999" });
+    // Use an expanded-only field (email) as the sentinel — phone now shows in
+    // the always-visible summary.
+    const student = makeStudent({ email: "collapse-test@example.com" });
     render(<StudentTable students={[student]} grades={defaultGrades} />);
 
     await user.click(screen.getByLabelText("Expand"));
-    expect(screen.getByText("9999999999")).toBeInTheDocument();
+    expect(screen.getByText("collapse-test@example.com")).toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Collapse"));
-    expect(screen.queryByText("9999999999")).not.toBeInTheDocument();
+    expect(screen.queryByText("collapse-test@example.com")).not.toBeInTheDocument();
   });
 
   it("shows em-dash for null expanded fields", async () => {
@@ -1068,8 +1072,7 @@ describe("StudentTable - dropout badge", () => {
 // ─── Helper functions (formatDate, getCategoryColor, etc.) ──────────────────
 
 describe("StudentTable - helper function behaviors", () => {
-  it("getCategoryColor: applies correct color classes for each category", async () => {
-    const user = userEvent.setup();
+  it("getCategoryColor: applies correct color classes for each category", () => {
     const categories = ["Gen", "OBC", "SC", "ST", null];
     const expectedClasses = [
       "bg-green-100",
@@ -1092,12 +1095,11 @@ describe("StudentTable - helper function behaviors", () => {
         />,
       );
 
-      await user.click(screen.getByLabelText("Expand"));
-      // Target the category badge specifically: the only pill-shaped span
-      // inside the expanded (.bg-gray-50) area. A null category renders "—",
-      // which now also appears in other empty fields, and the grade badge in
-      // the header is also pill-shaped — so both need to be excluded.
-      const badge = document.querySelector(".bg-gray-50 span.inline-flex.rounded-full");
+      // Category renders as a chip in the always-visible summary grid; find it
+      // via its "Category" label rather than the grade badge (also pill-shaped).
+      const badge = screen
+        .getByText("Category")
+        .nextElementSibling?.querySelector("span.inline-flex.rounded-full");
       expect(badge?.textContent).toBe(categories[i] || "—");
       expect(badge?.className).toContain(expectedClasses[i]);
       unmount();
@@ -1111,12 +1113,9 @@ describe("StudentTable - helper function behaviors", () => {
         grades={defaultGrades}
       />,
     );
-    // DOB area should show "—"
-    const dobLabel = screen.getByText("DOB:");
-    const dobValue = dobLabel.parentElement?.querySelector(
-      "span.text-gray-700",
-    );
-    expect(dobValue?.textContent).toBe("—");
+    // DOB field should show "—"
+    const dobLabel = screen.getByText("DOB");
+    expect(dobLabel.nextElementSibling?.textContent).toBe("—");
   });
 });
 
