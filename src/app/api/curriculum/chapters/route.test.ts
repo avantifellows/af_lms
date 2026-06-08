@@ -132,6 +132,11 @@ describe("GET /api/curriculum/chapters", () => {
         prescribedMinutes: 120,
       }),
     ]);
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining("JOIN topic_curriculum tc"),
+      ["neet", 12, 3, 2]
+    );
   });
 
   it("returns 403 for passcode users", async () => {

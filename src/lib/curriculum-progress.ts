@@ -83,6 +83,9 @@ export async function getCurriculumProgress(params: {
          COUNT(*) OVER (PARTITION BY l.id) AS total_topics_in_log
        FROM lms_curriculum_logs l
        JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
+       JOIN topic_curriculum tc
+         ON tc.topic_id = lt.topic_id
+        AND tc.curriculum_id = $7
        WHERE l.school_code = $1
          AND l.program_id = $2
          AND l.grade_id = $3
@@ -100,7 +103,12 @@ export async function getCurriculumProgress(params: {
      FROM lms_chapter_exam_configs cfg
      JOIN chapter ch ON ch.id = cfg.chapter_id
      JOIN grade g ON g.id = ch.grade_id
-     LEFT JOIN topic t ON t.chapter_id = ch.id
+     LEFT JOIN (
+       topic t
+       JOIN topic_curriculum topic_scope
+         ON topic_scope.topic_id = t.id
+        AND topic_scope.curriculum_id = $7
+     ) ON t.chapter_id = ch.id
      LEFT JOIN scoped_log_topics slt ON slt.topic_id = t.id
      WHERE cfg.exam_track = $5
        AND cfg.is_in_syllabus = true
@@ -114,6 +122,7 @@ export async function getCurriculumProgress(params: {
       scope.subjectId,
       scope.examTrack,
       scope.grade,
+      scope.curriculumId,
     ]
   );
 

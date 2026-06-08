@@ -134,7 +134,7 @@ describe("GET /api/curriculum/progress", () => {
     expect(mockQuery).toHaveBeenNthCalledWith(
       5,
       expect.stringContaining("AND l.deleted_at IS NULL"),
-      ["70705", 1, 3, 4, "jee_main", 11]
+      ["70705", 1, 3, 4, "jee_main", 11, 1]
     );
   });
 
@@ -183,8 +183,8 @@ describe("GET /api/curriculum/progress", () => {
     });
     expect(mockQuery).toHaveBeenNthCalledWith(
       5,
-      expect.stringContaining("LEFT JOIN topic t ON t.chapter_id = ch.id"),
-      ["70705", 1, 3, 4, "jee_main", 11]
+      expect.stringContaining("JOIN topic_curriculum topic_scope"),
+      ["70705", 1, 3, 4, "jee_main", 11, 1]
     );
   });
 
