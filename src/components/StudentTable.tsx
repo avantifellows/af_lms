@@ -602,12 +602,11 @@ export default function StudentTable({
         </div>
       )}
 
-      {/* Student cards — responsive grid so the roster fills the width and
-          aligns with the full-width summary cards above. items-start keeps an
-          expanded card from stretching its row neighbour. */}
-      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+      {/* Student cards — one per row, full width. The card's own field grid
+          fills the width, so a single column reads cleanly. */}
+      <div className="space-y-3">
         {filteredStudents.length === 0 ? (
-          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500 lg:col-span-2">
+          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500">
             {currentStudents.length === 0
               ? activeTab === "active"
                 ? "No active students enrolled in this school"
