@@ -294,6 +294,11 @@ interface RemoveMutationRow extends CurriculumConfigQueryRow {
 }
 
 const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
+  jee_main: 1,
+  jee_advanced: 9,
+  neet: 2,
+};
 const SYLLABUS_STATUSES: CurriculumConfigSyllabusStatus[] = [
   "in_syllabus",
   "out_of_syllabus",
@@ -646,6 +651,7 @@ export async function getCurriculumConfigChapterOptions(
     buildChapterOptionsSql(),
     [
       params.examTrack,
+      EXAM_TRACK_CURRICULUM_IDS[params.examTrack],
       params.grade,
       params.subject,
       params.search ? `%${params.search.toLowerCase()}%` : null,
@@ -1108,7 +1114,12 @@ function buildChapterOptionsSql(): string {
       FROM chapter ch
       JOIN grade g ON g.id = ch.grade_id
       JOIN subject s ON s.id = ch.subject_id
-      LEFT JOIN topic t ON t.chapter_id = ch.id
+      LEFT JOIN (
+        topic t
+        JOIN topic_curriculum tc
+          ON tc.topic_id = t.id
+         AND tc.curriculum_id = $2
+      ) ON t.chapter_id = ch.id
       LEFT JOIN lms_chapter_exam_configs cfg
         ON cfg.chapter_id = ch.id
        AND cfg.exam_track = $1
@@ -1124,16 +1135,16 @@ function buildChapterOptionsSql(): string {
     )
     SELECT *
     FROM chapter_options
-    WHERE ($2::int IS NULL OR grade = $2::int)
-      AND (
-        $3::text IS NULL
-        OR subject_id::text = $3::text
-        OR LOWER(subject_name) = LOWER($3::text)
-      )
+    WHERE ($3::int IS NULL OR grade = $3::int)
       AND (
         $4::text IS NULL
-        OR LOWER(chapter_code) LIKE $4::text
-        OR LOWER(chapter_name) LIKE $4::text
+        OR subject_id::text = $4::text
+        OR LOWER(subject_name) = LOWER($4::text)
+      )
+      AND (
+        $5::text IS NULL
+        OR LOWER(chapter_code) LIKE $5::text
+        OR LOWER(chapter_name) LIKE $5::text
       )
     ORDER BY grade ASC, subject_name ASC, chapter_code ASC, chapter_name ASC
     LIMIT 50`;

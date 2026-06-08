@@ -31,6 +31,8 @@ const REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "lms_curriculum_logs", column: "deleted_at" },
   { table: "lms_curriculum_log_topics", column: "curriculum_log_id" },
   { table: "lms_curriculum_log_topics", column: "topic_id" },
+  { table: "topic_curriculum", column: "topic_id" },
+  { table: "topic_curriculum", column: "curriculum_id" },
   { table: "lms_curriculum_chapter_completions", column: "school_code" },
   { table: "lms_curriculum_chapter_completions", column: "program_id" },
   { table: "lms_curriculum_chapter_completions", column: "chapter_id" },
