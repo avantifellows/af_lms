@@ -11,7 +11,7 @@ import {
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { listDocuments } from "@/lib/db-service-documents";
 import {
-  ADMISSION_GRADE,
+  ADMISSION_GRADES,
   CONSENT_REQUIRED_DOC_TYPES,
   type ConsentByStudentId,
   type ConsentDocType,
@@ -23,11 +23,12 @@ function jsonError(status: number, message: string) {
 
 const REQUIRED = new Set<string>(CONSENT_REQUIRED_DOC_TYPES);
 
-// GET /api/schools/[code]/consent-status?grade=11
+// GET /api/schools/[code]/consent-status[?grade=11]
 //
 // Returns the required consent doc types currently uploaded for each student
-// in the given grade at the school: `{ consent: { [student_pk_id]: string[] } }`.
-// Powers the grade-11 admission-readiness summary + per-student consent flags.
+// at the school: `{ consent: { [student_pk_id]: string[] } }`. Defaults to the
+// admission grades (11 & 12); pass `?grade=N` to scope to a single grade.
+// Powers the admission-readiness summary + per-student consent flags.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
@@ -39,9 +40,15 @@ export async function GET(
 
   const { code } = await params;
   const gradeParam = request.nextUrl.searchParams.get("grade");
-  const grade = gradeParam ? Number(gradeParam) : ADMISSION_GRADE;
-  if (!Number.isInteger(grade) || grade < 1) {
-    return jsonError(400, "grade must be a positive integer");
+  let grades: number[];
+  if (gradeParam == null) {
+    grades = [...ADMISSION_GRADES];
+  } else {
+    const grade = Number(gradeParam);
+    if (!Number.isInteger(grade) || grade < 1) {
+      return jsonError(400, "grade must be a positive integer");
+    }
+    grades = [grade];
   }
 
   // Resolve the school by UDISE or code (same lookup as the school page).
@@ -80,7 +87,8 @@ export async function GET(
     }
   }
 
-  // Grade-N students currently enrolled at the school (excludes dropouts).
+  // Students in the target grade(s) currently enrolled at the school
+  // (excludes dropouts).
   const students = await query<{ student_pk_id: string }>(
     `SELECT s.id AS student_pk_id
      FROM group_user gu
@@ -93,9 +101,9 @@ export async function GET(
        AND er.academic_year = $2
      JOIN grade gr ON er.group_id = gr.id
      WHERE g.child_id = $1
-       AND gr.number = $3
+       AND gr.number = ANY($3::int[])
        AND (s.status IS NULL OR s.status != 'dropout')`,
-    [school.id, CURRENT_ACADEMIC_YEAR, grade],
+    [school.id, CURRENT_ACADEMIC_YEAR, grades],
   );
 
   // Fetch each student's documents from the db-service. The docs API is

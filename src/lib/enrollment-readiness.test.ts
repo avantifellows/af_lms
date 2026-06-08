@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { Student } from "@/components/StudentTable";
 import {
-  ADMISSION_GRADE,
+  ADMISSION_GRADES,
   CONSENT_REQUIRED_DOC_TYPES,
   INFO_REQUIRED_FIELDS,
+  isAdmissionGrade,
   isInfoComplete,
   isReported,
   missingConsentDocs,
@@ -19,7 +20,7 @@ function completeStudent(overrides: Partial<Student> = {}): Student {
     student_pk_id: "1",
     program_name: "NVS",
     program_id: 64,
-    grade: ADMISSION_GRADE,
+    grade: 11,
     grade_id: "g-11",
     status: null,
     updated_at: null,
@@ -31,8 +32,8 @@ function completeStudent(overrides: Partial<Student> = {}): Student {
 }
 
 describe("config integrity", () => {
-  it("admission grade is 11", () => {
-    expect(ADMISSION_GRADE).toBe(11);
+  it("tracks admission grades 11 and 12", () => {
+    expect([...ADMISSION_GRADES]).toEqual([11, 12]);
   });
 
   it("requires parent + WISE consent", () => {
@@ -40,6 +41,19 @@ describe("config integrity", () => {
       "parent_undertaking",
       "wise_research_consent",
     ]);
+  });
+});
+
+describe("isAdmissionGrade", () => {
+  it("true for grades 11 and 12", () => {
+    expect(isAdmissionGrade(11)).toBe(true);
+    expect(isAdmissionGrade(12)).toBe(true);
+  });
+
+  it("false for other grades and nullish", () => {
+    expect(isAdmissionGrade(10)).toBe(false);
+    expect(isAdmissionGrade(null)).toBe(false);
+    expect(isAdmissionGrade(undefined)).toBe(false);
   });
 });
 

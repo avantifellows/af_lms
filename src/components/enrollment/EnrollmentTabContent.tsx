@@ -8,8 +8,9 @@ import EnrollmentStatsCards, {
 import AdmissionReadinessCard from "./AdmissionReadinessCard";
 import { buildProgramStats } from "@/lib/enrollment-stats";
 import {
-  ADMISSION_GRADE,
+  ADMISSION_GRADES,
   buildAdmissionSummary,
+  isAdmissionGrade,
   type ConsentByStudentId,
 } from "@/lib/enrollment-readiness";
 import type { Batch } from "@/components/EditStudentModal";
@@ -59,9 +60,7 @@ export default function EnrollmentTabContent({
   // to avoid cascading renders.
   useEffect(() => {
     let cancelled = false;
-    fetch(
-      `/api/schools/${encodeURIComponent(schoolCode)}/consent-status?grade=${ADMISSION_GRADE}`,
-    )
+    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/consent-status`)
       .then((res) => {
         if (!res.ok) throw new Error(`consent-status ${res.status}`);
         return res.json();
@@ -122,10 +121,19 @@ export default function EnrollmentTabContent({
       .length;
   }, [filteredActive, selectedGrade]);
 
-  // Grade-11 admission summary for the selected program's roster.
-  const admissionSummary = useMemo(() => {
-    const grade11 = filteredActive.filter((s) => s.grade === ADMISSION_GRADE);
-    return buildAdmissionSummary(grade11, consent);
+  // Admission summary for the selected program's roster: a combined figure
+  // across the admission grades plus a per-grade breakdown.
+  const admission = useMemo(() => {
+    const inScope = filteredActive.filter((s) => isAdmissionGrade(s.grade));
+    const combined = buildAdmissionSummary(inScope, consent);
+    const perGrade = ADMISSION_GRADES.map((grade) => ({
+      grade,
+      summary: buildAdmissionSummary(
+        inScope.filter((s) => s.grade === grade),
+        consent,
+      ),
+    }));
+    return { combined, perGrade };
   }, [filteredActive, consent]);
 
   return (
@@ -161,7 +169,8 @@ export default function EnrollmentTabContent({
       </div>
 
       <AdmissionReadinessCard
-        summary={admissionSummary}
+        combined={admission.combined}
+        perGrade={admission.perGrade}
         loading={consentLoading}
         error={consentError}
       />

@@ -6,7 +6,7 @@ import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import {
-  ADMISSION_GRADE,
+  isAdmissionGrade,
   isReported,
   missingConsentDocs,
   type ConsentByStudentId,
@@ -611,7 +611,7 @@ export default function StudentTable({
               consent={
                 consentByStudentId
                   ? {
-                      show: student.grade === ADMISSION_GRADE,
+                      show: isAdmissionGrade(student.grade),
                       present:
                         consentByStudentId[student.student_pk_id ?? ""] ?? [],
                       loading: consentLoading,

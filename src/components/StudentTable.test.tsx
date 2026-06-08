@@ -1282,7 +1282,7 @@ describe("StudentTable - consent flag", () => {
     expect(screen.queryByText(/Consent/)).not.toBeInTheDocument();
   });
 
-  it("does not flag non-grade-11 students even when consent data is present", () => {
+  it("does not flag non-admission-grade students even when consent data is present", () => {
     const student = makeStudent({ grade: 10, student_pk_id: "1" });
     render(
       <StudentTable
@@ -1292,6 +1292,20 @@ describe("StudentTable - consent flag", () => {
       />,
     );
     expect(screen.queryByText(/Consent/)).not.toBeInTheDocument();
+  });
+
+  it("flags grade-12 students too", () => {
+    const student = makeStudent({ grade: 12, student_pk_id: "1" });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        consentByStudentId={{
+          "1": ["parent_undertaking", "wise_research_consent"],
+        }}
+      />,
+    );
+    expect(screen.getByText("Consent ✓")).toBeInTheDocument();
   });
 
   it("shows a green flag for a reported grade-11 student", () => {

@@ -129,6 +129,17 @@ describe("GET /api/schools/[code]/consent-status", () => {
       "wise_research_consent",
     ]);
     expect(body.consent["2"]).toEqual(["parent_undertaking"]);
+    // With no ?grade, it defaults to both admission grades.
+    expect(mockQuery.mock.calls[1][1]?.[2]).toEqual([11, 12]);
+  });
+
+  it("scopes to a single grade when ?grade is given", async () => {
+    mockSession.mockResolvedValueOnce(ADMIN_SESSION);
+    mockQuery
+      .mockResolvedValueOnce(SCHOOL_ROW as never)
+      .mockResolvedValueOnce([] as never);
+    await GET(req("12"), params);
+    expect(mockQuery.mock.calls[1][1]?.[2]).toEqual([12]);
   });
 
   it("degrades a failed document lookup to empty consent", async () => {

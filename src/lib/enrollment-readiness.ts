@@ -1,6 +1,6 @@
-// Grade-11 admission readiness metrics.
+// Admission readiness metrics (grades 11 & 12).
 //
-// Tracks, per school, how far grade-11 admissions have progressed:
+// Tracks, per school, how far admissions have progressed for each grade:
 //   • total students        — grade-11 roster size
 //   • reported              — students whose admission is complete (all the
 //                             required consent docs uploaded on the LMS)
@@ -13,8 +13,13 @@
 
 import type { Student } from "@/components/StudentTable";
 
-/** Grade these admission metrics apply to. */
-export const ADMISSION_GRADE = 11;
+/** Grades these admission metrics apply to. */
+export const ADMISSION_GRADES = [11, 12] as const;
+
+/** True when a student's grade is tracked for admissions (grade 11 or 12). */
+export function isAdmissionGrade(grade: number | null | undefined): boolean {
+  return grade != null && (ADMISSION_GRADES as readonly number[]).includes(grade);
+}
 
 // Document types that together mark a student as "reported" / admitted.
 //   parent_undertaking   → parent consent
