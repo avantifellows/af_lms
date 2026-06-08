@@ -143,7 +143,7 @@ export default function EnrollmentTabContent({
     <>
       {/* Grade filter — placed above the summary so it's clear the pills react
           to it. */}
-      <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
         <label
           htmlFor="gradeFilter"
           className="text-sm font-medium text-gray-700"

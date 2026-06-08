@@ -539,7 +539,7 @@ export default function StudentTable({
     <>
       {/* Tabs - only show if there are dropout students */}
       {showTabs && (
-        <div className="max-w-3xl mx-auto mb-4">
+        <div className="mb-4">
           <div className="flex border-b border-gray-200">
             <button
               onClick={() => handleTabChange("active")}
@@ -568,7 +568,7 @@ export default function StudentTable({
       {/* Grade filter - centered. Hidden when the parent renders its own
           filter control above (controlled mode). */}
       {!hideGradeFilterUI && (
-        <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+        <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
           <label
             htmlFor="gradeFilter"
             className="text-sm font-medium text-gray-700"
@@ -596,10 +596,12 @@ export default function StudentTable({
         </div>
       )}
 
-      {/* Student cards */}
-      <div className="max-w-3xl mx-auto space-y-3">
+      {/* Student cards — responsive grid so the roster fills the width and
+          aligns with the full-width summary cards above. items-start keeps an
+          expanded card from stretching its row neighbour. */}
+      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
         {filteredStudents.length === 0 ? (
-          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500">
+          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500 lg:col-span-2">
             {currentStudents.length === 0
               ? activeTab === "active"
                 ? "No active students enrolled in this school"
