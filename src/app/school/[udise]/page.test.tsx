@@ -590,7 +590,7 @@ describe("SchoolPage (server component)", () => {
     expect(header).toHaveAttribute("data-back-href", "");
   });
 
-  it("shows Curriculum Summary top-level link for eligible one-school users", async () => {
+  it("does not show Curriculum Summary top-level link for eligible one-school users", async () => {
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
       makePermission({
@@ -609,13 +609,9 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    const curriculumSummaryLink = screen.getByRole("link", {
-      name: "Curriculum Summary",
-    });
-    expect(curriculumSummaryLink).toHaveAttribute(
-      "href",
-      "/curriculum-summary"
-    );
+    expect(
+      screen.queryByRole("link", { name: "Curriculum Summary" })
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("page-header")).not.toHaveTextContent(
       "Curriculum Summary"
     );

@@ -80,6 +80,7 @@ vi.mock("./SessionHistory", () => ({
 
 vi.mock("./LogSessionModal", () => ({
   default: (props: {
+    chapters: Chapter[];
     onSave: (payload: {
       date: string;
       durationMinutes: number;
@@ -91,7 +92,10 @@ vi.mock("./LogSessionModal", () => ({
     isSaving?: boolean;
     editLog?: { id: number } | null;
   }) => (
-    <div data-testid="log-session-modal">
+    <div
+      data-testid="log-session-modal"
+      data-chapters={JSON.stringify(props.chapters)}
+    >
       {props.editLog && <div>Editing log {props.editLog.id}</div>}
       {props.error && <div>{props.error}</div>}
       <button
@@ -208,6 +212,37 @@ const logsResponse = {
     },
   ],
 };
+const biologyProgressResponse = {
+  subjectTotalTimeMinutes: 30,
+  progress: {
+    2: {
+      chapterId: 2,
+      completedTopicIds: [201],
+      totalTimeMinutes: 30,
+      lastTaughtDate: "2026-02-16",
+      allTopicsCovered: false,
+      isChapterComplete: false,
+      chapterCompletedDate: null,
+    },
+  },
+};
+const biologyLogsResponse = {
+  logs: [
+    {
+      id: 20,
+      logDate: "2026-02-16",
+      durationMinutes: 30,
+      programId: 1,
+      gradeId: 4,
+      subjectId: 3,
+      examTrack: "neet",
+      topics: [{ topicId: 201, topicName: "Algae", chapterId: 2, chapterName: "Plant Kingdom" }],
+      isEditable: true,
+      createdAt: "2026-02-16T10:00:00.000Z",
+      updatedAt: "2026-02-16T10:00:00.000Z",
+    },
+  ],
+};
 
 function mockOkJson(body: unknown) {
   return Promise.resolve({ ok: true, json: async () => body });
@@ -227,14 +262,20 @@ function setupFetch() {
     if (url === "/api/curriculum/options?school_code=70705") {
       return mockOkJson(optionsResponse);
     }
+    if (url.includes("/api/curriculum/logs?") && url.includes("exam_track=neet")) {
+      return mockOkJson(biologyLogsResponse);
+    }
+    if (url.includes("/api/curriculum/progress?") && url.includes("exam_track=neet")) {
+      return mockOkJson(biologyProgressResponse);
+    }
+    if (url.includes("/api/curriculum/chapters?") && url.includes("exam_track=neet")) {
+      return mockOkJson({ chapters: biologyChapters });
+    }
     if (url.includes("/api/curriculum/logs?")) {
       return mockOkJson(logsResponse);
     }
     if (url.includes("/api/curriculum/progress?")) {
       return mockOkJson(progressResponse);
-    }
-    if (url.includes("exam_track=neet")) {
-      return mockOkJson({ chapters: biologyChapters });
     }
     return mockOkJson({ chapters: physicsChapters });
   });
@@ -323,7 +364,43 @@ describe("CurriculumTab", () => {
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/curriculum/chapters?school_code=70705&program_id=1&exam_track=neet&grade=12&subject=Biology"
       );
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs?school_code=70705&program_id=1&exam_track=neet&grade=12&subject=Biology"
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=neet&grade=12&subject=Biology"
+      );
     });
+
+    expect(screen.getByTestId("chapter-accordion")).toHaveAttribute(
+      "data-chapters",
+      JSON.stringify(biologyChapters)
+    );
+    expect(screen.getByTestId("progress-summary")).toHaveAttribute(
+      "data-subject-total-time-minutes",
+      "30"
+    );
+  });
+
+  it("opens Add Log with chapters from the active filter scope", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Exam Track"), "neet");
+    await waitFor(() =>
+      expect(screen.getByTestId("chapter-accordion")).toHaveAttribute(
+        "data-chapters",
+        JSON.stringify(biologyChapters)
+      )
+    );
+
+    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+
+    expect(screen.getByTestId("log-session-modal")).toHaveAttribute(
+      "data-chapters",
+      JSON.stringify(biologyChapters)
+    );
   });
 
   it("shows backend Logs and opens the Add Log modal", async () => {

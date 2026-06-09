@@ -1076,6 +1076,12 @@ function QuizSessionCreateModal({
     );
   };
 
+  const toggleTemplate = (templateId: number) => {
+    setSelectedTemplateId((previous) =>
+      previous === templateId ? null : templateId
+    );
+  };
+
   const validate = () => {
     if (classBatchIds.length === 0) return "At least one class batch is required.";
     if (batchDerivation.error) return batchDerivation.error;
@@ -1282,12 +1288,13 @@ function QuizSessionCreateModal({
                           <div
                             key={template.id}
                             role="button"
+                            aria-pressed={isSelected}
                             tabIndex={0}
-                            onClick={() => setSelectedTemplateId(template.id)}
+                            onClick={() => toggleTemplate(template.id)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                setSelectedTemplateId(template.id);
+                                toggleTemplate(template.id);
                               }
                             }}
                             className={`flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left last:border-b-0 ${

@@ -47,6 +47,8 @@ describe("curriculum schema preflight", () => {
         "lms_curriculum_logs",
         "log_date",
         "deleted_at",
+        "topic_curriculum",
+        "curriculum_id",
       ])
     );
   });
