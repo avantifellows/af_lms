@@ -69,7 +69,6 @@ interface QuizTemplateOption {
 
 interface BatchDerivation {
   error: string | null;
-  grade: number | null;
   stream: string;
   parentBatchId: string;
   parentBatchName: string;
@@ -92,13 +91,6 @@ function getCompactBatchLabel(values: string[] | undefined): string {
   if (!values?.length) return "-";
   if (values.length === 1) return values[0];
   return `${values[0]} +${values.length - 1}`;
-}
-
-function parseBatchGrade(batchId: string): number | null {
-  const parts = batchId.split("_");
-  if (parts.length < 2) return null;
-  const value = Number(parts[1]);
-  return Number.isNaN(value) ? null : value;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -939,7 +931,6 @@ function QuizSessionCreateModal({
     if (selectedRows.length === 0) {
       return {
         error: null,
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -954,7 +945,6 @@ function QuizSessionCreateModal({
     if (parentIds.size !== 1) {
       return {
         error: "Selected class batches must belong to the same parent batch.",
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -966,22 +956,6 @@ function QuizSessionCreateModal({
     if (!parentRow) {
       return {
         error: "Unable to find the parent batch for the selected class batches.",
-        grade: null,
-        stream: "",
-        parentBatchId: "",
-        parentBatchName: "",
-      };
-    }
-
-    const gradeSet = new Set(
-      selectedRows
-        .map((row) => parseBatchGrade(row.batch_id))
-        .filter((grade): grade is number => grade !== null)
-    );
-    if (gradeSet.size !== 1) {
-      return {
-        error: "Selected class batches must have the same grade.",
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -991,8 +965,9 @@ function QuizSessionCreateModal({
     const streamSet = new Set(
       selectedRows
         .map((row) => {
-          if (row.batch_id.includes("_Engg_")) return "engineering";
-          if (row.batch_id.includes("_Med_")) return "medical";
+          const batchId = row.batch_id.toLowerCase();
+          if (batchId.includes("_engg_")) return "engineering";
+          if (batchId.includes("_med_")) return "medical";
           return "";
         })
         .filter(Boolean)
@@ -1000,7 +975,6 @@ function QuizSessionCreateModal({
     if (streamSet.size !== 1) {
       return {
         error: "Unable to derive stream from the selected class batches.",
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -1009,7 +983,6 @@ function QuizSessionCreateModal({
 
     return {
       error: null,
-      grade: Array.from(gradeSet)[0],
       stream: Array.from(streamSet)[0],
       parentBatchId: parentRow.batch_id,
       parentBatchName: parentRow.name,
@@ -1024,11 +997,7 @@ function QuizSessionCreateModal({
   }, [startTime, endTimeEdited]);
 
   useEffect(() => {
-    if (
-      !batchDerivation.grade ||
-      !batchDerivation.stream ||
-      !testFormat
-    ) {
+    if (!batchDerivation.stream || !testFormat) {
       setTemplates([]);
       setSelectedTemplateId(null);
       setTemplateError(null);
@@ -1042,7 +1011,6 @@ function QuizSessionCreateModal({
 
       try {
         const params = new URLSearchParams({
-          grade: String(batchDerivation.grade),
           stream: batchDerivation.stream,
           testFormat,
         });
@@ -1073,7 +1041,6 @@ function QuizSessionCreateModal({
       cancelled = true;
     };
   }, [
-    batchDerivation.grade,
     batchDerivation.stream,
     testFormat,
   ]);
@@ -1113,11 +1080,14 @@ function QuizSessionCreateModal({
     if (classBatchIds.length === 0) return "At least one class batch is required.";
     if (batchDerivation.error) return batchDerivation.error;
     if (!batchDerivation.parentBatchId) return "Parent batch could not be derived.";
-    if (!batchDerivation.grade || !batchDerivation.stream) {
+    if (!batchDerivation.stream) {
       return "Batch details could not be derived.";
     }
     if (!testFormat) return "Test format is required.";
     if (!selectedTemplate) return "Please select a paper.";
+    if (selectedTemplate.grade === null) {
+      return "Selected paper is missing grade metadata.";
+    }
 
     if (timingMode === "schedule") {
       const start = new Date(startTime);
@@ -1140,7 +1110,7 @@ function QuizSessionCreateModal({
       return;
     }
 
-    if (!selectedTemplate || !batchDerivation.grade) return;
+    if (!selectedTemplate || selectedTemplate.grade === null) return;
 
     setSaving(true);
     setError(null);
@@ -1156,7 +1126,7 @@ function QuizSessionCreateModal({
       const payload = {
         name: name.trim() || getDefaultSessionName(selectedTemplate.name),
         resourceId: selectedTemplate.id,
-        grade: batchDerivation.grade,
+        grade: selectedTemplate.grade,
         parentBatchId: batchDerivation.parentBatchId,
         classBatchIds,
         stream: batchDerivation.stream,
@@ -1286,7 +1256,6 @@ function QuizSessionCreateModal({
                   </div>
 
                   {!classBatchIds.length ||
-                  !batchDerivation.grade ||
                   !batchDerivation.stream ||
                   batchDerivation.error ||
                   !testFormat ? (
