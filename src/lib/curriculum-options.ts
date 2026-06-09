@@ -22,6 +22,10 @@ const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_advanced: 9,
   neet: 2,
 };
+const CURRICULUM_CODE_COLLATOR = new Intl.Collator("en", {
+  numeric: true,
+  sensitivity: "base",
+});
 
 interface SchoolScopeRow {
   code: string;
@@ -114,6 +118,10 @@ export function isSubjectName(value: string): value is SubjectName {
 
 export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
   return EXAM_TRACK_CURRICULUM_IDS[examTrack];
+}
+
+function compareCurriculumCodes(a: string, b: string): number {
+  return CURRICULUM_CODE_COLLATOR.compare(a, b);
 }
 
 function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; subject: SubjectName }>(
@@ -355,8 +363,11 @@ export async function getCurriculumChapters(params: {
   const chapters = [...chaptersById.values()].sort((a, b) => {
     const sequenceDiff = (a.coverageSequence ?? 0) - (b.coverageSequence ?? 0);
     if (sequenceDiff !== 0) return sequenceDiff;
-    return a.code.localeCompare(b.code);
+    return compareCurriculumCodes(a.code, b.code);
   });
+  for (const chapter of chapters) {
+    chapter.topics.sort((a, b) => compareCurriculumCodes(a.code, b.code));
+  }
 
   return { ok: true, chapters };
 }

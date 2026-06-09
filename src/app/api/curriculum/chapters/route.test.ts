@@ -65,7 +65,7 @@ describe("GET /api/curriculum/chapters", () => {
     });
   });
 
-  it("returns in-syllabus chapters with topics, prescribed minutes, Exam Track, and configured ordering", async () => {
+  it("returns in-syllabus chapters with topics, prescribed minutes, Exam Track, and natural code ordering", async () => {
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -103,6 +103,66 @@ describe("GET /api/curriculum/chapters", () => {
           topic_code: "BIO01.01",
           topic_name: [{ lang_code: "en", topic: "Algae" }],
         },
+        {
+          chapter_id: 10,
+          chapter_code: "BIO01",
+          chapter_name: [{ lang_code: "en", chapter: "Plant Kingdom" }],
+          grade_id: 4,
+          grade: 12,
+          subject_id: 3,
+          subject_name: [{ lang_code: "en", subject: "Biology" }],
+          exam_track: "neet",
+          prescribed_minutes: 90,
+          coverage_sequence: 1,
+          topic_id: 110,
+          topic_code: "BIO01.10",
+          topic_name: [{ lang_code: "en", topic: "Bryophytes" }],
+        },
+        {
+          chapter_id: 10,
+          chapter_code: "BIO01",
+          chapter_name: [{ lang_code: "en", chapter: "Plant Kingdom" }],
+          grade_id: 4,
+          grade: 12,
+          subject_id: 3,
+          subject_name: [{ lang_code: "en", subject: "Biology" }],
+          exam_track: "neet",
+          prescribed_minutes: 90,
+          coverage_sequence: 1,
+          topic_id: 102,
+          topic_code: "BIO01.2",
+          topic_name: [{ lang_code: "en", topic: "Fungi" }],
+        },
+        {
+          chapter_id: 30,
+          chapter_code: "BIO10",
+          chapter_name: [{ lang_code: "en", chapter: "Genetics" }],
+          grade_id: 4,
+          grade: 12,
+          subject_id: 3,
+          subject_name: [{ lang_code: "en", subject: "Biology" }],
+          exam_track: "neet",
+          prescribed_minutes: 60,
+          coverage_sequence: 2,
+          topic_id: 301,
+          topic_code: "BIO10.1",
+          topic_name: [{ lang_code: "en", topic: "Heredity" }],
+        },
+        {
+          chapter_id: 40,
+          chapter_code: "BIO2",
+          chapter_name: [{ lang_code: "en", chapter: "Cell Biology" }],
+          grade_id: 4,
+          grade: 12,
+          subject_id: 3,
+          subject_name: [{ lang_code: "en", subject: "Biology" }],
+          exam_track: "neet",
+          prescribed_minutes: 75,
+          coverage_sequence: 2,
+          topic_id: 401,
+          topic_code: "BIO2.1",
+          topic_name: [{ lang_code: "en", topic: "Cell Structure" }],
+        },
       ]);
 
     const res = await GET(
@@ -123,6 +183,8 @@ describe("GET /api/curriculum/chapters", () => {
         coverageSequence: 1,
         topics: [
           { id: 101, code: "BIO01.01", name: "Algae", chapterId: 10 },
+          { id: 102, code: "BIO01.2", name: "Fungi", chapterId: 10 },
+          { id: 110, code: "BIO01.10", name: "Bryophytes", chapterId: 10 },
         ],
       }),
       expect.objectContaining({
@@ -130,6 +192,16 @@ describe("GET /api/curriculum/chapters", () => {
         code: "BIO02",
         name: "Human Physiology",
         prescribedMinutes: 120,
+      }),
+      expect.objectContaining({
+        id: 40,
+        code: "BIO2",
+        name: "Cell Biology",
+      }),
+      expect.objectContaining({
+        id: 30,
+        code: "BIO10",
+        name: "Genetics",
       }),
     ]);
     expect(mockQuery).toHaveBeenNthCalledWith(
