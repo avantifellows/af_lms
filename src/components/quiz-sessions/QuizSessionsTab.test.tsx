@@ -305,7 +305,8 @@ describe("QuizSessionsTab", () => {
     );
     await user.click(screen.getByLabelText("Class 11 Engg A"));
     await user.click(screen.getByLabelText("Class 11 Engg B"));
-    await user.selectOptions(screen.getAllByRole("combobox")[1], "part_test");
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
 
     expect(await screen.findByText("Part Test 11")).toBeInTheDocument();
     await user.click(screen.getByText("Part Test 11"));
@@ -341,7 +342,7 @@ describe("QuizSessionsTab", () => {
 
     const templateCallUrl = String(getFetchCalls(mockFetch, "/api/quiz-sessions/templates?")[0][0]);
     const templateParams = new URL(templateCallUrl, "http://localhost").searchParams;
-    expect(templateParams.get("grade")).toBeNull();
+    expect(templateParams.get("grade")).toBe("11");
     expect(templateParams.get("stream")).toBe("engineering");
     expect(templateParams.get("testFormat")).toBe("part_test");
   });
@@ -376,7 +377,8 @@ describe("QuizSessionsTab", () => {
     await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
     await user.click(screen.getByLabelText("CoE JNV Hassan 2028 Engineering"));
     await user.click(screen.getByLabelText("CoE JNV Kottayam 2028 Engineering"));
-    await user.selectOptions(screen.getAllByRole("combobox")[1], "part_test");
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
 
     expect(await screen.findByText("Part Test 11")).toBeInTheDocument();
     await user.click(screen.getByText("Part Test 11"));
@@ -396,7 +398,7 @@ describe("QuizSessionsTab", () => {
 
     const templateCallUrl = String(getFetchCalls(mockFetch, "/api/quiz-sessions/templates?")[0][0]);
     const templateParams = new URL(templateCallUrl, "http://localhost").searchParams;
-    expect(templateParams.get("grade")).toBeNull();
+    expect(templateParams.get("grade")).toBe("11");
     expect(templateParams.get("stream")).toBe("engineering");
   });
 
@@ -411,7 +413,8 @@ describe("QuizSessionsTab", () => {
       screen.getByRole("button", { name: "Create Quiz Session" })
     );
     await user.click(screen.getByLabelText("Class 11 Engg A"));
-    await user.selectOptions(screen.getAllByRole("combobox")[1], "part_test");
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
 
     const paper = await screen.findByRole("button", { name: /Part Test 11/ });
     await user.click(paper);
@@ -438,7 +441,7 @@ describe("QuizSessionsTab", () => {
       screen.getByRole("button", { name: "Create Quiz Session" })
     );
 
-    const formatSelect = screen.getAllByRole("combobox")[1];
+    const formatSelect = screen.getByLabelText("Test Format");
     expect(
       within(formatSelect).queryByRole("option", { name: "Hiring Test" })
     ).not.toBeInTheDocument();

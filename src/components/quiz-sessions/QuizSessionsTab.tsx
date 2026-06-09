@@ -78,6 +78,7 @@ const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
 const AUTO_SYNC_INTERVAL_MINUTES = 60;
 const QA_GURUKUL_FORMAT = "qa";
+const GradeOptions = [11, 12];
 
 function getDefaultSessionName(baseName: string): string {
   return baseName.trim();
@@ -876,6 +877,7 @@ function QuizSessionCreateModal({
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
+  const [selectedGrade, setSelectedGrade] = useState("");
   const [testFormat, setTestFormat] = useState("");
   const [templates, setTemplates] = useState<QuizTemplateOption[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -997,7 +999,7 @@ function QuizSessionCreateModal({
   }, [startTime, endTimeEdited]);
 
   useEffect(() => {
-    if (!batchDerivation.stream || !testFormat) {
+    if (!batchDerivation.stream || !selectedGrade || !testFormat) {
       setTemplates([]);
       setSelectedTemplateId(null);
       setTemplateError(null);
@@ -1011,6 +1013,7 @@ function QuizSessionCreateModal({
 
       try {
         const params = new URLSearchParams({
+          grade: selectedGrade,
           stream: batchDerivation.stream,
           testFormat,
         });
@@ -1042,6 +1045,7 @@ function QuizSessionCreateModal({
     };
   }, [
     batchDerivation.stream,
+    selectedGrade,
     testFormat,
   ]);
 
@@ -1089,6 +1093,7 @@ function QuizSessionCreateModal({
     if (!batchDerivation.stream) {
       return "Batch details could not be derived.";
     }
+    if (!selectedGrade) return "Grade is required.";
     if (!testFormat) return "Test format is required.";
     if (!selectedTemplate) return "Please select a paper.";
     if (selectedTemplate.grade === null) {
@@ -1240,33 +1245,65 @@ function QuizSessionCreateModal({
 
               <SectionCard title="2. Select Paper">
                 <div className="space-y-4">
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                      Test Format
-                    </label>
-                    <select
-                      value={testFormat}
-                      onChange={(event) => {
-                        setTestFormat(event.target.value);
-                        setSelectedTemplateId(null);
-                      }}
-                      className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-                    >
-                      <option value="">Select test format</option>
-                      {TestFormatOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="quiz-session-grade"
+                        className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                      >
+                        Grade
+                      </label>
+                      <select
+                        id="quiz-session-grade"
+                        value={selectedGrade}
+                        onChange={(event) => {
+                          setSelectedGrade(event.target.value);
+                          setSelectedTemplateId(null);
+                        }}
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                      >
+                        <option value="">Select grade</option>
+                        {GradeOptions.map((grade) => (
+                          <option key={grade} value={grade}>
+                            {grade}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="quiz-session-test-format"
+                        className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                      >
+                        Test Format
+                      </label>
+                      <select
+                        id="quiz-session-test-format"
+                        value={testFormat}
+                        onChange={(event) => {
+                          setTestFormat(event.target.value);
+                          setSelectedTemplateId(null);
+                        }}
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                      >
+                        <option value="">Select test format</option>
+                        {TestFormatOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {!classBatchIds.length ||
                   !batchDerivation.stream ||
                   batchDerivation.error ||
+                  !selectedGrade ||
                   !testFormat ? (
                     <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
-                      Choose class batches and a test format first.
+                      Choose class batches, grade, and test format first.
                     </div>
                   ) : loadingTemplates ? (
                     <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
