@@ -5,10 +5,8 @@ import StudentTable, { type Grade, type Student } from "@/components/StudentTabl
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
-import AdmissionReadinessCard from "./AdmissionReadinessCard";
 import { buildProgramStats } from "@/lib/enrollment-stats";
 import {
-  ADMISSION_GRADES,
   buildAdmissionSummary,
   isAdmissionGrade,
   type ConsentByStudentId,
@@ -124,20 +122,18 @@ export default function EnrollmentTabContent({
       .length;
   }, [filteredActive, selectedGrade]);
 
-  // Admission summary for the selected program's roster: a combined figure
-  // across the admission grades plus a per-grade breakdown.
-  const admission = useMemo(() => {
-    const inScope = filteredActive.filter((s) => isAdmissionGrade(s.grade));
-    const combined = buildAdmissionSummary(inScope, consent);
-    const perGrade = ADMISSION_GRADES.map((grade) => ({
-      grade,
-      summary: buildAdmissionSummary(
-        inScope.filter((s) => s.grade === grade),
-        consent,
-      ),
-    }));
-    return { combined, perGrade };
-  }, [filteredActive, consent]);
+  // Admission summary, scoped to the grade filter:
+  //  • "all"  → combined across admission grades (11 & 12)
+  //  • "11"/"12" → just that grade
+  //  • a non-admission grade (9/10) → null (admission tracking doesn't apply)
+  const admissionSummary = useMemo(() => {
+    const gradeNum = selectedGrade === "all" ? null : Number(selectedGrade);
+    if (gradeNum != null && !isAdmissionGrade(gradeNum)) return null;
+    const inScope = filteredActive.filter((s) =>
+      gradeNum == null ? isAdmissionGrade(s.grade) : s.grade === gradeNum,
+    );
+    return buildAdmissionSummary(inScope, consent);
+  }, [filteredActive, consent, selectedGrade]);
 
   return (
     <>
@@ -171,13 +167,6 @@ export default function EnrollmentTabContent({
         )}
       </div>
 
-      <AdmissionReadinessCard
-        combined={admission.combined}
-        perGrade={admission.perGrade}
-        loading={consentLoading}
-        error={consentError}
-      />
-
       {selectedId != null && (
         <EnrollmentStatsCards
           programs={scopedPrograms}
@@ -186,6 +175,9 @@ export default function EnrollmentTabContent({
             setSelectedId(id);
             setSelectedGrade("all");
           }}
+          admission={admissionSummary}
+          consentLoading={consentLoading}
+          consentError={consentError}
         />
       )}
 
