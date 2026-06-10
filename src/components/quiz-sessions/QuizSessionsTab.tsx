@@ -7,6 +7,7 @@ import {
   TestFormatOptions,
 } from "@/lib/quiz-session-options";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
+import { parseBatchStream } from "@/lib/batch-code";
 
 interface BatchOption {
   id: number;
@@ -69,7 +70,6 @@ interface QuizTemplateOption {
 
 interface BatchDerivation {
   error: string | null;
-  grade: number | null;
   stream: string;
   parentBatchId: string;
   parentBatchName: string;
@@ -79,6 +79,7 @@ const PER_PAGE = 50;
 const DEFAULT_DURATION_HOURS = 4;
 const AUTO_SYNC_INTERVAL_MINUTES = 60;
 const QA_GURUKUL_FORMAT = "qa";
+const GradeOptions = [11, 12];
 
 function getDefaultSessionName(baseName: string): string {
   return baseName.trim();
@@ -92,13 +93,6 @@ function getCompactBatchLabel(values: string[] | undefined): string {
   if (!values?.length) return "-";
   if (values.length === 1) return values[0];
   return `${values[0]} +${values.length - 1}`;
-}
-
-function parseBatchGrade(batchId: string): number | null {
-  const parts = batchId.split("_");
-  if (parts.length < 2) return null;
-  const value = Number(parts[1]);
-  return Number.isNaN(value) ? null : value;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -884,6 +878,7 @@ function QuizSessionCreateModal({
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
+  const [selectedGrade, setSelectedGrade] = useState("");
   const [testFormat, setTestFormat] = useState("");
   const [templates, setTemplates] = useState<QuizTemplateOption[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -939,7 +934,6 @@ function QuizSessionCreateModal({
     if (selectedRows.length === 0) {
       return {
         error: null,
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -954,7 +948,6 @@ function QuizSessionCreateModal({
     if (parentIds.size !== 1) {
       return {
         error: "Selected class batches must belong to the same parent batch.",
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -966,22 +959,6 @@ function QuizSessionCreateModal({
     if (!parentRow) {
       return {
         error: "Unable to find the parent batch for the selected class batches.",
-        grade: null,
-        stream: "",
-        parentBatchId: "",
-        parentBatchName: "",
-      };
-    }
-
-    const gradeSet = new Set(
-      selectedRows
-        .map((row) => parseBatchGrade(row.batch_id))
-        .filter((grade): grade is number => grade !== null)
-    );
-    if (gradeSet.size !== 1) {
-      return {
-        error: "Selected class batches must have the same grade.",
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -990,17 +967,12 @@ function QuizSessionCreateModal({
 
     const streamSet = new Set(
       selectedRows
-        .map((row) => {
-          if (row.batch_id.includes("_Engg_")) return "engineering";
-          if (row.batch_id.includes("_Med_")) return "medical";
-          return "";
-        })
+        .map((row) => parseBatchStream(row.batch_id))
         .filter(Boolean)
     );
     if (streamSet.size !== 1) {
       return {
         error: "Unable to derive stream from the selected class batches.",
-        grade: null,
         stream: "",
         parentBatchId: "",
         parentBatchName: "",
@@ -1009,7 +981,6 @@ function QuizSessionCreateModal({
 
     return {
       error: null,
-      grade: Array.from(gradeSet)[0],
       stream: Array.from(streamSet)[0],
       parentBatchId: parentRow.batch_id,
       parentBatchName: parentRow.name,
@@ -1024,11 +995,7 @@ function QuizSessionCreateModal({
   }, [startTime, endTimeEdited]);
 
   useEffect(() => {
-    if (
-      !batchDerivation.grade ||
-      !batchDerivation.stream ||
-      !testFormat
-    ) {
+    if (!batchDerivation.stream || !selectedGrade || !testFormat) {
       setTemplates([]);
       setSelectedTemplateId(null);
       setTemplateError(null);
@@ -1042,7 +1009,7 @@ function QuizSessionCreateModal({
 
       try {
         const params = new URLSearchParams({
-          grade: String(batchDerivation.grade),
+          grade: selectedGrade,
           stream: batchDerivation.stream,
           testFormat,
         });
@@ -1073,8 +1040,8 @@ function QuizSessionCreateModal({
       cancelled = true;
     };
   }, [
-    batchDerivation.grade,
     batchDerivation.stream,
+    selectedGrade,
     testFormat,
   ]);
 
@@ -1119,11 +1086,15 @@ function QuizSessionCreateModal({
     if (classBatchIds.length === 0) return "At least one class batch is required.";
     if (batchDerivation.error) return batchDerivation.error;
     if (!batchDerivation.parentBatchId) return "Parent batch could not be derived.";
-    if (!batchDerivation.grade || !batchDerivation.stream) {
+    if (!batchDerivation.stream) {
       return "Batch details could not be derived.";
     }
+    if (!selectedGrade) return "Grade is required.";
     if (!testFormat) return "Test format is required.";
     if (!selectedTemplate) return "Please select a paper.";
+    if (selectedTemplate.grade === null) {
+      return "Selected paper is missing grade metadata.";
+    }
 
     if (timingMode === "schedule") {
       const start = new Date(startTime);
@@ -1146,7 +1117,7 @@ function QuizSessionCreateModal({
       return;
     }
 
-    if (!selectedTemplate || !batchDerivation.grade) return;
+    if (!selectedTemplate || selectedTemplate.grade === null) return;
 
     setSaving(true);
     setError(null);
@@ -1162,7 +1133,7 @@ function QuizSessionCreateModal({
       const payload = {
         name: name.trim() || getDefaultSessionName(selectedTemplate.name),
         resourceId: selectedTemplate.id,
-        grade: batchDerivation.grade,
+        grade: selectedTemplate.grade,
         parentBatchId: batchDerivation.parentBatchId,
         classBatchIds,
         stream: batchDerivation.stream,
@@ -1270,34 +1241,65 @@ function QuizSessionCreateModal({
 
               <SectionCard title="2. Select Paper">
                 <div className="space-y-4">
-                  <div>
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                      Test Format
-                    </label>
-                    <select
-                      value={testFormat}
-                      onChange={(event) => {
-                        setTestFormat(event.target.value);
-                        setSelectedTemplateId(null);
-                      }}
-                      className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-                    >
-                      <option value="">Select test format</option>
-                      {TestFormatOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="quiz-session-grade"
+                        className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                      >
+                        Grade
+                      </label>
+                      <select
+                        id="quiz-session-grade"
+                        value={selectedGrade}
+                        onChange={(event) => {
+                          setSelectedGrade(event.target.value);
+                          setSelectedTemplateId(null);
+                        }}
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                      >
+                        <option value="">Select grade</option>
+                        {GradeOptions.map((grade) => (
+                          <option key={grade} value={grade}>
+                            {grade}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="quiz-session-test-format"
+                        className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                      >
+                        Test Format
+                      </label>
+                      <select
+                        id="quiz-session-test-format"
+                        value={testFormat}
+                        onChange={(event) => {
+                          setTestFormat(event.target.value);
+                          setSelectedTemplateId(null);
+                        }}
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                      >
+                        <option value="">Select test format</option>
+                        {TestFormatOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {!classBatchIds.length ||
-                  !batchDerivation.grade ||
                   !batchDerivation.stream ||
                   batchDerivation.error ||
+                  !selectedGrade ||
                   !testFormat ? (
                     <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
-                      Choose class batches and a test format first.
+                      Choose class batches, grade, and test format first.
                     </div>
                   ) : loadingTemplates ? (
                     <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
