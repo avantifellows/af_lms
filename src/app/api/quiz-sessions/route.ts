@@ -268,9 +268,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!body.grade || !body.stream) {
+  if (!body.stream) {
     return NextResponse.json(
-      { error: "grade and stream are required" },
+      { error: "stream is required" },
       { status: 400 }
     );
   }
@@ -290,9 +290,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (selectedTemplate.grade !== null && selectedTemplate.grade !== Number(body.grade)) {
+  if (selectedTemplate.grade === null) {
     return NextResponse.json(
-      { error: "Selected template grade does not match selected batches" },
+      { error: "Selected template is missing grade metadata" },
       { status: 400 }
     );
   }
@@ -361,7 +361,7 @@ export async function POST(request: NextRequest) {
       batch_id: Array.isArray(body.classBatchIds)
         ? body.classBatchIds.join(",")
         : body.classBatchIds,
-      grade: Number(body.grade),
+      grade: selectedTemplate.grade,
       course: selectedTemplate.course,
       stream: body.stream,
       resource_id: selectedTemplate.id,
