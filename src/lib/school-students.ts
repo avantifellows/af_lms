@@ -18,7 +18,9 @@ export interface SchoolRoster {
  * must consume this function instead of writing its own query, so the lists
  * can never drift apart.
  */
-export async function getSchoolRoster(schoolId: string): Promise<SchoolRoster> {
+export async function getSchoolRoster(
+  schoolId: string | number,
+): Promise<SchoolRoster> {
   const rows = await query<Student>(
     `SELECT
       gu.id as group_user_id,
