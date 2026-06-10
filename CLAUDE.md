@@ -213,11 +213,11 @@ npm run test:unit:coverage # Run with V8 coverage report
 ### Key conventions
 - Test files: `src/**/*.test.ts` and `src/**/*.test.tsx` (colocated with source)
 - Config: `vitest.config.ts` (path alias `@/*` configured)
-- Coverage output:
-  - `unit-coverage/coverage-summary.json` — **committed** to repo; read by GitHub Actions
-  - `unit-coverage/index.html` — local coverage viewer (gitignored)
-- GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) posts a coverage table as a PR comment
-- Developer workflow: run tests locally, commit `unit-coverage/coverage-summary.json`, push
+- Coverage output (`unit-coverage/` is fully gitignored — never committed):
+  - `unit-coverage/coverage-summary.json` — generated locally and in CI
+  - `unit-coverage/index.html` — local coverage viewer
+- GitHub Actions workflow (`.github/workflows/unit-coverage-comment.yml`) runs `npm run test:unit:coverage` in CI and posts a coverage table as a PR comment
+- Developer workflow: run tests locally, push — CI computes coverage (e2e coverage is still committed; see E2E section)
 
 ### Test files (92 files, 1661 tests as of 2026-03-22)
 
