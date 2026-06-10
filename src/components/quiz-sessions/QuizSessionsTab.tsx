@@ -7,6 +7,7 @@ import {
   TestFormatOptions,
 } from "@/lib/quiz-session-options";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
+import { parseBatchGrade, parseBatchStream } from "@/lib/batch-code";
 
 interface BatchOption {
   id: number;
@@ -92,13 +93,6 @@ function getCompactBatchLabel(values: string[] | undefined): string {
   if (!values?.length) return "-";
   if (values.length === 1) return values[0];
   return `${values[0]} +${values.length - 1}`;
-}
-
-function parseBatchGrade(batchId: string): number | null {
-  const parts = batchId.split("_");
-  if (parts.length < 2) return null;
-  const value = Number(parts[1]);
-  return Number.isNaN(value) ? null : value;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -990,11 +984,7 @@ function QuizSessionCreateModal({
 
     const streamSet = new Set(
       selectedRows
-        .map((row) => {
-          if (row.batch_id.includes("_Engg_")) return "engineering";
-          if (row.batch_id.includes("_Med_")) return "medical";
-          return "";
-        })
+        .map((row) => parseBatchStream(row.batch_id))
         .filter(Boolean)
     );
     if (streamSet.size !== 1) {
