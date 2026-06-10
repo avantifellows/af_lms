@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ADMIN_SESSION, NO_SESSION, PASSCODE_SESSION, PM_SESSION } from "@/app/api/__test-utils__/api-test-helpers";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
 vi.mock("next-auth");
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -25,6 +26,33 @@ function studentsRequest(params?: Record<string, string>): NextRequest {
   return new NextRequest(url);
 }
 
+// Roster-shaped row, as returned by the canonical school-roster query the
+// route now shares with the Enrollment tab.
+function makeRosterStudent(overrides: Partial<{
+  group_user_id: string;
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  student_id: string | null;
+  grade: number | null;
+  status: string | null;
+}> = {}) {
+  const user_id = overrides.user_id ?? "1";
+  return {
+    group_user_id: `gu-${user_id}`,
+    user_id,
+    first_name: "Alice",
+    last_name: "Student",
+    student_id: "STU001",
+    grade: 11,
+    status: null,
+    stream: null,
+    program_name: null,
+    program_id: null,
+    ...overrides,
+  };
+}
+
 // Stub getUserPermission for role-based checks
 function stubPermission(overrides: Record<string, unknown> = {}) {
   const defaultPermission = {
@@ -42,6 +70,9 @@ function stubPermission(overrides: Record<string, unknown> = {}) {
 describe("GET /api/pm/students", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default for queries after the roster fetch (e.g. the multi-school
+    // issue check inside processStudents).
+    mockQuery.mockResolvedValue([] as never);
   });
 
   it("returns 401 when no session", async () => {
@@ -106,50 +137,63 @@ describe("GET /api/pm/students", () => {
     expect(response.status).toBe(403);
   });
 
-  it("returns students for a valid school_code", async () => {
+  it("returns students from the canonical roster, sorted by grade then name", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     stubPermission();
     // school lookup
     mockQuery.mockResolvedValueOnce([{ id: 10, region: "Jaipur" }] as never);
-    // students query
+    // roster query
     mockQuery.mockResolvedValueOnce([
-      { id: 1, full_name: "Alice Student", student_id: "STU001", grade: 11 },
-      { id: 2, full_name: null, student_id: "STU002", grade: 12 },
+      makeRosterStudent({ user_id: "2", first_name: null, last_name: null, student_id: "STU002", grade: 12 }),
+      makeRosterStudent({ user_id: "1", first_name: "Alice", last_name: "Student", student_id: "STU001", grade: 11 }),
     ] as never);
 
     const response = await GET(studentsRequest({ school_code: "SCH001" }));
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.students).toEqual([
-      { id: 1, full_name: "Alice Student", student_id: "STU001", grade: 11 },
-      { id: 2, full_name: null, student_id: "STU002", grade: 12 },
+      { id: "1", full_name: "Alice Student", student_id: "STU001", grade: 11 },
+      { id: "2", full_name: null, student_id: "STU002", grade: 12 },
     ]);
 
-    // Verify students query uses school.id and null grade
-    expect(mockQuery).toHaveBeenLastCalledWith(
-      expect.stringContaining("g.child_id = $1"),
-      [10, null]
-    );
+    // The roster query is the canonical one: scoped to the school and the
+    // current academic year (no grade param — grade filtering happens in JS).
+    const rosterCall = mockQuery.mock.calls[2];
+    expect(rosterCall[0]).toContain("g.type = 'school' AND g.child_id = $1");
+    expect(rosterCall[0]).toContain("er_grade.academic_year = $2");
+    expect(rosterCall[1]).toEqual([10, CURRENT_ACADEMIC_YEAR]);
   });
 
-  it("passes grade filter to query when provided", async () => {
+  it("filters to the requested grade in JS with roster semantics", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     stubPermission();
     mockQuery.mockResolvedValueOnce([{ id: 10, region: "Jaipur" }] as never);
     mockQuery.mockResolvedValueOnce([
-      { id: 3, full_name: "Grade 11 Student", student_id: "STU003", grade: 11 },
+      makeRosterStudent({ user_id: "3", first_name: "Eleven", student_id: "STU003", grade: 11 }),
+      makeRosterStudent({ user_id: "4", first_name: "Twelve", student_id: "STU004", grade: 12 }),
     ] as never);
 
     const response = await GET(studentsRequest({ school_code: "SCH001", grade: "11" }));
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.students).toHaveLength(1);
+    expect(body.students).toEqual([
+      { id: "3", full_name: "Eleven Student", student_id: "STU003", grade: 11 },
+    ]);
+  });
 
-    // Verify grade is passed as number
-    expect(mockQuery).toHaveBeenLastCalledWith(
-      expect.stringContaining("g.child_id = $1"),
-      [10, 11]
-    );
+  it("excludes dropout students even when they match the grade", async () => {
+    mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
+    stubPermission();
+    mockQuery.mockResolvedValueOnce([{ id: 10, region: "Jaipur" }] as never);
+    mockQuery.mockResolvedValueOnce([
+      makeRosterStudent({ user_id: "5", first_name: "Active", grade: 11 }),
+      makeRosterStudent({ user_id: "6", first_name: "Gone", grade: 11, status: "dropout" }),
+    ] as never);
+
+    const response = await GET(studentsRequest({ school_code: "SCH001", grade: "11" }));
+    const body = await response.json();
+    expect(body.students).toHaveLength(1);
+    expect(body.students[0].full_name).toBe("Active Student");
   });
 
   it("returns empty array when no matching students", async () => {

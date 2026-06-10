@@ -96,6 +96,13 @@ Visit tables:
 - `lms_pm_school_visits`: id, school_code, pm_email, visit_date, status (`in_progress`/`completed`), start GPS fields, end GPS fields, completed_at, deleted_at TIMESTAMP(0) NULL, inserted_at, updated_at
 - `lms_pm_school_visit_actions`: id, visit_id (FK), action_type, status (`pending`/`in_progress`/`completed`), start/end GPS + timestamps, data (JSONB form payload), deleted_at (soft delete), inserted_at, updated_at
 
+### Document Uploads (tracking / querying prod)
+- Table: `lms_student_documents` (PLURAL — db-service `LmsStudentDocument`, PR #514). Columns: id, student_id, document_type, pages (jsonb), metadata (jsonb), uploaded_by (email), deleted_at, inserted_at, updated_at. No DB-level FK constraint.
+- **`lms_student_documents.student_id` = `student.id` (the student-table PRIMARY KEY)** — NOT the human-facing roster code `student.student_id` (a string) and NOT `user.id`. These three id spaces are numerically similar and easy to confuse; a docs `student_id` won't be findable in the roster, which shows `student.student_id`. Resolve with: `JOIN student s ON s.id = <docs.student_id>` then `JOIN "user" u ON u.id = s.user_id`.
+- Document type allowlist lives in `src/lib/document-types.ts` (keep in sync with db-service `LmsStudentDocument.@document_types`): `student_undertaking`, `parent_undertaking`, `income_certificate`, `caste_certificate`, `media_consent_form`, `wise_research_consent` (= "WISE Research Consent"), `student_photograph`.
+- **MCP query gotcha (`mcp__avanti-db__query`)**: a naive blocklist rejects any SQL containing the substrings `insert`/`update`/`delete`/`drop` with "Only SELECT queries are allowed". This trips on the timestamp columns `inserted_at`, `updated_at`, and `deleted_at` — omit them from `SELECT`/`WHERE`, or count active rows another way. Plain `SELECT count(*) ... WHERE document_type = 'x'` works.
+- WISE consent count query: `SELECT count(*) FROM lms_student_documents WHERE document_type = 'wise_research_consent'`. As of 2026-06-06: 0 WISE consents uploaded; only a handful of total uploads across 4 students (314909, 492825, 492831, 492848).
+
 ### PM Visits: Classroom Observation Rubric (v1)
 - Payload contract is rubric-only: `rubric_version`, `params`, `observer_summary_strengths`, `observer_summary_improvements`
 - Legacy classroom keys (`class_details`, `observations`, `support_needed`) are sanitized out of active edit/save payloads

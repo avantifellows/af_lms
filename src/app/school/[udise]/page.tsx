@@ -12,9 +12,8 @@ import {
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
-import { type Grade, type Student } from "@/components/StudentTable";
-import { processStudents } from "@/lib/school-student-list-data-issues";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { type Grade } from "@/components/StudentTable";
+import { getSchoolRoster } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Card } from "@/components/ui";
@@ -86,83 +85,6 @@ function getDistinctNVSStreams(batches: Batch[]): string[] {
     }
   });
   return Array.from(streams).sort();
-}
-
-async function getStudents(schoolId: string): Promise<Student[]> {
-  return query<Student>(
-    `SELECT
-      gu.id as group_user_id,
-      u.id as user_id,
-      s.id as student_pk_id,
-      u.first_name,
-      u.last_name,
-      u.phone,
-      u.whatsapp_phone,
-      u.email,
-      u.date_of_birth,
-      u.gender,
-      u.address,
-      u.city,
-      u.district,
-      u.state,
-      u.pincode,
-      s.student_id,
-      s.apaar_id,
-      s.category,
-      s.stream,
-      s.board_stream,
-      s.school_medium,
-      s.father_name,
-      s.father_phone,
-      s.father_profession,
-      s.father_education_level,
-      s.mother_name,
-      s.mother_phone,
-      s.mother_profession,
-      s.mother_education_level,
-      s.guardian_name,
-      s.guardian_relation,
-      s.guardian_phone,
-      s.guardian_education_level,
-      s.guardian_profession,
-      s.annual_family_income,
-      s.monthly_family_income,
-      s.status,
-      er_grade.group_id as grade_id,
-      gr.number as grade,
-      p.program_name,
-      p.program_id,
-      GREATEST(s.updated_at, u.updated_at) as updated_at
-    FROM group_user gu
-    JOIN "group" g ON gu.group_id = g.id
-    JOIN "user" u ON gu.user_id = u.id
-    LEFT JOIN student s ON s.user_id = u.id
-    -- Restrict the roster to students enrolled for the current academic year.
-    -- Inner join (not LEFT) so students whose only grade enrollment is from a
-    -- prior year (e.g. graduated cohorts still attached to old batches) are
-    -- excluded rather than shown with a blank grade.
-    JOIN enrollment_record er_grade ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = $2
-    LEFT JOIN grade gr ON er_grade.group_id = gr.id
-    LEFT JOIN LATERAL (
-      SELECT p.name as program_name, p.id as program_id
-      FROM group_user gu_batch
-      JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-      JOIN batch b ON g_batch.child_id = b.id
-      JOIN program p ON b.program_id = p.id
-      WHERE gu_batch.user_id = u.id
-      -- Deterministic tiebreaker for students in multiple program batches:
-      -- prefer CoE → Nodal → NVS (matches PROGRAM_IDS_ORDERED). Interim until
-      -- a primary_batch field lands; see PR #58 discussion.
-      ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
-      LIMIT 1
-    ) p ON true
-    WHERE g.type = 'school' AND g.child_id = $1
-    ORDER BY gr.number, u.first_name, u.last_name`,
-    [schoolId, CURRENT_ACADEMIC_YEAR],
-  );
 }
 
 interface PageProps {
@@ -291,15 +213,15 @@ export default async function SchoolPage({ params }: PageProps) {
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
 
-  // Fetch enrollment data in parallel (other tabs lazy-load their own data)
-  const [allStudents, grades, batches] = await Promise.all([
-    getStudents(school.id),
-    getGrades(),
-    getBatchesWithMetadata(),
-  ]);
-
-  // Deduplicate students and detect all data issues
-  const { students: dedupedStudents, issues: dataIssues } = await processStudents(allStudents);
+  // Fetch enrollment data in parallel (other tabs lazy-load their own data).
+  // getSchoolRoster is the canonical student list (query + dedup + issues),
+  // shared with the Performance deep-dive so both surfaces always agree.
+  const [{ students: dedupedStudents, issues: dataIssues }, grades, batches] =
+    await Promise.all([
+      getSchoolRoster(school.id),
+      getGrades(),
+      getBatchesWithMetadata(),
+    ]);
 
   // Separate active and dropout students (all students visible; editability is per-row)
   const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
