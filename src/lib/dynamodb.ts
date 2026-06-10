@@ -1,6 +1,9 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { query } from "@/lib/db";
+import {
+  getSchoolRoster,
+  filterActiveRosterStudents,
+} from "@/lib/school-students";
 import type {
   TestDeepDiveData,
   TestDeepDiveSummary,
@@ -46,51 +49,28 @@ interface StudentIdentifiers {
   stream: string | null;
 }
 
+// Built from the canonical school roster (the same query + dedup the
+// Enrollment tab renders) so the deep-dive can never show a student who
+// isn't on the Enrollment tab for the same filters. In particular, the
+// roster's academic-year filter excludes passed-out cohorts whose grade-12
+// enrollment records are still marked current.
 async function getSchoolStudentIdentifiers(
   schoolId: string,
   grade: number,
   program?: string,
   stream?: string
 ): Promise<StudentIdentifiers[]> {
-  const programJoin = program
-    ? `JOIN group_user gu_batch ON gu_batch.user_id = u.id
-       JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-       JOIN batch b ON g_batch.child_id = b.id
-       JOIN program p ON b.program_id = p.id`
-    : "";
-  const programWhere = program ? `AND p.name = $3` : "";
-  const streamWhere = stream
-    ? `AND LOWER(s.stream) = $${program ? 4 : 3}`
-    : "";
-  const params: (string | number)[] = program
-    ? [schoolId, grade, program]
-    : [schoolId, grade];
-  if (stream) params.push(stream);
-
-  return query<StudentIdentifiers>(
-    `SELECT DISTINCT
-      u.id as user_id,
-      s.student_id,
-      s.apaar_id,
-      u.first_name,
-      u.last_name,
-      u.gender,
-      s.stream
-    FROM group_user gu
-    JOIN "group" g ON gu.group_id = g.id
-    JOIN "user" u ON gu.user_id = u.id
-    LEFT JOIN student s ON s.user_id = u.id
-    LEFT JOIN enrollment_record er_grade ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-    LEFT JOIN grade gr ON er_grade.group_id = gr.id
-    ${programJoin}
-    WHERE g.type = 'school' AND g.child_id = $1
-      AND gr.number = $2
-      AND (s.status IS NULL OR s.status != 'dropout')
-      ${programWhere}
-      ${streamWhere}`,
-    params
+  const { students } = await getSchoolRoster(schoolId);
+  return filterActiveRosterStudents(students, { grade, program, stream }).map(
+    (s) => ({
+      user_id: s.user_id,
+      student_id: s.student_id,
+      apaar_id: s.apaar_id,
+      first_name: s.first_name ?? "",
+      last_name: s.last_name,
+      gender: s.gender,
+      stream: s.stream,
+    })
   );
 }
 
