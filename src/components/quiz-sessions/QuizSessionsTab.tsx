@@ -7,6 +7,7 @@ import {
   TestFormatOptions,
 } from "@/lib/quiz-session-options";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
+import { parseBatchStream } from "@/lib/batch-code";
 
 interface BatchOption {
   id: number;
@@ -966,12 +967,7 @@ function QuizSessionCreateModal({
 
     const streamSet = new Set(
       selectedRows
-        .map((row) => {
-          const batchId = row.batch_id.toLowerCase();
-          if (batchId.includes("_engg_")) return "engineering";
-          if (batchId.includes("_med_")) return "medical";
-          return "";
-        })
+        .map((row) => parseBatchStream(row.batch_id))
         .filter(Boolean)
     );
     if (streamSet.size !== 1) {
