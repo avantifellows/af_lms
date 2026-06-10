@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
 import { buildProgramStats } from "@/lib/enrollment-stats";
+import {
+  buildAdmissionSummary,
+  isAdmissionGrade,
+  type ConsentByStudentId,
+} from "@/lib/enrollment-readiness";
 import type { Batch } from "@/components/EditStudentModal";
 
 interface Props {
@@ -19,6 +24,8 @@ interface Props {
   grades: Grade[];
   batches: Batch[];
   nvsStreams: string[];
+  /** School code/UDISE used to fetch grade-11 consent status. */
+  schoolCode: string;
 }
 
 export default function EnrollmentTabContent({
@@ -32,11 +39,48 @@ export default function EnrollmentTabContent({
   grades,
   batches,
   nvsStreams,
+  schoolCode,
 }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+
+  // Consent status for the school's grade-11 students, keyed by student_pk_id.
+  // Fetched client-side so the (default) enrollment tab isn't blocked on the
+  // per-student document lookups.
+  const [consent, setConsent] = useState<ConsentByStudentId>({});
+  const [consentLoading, setConsentLoading] = useState(true);
+  const [consentError, setConsentError] = useState(false);
+  // Bumped after a save/upload in the roster so the consent map refetches and
+  // the flags/summary update without a full page reload.
+  const [consentReloadKey, setConsentReloadKey] = useState(0);
+
+  // Refetch when the school changes or after an upload. State is only mutated
+  // inside async callbacks (not synchronously in the effect body) to avoid
+  // cascading renders.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/consent-status`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`consent-status ${res.status}`);
+        return res.json();
+      })
+      .then((data: { consent: ConsentByStudentId }) => {
+        if (cancelled) return;
+        setConsent(data.consent ?? {});
+        setConsentError(false);
+      })
+      .catch(() => {
+        if (!cancelled) setConsentError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setConsentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schoolCode, consentReloadKey]);
 
   const filteredActive = useMemo(() => {
     if (selectedId == null) return [];
@@ -78,11 +122,24 @@ export default function EnrollmentTabContent({
       .length;
   }, [filteredActive, selectedGrade]);
 
+  // Admission summary, scoped to the grade filter:
+  //  • "all"  → combined across admission grades (11 & 12)
+  //  • "11"/"12" → just that grade
+  //  • a non-admission grade (9/10) → null (admission tracking doesn't apply)
+  const admissionSummary = useMemo(() => {
+    const gradeNum = selectedGrade === "all" ? null : Number(selectedGrade);
+    if (gradeNum != null && !isAdmissionGrade(gradeNum)) return null;
+    const inScope = filteredActive.filter((s) =>
+      gradeNum == null ? isAdmissionGrade(s.grade) : s.grade === gradeNum,
+    );
+    return buildAdmissionSummary(inScope, consent);
+  }, [filteredActive, consent, selectedGrade]);
+
   return (
     <>
       {/* Grade filter — placed above the summary so it's clear the pills react
           to it. */}
-      <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
         <label
           htmlFor="gradeFilter"
           className="text-sm font-medium text-gray-700"
@@ -118,6 +175,9 @@ export default function EnrollmentTabContent({
             setSelectedId(id);
             setSelectedGrade("all");
           }}
+          admission={admissionSummary}
+          consentLoading={consentLoading}
+          consentError={consentError}
         />
       )}
 
@@ -134,6 +194,9 @@ export default function EnrollmentTabContent({
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         hideGradeFilterUI
+        consentByStudentId={consent}
+        consentLoading={consentLoading}
+        onDataChanged={() => setConsentReloadKey((k) => k + 1)}
       />
     </>
   );
