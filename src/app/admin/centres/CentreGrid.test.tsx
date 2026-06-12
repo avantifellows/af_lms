@@ -341,14 +341,21 @@ describe("CentreGrid", () => {
   it("loads later Centre pages without resetting filters", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        filters: { ...filters, search: "bench" },
-        rows: [rows[1]],
-        pagination: { page: 2, limit: 25, totalRows: 54, totalPages: 3 },
-      }),
-    } as Response);
+    mockFetch.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("/api/admin/centres/search-suggestions")) {
+        return { ok: true, json: async () => ({ suggestions: [] }) } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          filters: { ...filters, search: "bench" },
+          rows: [rows[1]],
+          pagination: { page: 2, limit: 25, totalRows: 54, totalPages: 3 },
+        }),
+      } as Response;
+    });
     renderGrid({
       initialPagination: { page: 1, limit: 25, totalRows: 54, totalPages: 3 },
     });
@@ -356,8 +363,11 @@ describe("CentreGrid", () => {
     await user.type(screen.getByLabelText("Search"), "bench");
     await user.click(screen.getByRole("button", { name: "Next Centre page" }));
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const url = String(mockFetch.mock.calls[0][0]);
+    const centreListCalls = mockFetch.mock.calls.filter(([input]) =>
+      String(input).startsWith("/api/admin/centres?")
+    );
+    expect(centreListCalls).toHaveLength(1);
+    const url = String(centreListCalls[0][0]);
     expect(url).toContain("search=bench");
     expect(url).toContain("page=2");
     expect(url).toContain("limit=25");
