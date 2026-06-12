@@ -24,9 +24,8 @@ e2e/fixtures/db-dump.sql
 /monocart-report/
 /assets/
 
-# coverage - unit tests (full reports gitignored, summary committed)
-/unit-coverage/*
-!/unit-coverage/coverage-summary.json
+# coverage - unit tests (generated locally and in CI, never committed)
+/unit-coverage/
 
 # next.js
 /.next/
