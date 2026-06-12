@@ -104,7 +104,7 @@ describe("GET /api/admin/centres", () => {
       },
       pagination: {
         page: 1,
-        limit: 25,
+        limit: 100,
         totalRows: 1,
       },
       summary: {

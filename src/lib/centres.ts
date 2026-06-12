@@ -418,7 +418,9 @@ export function normalizeCentreListParams(searchParams: {
   [key: string]: string | string[] | undefined;
 }): CentreListParams {
   const page = positiveInteger(searchParams.page, 1);
-  const limit = clamp(positiveInteger(searchParams.limit, 25), 1, 100);
+  // Default to the max page size so the directory shows every Centre on one
+  // page until the count crosses 100, at which point pagination kicks in.
+  const limit = clamp(positiveInteger(searchParams.limit, 100), 1, 100);
 
   return {
     page,
