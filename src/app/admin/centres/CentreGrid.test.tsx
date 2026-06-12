@@ -250,14 +250,21 @@ describe("CentreGrid", () => {
   it("loads Centres through API-supported filters when filters are applied", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        filters: { ...filters, search: "bench", active: "false", schoolLink: "unlinked" },
-        rows: [rows[1]],
-        pagination: { page: 1, limit: 25, totalRows: 1, totalPages: 1 },
-      }),
-    } as Response);
+    mockFetch.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("/api/admin/centres/search-suggestions")) {
+        return { ok: true, json: async () => ({ suggestions: [] }) } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          filters: { ...filters, search: "bench", active: "false", schoolLink: "unlinked" },
+          rows: [rows[1]],
+          pagination: { page: 1, limit: 25, totalRows: 1, totalPages: 1 },
+        }),
+      } as Response;
+    });
     renderGrid();
 
     await user.type(screen.getByLabelText("Search"), "bench");
@@ -265,8 +272,11 @@ describe("CentreGrid", () => {
     await user.selectOptions(screen.getByLabelText("School Link"), "unlinked");
     await user.click(screen.getByRole("button", { name: /Apply/ }));
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const url = String(mockFetch.mock.calls[0][0]);
+    const centreListCalls = mockFetch.mock.calls.filter(([input]) =>
+      String(input).startsWith("/api/admin/centres?")
+    );
+    expect(centreListCalls).toHaveLength(1);
+    const url = String(centreListCalls[0][0]);
     expect(url).toContain("/api/admin/centres?");
     expect(url).toContain("search=bench");
     expect(url).toContain("active=false");
