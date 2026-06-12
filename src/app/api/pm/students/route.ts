@@ -3,14 +3,11 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
+import {
+  getSchoolRoster,
+  filterActiveRosterStudents,
+} from "@/lib/school-students";
 import { apiError, canAccessVisitSchoolScope, requireVisitsAccess } from "@/lib/visits-policy";
-
-interface StudentRow {
-  id: number;
-  full_name: string | null;
-  student_id: string | null;
-  grade: number | null;
-}
 
 // GET /api/pm/students?school_code=XXXXX&grade=11
 export async function GET(request: NextRequest) {
@@ -45,26 +42,33 @@ export async function GET(request: NextRequest) {
     return apiError(403, "Forbidden");
   }
 
-  // Query students via join chain: group_user → group(school) → user → student → enrollment_record → grade
-  const students = await query<StudentRow>(
-    `SELECT DISTINCT u.id,
-            TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS full_name,
-            s.student_id,
-            gr.number AS grade
-     FROM group_user gu
-     JOIN "group" g ON g.id = gu.group_id AND g.type = 'school'
-     JOIN "user" u ON gu.user_id = u.id
-     LEFT JOIN student s ON s.user_id = u.id
-     LEFT JOIN enrollment_record er ON er.user_id = u.id
-       AND er.group_type = 'grade'
-       AND er.is_current = true
-     LEFT JOIN grade gr ON er.group_id = gr.id
-     WHERE g.child_id = $1
-       AND ($2::INT IS NULL OR gr.number = $2)
-       AND (s.status IS NULL OR s.status != 'dropout')
-     ORDER BY gr.number NULLS LAST, full_name NULLS LAST`,
-    [school.id, grade]
-  );
+  // Canonical roster (the exact list the Enrollment tab shows) narrowed to
+  // active students of the requested grade. The roster's academic-year filter
+  // is what keeps passed-out cohorts — whose grade enrollment records stay
+  // is_current forever — out of the visit form's student picker.
+  const { students: roster } = await getSchoolRoster(school.id);
+  const students = filterActiveRosterStudents(
+    roster,
+    grade !== null ? { grade } : {}
+  )
+    .map((s) => {
+      const fullName = [s.first_name, s.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      return {
+        id: s.user_id,
+        full_name: fullName || null,
+        student_id: s.student_id,
+        grade: s.grade,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.grade ?? Number.MAX_SAFE_INTEGER) -
+          (b.grade ?? Number.MAX_SAFE_INTEGER) ||
+        (a.full_name ?? "").localeCompare(b.full_name ?? "")
+    );
 
   return NextResponse.json({ students });
 }

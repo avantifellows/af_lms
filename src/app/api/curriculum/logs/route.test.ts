@@ -168,7 +168,7 @@ describe("/api/curriculum/logs", () => {
     });
     expect(mockQuery).toHaveBeenLastCalledWith(
       expect.stringContaining("AND l.deleted_at IS NULL"),
-      ["70705", 1, 3, 4, "jee_main"]
+      ["70705", 1, 3, 4, "jee_main", 1]
     );
   });
 

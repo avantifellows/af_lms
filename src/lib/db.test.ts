@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Pool } from "pg";
 
 // Use vi.hoisted so these are available inside vi.mock factory
 const mocks = vi.hoisted(() => ({
@@ -20,6 +21,20 @@ beforeEach(() => {
   mocks.mockConnect.mockResolvedValue({
     query: mocks.mockClientQuery,
     release: mocks.mockRelease,
+  });
+});
+
+describe("pool configuration", () => {
+  it("sets connection ceiling and timeouts so stuck queries can't exhaust the pool", async () => {
+    // Importing the module constructs the Pool once (cached thereafter).
+    await import("./db");
+    const config = vi.mocked(Pool).mock.calls[0]?.[0] ?? {};
+    expect(config).toMatchObject({
+      max: 10,
+      connectionTimeoutMillis: 5000,
+      statement_timeout: 15000,
+      idle_in_transaction_session_timeout: 15000,
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
 import {
+  curriculumIdForExamTrack,
   isExamTrack,
   isGradeNumber,
   isSubjectName,
@@ -174,6 +175,7 @@ export async function validateSelectedScope(params: {
       subject: SubjectName;
       gradeId: number;
       subjectId: number;
+      curriculumId: number;
     }
   | CurriculumValidationFailure
   | { ok: false; status: 403 | 404; error: string }
@@ -205,6 +207,7 @@ export async function validateSelectedScope(params: {
     subject: params.subject,
     gradeId: GRADE_IDS[params.grade],
     subjectId: SUBJECT_IDS[params.subject],
+    curriculumId: curriculumIdForExamTrack(params.examTrack),
   };
 }
 
@@ -222,6 +225,9 @@ async function loadValidTopics(params: {
        ch.name AS chapter_name
      FROM topic t
      JOIN chapter ch ON ch.id = t.chapter_id
+     JOIN topic_curriculum tc
+       ON tc.topic_id = t.id
+      AND tc.curriculum_id = $5
      JOIN grade g ON g.id = ch.grade_id
      JOIN lms_chapter_exam_configs cfg
        ON cfg.chapter_id = ch.id
@@ -230,7 +236,13 @@ async function loadValidTopics(params: {
      WHERE t.id = ANY($2::int[])
        AND g.number = $3
        AND ch.subject_id = $4`,
-    [params.examTrack, params.topicIds, params.grade, params.subjectId]
+    [
+      params.examTrack,
+      params.topicIds,
+      params.grade,
+      params.subjectId,
+      curriculumIdForExamTrack(params.examTrack),
+    ]
   );
 }
 
@@ -248,6 +260,9 @@ async function loadValidTopicsForStoredScope(params: {
        ch.name AS chapter_name
      FROM topic t
      JOIN chapter ch ON ch.id = t.chapter_id
+     JOIN topic_curriculum tc
+       ON tc.topic_id = t.id
+      AND tc.curriculum_id = $5
      JOIN lms_chapter_exam_configs cfg
        ON cfg.chapter_id = ch.id
       AND cfg.exam_track = $1
@@ -255,7 +270,13 @@ async function loadValidTopicsForStoredScope(params: {
      WHERE t.id = ANY($2::int[])
        AND ch.grade_id = $3
        AND ch.subject_id = $4`,
-    [params.examTrack, params.topicIds, params.gradeId, params.subjectId]
+    [
+      params.examTrack,
+      params.topicIds,
+      params.gradeId,
+      params.subjectId,
+      curriculumIdForExamTrack(params.examTrack),
+    ]
   );
 }
 
@@ -274,9 +295,16 @@ async function loadLogMutationScope(id: number): Promise<LogMutationScopeRow | n
              SELECT 1
              FROM lms_chapter_exam_configs current_cfg
              JOIN topic current_topic ON current_topic.chapter_id = current_cfg.chapter_id
+             JOIN topic_curriculum current_tc
+               ON current_tc.topic_id = current_topic.id
              WHERE current_topic.id = lt.topic_id
                AND current_cfg.exam_track = l.exam_track
                AND current_cfg.is_in_syllabus = true
+               AND current_tc.curriculum_id = CASE l.exam_track
+                 WHEN 'jee_main' THEN 1
+                 WHEN 'jee_advanced' THEN 9
+                 WHEN 'neet' THEN 2
+               END
            )
          ),
          false
@@ -421,13 +449,19 @@ export async function getCurriculumLogs(params: {
        EXISTS (
          SELECT 1
          FROM lms_chapter_exam_configs current_cfg
+         JOIN topic_curriculum current_tc
+           ON current_tc.topic_id = t.id
          WHERE current_cfg.chapter_id = ch.id
            AND current_cfg.exam_track = l.exam_track
            AND current_cfg.is_in_syllabus = true
+           AND current_tc.curriculum_id = $6
        ) AS topic_currently_in_syllabus
      FROM lms_curriculum_logs l
      JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
      JOIN topic t ON t.id = lt.topic_id
+     JOIN topic_curriculum tc
+       ON tc.topic_id = t.id
+      AND tc.curriculum_id = $6
      JOIN chapter ch ON ch.id = t.chapter_id
      WHERE l.school_code = $1
        AND l.program_id = $2
@@ -442,6 +476,7 @@ export async function getCurriculumLogs(params: {
       scope.gradeId,
       scope.subjectId,
       scope.examTrack,
+      scope.curriculumId,
     ]
   );
 
@@ -467,13 +502,27 @@ export async function getCurriculumLogById(id: number): Promise<LmsCurriculumLog
        EXISTS (
          SELECT 1
          FROM lms_chapter_exam_configs current_cfg
+         JOIN topic_curriculum current_tc
+           ON current_tc.topic_id = t.id
          WHERE current_cfg.chapter_id = ch.id
            AND current_cfg.exam_track = l.exam_track
            AND current_cfg.is_in_syllabus = true
+           AND current_tc.curriculum_id = CASE l.exam_track
+             WHEN 'jee_main' THEN 1
+             WHEN 'jee_advanced' THEN 9
+             WHEN 'neet' THEN 2
+           END
        ) AS topic_currently_in_syllabus
      FROM lms_curriculum_logs l
      JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
      JOIN topic t ON t.id = lt.topic_id
+     JOIN topic_curriculum tc
+       ON tc.topic_id = t.id
+      AND tc.curriculum_id = CASE l.exam_track
+        WHEN 'jee_main' THEN 1
+        WHEN 'jee_advanced' THEN 9
+        WHEN 'neet' THEN 2
+      END
      JOIN chapter ch ON ch.id = t.chapter_id
      WHERE l.id = $1
        AND l.deleted_at IS NULL

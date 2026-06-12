@@ -8,6 +8,7 @@ import {
   getFeatureAccess,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
@@ -41,15 +42,33 @@ async function getSchools(
   const searchPattern = search ? `%${search}%` : null;
   const offset = (page - 1) * SCHOOLS_PER_PAGE;
 
+  // Stopgap: hide duplicate placeholder school rows. A stale bulk import left a
+  // second JNV row (null udise_code, 0 students) for ~190 schools, so they
+  // double-listed on the dashboard. Exclude a row only when its udise is null
+  // AND a same-named JNV row carries a real udise — that pins it as the dup.
+  // Single schools that legitimately lack a udise (a few Telangana/WB rows with
+  // real students) have no udise-bearing namesake and are kept. The data team
+  // will purge the placeholder rows; remove this filter once they have.
+  const excludeDupPlaceholders = `
+    AND NOT (
+      s.udise_code IS NULL
+      AND EXISTS (
+        SELECT 1 FROM school s2
+        WHERE s2.af_school_category = 'JNV'
+          AND s2.name = s.name
+          AND s2.udise_code IS NOT NULL
+      )
+    )`;
+
   const baseQuery = `
     SELECT s.id, s.code, s.name, s.district, s.state, s.region
     FROM school s
-    WHERE s.af_school_category = 'JNV'`;
+    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
 
   const countBaseQuery = `
     SELECT COUNT(DISTINCT s.id) as total
     FROM school s
-    WHERE s.af_school_category = 'JNV'`;
+    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
 
   if (codes === "all") {
     if (searchPattern) {
@@ -116,7 +135,9 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise student counts for loaded schools (all programs)
+// Get grade-wise student counts for loaded schools (all programs).
+// Scoped to the current academic year so the dashboard summary cards match
+// the school roster, which is also restricted to CURRENT_ACADEMIC_YEAR.
 async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
   if (schoolIds.length === 0) return new Map();
 
@@ -130,11 +151,12 @@ async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, Gr
      JOIN group_user gu_school ON gu_school.group_id = g_school.id
      LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
        AND er.group_type = 'grade' AND er.is_current = true
+       AND er.academic_year = $2
      LEFT JOIN grade gr ON er.group_id = gr.id
      WHERE s.id = ANY($1) AND gr.number IS NOT NULL
      GROUP BY s.id, gr.number
      ORDER BY gr.number`,
-    [schoolIds]
+    [schoolIds, CURRENT_ACADEMIC_YEAR]
   );
 
   const gradeMap = new Map<string, GradeCount[]>();

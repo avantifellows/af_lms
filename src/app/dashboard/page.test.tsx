@@ -911,6 +911,22 @@ describe("DashboardPage (server component)", () => {
     expect(params[0]).toEqual(["SC001", "SC002"]);
   });
 
+  it("excludes duplicate placeholder school rows (null udise with a udise-bearing namesake)", async () => {
+    setupTeacher([], 0);
+
+    await DashboardPage({ searchParams: defaultSearchParams });
+
+    // Both the list query and the count query must carry the dedup guard so the
+    // card list and the total stay in sync.
+    const [listSql] = mockQuery.mock.calls[0];
+    const [countSql] = mockQuery.mock.calls[1];
+    for (const sql of [listSql, countSql]) {
+      expect(sql).toContain("s.udise_code IS NULL");
+      expect(sql).toContain("s2.udise_code IS NOT NULL");
+      expect(sql).toContain("s2.name = s.name");
+    }
+  });
+
   it("passes school IDs to getSchoolGradeCounts", async () => {
     const school = makeSchool({ id: "s99" });
     mockGetServerSession.mockResolvedValue(teacherSession);
@@ -929,7 +945,9 @@ describe("DashboardPage (server component)", () => {
     const gradeCountsCall = mockQuery.mock.calls[2];
     const [sql, params] = gradeCountsCall;
     expect(sql).toContain("grade");
+    expect(sql).toContain("er.academic_year = $2");
     expect(params[0]).toEqual(["s99"]);
+    expect(params[1]).toBe("2026-2027");
   });
 
   it("skips grade count query when no schools found", async () => {

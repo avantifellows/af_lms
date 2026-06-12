@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
 // --- Hoisted mocks ---
 
@@ -30,11 +31,17 @@ beforeEach(() => {
   vi.resetModules();
   mocks.mockSend.mockReset();
   mocks.mockQuery.mockReset();
+  // Default for queries beyond the roster fetch (e.g. the multi-school
+  // issue check inside processStudents).
+  mocks.mockQuery.mockResolvedValue([]);
 });
 
 // --- Helper factories ---
 
+// Roster-shaped row, as returned by the canonical school-roster query that
+// the deep-dive now shares with the Enrollment tab.
 function makeStudent(overrides: Partial<{
+  group_user_id: string;
   user_id: string;
   student_id: string | null;
   apaar_id: string | null;
@@ -42,15 +49,32 @@ function makeStudent(overrides: Partial<{
   last_name: string | null;
   gender: string | null;
   stream: string | null;
+  grade: number | null;
+  status: string | null;
+  program_name: string | null;
+  program_id: number | null;
 }> = {}) {
+  const user_id = overrides.user_id ?? "user-1";
   return {
-    user_id: "user-1",
+    group_user_id: `gu-${user_id}`,
+    user_id,
+    student_pk_id: null,
     student_id: "stu-1",
     apaar_id: "apaar-1",
     first_name: "Alice",
     last_name: "Smith",
+    phone: null,
+    email: null,
+    date_of_birth: null,
+    category: null,
     gender: "female",
     stream: null,
+    grade: 10,
+    grade_id: null,
+    status: null,
+    program_name: null,
+    program_id: null,
+    updated_at: null,
     ...overrides,
   };
 }
@@ -113,7 +137,7 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
   }
 
   describe("Postgres roster lookup", () => {
-    it("issues the school+grade SQL with the right params", async () => {
+    it("uses the canonical school-roster query (current academic year, no grade param)", async () => {
       mocks.mockQuery.mockResolvedValueOnce([]);
 
       const { getTestDeepDiveFromDynamo } = await importModule();
@@ -122,9 +146,8 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(mocks.mockQuery).toHaveBeenCalledTimes(1);
       const [sql, params] = mocks.mockQuery.mock.calls[0];
       expect(sql).toContain("g.type = 'school' AND g.child_id = $1");
-      expect(sql).toContain("gr.number = $2");
-      expect(sql).toContain("s.status IS NULL OR s.status != 'dropout'");
-      expect(params).toEqual(["school-abc", 10]);
+      expect(sql).toContain("er_grade.academic_year = $2");
+      expect(params).toEqual(["school-abc", CURRENT_ACADEMIC_YEAR]);
     });
 
     it("returns null + skips DynamoDB when Postgres returns no students", async () => {
@@ -135,6 +158,75 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
 
       expect(result).toBeNull();
       expect(mocks.mockSend).not.toHaveBeenCalled();
+    });
+
+    it("only includes roster students of the requested grade", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ user_id: "u-g10", student_id: "stu-g10", apaar_id: null, first_name: "Tenth", grade: 10 }),
+        makeStudent({ user_id: "u-g12", student_id: "stu-g12", apaar_id: null, first_name: "Twelfth", grade: 12 }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({ student_id: "stu-g10", apaar_id: "", user_id: "u-g10" }),
+          makeV2Doc({ student_id: "stu-g12", apaar_id: "", user_id: "u-g12" }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+
+      expect(result).not.toBeNull();
+      expect(result!.students).toHaveLength(1);
+      expect(result!.students[0].student_name).toBe("Tenth Smith");
+    });
+
+    it("excludes dropout students even when they have a report doc", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ user_id: "u-active", student_id: "stu-active", apaar_id: null, first_name: "Active" }),
+        makeStudent({ user_id: "u-drop", student_id: "stu-drop", apaar_id: null, first_name: "Gone", status: "dropout" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({ student_id: "stu-active", apaar_id: "", user_id: "u-active" }),
+          makeV2Doc({ student_id: "stu-drop", apaar_id: "", user_id: "u-drop" }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+
+      expect(result).not.toBeNull();
+      expect(result!.students).toHaveLength(1);
+      expect(result!.students[0].student_name).toBe("Active Smith");
+    });
+
+    it("applies program (attributed name) and stream (case-insensitive) filters", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ user_id: "u-1", student_id: "stu-1", apaar_id: null, first_name: "Match", program_name: "CoE", stream: "PCM" }),
+        makeStudent({ user_id: "u-2", student_id: "stu-2", apaar_id: null, first_name: "OtherProgram", program_name: "NVS", stream: "PCM" }),
+        makeStudent({ user_id: "u-3", student_id: "stu-3", apaar_id: null, first_name: "OtherStream", program_name: "CoE", stream: "PCB" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({ student_id: "stu-1", apaar_id: "", user_id: "u-1" }),
+          makeV2Doc({ student_id: "stu-2", apaar_id: "", user_id: "u-2" }),
+          makeV2Doc({ student_id: "stu-3", apaar_id: "", user_id: "u-3" }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo(
+        "school-1",
+        "JNV Test",
+        10,
+        "sess-1",
+        "CoE",
+        "pcm"
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.students).toHaveLength(1);
+      expect(result!.students[0].student_name).toBe("Match Smith");
     });
   });
 

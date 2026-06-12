@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
-import { Card, Badge, Button, Modal, Input } from "@/components/ui";
+import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 
 export interface Student {
@@ -20,6 +20,31 @@ export interface Student {
   category: string | null;
   stream: string | null;
   gender: string | null;
+  // Additional editable profile fields. Optional because not every consumer
+  // (or test fixture) selects them; the school roster query populates them.
+  whatsapp_phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  district?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  board_stream?: string | null;
+  school_medium?: string | null;
+  father_name?: string | null;
+  father_phone?: string | null;
+  father_profession?: string | null;
+  father_education_level?: string | null;
+  mother_name?: string | null;
+  mother_phone?: string | null;
+  mother_profession?: string | null;
+  mother_education_level?: string | null;
+  guardian_name?: string | null;
+  guardian_relation?: string | null;
+  guardian_phone?: string | null;
+  guardian_education_level?: string | null;
+  guardian_profession?: string | null;
+  annual_family_income?: string | null;
+  monthly_family_income?: string | null;
   program_name: string | null;
   program_id: number | null;
   grade: number | null;
@@ -194,41 +219,64 @@ function StudentCard({
 
       {/* Expanded content */}
       {expanded && (
-        <div className="px-4 pb-3 pt-3 border-t border-gray-100 bg-gray-50">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Phone</span>
-              <p className="text-gray-900 font-medium">{student.phone || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Gender</span>
-              <p className="text-gray-900">{student.gender || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Category</span>
-              <p>
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}>
-                  {student.category || "—"}
-                </span>
-              </p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Stream</span>
-              <p className="text-gray-900 capitalize">{student.stream || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Program</span>
-              <p className="text-gray-900">{student.program_name || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-400 text-xs uppercase tracking-wide">Email</span>
-              <p className="text-gray-900 truncate">{student.email || "—"}</p>
-            </div>
-          </div>
+        <div className="space-y-3 border-t border-gray-100 bg-gray-50 px-4 pb-4 pt-4">
+          <DetailGroup title="Personal">
+            <DetailField label="Phone" value={student.phone} className="font-medium" />
+            <DetailField label="Gender" value={student.gender} />
+            <DetailField label="Category">
+              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}>
+                {student.category || "—"}
+              </span>
+            </DetailField>
+            <DetailField label="Stream" value={student.stream} className="capitalize" />
+            <DetailField label="Program" value={student.program_name} />
+            <DetailField label="Email" value={student.email} className="truncate" />
+          </DetailGroup>
+
+          <DetailGroup title="Academic">
+            <DetailField label="Board Stream" value={student.board_stream} />
+            <DetailField label="School Medium" value={student.school_medium} />
+          </DetailGroup>
+
+          <DetailGroup title="Contact & Address">
+            <DetailField label="WhatsApp" value={student.whatsapp_phone} />
+            <DetailField label="Address" value={student.address} />
+            <DetailField label="City" value={student.city} />
+            <DetailField label="District" value={student.district} />
+            <DetailField label="State" value={student.state} />
+            <DetailField label="Pincode" value={student.pincode} />
+          </DetailGroup>
+
+          <DetailGroup title="Father">
+            <DetailField label="Name" value={student.father_name} />
+            <DetailField label="Phone" value={student.father_phone} />
+            <DetailField label="Profession" value={student.father_profession} />
+            <DetailField label="Education Level" value={student.father_education_level} />
+          </DetailGroup>
+
+          <DetailGroup title="Mother">
+            <DetailField label="Name" value={student.mother_name} />
+            <DetailField label="Phone" value={student.mother_phone} />
+            <DetailField label="Profession" value={student.mother_profession} />
+            <DetailField label="Education Level" value={student.mother_education_level} />
+          </DetailGroup>
+
+          <DetailGroup title="Guardian">
+            <DetailField label="Name" value={student.guardian_name} />
+            <DetailField label="Relation" value={student.guardian_relation} />
+            <DetailField label="Phone" value={student.guardian_phone} />
+            <DetailField label="Profession" value={student.guardian_profession} />
+            <DetailField label="Education Level" value={student.guardian_education_level} />
+          </DetailGroup>
+
+          <DetailGroup title="Socio-economic">
+            <DetailField label="Annual Family Income" value={student.annual_family_income} />
+            <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
+          </DetailGroup>
 
           {studentPkId !== null && (
-            <div className="mt-4 border-t border-border pt-3">
-              <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+            <section className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+              <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents
               </h4>
               <DocumentsList
@@ -236,7 +284,7 @@ function StudentCard({
                 canDelete={canEdit}
                 refreshNonce={documentsRefreshNonce}
               />
-            </div>
+            </section>
           )}
         </div>
       )}

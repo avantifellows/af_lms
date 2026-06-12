@@ -17,6 +17,15 @@ import type {
 export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 const CURRICULUM_PROGRAM_IDS: number[] = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
 const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"];
+const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
+  jee_main: 1,
+  jee_advanced: 9,
+  neet: 2,
+};
+const CURRICULUM_CODE_COLLATOR = new Intl.Collator("en", {
+  numeric: true,
+  sensitivity: "base",
+});
 
 interface SchoolScopeRow {
   code: string;
@@ -105,6 +114,14 @@ export function isGradeNumber(value: number): value is GradeNumber {
 
 export function isSubjectName(value: string): value is SubjectName {
   return SUBJECT_ORDER.includes(value as SubjectName);
+}
+
+export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
+  return EXAM_TRACK_CURRICULUM_IDS[examTrack];
+}
+
+function compareCurriculumCodes(a: string, b: string): number {
+  return CURRICULUM_CODE_COLLATOR.compare(a, b);
 }
 
 function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; subject: SubjectName }>(
@@ -271,6 +288,7 @@ export async function getCurriculumChapters(params: {
   if (!scope.allowedProgramIds.includes(params.programId)) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
+  const curriculumId = curriculumIdForExamTrack(params.examTrack);
 
   const rows = await query<ChapterScopeRow>(
     `SELECT
@@ -291,7 +309,12 @@ export async function getCurriculumChapters(params: {
      JOIN chapter ch ON ch.id = cfg.chapter_id
      JOIN grade g ON g.id = ch.grade_id
      JOIN subject s ON s.id = ch.subject_id
-     LEFT JOIN topic t ON t.chapter_id = ch.id
+     LEFT JOIN (
+       topic t
+       JOIN topic_curriculum tc
+         ON tc.topic_id = t.id
+        AND tc.curriculum_id = $4
+     ) ON t.chapter_id = ch.id
      WHERE cfg.exam_track = $1
        AND cfg.is_in_syllabus = true
        AND g.number = $2
@@ -303,6 +326,7 @@ export async function getCurriculumChapters(params: {
       ({ Maths: 1, Chemistry: 2, Biology: 3, Physics: 4 } as Record<SubjectName, number>)[
         params.subject
       ],
+      curriculumId,
     ]
   );
 
@@ -339,8 +363,11 @@ export async function getCurriculumChapters(params: {
   const chapters = [...chaptersById.values()].sort((a, b) => {
     const sequenceDiff = (a.coverageSequence ?? 0) - (b.coverageSequence ?? 0);
     if (sequenceDiff !== 0) return sequenceDiff;
-    return a.code.localeCompare(b.code);
+    return compareCurriculumCodes(a.code, b.code);
   });
+  for (const chapter of chapters) {
+    chapter.topics.sort((a, b) => compareCurriculumCodes(a.code, b.code));
+  }
 
   return { ok: true, chapters };
 }

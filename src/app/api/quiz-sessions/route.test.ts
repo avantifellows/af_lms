@@ -186,7 +186,7 @@ describe("GET /api/quiz-sessions", () => {
 });
 
 describe("POST /api/quiz-sessions", () => {
-  it("returns 400 when selected template grade does not match the selected batches", async () => {
+  it("returns 400 when selected template is missing grade metadata", async () => {
     const { POST } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mocks.mockFetch.mockResolvedValueOnce(
@@ -196,7 +196,6 @@ describe("POST /api/quiz-sessions", () => {
         code: "PT-12",
         name: [{ resource: "Part Test 12", lang_code: "en" }],
         type_params: {
-          grade: 12,
           stream: "engineering",
           test_format: "part_test",
           test_purpose: "weekly_test",
@@ -225,7 +224,7 @@ describe("POST /api/quiz-sessions", () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({
-      error: "Selected template grade does not match selected batches",
+      error: "Selected template is missing grade metadata",
     });
     expect(mocks.mockFetch).toHaveBeenCalledTimes(1);
     expect(mocks.mockPublishMessage).not.toHaveBeenCalled();
