@@ -200,7 +200,8 @@ describe("CentreGrid", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders Centre rows with linked School metadata and option labels", () => {
+  it("renders Centre cards with collapsed summary fields and expandable details", async () => {
+    const user = userEvent.setup();
     renderGrid();
 
     expect(screen.getByRole("heading", { name: "Centres" })).toBeInTheDocument();
@@ -209,42 +210,45 @@ describe("CentreGrid", () => {
     expect(screen.getByText("Active Centres")).toBeInTheDocument();
     expect(screen.getByText("Centres linked to Schools")).toBeInTheDocument();
     expect(screen.getByText("Total Physical Centres")).toBeInTheDocument();
-    for (const header of [
-      "Centre",
-      "Linked School",
-      "School Code",
-      "UDISE",
-      "Region",
-      "State",
-      "District",
-      "Type",
-      "Centre Streams",
-      "Category",
-      "Sub-category",
-      "Updated",
-    ]) {
-      expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
-    }
 
-    const linkedRow = screen.getByRole("row", { name: /JNV Bhavnagar CoE/ });
-    expect(within(linkedRow).getByText("JNV Bhavnagar")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("SCH001")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("24010100101")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("West")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("Gujarat")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("Bhavnagar")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("CoE")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("School")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("JEE")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("Physical")).toBeInTheDocument();
-    expect(within(linkedRow).getByText("Active")).toBeInTheDocument();
+    const linkedToggle = screen.getByRole("button", {
+      name: "Show details for JNV Bhavnagar CoE",
+    });
+    const linkedCard = linkedToggle.closest("li") as HTMLElement;
+    expect(within(linkedCard).getByText("JNV Bhavnagar CoE")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("JNV Bhavnagar")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("CoE")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("School")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("Physical")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("Active")).toBeInTheDocument();
+    // School metadata and streams stay behind the expand toggle
+    expect(within(linkedCard).queryByText("SCH001")).not.toBeInTheDocument();
+    expect(within(linkedCard).queryByText("JEE")).not.toBeInTheDocument();
 
-    const unlinkedRow = screen.getByRole("row", { name: /Bench Teacher Bucket/ });
-    expect(within(unlinkedRow).getByText("Unlinked")).toBeInTheDocument();
-    expect(within(unlinkedRow).getAllByText("-").length).toBeGreaterThanOrEqual(4);
-    expect(within(unlinkedRow).getByText("Legacy Type")).toBeInTheDocument();
-    expect(within(unlinkedRow).getByText("No streams")).toBeInTheDocument();
-    expect(within(unlinkedRow).getByText("Inactive")).toBeInTheDocument();
+    await user.click(linkedToggle);
+    expect(within(linkedCard).getByText("SCH001")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("24010100101")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("West")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("Gujarat")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("Bhavnagar")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("JEE")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hide details for JNV Bhavnagar CoE" })
+    ).toBeInTheDocument();
+
+    const unlinkedToggle = screen.getByRole("button", {
+      name: "Show details for Bench Teacher Bucket",
+    });
+    const unlinkedCard = unlinkedToggle.closest("li") as HTMLElement;
+    expect(within(unlinkedCard).getByText("Unlinked")).toBeInTheDocument();
+    expect(within(unlinkedCard).getByText("Legacy Type")).toBeInTheDocument();
+    expect(within(unlinkedCard).getByText("Inactive")).toBeInTheDocument();
+
+    await user.click(unlinkedToggle);
+    expect(
+      within(unlinkedCard).getByText("No School linked to this Centre")
+    ).toBeInTheDocument();
+    expect(within(unlinkedCard).getByText("No streams")).toBeInTheDocument();
   });
 
   it("loads Centres through API-supported filters when filters are applied", async () => {
@@ -459,6 +463,10 @@ describe("CentreGrid", () => {
     );
     expect(await screen.findByText("New Jaipur Centre")).toBeInTheDocument();
     expect(screen.getByText("JNV Jaipur")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Show details for New Jaipur Centre" })
+    );
     expect(screen.getByText("2026-02-01")).toBeInTheDocument();
   });
 
@@ -479,8 +487,10 @@ describe("CentreGrid", () => {
     } as Response);
     renderGrid();
 
-    const linkedRow = screen.getByRole("row", { name: /JNV Bhavnagar CoE/ });
-    await user.click(within(linkedRow).getByRole("button", { name: "Edit" }));
+    const linkedCard = screen
+      .getByRole("button", { name: "Show details for JNV Bhavnagar CoE" })
+      .closest("li") as HTMLElement;
+    await user.click(within(linkedCard).getByRole("button", { name: "Edit" }));
 
     expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
     const nameInput = screen.getByLabelText("Centre name");
@@ -506,20 +516,25 @@ describe("CentreGrid", () => {
         }),
       })
     );
-    const updatedRow = await screen.findByRole("row", {
-      name: /JNV Bhavnagar CoE Updated/,
+    const updatedToggle = await screen.findByRole("button", {
+      name: "Show details for JNV Bhavnagar CoE Updated",
     });
-    expect(within(updatedRow).getByText("Unlinked")).toBeInTheDocument();
-    expect(within(updatedRow).getByText("Inactive")).toBeInTheDocument();
-    expect(within(updatedRow).getByText("2026-03-04")).toBeInTheDocument();
+    const updatedCard = updatedToggle.closest("li") as HTMLElement;
+    expect(within(updatedCard).getByText("Unlinked")).toBeInTheDocument();
+    expect(within(updatedCard).getByText("Inactive")).toBeInTheDocument();
+
+    await user.click(updatedToggle);
+    expect(within(updatedCard).getByText("2026-03-04")).toBeInTheDocument();
   });
 
   it("keeps an existing inactive option visible when editing that Centre", async () => {
     const user = userEvent.setup();
     renderGrid();
 
-    const legacyRow = screen.getByRole("row", { name: /Bench Teacher Bucket/ });
-    await user.click(within(legacyRow).getByRole("button", { name: "Edit" }));
+    const legacyCard = screen
+      .getByRole("button", { name: "Show details for Bench Teacher Bucket" })
+      .closest("li") as HTMLElement;
+    await user.click(within(legacyCard).getByRole("button", { name: "Edit" }));
 
     const modalTypeSelect = screen.getAllByLabelText("Type").at(-1) as HTMLSelectElement;
     expect(Array.from(modalTypeSelect.options).map((option) => option.text)).toContain(
