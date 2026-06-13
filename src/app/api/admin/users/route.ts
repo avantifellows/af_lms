@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 
 // Disable Next.js caching for this route
@@ -35,15 +36,7 @@ export async function GET() {
     updated_at: string;
   }>(
     `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name,
-            COALESCE((
-              SELECT json_agg(
-                       json_build_object('centreName', c.name, 'role', cp.role)
-                       ORDER BY c.name, cp.role
-                     )
-              FROM centre_positions cp
-              JOIN centres c ON c.id = cp.centre_id
-              WHERE cp.user_id = user_permission.user_id AND cp.deleted_at IS NULL
-            ), '[]'::json) AS centres,
+            ${CENTRE_ASSIGNMENTS_SUBQUERY},
             inserted_at, updated_at
      FROM user_permission
      ORDER BY level DESC, role, email`

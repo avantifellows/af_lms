@@ -29,6 +29,7 @@
 import * as fs from "fs";
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
+import { normalizeEmployeeCode, type SeatRole } from "./staff-shared";
 
 export type BackfillMode = "dry-run" | "apply";
 
@@ -73,13 +74,7 @@ export interface CentreRef {
   schoolCode: string;
 }
 
-export type SeatRole =
-  | "physics"
-  | "chemistry"
-  | "maths"
-  | "biology"
-  | "apc"
-  | "pm";
+export type { SeatRole };
 
 export interface PlannedSeat {
   centreId: number;
@@ -160,12 +155,9 @@ export function splitFullName(fullName: string): {
   return { firstName: tokens[0], lastName: tokens.slice(1).join(" ") };
 }
 
-const AF_CODE_PATTERN = /^AF\d+$/i;
-
-export function normalizeAfCode(raw: string): string | null {
-  const code = raw.trim().toUpperCase();
-  return AF_CODE_PATTERN.test(code) ? code : null;
-}
+// Canonical AF-code normalization lives in staff-shared (used by the live admin
+// surface too); keep this name as the backfill's entry point so they can't drift.
+export const normalizeAfCode = normalizeEmployeeCode;
 
 export function resolveAfCode(row: SheetRow | undefined): CodeResolution {
   if (!row) {
@@ -744,7 +736,7 @@ export async function runStaffBackfill(
     try {
       await withTransaction(async (client) => {
         for (const plan of report.plans) {
-          if (!plan.skipped) await applyPlan(client, plan, people);
+          if (!plan.skipped) await applyPlan(client, plan, people, existing);
         }
       });
     } catch (error) {
@@ -796,7 +788,8 @@ function tallyPlan(
 async function applyPlan(
   client: PoolClient,
   plan: PersonPlan,
-  people: PermissionRow[]
+  people: PermissionRow[],
+  existing: ExistingContext
 ): Promise<void> {
   const person = people.find(
     (p) => p.email === plan.email && p.role === plan.role
@@ -854,19 +847,19 @@ async function applyPlan(
     [userId, person.id]
   );
 
-  // 4. Seats (skip ones that already exist for this user)
+  // 4. Seats (skip ones that already exist for this user). Reuse the
+  // pre-loaded activeSeats set instead of a per-seat SELECT (the same set
+  // tallyPlan counts against), and add freshly-inserted keys so a later plan
+  // for the same user can't double-insert within this transaction.
   for (const seat of plan.seats) {
-    const existsResult = await client.query(
-      `SELECT 1 FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL`,
-      [seat.centreId, seat.role, userId]
-    );
-    if (existsResult.rows.length === 0) {
+    const seatKey = `${seat.centreId}:${seat.role}:${userId}`;
+    if (!existing.activeSeats.has(seatKey)) {
       await client.query(
         `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
          VALUES ($1, $2, $3, now(), now())`,
         [seat.centreId, seat.role, userId]
       );
+      existing.activeSeats.add(seatKey);
     }
   }
 }

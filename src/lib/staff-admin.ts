@@ -15,41 +15,22 @@
 
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
-import { getUserPermission } from "./permissions";
+import {
+  type AdminGuardResult,
+  type AdminSession,
+  makeSchemaChecker,
+  requireAdmin,
+} from "./admin-guard";
 
-// --- Sessions / guard (same shape as requireCentreAdmin) ---
+// --- Sessions / guard (shared with the Centre management surface) ---
 
-export type StaffAdminSession = {
-  user?: { email?: string | null } | null;
-  isPasscodeUser?: boolean;
-} | null;
-
-export type StaffAdminResult =
-  | {
-      ok: true;
-      email: string;
-      permission: NonNullable<Awaited<ReturnType<typeof getUserPermission>>>;
-    }
-  | { ok: false; status: 401 | 403; error: string };
+export type StaffAdminSession = AdminSession;
+export type StaffAdminResult = AdminGuardResult;
 
 export async function requireStaffAdmin(
   session: StaffAdminSession
 ): Promise<StaffAdminResult> {
-  const email = session?.user?.email;
-  if (!email) {
-    return { ok: false, status: 401, error: "Unauthorized" };
-  }
-
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  const permission = await getUserPermission(email);
-  if (permission?.role !== "admin") {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  return { ok: true, email, permission };
+  return requireAdmin(session);
 }
 
 // --- Schema readiness ---
@@ -90,8 +71,6 @@ export const STAFF_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = 
   { table: "centres", column: "name" },
 ];
 
-let cachedStaffSchemaStatus: Promise<StaffSchemaStatus> | null = null;
-
 async function loadStaffSchemaStatus(): Promise<StaffSchemaStatus> {
   const rows = await query<{ table_name: string; column_name: string }>(
     `SELECT table_name, column_name
@@ -119,24 +98,14 @@ async function loadStaffSchemaStatus(): Promise<StaffSchemaStatus> {
   return { ok: true };
 }
 
-export async function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
-  cachedStaffSchemaStatus ??= loadStaffSchemaStatus().then(
-    (status) => {
-      if (!status.ok) {
-        cachedStaffSchemaStatus = null;
-      }
-      return status;
-    },
-    (error) => {
-      cachedStaffSchemaStatus = null;
-      throw error;
-    }
-  );
-  return cachedStaffSchemaStatus;
+const staffSchemaChecker = makeSchemaChecker(loadStaffSchemaStatus);
+
+export function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
+  return staffSchemaChecker.check();
 }
 
 export function resetStaffSchemaCheckForTests() {
-  cachedStaffSchemaStatus = null;
+  staffSchemaChecker.reset();
 }
 
 // --- Shared shapes (client-safe values/types live in staff-shared) ---
@@ -160,16 +129,22 @@ export interface StaffValidationFailure {
   status: 404 | 409 | 422 | 502;
   error: string;
   fields?: Record<string, string>;
+  // Machine-readable discriminator for failures the client handles specially
+  // (e.g. "last_seat" → offer a force-confirm). Absent for ordinary failures.
+  code?: string;
 }
 
 export function safeStaffApiError(result: {
   status: number;
   error: string;
   fields?: Record<string, string>;
-}): { error: string; fields?: Record<string, string> } {
-  return result.fields
-    ? { error: result.error, fields: result.fields }
-    : { error: result.error };
+  code?: string;
+}): { error: string; fields?: Record<string, string>; code?: string } {
+  return {
+    error: result.error,
+    ...(result.fields ? { fields: result.fields } : {}),
+    ...(result.code ? { code: result.code } : {}),
+  };
 }
 
 // --- Roster ---
@@ -588,6 +563,54 @@ async function clearExplicitSchoolScope(
   );
 }
 
+// Strict region/seat exclusivity (#1): a region-level (level-2) user's scope is
+// their regions, which seat assignment would wipe with no way to reconstitute.
+// Reject seating such a user up front rather than silently collapsing their
+// access to a single school. Returns a failure to surface, or null if allowed.
+async function rejectIfRegionLevelUser(
+  userId: number
+): Promise<StaffValidationFailure | null> {
+  const rows = await query<{ level: number }>(
+    `SELECT level FROM user_permission WHERE user_id = $1 AND revoked_at IS NULL`,
+    [userId]
+  );
+  if (rows.some((r) => r.level === 2)) {
+    return {
+      ok: false,
+      status: 422,
+      error:
+        "Region-level users can't hold centre seats — their access is scoped by region, not by seat.",
+      fields: { user_id: "This user has region-level access" },
+    };
+  }
+  return null;
+}
+
+// Whether `userId`'s only remaining active seat is `excludePositionId` — i.e.
+// removing/vacating that seat would leave them with no seat-derived scope.
+// Strict exclusivity already cleared their explicit school_codes, so this is a
+// total access loss (#2): callers block it unless `force` is set.
+async function isLastActiveSeat(
+  userId: number,
+  excludePositionId: number
+): Promise<boolean> {
+  const others = await query<{ id: number }>(
+    `SELECT id FROM centre_positions
+     WHERE user_id = $1 AND deleted_at IS NULL AND id <> $2
+     LIMIT 1`,
+    [userId, excludePositionId]
+  );
+  return others.length === 0;
+}
+
+const LAST_SEAT_BLOCK: StaffValidationFailure = {
+  ok: false,
+  status: 409,
+  error:
+    "This is the person's only centre seat — removing it leaves them with no access. Re-assign them to another seat first, or confirm to remove anyway.",
+  code: "last_seat",
+};
+
 // --- Staff (non-teaching) members: LMS-direct ---
 
 export interface CreateStaffMemberBody {
@@ -659,10 +682,25 @@ export async function createStaffMember(params: {
       error: `Employee code ${code} is already used by another staff member`,
     };
   }
-  if (permission.user_id !== null) {
+  // Resolve the effective user identity. If user_permission.user_id is unset, a
+  // "user" row may still exist for this email (e.g. a prior backfill linked by
+  // email but never wrote user_permission.user_id). Reuse it rather than
+  // minting a duplicate identity that would orphan their teacher/seat links
+  // (#3). null here means "no user exists yet — create one in the transaction".
+  let existingUserId: number | null =
+    permission.user_id === null ? null : Number(permission.user_id);
+  if (existingUserId === null) {
+    const found = await query<{ id: number | string }>(
+      `SELECT id FROM "user" WHERE LOWER(email) = $1 ORDER BY id LIMIT 1`,
+      [permission.email]
+    );
+    if (found.length > 0) existingUserId = Number(found[0].id);
+  }
+
+  if (existingUserId !== null) {
     const staffClash = await query<{ id: number }>(
       `SELECT id FROM staff WHERE user_id = $1`,
-      [permission.user_id]
+      [existingUserId]
     );
     if (staffClash.length > 0) {
       return {
@@ -674,7 +712,7 @@ export async function createStaffMember(params: {
   }
 
   await withTransaction(async (client) => {
-    let userId = permission.user_id === null ? null : Number(permission.user_id);
+    let userId = existingUserId;
     if (userId === null) {
       const name = (permission.full_name ?? "").trim();
       const tokens = name.split(/\s+/).filter(Boolean);
@@ -688,6 +726,8 @@ export async function createStaffMember(params: {
         ]
       );
       userId = Number(inserted.rows[0].id);
+    }
+    if (userId !== permission.user_id) {
       await client.query(
         `UPDATE user_permission SET user_id = $1, updated_at = now() WHERE id = $2`,
         [userId, permission.id]
@@ -843,6 +883,8 @@ export async function createPosition(params: {
     if (users.length === 0) {
       return { ok: false, status: 404, error: "User not found" };
     }
+    const regionBlock = await rejectIfRegionLevelUser(userId);
+    if (regionBlock) return regionBlock;
     const duplicate = await query<{ id: number }>(
       `SELECT id FROM centre_positions
        WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL`,
@@ -878,6 +920,7 @@ export interface UpdatePositionBody {
 export async function updatePosition(params: {
   id: number;
   body: UpdatePositionBody;
+  force?: boolean;
 }): Promise<StaffMutationResult> {
   const schema = await checkStaffManagementSchema();
   if (!schema.ok) return schema;
@@ -894,8 +937,9 @@ export async function updatePosition(params: {
     id: number;
     centre_id: number;
     role: SeatRole;
+    user_id: number | null;
   }>(
-    `SELECT id, centre_id, role FROM centre_positions
+    `SELECT id, centre_id, role, user_id FROM centre_positions
      WHERE id = $1 AND deleted_at IS NULL`,
     [params.id]
   );
@@ -922,6 +966,8 @@ export async function updatePosition(params: {
     if (users.length === 0) {
       return { ok: false, status: 404, error: "User not found" };
     }
+    const regionBlock = await rejectIfRegionLevelUser(userId);
+    if (regionBlock) return regionBlock;
     const duplicate = await query<{ id: number }>(
       `SELECT id FROM centre_positions
        WHERE centre_id = $1 AND role = $2 AND user_id = $3
@@ -935,6 +981,17 @@ export async function updatePosition(params: {
         error: "This person already holds this seat",
       };
     }
+  }
+
+  // Vacating the seat: refuse if it's the occupant's only seat (would strand
+  // them with no scope), unless the caller explicitly forces it (#2).
+  if (
+    userId === null &&
+    position.user_id !== null &&
+    !params.force &&
+    (await isLastActiveSeat(position.user_id, params.id))
+  ) {
+    return LAST_SEAT_BLOCK;
   }
 
   await withTransaction(async (client) => {
@@ -952,16 +1009,28 @@ export async function updatePosition(params: {
 
 export async function deletePosition(params: {
   id: number;
+  force?: boolean;
 }): Promise<StaffMutationResult> {
   const schema = await checkStaffManagementSchema();
   if (!schema.ok) return schema;
 
-  const positions = await query<{ id: number }>(
-    `SELECT id FROM centre_positions WHERE id = $1 AND deleted_at IS NULL`,
+  const positions = await query<{ id: number; user_id: number | null }>(
+    `SELECT id, user_id FROM centre_positions WHERE id = $1 AND deleted_at IS NULL`,
     [params.id]
   );
   if (positions.length === 0) {
     return { ok: false, status: 404, error: "Position not found" };
+  }
+  const position = positions[0];
+
+  // Deleting an occupied seat that is the occupant's last one strands them
+  // (#2) — block unless forced. Empty seats delete freely.
+  if (
+    position.user_id !== null &&
+    !params.force &&
+    (await isLastActiveSeat(position.user_id, params.id))
+  ) {
+    return LAST_SEAT_BLOCK;
   }
 
   await query(

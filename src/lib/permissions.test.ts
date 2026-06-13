@@ -427,13 +427,29 @@ describe("resolveScope", () => {
     expect(scope.schools).toEqual(new Set());
   });
 
-  it("degrades to explicit-only scope when the centre query throws", async () => {
-    mockQuery.mockRejectedValueOnce(new Error("relation centre_positions does not exist"));
+  it("degrades to explicit-only scope when the centre tables are missing", async () => {
+    // undefined_table (42P01): the seat migration hasn't run on this env.
+    const missingTable = Object.assign(
+      new Error("relation centre_positions does not exist"),
+      { code: "42P01" }
+    );
+    mockQuery.mockRejectedValueOnce(missingTable);
     const scope = await resolveScope(
       makePermission({ level: 1, school_codes: ["70705"], user_id: 42 })
     );
     expect(scope.schools).toEqual(new Set(["70705"]));
     expect(scope.centres).toEqual(new Set());
+  });
+
+  it("propagates a transient centre-query error instead of silently emptying scope", async () => {
+    // A non-schema error (e.g. connection reset) must not be swallowed — doing
+    // so would hand a seated user an empty scope and lock them out silently.
+    mockQuery.mockRejectedValueOnce(new Error("connection terminated"));
+    await expect(
+      resolveScope(
+        makePermission({ level: 1, school_codes: ["70705"], user_id: 42 })
+      )
+    ).rejects.toThrow("connection terminated");
   });
 });
 

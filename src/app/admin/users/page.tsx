@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { isAdmin } from "@/lib/permissions";
+import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import Link from "next/link";
 import UserList from "./UserList";
@@ -37,15 +38,7 @@ interface SchoolNameRow {
 async function getUsers(): Promise<UserPermission[]> {
   return query<UserPermission>(
     `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name,
-            COALESCE((
-              SELECT json_agg(
-                       json_build_object('centreName', c.name, 'role', cp.role)
-                       ORDER BY c.name, cp.role
-                     )
-              FROM centre_positions cp
-              JOIN centres c ON c.id = cp.centre_id
-              WHERE cp.user_id = user_permission.user_id AND cp.deleted_at IS NULL
-            ), '[]'::json) AS centres
+            ${CENTRE_ASSIGNMENTS_SUBQUERY}
      FROM user_permission
      ORDER BY level DESC, role, email`
   );

@@ -42,6 +42,7 @@ export async function PATCH(
   const result = await updatePosition({
     id: positionId,
     body: (body ?? {}) as Record<string, unknown>,
+    force: request.nextUrl.searchParams.get("force") === "true",
   });
   if (!result.ok) {
     return NextResponse.json(safeStaffApiError(result), {
@@ -53,7 +54,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
@@ -67,7 +68,10 @@ export async function DELETE(
     return NextResponse.json({ error: "Invalid position id" }, { status: 400 });
   }
 
-  const result = await deletePosition({ id: positionId });
+  const result = await deletePosition({
+    id: positionId,
+    force: request.nextUrl.searchParams.get("force") === "true",
+  });
   if (!result.ok) {
     return NextResponse.json(safeStaffApiError(result), {
       status: result.status,

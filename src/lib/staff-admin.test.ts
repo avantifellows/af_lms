@@ -378,6 +378,7 @@ describe("createStaffMember", () => {
       },
     ]);
     mockQuery.mockResolvedValueOnce([]); // code clash check
+    mockQuery.mockResolvedValueOnce([]); // existing-user-by-email lookup (none)
     mockClientQuery.mockResolvedValueOnce({ rows: [{ id: "99" }] }); // user insert
 
     const result = await createStaffMember({
@@ -391,6 +392,37 @@ describe("createStaffMember", () => {
     expect(calls[1][0]).toContain("UPDATE user_permission SET user_id");
     expect(calls[2][0]).toContain("INSERT INTO staff");
     expect(calls[2][1]).toEqual([99, "AF7", null]);
+  });
+
+  it("reuses an existing user found by email instead of inserting a duplicate", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 5,
+        email: "pm@avantifellows.org",
+        full_name: "Pending Pm Person",
+        role: "program_manager",
+        user_id: null,
+      },
+    ]);
+    mockQuery.mockResolvedValueOnce([]); // code clash check
+    mockQuery.mockResolvedValueOnce([{ id: "70" }]); // existing user found by email
+    mockQuery.mockResolvedValueOnce([]); // staff clash check (none)
+
+    const result = await createStaffMember({
+      body: { user_permission_id: 5, employee_code: "AF7" },
+    });
+    expect(result).toEqual({ ok: true });
+
+    const calls = mockClientQuery.mock.calls;
+    // No "user" INSERT — the existing id 70 is reused.
+    expect(calls.some(([sql]) => String(sql).includes(`INSERT INTO "user"`))).toBe(
+      false
+    );
+    expect(calls[0][0]).toContain("UPDATE user_permission SET user_id");
+    expect(calls[0][1]).toEqual([70, 5]);
+    expect(calls[1][0]).toContain("INSERT INTO staff");
+    expect(calls[1][1]).toEqual([70, "AF7", null]);
   });
 
   it("409s when the code or person already exists", async () => {
@@ -480,6 +512,7 @@ describe("positions", () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
     mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard (not level 2)
     mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
     expect(
       await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
@@ -496,15 +529,32 @@ describe("positions", () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
     mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard (not level 2)
     mockQuery.mockResolvedValueOnce([{ id: 44 }]); // duplicate
     expect(
       await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
     ).toMatchObject({ ok: false, status: 409 });
   });
 
+  it("createPosition rejects seating a region-level (level-2) user", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 2 }]); // region-level user → blocked
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
+    ).toMatchObject({ ok: false, status: 422 });
+    // No transaction / insert happened.
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
   it("updatePosition vacates a seat without clearing scope", async () => {
     mockSchemaReady();
-    mockQuery.mockResolvedValueOnce([{ id: 44, centre_id: 8, role: "physics" }]);
+    // Occupant 70 has another active seat, so vacating this one isn't a strand.
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "physics", user_id: 70 },
+    ]);
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
     expect(await updatePosition({ id: 44, body: { user_id: null } })).toEqual({
       ok: true,
     });
@@ -518,10 +568,35 @@ describe("positions", () => {
     ).toBe(false);
   });
 
+  it("updatePosition refuses to vacate an occupant's only seat unless forced", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "physics", user_id: 70 },
+    ]); // position
+    mockQuery.mockResolvedValueOnce([]); // isLastActiveSeat → no other seats → last
+    const blocked = await updatePosition({ id: 44, body: { user_id: null } });
+    expect(blocked).toMatchObject({ ok: false, status: 409, code: "last_seat" });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+
+    // With force the vacate proceeds (no last-seat check query needed).
+    resetStaffSchemaCheckForTests();
+    mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "physics", user_id: 70 },
+    ]);
+    expect(
+      await updatePosition({ id: 44, body: { user_id: null }, force: true })
+    ).toEqual({ ok: true });
+    expect(mockClientQuery.mock.calls.at(-1)![0]).toContain("SET user_id = $1");
+  });
+
   it("updatePosition fills a seat and clears the occupant's explicit scope", async () => {
     mockSchemaReady();
-    mockQuery.mockResolvedValueOnce([{ id: 44, centre_id: 8, role: "physics" }]); // position
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "physics", user_id: null },
+    ]); // position
     mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user lookup
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard (not level 2)
     mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
     expect(await updatePosition({ id: 44, body: { user_id: 70 } })).toEqual({
       ok: true,
@@ -534,11 +609,29 @@ describe("positions", () => {
     expect(clearCall[1]).toEqual([70]);
   });
 
-  it("deletePosition soft-deletes", async () => {
+  it("deletePosition soft-deletes a vacant seat", async () => {
     mockSchemaReady();
-    mockQuery.mockResolvedValueOnce([{ id: 44 }]);
-    mockQuery.mockResolvedValueOnce([]);
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: null }]); // vacant seat
+    mockQuery.mockResolvedValueOnce([]); // UPDATE
     expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(mockQuery.mock.calls.at(-1)![0]).toContain("SET deleted_at = now()");
+  });
+
+  it("deletePosition refuses to delete an occupant's only seat unless forced", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // occupied seat
+    mockQuery.mockResolvedValueOnce([]); // isLastActiveSeat → last
+    expect(await deletePosition({ id: 44 })).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "last_seat",
+    });
+
+    resetStaffSchemaCheckForTests();
+    mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // occupied seat
+    mockQuery.mockResolvedValueOnce([]); // UPDATE (force skips the last-seat check)
+    expect(await deletePosition({ id: 44, force: true })).toEqual({ ok: true });
     expect(mockQuery.mock.calls.at(-1)![0]).toContain("SET deleted_at = now()");
   });
 });

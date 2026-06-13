@@ -114,6 +114,11 @@ export default function StaffGrid({
   const [seatRoleDraft, setSeatRoleDraft] = useState<SeatRole>("physics");
   const [actionError, setActionError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
+  // Seat id awaiting a "remove anyway" confirmation (the server flagged it as
+  // the person's last seat). Null when no confirmation is pending.
+  const [confirmVacateSeatId, setConfirmVacateSeatId] = useState<number | null>(
+    null
+  );
 
   const modalRow = useMemo(
     () => (modalKey === null ? null : (rows.find((row) => rowKey(row) === modalKey) ?? null)),
@@ -194,6 +199,7 @@ export default function StaffGrid({
   const closeModal = () => {
     setModalKey(null);
     setActionError("");
+    setConfirmVacateSeatId(null);
   };
 
   const runAction = async (
@@ -296,14 +302,36 @@ export default function StaffGrid({
     );
   };
 
-  const vacateSeat = (seatId: number) => {
-    return runAction(() =>
-      fetch(`/api/admin/staff/positions/${seatId}`, {
+  // Vacate a seat. The server blocks removing a person's *last* seat (409 with
+  // code "last_seat") unless force=true; on that block we surface an inline
+  // "remove anyway" confirmation rather than failing silently.
+  const vacateSeat = async (seatId: number, force = false) => {
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const url = `/api/admin/staff/positions/${seatId}${force ? "?force=true" : ""}`;
+      const response = await fetch(url, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: null }),
-      })
-    );
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409 && data.code === "last_seat") {
+          setConfirmVacateSeatId(seatId);
+          return false;
+        }
+        throw new Error(data.error || "Action failed");
+      }
+      setConfirmVacateSeatId(null);
+      await fetchRoster(filters);
+      return true;
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Action failed");
+      return false;
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const canEdit = (row: StaffRosterRow) => row.kind !== "pending_teacher";
@@ -570,16 +598,40 @@ export default function StaffGrid({
                         <span>
                           {SEAT_ROLE_LABELS[seat.role]} @ {seat.centreName}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => void vacateSeat(seat.id)}
-                          disabled={actionBusy}
-                          className="text-danger hover:text-danger/80"
-                          aria-label={`Remove ${SEAT_ROLE_LABELS[seat.role]} assignment at ${seat.centreName}`}
-                          title="Remove assignment (keeps the position open)"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
+                        {confirmVacateSeatId === seat.id ? (
+                          <span className="flex items-center gap-2">
+                            <span className="text-xs text-brand-coral">
+                              Only seat — remove anyway?
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void vacateSeat(seat.id, true)}
+                              disabled={actionBusy}
+                              className="text-xs font-bold text-danger hover:text-danger/80"
+                            >
+                              Remove
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmVacateSeatId(null)}
+                              disabled={actionBusy}
+                              className="text-xs text-text-muted hover:text-text"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void vacateSeat(seat.id)}
+                            disabled={actionBusy}
+                            className="text-danger hover:text-danger/80"
+                            aria-label={`Remove ${SEAT_ROLE_LABELS[seat.role]} assignment at ${seat.centreName}`}
+                            title="Remove assignment (keeps the position open)"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

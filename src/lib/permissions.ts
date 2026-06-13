@@ -236,6 +236,15 @@ async function schoolCodesForCentres(centreIds: number[]): Promise<string[]> {
   return rows.map((r) => r.code);
 }
 
+// True only for Postgres "undefined_table" / "undefined_column" errors — the
+// signal that the centre-seat schema hasn't been migrated on this environment
+// yet. Used to scope resolveScope's degrade-to-explicit fallback to that case
+// alone (transient failures must propagate, not silently empty the scope).
+function isMissingSchemaError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === "42P01" || code === "42703";
+}
+
 // Resolve a permission's effective scope: explicit school_codes ∪ centre-seat-
 // derived schools. Regions stay handled lazily by canAccessSchoolSync's level-2
 // branch (no eager region→school expansion here, so level-2 semantics are
@@ -259,10 +268,14 @@ export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
       for (const code of await schoolCodesForCentres(centreIds)) {
         schools.add(code);
       }
-    } catch {
-      // centre tables missing on an env (or a transient error) → degrade to
-      // explicit-only scope. Fails toward *less* access (deny), never throws on
-      // the auth hot path.
+    } catch (err) {
+      // The centre tables/columns may not exist yet on an environment that
+      // hasn't run the seat migration — degrade to explicit-only scope in that
+      // one case. Any other error (a transient DB failure) must propagate:
+      // swallowing it would silently hand a *seated* staff member an empty
+      // scope (their explicit school_codes were cleared by strict exclusivity),
+      // i.e. lock them out of their own data while showing no error.
+      if (!isMissingSchemaError(err)) throw err;
     }
   }
 
