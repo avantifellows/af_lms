@@ -28,6 +28,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   return {
     ...actual,
     getUserPermission: mockGetUserPermission,
+    getResolvedPermission: mockGetUserPermission,
     getFeatureAccess: mockGetFeatureAccess,
   };
 });

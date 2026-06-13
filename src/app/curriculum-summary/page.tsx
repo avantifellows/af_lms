@@ -28,7 +28,7 @@ import {
 import {
   getFeatureAccess,
   getProgramContextSync,
-  getUserPermission,
+  getResolvedPermission,
 } from "@/lib/permissions";
 
 interface PageProps {
@@ -64,7 +64,7 @@ export default async function CurriculumSummaryPage({ searchParams }: PageProps)
   }
 
   const email = session.user.email;
-  const permission = await getUserPermission(email);
+  const permission = await getResolvedPermission(email);
 
   if (!permission) {
     redirect("/dashboard");

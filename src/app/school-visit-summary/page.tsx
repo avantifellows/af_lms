@@ -8,7 +8,7 @@ import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getUserPermission, type UserPermission } from "@/lib/permissions";
+import { getFeatureAccess, getResolvedPermission, type UserPermission } from "@/lib/permissions";
 import { ACTION_TYPES, ACTION_TYPE_VALUES, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
 import {
   resolvePresetDateRange,
@@ -912,7 +912,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   if (!permission) {
     redirect("/dashboard");
   }

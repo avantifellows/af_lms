@@ -1,7 +1,22 @@
 import { query } from "./db";
-import { getUserPermission, type UserPermission } from "./permissions";
+import { type UserPermission } from "./permissions";
+import { makeSchemaChecker, requireAdmin } from "./admin-guard";
 
 export type CentreOptionSetCode = "type" | "category" | "sub_category" | "stream";
+
+// Correlated subquery yielding a user's active centre assignments as a JSON
+// array of { centreName, role }, aliased `centres`. Embed inside a SELECT over
+// `user_permission` (it references `user_permission.user_id`). Shared by the
+// admin users page and the /api/admin/users route so they can't drift.
+export const CENTRE_ASSIGNMENTS_SUBQUERY = `COALESCE((
+  SELECT json_agg(
+           json_build_object('centreName', c.name, 'role', cp.role)
+           ORDER BY c.name, cp.role
+         )
+  FROM centre_positions cp
+  JOIN centres c ON c.id = cp.centre_id
+  WHERE cp.user_id = user_permission.user_id AND cp.deleted_at IS NULL
+), '[]'::json) AS centres`;
 
 export interface CentreSchemaReady {
   ok: true;
@@ -318,8 +333,6 @@ const REQUIRED_CENTRE_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "centres", column: "updated_at" },
 ];
 
-let cachedCentreSchemaStatus: Promise<CentreSchemaStatus> | null = null;
-
 export function fixedCentreOptionSetCodes(): CentreOptionSetCode[] {
   return [...FIXED_OPTION_SET_CODES];
 }
@@ -348,41 +361,17 @@ export function isActiveCentreOptionCode(
 export async function requireCentreAdmin(
   session: CentreAdminSession
 ): Promise<CentreAdminResult> {
-  const email = session?.user?.email;
-  if (!email) {
-    return { ok: false, status: 401, error: "Unauthorized" };
-  }
-
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  const permission = await getUserPermission(email);
-  if (permission?.role !== "admin") {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  return { ok: true, email, permission };
+  return requireAdmin(session);
 }
 
-export async function checkCentreManagementSchema(): Promise<CentreSchemaStatus> {
-  cachedCentreSchemaStatus ??= loadCentreSchemaStatus().then(
-    (status) => {
-      if (!status.ok) {
-        cachedCentreSchemaStatus = null;
-      }
-      return status;
-    },
-    (error) => {
-      cachedCentreSchemaStatus = null;
-      throw error;
-    }
-  );
-  return cachedCentreSchemaStatus;
+const centreSchemaChecker = makeSchemaChecker(loadCentreSchemaStatus);
+
+export function checkCentreManagementSchema(): Promise<CentreSchemaStatus> {
+  return centreSchemaChecker.check();
 }
 
 export function resetCentreSchemaCheckForTests() {
-  cachedCentreSchemaStatus = null;
+  centreSchemaChecker.reset();
 }
 
 export async function getCentreOptionSets(): Promise<CentreOptionSetsResult> {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
-  getUserPermission,
+  getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
   canAccessSchoolSync,
@@ -132,7 +132,7 @@ export default async function SchoolPage({ params }: PageProps) {
 
   // Single DB call for permission — reuse everywhere
   const permission = !isPasscodeUser && session.user?.email
-    ? await getUserPermission(session.user.email)
+    ? await getResolvedPermission(session.user.email)
     : null;
 
   // For Google users, check school access

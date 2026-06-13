@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import ActionDetailForm from "@/components/visits/ActionDetailForm";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
+import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
 
 interface VisitRow {
@@ -133,7 +133,7 @@ export default async function VisitActionDetailPage({ params, searchParams }: Pa
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   if (!permission) {
     redirect("/dashboard");
   }

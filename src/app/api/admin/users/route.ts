@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 
 // Disable Next.js caching for this route
@@ -30,10 +31,13 @@ export async function GET() {
     program_ids: number[] | null;
     read_only: boolean;
     full_name: string | null;
+    centres: { centreName: string; role: string }[];
     inserted_at: string;
     updated_at: string;
   }>(
-    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name, inserted_at, updated_at
+    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name,
+            ${CENTRE_ASSIGNMENTS_SUBQUERY},
+            inserted_at, updated_at
      FROM user_permission
      ORDER BY level DESC, role, email`
   );

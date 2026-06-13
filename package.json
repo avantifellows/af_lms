@@ -9,6 +9,8 @@
     "lint": "eslint",
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "centres:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-centres.ts",
+    "staff:backfill": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/backfill-staff.ts",
+    "staff:clear-seated-scope": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/clear-seated-school-codes.ts",
     "centres:seed-options": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-centre-options.ts",
     "curriculum:seed-dummy": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-curriculum-dummy-data.ts",
     "deploy:staging": "./scripts/deploy.sh staging",
