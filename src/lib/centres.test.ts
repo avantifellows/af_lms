@@ -315,6 +315,8 @@ describe("Centre grid contracts", () => {
           ],
           is_physical: true,
           is_active: true,
+          program_id: "1",
+          program_name: "JNV CoE",
           inserted_at: "2026-01-05T00:00:00.000Z",
           updated_at: "2026-01-06T00:00:00.000Z",
           school_name: "JNV Pune",
@@ -368,6 +370,8 @@ describe("Centre grid contracts", () => {
           ],
           isPhysical: true,
           isActive: true,
+          programId: 1,
+          programName: "JNV CoE",
           insertedAt: "2026-01-05T00:00:00.000Z",
           updatedAt: "2026-01-06T00:00:00.000Z",
           school: {
@@ -537,6 +541,7 @@ describe("Centre grid contracts", () => {
       ["jee"],
       false,
       true,
+      null,
     ]);
   });
 
@@ -635,6 +640,7 @@ describe("Centre grid contracts", () => {
       ["old_stream"],
       true,
       false,
+      null,
     ]);
   });
 

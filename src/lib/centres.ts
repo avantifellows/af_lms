@@ -81,6 +81,8 @@ export interface CentreListRow {
   streams: CentreStreamDisplay[];
   isPhysical: boolean;
   isActive: boolean;
+  programId: number | null;
+  programName: string | null;
   insertedAt: string;
   updatedAt: string;
   school: {
@@ -210,6 +212,7 @@ interface CentreCreatePayload {
   streamCodes: string[];
   isPhysical: boolean;
   isActive: boolean;
+  programId: number | null;
 }
 
 type CentreEditPayload = CentreCreatePayload;
@@ -262,6 +265,8 @@ interface CentreListQueryRow {
   stream_options: unknown;
   is_physical: boolean | string | null;
   is_active: boolean | string | null;
+  program_id: string | number | null;
+  program_name: string | null;
   inserted_at: string | Date | null;
   updated_at: string | Date | null;
   school_name: string | null;
@@ -308,6 +313,7 @@ const REQUIRED_CENTRE_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "centres", column: "stream_codes" },
   { table: "centres", column: "is_physical" },
   { table: "centres", column: "is_active" },
+  { table: "centres", column: "program_id" },
   { table: "centres", column: "inserted_at" },
   { table: "centres", column: "updated_at" },
 ];
@@ -532,6 +538,8 @@ export async function getCentreList(params: {
        COALESCE(streams.stream_options, '[]'::jsonb) AS stream_options,
        centres.is_physical,
        centres.is_active,
+       centres.program_id,
+       programs.name AS program_name,
        centres.inserted_at,
        centres.updated_at,
        schools.name AS school_name,
@@ -547,6 +555,8 @@ export async function getCentreList(params: {
      FROM centres
      LEFT JOIN school schools
        ON schools.id = centres.school_id
+     LEFT JOIN program programs
+       ON programs.id = centres.program_id
      LEFT JOIN centre_option_sets type_set
        ON type_set.code = 'type'
      LEFT JOIN centre_options type_options
@@ -730,11 +740,16 @@ export async function createCentre(params: {
     return schoolValidation;
   }
 
+  const programValidation = await validateProgramId(payload.payload.programId);
+  if (!programValidation.ok) {
+    return programValidation;
+  }
+
   const rows = await query<CentreListQueryRow>(
     centreMutationReturningSql(
       `INSERT INTO centres
-         (name, school_id, type_code, category_code, sub_category_code, stream_codes, is_physical, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (name, school_id, type_code, category_code, sub_category_code, stream_codes, is_physical, is_active, program_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`
     ),
     [
@@ -746,6 +761,7 @@ export async function createCentre(params: {
       payload.payload.streamCodes,
       payload.payload.isPhysical,
       payload.payload.isActive,
+      payload.payload.programId,
     ]
   );
 
@@ -790,6 +806,11 @@ export async function updateCentre(params: {
     return schoolValidation;
   }
 
+  const programValidation = await validateProgramId(payload.payload.programId);
+  if (!programValidation.ok) {
+    return programValidation;
+  }
+
   const rows = await query<CentreListQueryRow>(
     centreMutationReturningSql(
       `UPDATE centres
@@ -801,6 +822,7 @@ export async function updateCentre(params: {
            stream_codes = $7,
            is_physical = $8,
            is_active = $9,
+           program_id = $10,
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`
@@ -815,6 +837,7 @@ export async function updateCentre(params: {
       payload.payload.streamCodes,
       payload.payload.isPhysical,
       payload.payload.isActive,
+      payload.payload.programId,
     ]
   );
 
@@ -1018,6 +1041,8 @@ function mapCentreListRow(row: CentreListQueryRow): CentreListRow {
     streams: streamOptionsFromDb(row.stream_options),
     isPhysical: booleanFromDb(row.is_physical),
     isActive: booleanFromDb(row.is_active),
+    programId: row.program_id == null ? null : numberFromDb(row.program_id),
+    programName: row.program_name ?? null,
     insertedAt: row.inserted_at ? String(row.inserted_at) : "",
     updatedAt: row.updated_at ? String(row.updated_at) : "",
     school:
@@ -1198,6 +1223,7 @@ function normalizeCentreCreatePayload(
     "stream_codes",
     "is_physical",
     "is_active",
+    "program_id",
   ]);
 
   for (const key of Object.keys(payload)) {
@@ -1208,6 +1234,7 @@ function normalizeCentreCreatePayload(
 
   const name = typeof payload.name === "string" ? payload.name.trim() : "";
   const schoolId = nullablePositiveIntegerFromPayload(payload.school_id);
+  const programId = nullablePositiveIntegerFromPayload(payload.program_id);
   const typeCode = nullableStringFromPayload(payload.type_code, "type_code", fields);
   const categoryCode = nullableStringFromPayload(
     payload.category_code,
@@ -1230,6 +1257,9 @@ function normalizeCentreCreatePayload(
   }
   if (schoolId === undefined) {
     fields.school_id = "School id must be a positive integer or null";
+  }
+  if (programId === undefined) {
+    fields.program_id = "Program id must be a positive integer or null";
   }
   if (streamCodes === null) {
     fields.stream_codes = "Centre Stream codes must be an array of strings";
@@ -1261,6 +1291,7 @@ function normalizeCentreCreatePayload(
       streamCodes: streamCodes ?? [],
       isPhysical: isPhysical ?? false,
       isActive: isActive ?? true,
+      programId: programId ?? null,
     },
   };
 }
@@ -1280,6 +1311,7 @@ function normalizeCentreEditPayload(
     "stream_codes",
     "is_physical",
     "is_active",
+    "program_id",
   ]);
 
   for (const key of Object.keys(payload)) {
@@ -1296,6 +1328,10 @@ function normalizeCentreEditPayload(
     "school_id" in payload
       ? nullablePositiveIntegerFromPayload(payload.school_id)
       : existing.schoolId;
+  const programId =
+    "program_id" in payload
+      ? nullablePositiveIntegerFromPayload(payload.program_id)
+      : existing.programId;
   const streamCodes =
     "stream_codes" in payload
       ? stringArrayFromPayload(payload.stream_codes)
@@ -1335,6 +1371,9 @@ function normalizeCentreEditPayload(
   if (schoolId === undefined) {
     fields.school_id = "School id must be a positive integer or null";
   }
+  if (programId === undefined) {
+    fields.program_id = "Program id must be a positive integer or null";
+  }
   if (streamCodes === null) {
     fields.stream_codes = "Centre Stream codes must be an array of strings";
   }
@@ -1365,6 +1404,7 @@ function normalizeCentreEditPayload(
       streamCodes: streamCodes ?? [],
       isPhysical: isPhysical ?? existing.isPhysical,
       isActive: isActive ?? existing.isActive,
+      programId: programId ?? null,
     },
   };
 }
@@ -1501,6 +1541,50 @@ async function validateSchoolId(
   };
 }
 
+export interface ProgramOption {
+  id: number;
+  name: string;
+}
+
+// Programs for the centre↔program selector. `program` is a core db-service
+// table (always present), so no schema-readiness gate is needed here. Names are
+// plain strings (unlike the jsonb `subject` table).
+export async function listPrograms(params?: {
+  search?: string;
+}): Promise<ProgramOption[]> {
+  const search = params?.search?.trim() ?? "";
+  const rows = search
+    ? await query<{ id: string | number; name: string | null }>(
+        `SELECT id, name FROM program WHERE name ILIKE $1 ORDER BY name ASC`,
+        [`%${search}%`]
+      )
+    : await query<{ id: string | number; name: string | null }>(
+        `SELECT id, name FROM program ORDER BY name ASC`
+      );
+  return rows.map((row) => ({
+    id: numberFromDb(row.id),
+    name: String(row.name ?? ""),
+  }));
+}
+
+async function validateProgramId(
+  programId: number | null
+): Promise<{ ok: true } | CentreValidationFailure> {
+  if (programId === null) return { ok: true };
+  const rows = await query<{ id: string | number }>(
+    "SELECT id FROM program WHERE id = $1",
+    [programId]
+  );
+  if (rows.length > 0) return { ok: true };
+
+  return {
+    ok: false,
+    status: 422,
+    error: "Invalid Centre payload",
+    fields: { program_id: "Program id does not exist" },
+  };
+}
+
 function centreMutationReturningSql(mutationSql: string): string {
   return `WITH changed AS (
     ${mutationSql}
@@ -1522,6 +1606,8 @@ function centreMutationReturningSql(mutationSql: string): string {
     COALESCE(streams.stream_options, '[]'::jsonb) AS stream_options,
     changed.is_physical,
     changed.is_active,
+    changed.program_id,
+    programs.name AS program_name,
     changed.inserted_at,
     changed.updated_at,
     schools.name AS school_name,
@@ -1534,6 +1620,8 @@ function centreMutationReturningSql(mutationSql: string): string {
   FROM changed
   LEFT JOIN school schools
     ON schools.id = changed.school_id
+  LEFT JOIN program programs
+    ON programs.id = changed.program_id
   LEFT JOIN centre_option_sets type_set
     ON type_set.code = 'type'
   LEFT JOIN centre_options type_options
