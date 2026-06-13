@@ -334,6 +334,15 @@ describe("getUserPermission", () => {
     });
   });
 
+  it("excludes revoked (exited) rows via revoked_at IS NULL", async () => {
+    mockQuery.mockResolvedValueOnce([]); // revoked person -> no active row
+    const result = await getUserPermission("exited@avantifellows.org");
+    expect(result).toBeNull();
+
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("revoked_at IS NULL");
+  });
+
   it("returns null when no rows found", async () => {
     mockQuery.mockResolvedValueOnce([]);
     const result = await getUserPermission("unknown@example.com");

@@ -158,6 +158,10 @@ const SCHOOL_PASSCODES: SchoolPasscode[] = [
 export async function getUserPermission(
   email: string
 ): Promise<UserPermission | null> {
+  // `revoked_at IS NULL` is the single enforcement point for "marked exited":
+  // a revoked person resolves to no permissions everywhere this is called —
+  // login lands on pages that gate on it, isAdmin, canAccessSchool, the admin
+  // guards.
   const results = await query<{
     email: string;
     level: number;
@@ -169,7 +173,7 @@ export async function getUserPermission(
   }>(
     `SELECT email, level, role, school_codes, regions, program_ids, read_only
      FROM user_permission
-     WHERE LOWER(email) = LOWER($1)`,
+     WHERE LOWER(email) = LOWER($1) AND revoked_at IS NULL`,
     [email]
   );
 
