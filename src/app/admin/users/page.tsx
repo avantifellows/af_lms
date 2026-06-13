@@ -6,6 +6,11 @@ import { query } from "@/lib/db";
 import Link from "next/link";
 import UserList from "./UserList";
 
+interface CentreAssignment {
+  centreName: string;
+  role: string;
+}
+
 interface UserPermission {
   id: number;
   email: string;
@@ -16,6 +21,7 @@ interface UserPermission {
   program_ids: number[] | null;
   read_only: boolean;
   full_name: string | null;
+  centres: CentreAssignment[];
 }
 
 interface Region {
@@ -30,7 +36,16 @@ interface SchoolNameRow {
 
 async function getUsers(): Promise<UserPermission[]> {
   return query<UserPermission>(
-    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name
+    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name,
+            COALESCE((
+              SELECT json_agg(
+                       json_build_object('centreName', c.name, 'role', cp.role)
+                       ORDER BY c.name, cp.role
+                     )
+              FROM centre_positions cp
+              JOIN centres c ON c.id = cp.centre_id
+              WHERE cp.user_id = user_permission.user_id AND cp.deleted_at IS NULL
+            ), '[]'::json) AS centres
      FROM user_permission
      ORDER BY level DESC, role, email`
   );

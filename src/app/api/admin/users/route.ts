@@ -30,10 +30,21 @@ export async function GET() {
     program_ids: number[] | null;
     read_only: boolean;
     full_name: string | null;
+    centres: { centreName: string; role: string }[];
     inserted_at: string;
     updated_at: string;
   }>(
-    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name, inserted_at, updated_at
+    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name,
+            COALESCE((
+              SELECT json_agg(
+                       json_build_object('centreName', c.name, 'role', cp.role)
+                       ORDER BY c.name, cp.role
+                     )
+              FROM centre_positions cp
+              JOIN centres c ON c.id = cp.centre_id
+              WHERE cp.user_id = user_permission.user_id AND cp.deleted_at IS NULL
+            ), '[]'::json) AS centres,
+            inserted_at, updated_at
      FROM user_permission
      ORDER BY level DESC, role, email`
   );
