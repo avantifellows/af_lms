@@ -567,6 +567,27 @@ async function vacateSeatsAndRevoke(
   );
 }
 
+// Strict per-user exclusivity: when a person is assigned a centre seat their
+// school scope becomes purely seat-derived, so clear any explicit
+// school_codes/regions on their user_permission row. This is what makes
+// centre_positions the source of truth and prevents the move-doesn't-revoke
+// staleness bug — a seated person's home schools must live in exactly one place
+// (the seats). A seated person must therefore have ALL their schools
+// represented as seats; ops backfills any seat gaps (the one-time migration
+// script reports them). The NOT NULL guard keeps this a no-op when nothing is
+// set, so re-saving an already-seated person doesn't churn the row.
+async function clearExplicitSchoolScope(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  await client.query(
+    `UPDATE user_permission
+     SET school_codes = NULL, regions = NULL, updated_at = now()
+     WHERE user_id = $1 AND (school_codes IS NOT NULL OR regions IS NOT NULL)`,
+    [userId]
+  );
+}
+
 // --- Staff (non-teaching) members: LMS-direct ---
 
 export interface CreateStaffMemberBody {
@@ -836,11 +857,16 @@ export async function createPosition(params: {
     }
   }
 
-  await query(
-    `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
-     VALUES ($1, $2, $3, now(), now())`,
-    [centreId, role, userId]
-  );
+  await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
+       VALUES ($1, $2, $3, now(), now())`,
+      [centreId, role, userId]
+    );
+    if (userId !== null) {
+      await clearExplicitSchoolScope(client, userId);
+    }
+  });
 
   return { ok: true };
 }
@@ -911,10 +937,15 @@ export async function updatePosition(params: {
     }
   }
 
-  await query(
-    `UPDATE centre_positions SET user_id = $1, updated_at = now() WHERE id = $2`,
-    [userId, params.id]
-  );
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE centre_positions SET user_id = $1, updated_at = now() WHERE id = $2`,
+      [userId, params.id]
+    );
+    if (userId !== null) {
+      await clearExplicitSchoolScope(client, userId);
+    }
+  });
 
   return { ok: true };
 }

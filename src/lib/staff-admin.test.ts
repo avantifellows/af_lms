@@ -459,16 +459,37 @@ describe("positions", () => {
     ).toMatchObject({ ok: false, status: 404 });
   });
 
-  it("createPosition inserts a vacant seat", async () => {
+  it("createPosition inserts a vacant seat (no scope clear)", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
-    mockQuery.mockResolvedValueOnce([]); // insert
     expect(
       await createPosition({ body: { centre_id: 8, role: "physics" } })
     ).toEqual({ ok: true });
-    const insertCall = mockQuery.mock.calls.at(-1)!;
+    // A vacant seat goes through the transaction client; no occupant → no clear.
+    const insertCall = mockClientQuery.mock.calls.at(-1)!;
     expect(insertCall[0]).toContain("INSERT INTO centre_positions");
     expect(insertCall[1]).toEqual([8, "physics", null]);
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET school_codes = NULL")
+      )
+    ).toBe(false);
+  });
+
+  it("createPosition clears the occupant's explicit school scope (strict per-user)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
+    ).toEqual({ ok: true });
+    const insertCall = mockClientQuery.mock.calls[0];
+    expect(insertCall[0]).toContain("INSERT INTO centre_positions");
+    expect(insertCall[1]).toEqual([8, "physics", 70]);
+    const clearCall = mockClientQuery.mock.calls[1];
+    expect(clearCall[0]).toContain("SET school_codes = NULL, regions = NULL");
+    expect(clearCall[1]).toEqual([70]);
   });
 
   it("createPosition rejects duplicate occupied seats", async () => {
@@ -481,16 +502,36 @@ describe("positions", () => {
     ).toMatchObject({ ok: false, status: 409 });
   });
 
-  it("updatePosition fills and vacates seats", async () => {
+  it("updatePosition vacates a seat without clearing scope", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 44, centre_id: 8, role: "physics" }]);
-    mockQuery.mockResolvedValueOnce([]); // update
     expect(await updatePosition({ id: 44, body: { user_id: null } })).toEqual({
       ok: true,
     });
-    const updateCall = mockQuery.mock.calls.at(-1)!;
+    const updateCall = mockClientQuery.mock.calls.at(-1)!;
     expect(updateCall[0]).toContain("SET user_id = $1");
     expect(updateCall[1]).toEqual([null, 44]);
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET school_codes = NULL")
+      )
+    ).toBe(false);
+  });
+
+  it("updatePosition fills a seat and clears the occupant's explicit scope", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, centre_id: 8, role: "physics" }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user lookup
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    expect(await updatePosition({ id: 44, body: { user_id: 70 } })).toEqual({
+      ok: true,
+    });
+    const updateCall = mockClientQuery.mock.calls[0];
+    expect(updateCall[0]).toContain("SET user_id = $1");
+    expect(updateCall[1]).toEqual([70, 44]);
+    const clearCall = mockClientQuery.mock.calls[1];
+    expect(clearCall[0]).toContain("SET school_codes = NULL, regions = NULL");
+    expect(clearCall[1]).toEqual([70]);
   });
 
   it("deletePosition soft-deletes", async () => {
