@@ -4,9 +4,11 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
+  const getUserPermission = vi.fn();
   return {
     ...actual,
-    getUserPermission: vi.fn(),
+    getUserPermission,
+    getResolvedPermission: getUserPermission,
     getFeatureAccess: vi.fn(),
   };
 });

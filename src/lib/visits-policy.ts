@@ -5,7 +5,7 @@ import { query } from "@/lib/db";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
-  getUserPermission,
+  getResolvedPermission,
   type UserPermission,
   type UserRole,
 } from "@/lib/permissions";
@@ -102,7 +102,7 @@ export async function requireVisitsAccess(
     };
   }
 
-  const permission = await getUserPermission(email);
+  const permission = await getResolvedPermission(email);
   if (!permission) {
     return { ok: false, response: apiError(403, "Forbidden") };
   }
@@ -154,18 +154,42 @@ export function buildVisitScopePredicate(
     return { clause: "", params: [] };
   }
 
+  // Seat-derived schools from the resolved scope (B1). For level 1 the scope set
+  // already unions explicit school_codes with seat schools, so it's the complete
+  // school list; for level 2 it carries only seats (regions stay separate). Once
+  // strict-exclusivity clears explicit school_codes for seated staff, this is the
+  // ONLY thing keeping their visits in the list — so the SQL filter must read it.
+  const scope = actor.permission.scope;
+  const seatScopeSchools =
+    scope && scope.schools !== "all" ? [...scope.schools] : null;
+
   if (actor.permission.level === 2) {
     const regions = actor.permission.regions ?? [];
-    if (regions.length === 0) {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (regions.length > 0) {
+      params.push(regions);
+      conditions.push(
+        `COALESCE(${schoolRegionColumn}, '') = ANY($${startIndex + params.length - 1})`
+      );
+    }
+    if (seatScopeSchools && seatScopeSchools.length > 0) {
+      params.push(seatScopeSchools);
+      conditions.push(`${schoolCodeColumn} = ANY($${startIndex + params.length - 1})`);
+    }
+    if (conditions.length === 0) {
       return { clause: "1 = 0", params: [] };
     }
     return {
-      clause: `COALESCE(${schoolRegionColumn}, '') = ANY($${startIndex})`,
-      params: [regions],
+      clause: conditions.length > 1 ? `(${conditions.join(" OR ")})` : conditions[0],
+      params,
     };
   }
 
-  const schoolCodes = actor.permission.school_codes ?? [];
+  // Level 1: prefer the resolved scope set (explicit ∪ seats); fall back to raw
+  // school_codes when scope isn't resolved (e.g. an actor built from a bare
+  // permission), preserving the pre-seat behaviour.
+  const schoolCodes = seatScopeSchools ?? actor.permission.school_codes ?? [];
   if (schoolCodes.length === 0) {
     return { clause: "1 = 0", params: [] };
   }

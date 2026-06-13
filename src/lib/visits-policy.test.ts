@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UserPermission } from "@/lib/permissions";
 import {
+  buildVisitScopePredicate,
   buildVisitsActor,
   canAccessVisitSchoolScope,
   canEditCompletedActionData,
@@ -98,5 +99,76 @@ describe("visits-policy", () => {
     expect(lockError?.status).toBe(409);
     expect(canEditCompletedActionData(pm)).toBe(false);
     expect(canEditCompletedActionData(admin)).toBe(true);
+  });
+});
+
+describe("buildVisitScopePredicate (seat-aware list filter)", () => {
+  it("returns no clause for level 3 (all access)", () => {
+    const actor = buildVisitsActor("a@x.org", makePermission({ role: "admin", level: 3 }));
+    expect(buildVisitScopePredicate(actor)).toEqual({ clause: "", params: [] });
+  });
+
+  it("level 1 falls back to raw school_codes when scope is unresolved", () => {
+    const actor = buildVisitsActor("t@x.org", makePermission({ level: 1, school_codes: ["70705"] }));
+    const scope = buildVisitScopePredicate(actor, { startIndex: 1, schoolCodeColumn: "v.school_code" });
+    expect(scope.clause).toBe("v.school_code = ANY($1)");
+    expect(scope.params).toEqual([["70705"]]);
+  });
+
+  it("level 1 uses the resolved scope set (explicit ∪ seats) when present", () => {
+    const actor = buildVisitsActor(
+      "t@x.org",
+      makePermission({
+        level: 1,
+        school_codes: ["70705"],
+        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]) },
+      })
+    );
+    const scope = buildVisitScopePredicate(actor, { startIndex: 1, schoolCodeColumn: "v.school_code" });
+    expect(scope.clause).toBe("v.school_code = ANY($1)");
+    expect(new Set(scope.params[0] as string[])).toEqual(new Set(["70705", "99999"]));
+  });
+
+  it("level 2 with only regions filters by region", () => {
+    const actor = buildVisitsActor(
+      "a@x.org",
+      makePermission({ role: "admin", level: 2, regions: ["North"], school_codes: null })
+    );
+    const scope = buildVisitScopePredicate(actor, {
+      startIndex: 3,
+      schoolRegionColumn: "s.region",
+    });
+    expect(scope.clause).toBe("COALESCE(s.region, '') = ANY($3)");
+    expect(scope.params).toEqual([["North"]]);
+  });
+
+  it("level 2 with seats ORs region and seat-school membership", () => {
+    const actor = buildVisitsActor(
+      "a@x.org",
+      makePermission({
+        role: "admin",
+        level: 2,
+        regions: ["North"],
+        school_codes: null,
+        scope: { schools: new Set(["55555"]), centres: new Set([9]) },
+      })
+    );
+    const scope = buildVisitScopePredicate(actor, {
+      startIndex: 1,
+      schoolCodeColumn: "v.school_code",
+      schoolRegionColumn: "s.region",
+    });
+    expect(scope.clause).toBe(
+      "(COALESCE(s.region, '') = ANY($1) OR v.school_code = ANY($2))"
+    );
+    expect(scope.params).toEqual([["North"], ["55555"]]);
+  });
+
+  it("returns an always-false clause when a scoped role has no scope at all", () => {
+    const actor = buildVisitsActor(
+      "t@x.org",
+      makePermission({ level: 1, school_codes: [], scope: { schools: new Set(), centres: new Set() } })
+    );
+    expect(buildVisitScopePredicate(actor)).toEqual({ clause: "1 = 0", params: [] });
   });
 });
