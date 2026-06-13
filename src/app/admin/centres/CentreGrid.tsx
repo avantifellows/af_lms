@@ -33,6 +33,7 @@ import type {
   CentreOptionSetCode,
   CentreSearchSuggestion,
   CentreSchoolLinkFilter,
+  ProgramOption,
 } from "@/lib/centres";
 
 interface CentreGridProps {
@@ -72,6 +73,7 @@ interface CentreFormState {
   streamCodes: string[];
   isPhysical: boolean;
   isActive: boolean;
+  programId: number | null;
 }
 
 const EMPTY_FILTERS: CentreListFilters = {
@@ -111,7 +113,23 @@ export default function CentreGrid({
   const [schoolResults, setSchoolResults] = useState<SchoolSearchResult[]>([]);
   const [schoolSuggestionsOpen, setSchoolSuggestionsOpen] = useState(false);
   const [schoolSearching, setSchoolSearching] = useState(false);
+  const [programs, setPrograms] = useState<ProgramOption[]>([]);
   const modalOpen = modal !== null;
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/programs")
+      .then((response) => response.json())
+      .then((data) => {
+        if (active && Array.isArray(data.programs)) setPrograms(data.programs);
+      })
+      .catch(() => {
+        /* program selector falls back to "None" only */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const optionsBySet = useMemo(() => {
     const map = new Map<CentreOptionSetCode, CentreOption[]>();
@@ -276,6 +294,7 @@ export default function CentreGrid({
         streamCodes: row.streamCodes,
         isPhysical: row.isPhysical,
         isActive: row.isActive,
+        programId: row.programId,
       },
     });
     setSchoolSearch("");
@@ -719,6 +738,31 @@ export default function CentreGrid({
                           error={fieldErrors.sub_category_code}
                           onChange={(subCategoryCode) => patchForm({ subCategoryCode })}
                         />
+                        <Field label="Program" error={fieldErrors.program_id}>
+                          <Select
+                            value={
+                              modal.form.programId === null
+                                ? ""
+                                : String(modal.form.programId)
+                            }
+                            onChange={(event) =>
+                              patchForm({
+                                programId:
+                                  event.target.value === ""
+                                    ? null
+                                    : Number(event.target.value),
+                              })
+                            }
+                            className="w-full"
+                          >
+                            <option value="">None</option>
+                            {programs.map((program) => (
+                              <option key={program.id} value={program.id}>
+                                {program.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
                       </div>
                     </div>
 
@@ -1163,6 +1207,14 @@ function CentreCard({
                 active={row.subCategoryOptionActive}
               />
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">Program:</span>
+              {row.programName ? (
+                <span className="font-medium text-text-primary">{row.programName}</span>
+              ) : (
+                <span className="text-text-muted/60">None</span>
+              )}
+            </div>
           </div>
 
           <div className="mt-3 flex items-center gap-2">
@@ -1207,6 +1259,7 @@ function CentreCard({
                   )}
                 </DetailField>
               </div>
+              <DetailField label="Program" value={row.programName ?? "None"} />
               <DetailField label="Updated">
                 <span className="font-mono text-xs text-text-muted">
                   {formatDate(row.updatedAt)}
@@ -1282,6 +1335,7 @@ function emptyForm(): CentreFormState {
     streamCodes: [],
     isPhysical: false,
     isActive: true,
+    programId: null,
   };
 }
 
@@ -1295,6 +1349,7 @@ function formToPayload(form: CentreFormState) {
     stream_codes: form.streamCodes,
     is_physical: form.isPhysical,
     is_active: form.isActive,
+    program_id: form.programId,
   };
 }
 

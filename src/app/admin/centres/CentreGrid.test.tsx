@@ -127,6 +127,8 @@ const rows: CentreListRow[] = [
     streams: [{ code: "jee", label: "JEE", isActive: true }],
     isPhysical: true,
     isActive: true,
+    programId: 1,
+    programName: "JNV CoE",
     insertedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-02T00:00:00.000Z",
     school: {
@@ -156,6 +158,8 @@ const rows: CentreListRow[] = [
     streams: [],
     isPhysical: false,
     isActive: false,
+    programId: null,
+    programName: null,
     insertedAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-03T00:00:00.000Z",
     school: null,
@@ -192,7 +196,18 @@ function renderGrid({
 
 describe("CentreGrid", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    // Default stub routes the on-mount /api/admin/programs fetch (and anything
+    // else a test doesn't explicitly mock) to a benign response so the program
+    // selector populates without interfering with per-test fetch expectations.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith("/api/admin/programs")) {
+          return { ok: true, json: async () => ({ programs: [] }) } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      })
+    );
     window.history.replaceState(null, "", "/admin/centres");
   });
 
@@ -401,25 +416,33 @@ describe("CentreGrid", () => {
         district: "Jaipur",
       },
     };
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          {
-            id: 50,
-            name: "JNV Jaipur",
-            code: "SCH050",
-            udise_code: "08010100101",
-            region: "North",
-            state: "Rajasthan",
-            district: "Jaipur",
-          },
-        ],
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ centre: createdCentre }),
-      } as Response);
+    mockFetch.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("/api/admin/programs")) {
+        return { ok: true, json: async () => ({ programs: [] }) } as Response;
+      }
+      if (url.startsWith("/api/admin/centres/search-suggestions")) {
+        return { ok: true, json: async () => ({ suggestions: [] }) } as Response;
+      }
+      if (url.startsWith("/api/admin/schools")) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 50,
+              name: "JNV Jaipur",
+              code: "SCH050",
+              udise_code: "08010100101",
+              region: "North",
+              state: "Rajasthan",
+              district: "Jaipur",
+            },
+          ],
+        } as Response;
+      }
+      // POST /api/admin/centres
+      return { ok: true, json: async () => ({ centre: createdCentre }) } as Response;
+    });
 
     renderGrid();
 
@@ -439,14 +462,19 @@ describe("CentreGrid", () => {
     await user.click(screen.getByRole("checkbox", { name: "Physical Centre" }));
     await user.click(screen.getByRole("button", { name: "Save Centre" }));
 
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      1,
-      "/api/admin/schools?scope=centres&q=080101",
+    const schoolsCall = mockFetch.mock.calls.find(([input]) =>
+      String(input).startsWith("/api/admin/schools")
+    );
+    expect(schoolsCall?.[0]).toBe("/api/admin/schools?scope=centres&q=080101");
+    expect(schoolsCall?.[1]).toEqual(
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      2,
-      "/api/admin/centres",
+    const postCall = mockFetch.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/admin/centres" &&
+        (init as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall?.[1]).toEqual(
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -458,6 +486,7 @@ describe("CentreGrid", () => {
           stream_codes: ["jee"],
           is_physical: true,
           is_active: true,
+          program_id: null,
         }),
       })
     );
@@ -481,10 +510,13 @@ describe("CentreGrid", () => {
       isActive: false,
       updatedAt: "2026-03-04T00:00:00.000Z",
     };
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ centre: updatedCentre }),
-    } as Response);
+    mockFetch.mockImplementation(async (input) => {
+      if (String(input).startsWith("/api/admin/programs")) {
+        return { ok: true, json: async () => ({ programs: [] }) } as Response;
+      }
+      // PATCH /api/admin/centres/1
+      return { ok: true, json: async () => ({ centre: updatedCentre }) } as Response;
+    });
     renderGrid();
 
     const linkedCard = screen
@@ -513,6 +545,7 @@ describe("CentreGrid", () => {
           stream_codes: ["jee"],
           is_physical: true,
           is_active: false,
+          program_id: 1,
         }),
       })
     );
@@ -546,13 +579,19 @@ describe("CentreGrid", () => {
   it("shows API validation failures without closing the form", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      json: async () => ({
-        error: "Invalid Centre payload",
-        fields: { name: "Centre name is required" },
-      }),
-    } as Response);
+    mockFetch.mockImplementation(async (input) => {
+      if (String(input).startsWith("/api/admin/programs")) {
+        return { ok: true, json: async () => ({ programs: [] }) } as Response;
+      }
+      // POST /api/admin/centres
+      return {
+        ok: false,
+        json: async () => ({
+          error: "Invalid Centre payload",
+          fields: { name: "Centre name is required" },
+        }),
+      } as Response;
+    });
     renderGrid();
 
     await user.click(screen.getByRole("button", { name: "New Centre" }));
