@@ -132,6 +132,24 @@ export interface UserPermission {
   regions?: string[] | null;
   program_ids?: number[] | null;
   read_only?: boolean;
+  // db-service `user` PK (user_permission.user_id, live prod + staging via #545).
+  // Carried so the scope resolver can find this person's centre seats without a
+  // second email→user lookup. Selected in getUserPermission (single column, no
+  // join — the hot path stays lean).
+  user_id?: number | null;
+  // Effective school/centre scope, populated only by getResolvedPermission /
+  // resolveScope (NOT by getUserPermission). When present, canAccessSchoolSync
+  // grants seat-derived schools on top of the level switch. Absent on a bare
+  // getUserPermission result, which behaves exactly as before.
+  scope?: ResolvedScope;
+}
+
+// Effective, DB-resolved access scope. `schools` is the union of explicit
+// school_codes/regions and centre-seat-derived schools; `centres` is the set of
+// centres the person holds a seat at. "all" short-circuits for level-3 admins.
+export interface ResolvedScope {
+  schools: Set<string> | "all";
+  centres: Set<number> | "all";
 }
 
 // Program permission context
@@ -170,8 +188,9 @@ export async function getUserPermission(
     regions: string[] | null;
     program_ids: number[] | null;
     read_only: boolean;
+    user_id: number | string | null;
   }>(
-    `SELECT email, level, role, school_codes, regions, program_ids, read_only
+    `SELECT email, level, role, school_codes, regions, program_ids, read_only, user_id
      FROM user_permission
      WHERE LOWER(email) = LOWER($1) AND revoked_at IS NULL`,
     [email]
@@ -188,7 +207,76 @@ export async function getUserPermission(
     regions: row.regions,
     program_ids: row.program_ids,
     read_only: row.read_only,
+    user_id: row.user_id == null ? null : Number(row.user_id),
   };
+}
+
+// Centre ids the user holds an active seat at (centre_positions.user_id).
+async function centresForUser(userId: number): Promise<number[]> {
+  const rows = await query<{ centre_id: number | string }>(
+    `SELECT DISTINCT centre_id
+     FROM centre_positions
+     WHERE user_id = $1 AND deleted_at IS NULL`,
+    [userId]
+  );
+  return rows.map((r) => Number(r.centre_id));
+}
+
+// School codes for a set of centres (centres.school_id → school.code). Returns
+// [] for empty input rather than issuing a `= ANY('{}')` query.
+async function schoolCodesForCentres(centreIds: number[]): Promise<string[]> {
+  if (centreIds.length === 0) return [];
+  const rows = await query<{ code: string }>(
+    `SELECT DISTINCT s.code
+     FROM centres c
+     JOIN school s ON s.id = c.school_id
+     WHERE c.id = ANY($1) AND c.school_id IS NOT NULL`,
+    [centreIds]
+  );
+  return rows.map((r) => r.code);
+}
+
+// Resolve a permission's effective scope: explicit school_codes ∪ centre-seat-
+// derived schools. Regions stay handled lazily by canAccessSchoolSync's level-2
+// branch (no eager region→school expansion here, so level-2 semantics are
+// unchanged). The union is additive and safe today because backfilled seats were
+// derived from school_codes (seat schools ⊆ school_codes); strict per-user
+// exclusivity (B2) makes seats the sole source for seated staff.
+export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
+  if (p.level === 3) return { schools: "all", centres: "all" };
+
+  // school_codes is the level-1 scope mechanism; level-2's explicit scope is
+  // regions (kept lazy in canAccessSchoolSync's switch), so only seed school_codes
+  // for level 1 — seeding it for level 2 would over-grant the additive check and
+  // diverge from the level switch.
+  const schools = new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
+  const centres = new Set<number>();
+
+  if (p.user_id != null) {
+    try {
+      const centreIds = await centresForUser(p.user_id);
+      centreIds.forEach((id) => centres.add(id));
+      for (const code of await schoolCodesForCentres(centreIds)) {
+        schools.add(code);
+      }
+    } catch {
+      // centre tables missing on an env (or a transient error) → degrade to
+      // explicit-only scope. Fails toward *less* access (deny), never throws on
+      // the auth hot path.
+    }
+  }
+
+  return { schools, centres };
+}
+
+// getUserPermission + resolved scope. Use this (not getUserPermission) anywhere
+// school/centre access is actually decided, so canAccessSchoolSync sees seats.
+export async function getResolvedPermission(
+  email: string
+): Promise<UserPermission | null> {
+  const permission = await getUserPermission(email);
+  if (!permission) return null;
+  return { ...permission, scope: await resolveScope(permission) };
 }
 
 export function getSchoolByPasscode(passcode: string): string | null {
@@ -202,6 +290,18 @@ export function canAccessSchoolSync(
   schoolRegion?: string
 ): boolean {
   if (!permission) return false;
+  // Seat-derived scope (populated by getResolvedPermission) grants access
+  // additively, regardless of level — a teacher seated at a centre reaches that
+  // centre's school even if it isn't in their explicit school_codes. Absent
+  // scope (bare getUserPermission) falls straight through to the level switch,
+  // so existing callers are unaffected.
+  if (
+    permission.scope &&
+    permission.scope.schools !== "all" &&
+    permission.scope.schools.has(schoolCode)
+  ) {
+    return true;
+  }
   switch (permission.level) {
     case 3: return true;
     case 2: return permission.regions?.includes(schoolRegion || "") || false;
@@ -210,13 +310,26 @@ export function canAccessSchoolSync(
   }
 }
 
+// Centre-native access check for callers that hold a centre id directly. Reads
+// the resolved seat set; level-3 (scope "all") reaches every centre.
+export function canAccessCentreSync(
+  permission: UserPermission | null,
+  centreId: number
+): boolean {
+  if (!permission) return false;
+  if (permission.scope?.centres === "all") return true;
+  return permission.scope?.centres instanceof Set
+    ? permission.scope.centres.has(centreId)
+    : false;
+}
+
 export async function canAccessSchool(
   email: string | null,
   schoolCode: string,
   schoolRegion?: string
 ): Promise<boolean> {
   if (!email) return false;
-  const permission = await getUserPermission(email);
+  const permission = await getResolvedPermission(email);
   // For level-2 (region) users, look up the school's region if not provided
   if (permission?.level === 2 && !schoolRegion) {
     const result = await query<{ region: string }>(
@@ -231,20 +344,31 @@ export async function canAccessSchool(
 export function hasMultipleSchools(permission: UserPermission | null): boolean {
   if (!permission) return false;
   return permission.level >= 2 ||
-    (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1);
+    (permission.school_codes !== null && (permission.school_codes?.length ?? 0) > 1) ||
+    (permission.scope?.schools instanceof Set && permission.scope.schools.size > 1);
 }
 
 export async function getAccessibleSchoolCodes(
   email: string,
   existingPermission?: UserPermission | null
 ): Promise<string[] | "all"> {
-  const permission = existingPermission !== undefined ? existingPermission : await getUserPermission(email);
+  const permission =
+    existingPermission !== undefined
+      ? existingPermission
+      : await getResolvedPermission(email);
   if (!permission) return [];
 
   if (permission.level === 3) return "all";
-  if (permission.level === 1) return permission.school_codes || [];
 
-  // Level 2: fetch all school codes in the user's assigned regions
+  // Resolved scope = explicit school_codes ∪ centre-seat schools. Resolve here
+  // if the caller handed us a bare (unresolved) permission so seat schools are
+  // still included.
+  const scope = permission.scope ?? (await resolveScope(permission));
+  if (scope.schools === "all") return "all";
+
+  const codes = new Set<string>(scope.schools);
+
+  // Level 2: also expand the user's assigned regions to concrete JNV codes.
   if (permission.level === 2 && permission.regions && permission.regions.length > 0) {
     const schools = await query<{ code: string }>(
       `SELECT code FROM school
@@ -252,10 +376,10 @@ export async function getAccessibleSchoolCodes(
          AND region = ANY($1)`,
       [permission.regions]
     );
-    return schools.map((s) => s.code);
+    for (const s of schools) codes.add(s.code);
   }
 
-  return [];
+  return [...codes];
 }
 
 export async function isAdmin(email: string): Promise<boolean> {
@@ -331,7 +455,7 @@ export async function canAccessStudent(
 
   const email = session.user?.email;
   if (!email) return false;
-  const permission = await getUserPermission(email);
+  const permission = await getResolvedPermission(email);
   if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
     // Level-2 region users may still match via the async fallback path that
     // canAccessSchool does (querying school.region when not provided). We've

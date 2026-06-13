@@ -3,7 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import {
   getAccessibleSchoolCodes,
-  getUserPermission,
+  getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
 } from "@/lib/permissions";
@@ -204,7 +204,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect(`/school/${session.schoolCode}`);
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
 
   if (!permission) {
     return (
