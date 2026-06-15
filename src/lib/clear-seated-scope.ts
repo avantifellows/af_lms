@@ -7,12 +7,17 @@
  * cutover is stale and must be cleared — otherwise a later seat move leaves the
  * old school reachable (the move-doesn't-revoke bug).
  *
- * This clears explicit scope for every active person holding ≥1 active seat. It
- * is LOUD about "stranded" people: those whose `school_codes` include a school
- * that NO seat covers (e.g. the centre isn't created/linked yet). Clearing their
- * scope removes access to those schools until ops creates the missing seats, so
- * the dry-run worklist is the ops to-do list. Idempotent: re-running clears
- * nothing once scopes are already null.
+ * This clears explicit scope for every active person holding ≥1 seat at a
+ * LINKED centre (centre.school_id set). A person whose seats are ALL at unlinked
+ * (school-less) centres is SKIPPED — clearing them would leave an empty scope and
+ * lock them out of their own data; they keep their explicit school_codes until
+ * their centre gets a school link (reported as skippedWouldBeEmpty — the ops
+ * to-do list).
+ *
+ * It is also LOUD about "stranded" people among those it DOES clear: those whose
+ * `school_codes` include a school no seat covers (usually an over-grant being
+ * corrected, occasionally a real seat gap) — surfaced so ops can tell them apart.
+ * Idempotent: re-running clears nothing once scopes are already null.
  */
 import { query } from "./db";
 
@@ -37,6 +42,9 @@ export interface ClearSeatedScopeReport {
   usersCleared: number;
   // Seated people who lose access to ≥1 uncovered school on clear (ops worklist).
   strandedUsers: SeatedScopeRow[];
+  // Seated people SKIPPED because their seats cover no school — clearing would
+  // empty their scope. They keep their explicit codes until a centre is linked.
+  skippedWouldBeEmpty: SeatedScopeRow[];
   rows: SeatedScopeRow[];
 }
 
@@ -80,10 +88,17 @@ export async function runClearSeatedScope(opts: {
     };
   });
 
-  const toClear = rows.filter(
+  const withExplicit = rows.filter(
     (r) => r.schoolCodes.length > 0 || r.regions.length > 0
   );
-  const strandedUsers = rows.filter((r) => r.uncoveredCodes.length > 0);
+  // Only clear people whose seats cover ≥1 school — clearing someone whose seats
+  // cover none would zero their scope (lock them out). Skip those until a centre
+  // they sit at gets a school link.
+  const toClear = withExplicit.filter((r) => r.seatSchoolCodes.length > 0);
+  const skippedWouldBeEmpty = withExplicit.filter(
+    (r) => r.seatSchoolCodes.length === 0
+  );
+  const strandedUsers = toClear.filter((r) => r.uncoveredCodes.length > 0);
 
   let usersCleared = toClear.length; // dry-run = would-clear count
   if (opts.mode === "apply" && toClear.length > 0) {
@@ -94,7 +109,9 @@ export async function runClearSeatedScope(opts: {
          AND (up.school_codes IS NOT NULL OR up.regions IS NOT NULL)
          AND EXISTS (
            SELECT 1 FROM centre_positions cp
+           JOIN centres c ON c.id = cp.centre_id
            WHERE cp.user_id = up.user_id AND cp.deleted_at IS NULL
+             AND c.school_id IS NOT NULL
          )
        RETURNING up.user_id`
     );
@@ -104,9 +121,10 @@ export async function runClearSeatedScope(opts: {
   return {
     mode: opts.mode,
     ok: true,
-    usersWithExplicitScope: toClear.length,
+    usersWithExplicitScope: withExplicit.length,
     usersCleared,
     strandedUsers,
+    skippedWouldBeEmpty,
     rows,
   };
 }

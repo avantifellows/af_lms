@@ -143,6 +143,55 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(json.success).toBe(true);
   });
 
+  it("rejects (409) editing school_codes for a user with a centre seat", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery.mockResolvedValueOnce([{ one: 1 }]); // seated check → seated
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { school_codes: ["54019"] },
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("centre");
+    // guard returns before the UPDATE — only the seated check ran
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces school_codes/regions to NULL when a seated user's other fields are edited", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([{ one: 1 }]) // seated check → seated
+      .mockResolvedValueOnce([]); // UPDATE
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { level: 2 }, // no scope edit, so allowed
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(200);
+    const updateArgs = mockQuery.mock.calls[1][1] as unknown[];
+    expect(updateArgs[2]).toBeNull(); // school_codes
+    expect(updateArgs[3]).toBeNull(); // regions
+  });
+
+  it("still allows editing school_codes for a user with NO centre seat", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([]) // seated check → not seated
+      .mockResolvedValueOnce([]); // UPDATE
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { school_codes: ["54019"] },
+    });
+    const res = await PATCH(req as never, params);
+    expect(res.status).toBe(200);
+    const updateArgs = mockQuery.mock.calls[1][1] as unknown[];
+    expect(updateArgs[2]).toEqual(["54019"]); // school_codes applied
+  });
+
   it("ignores invalid role values", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);

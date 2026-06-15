@@ -135,6 +135,32 @@ describe("UserList", () => {
       expect(within(cell).getByText("(you)")).toBeInTheDocument();
     });
 
+    it("disables Edit and shows a Staff Management note for seated users", () => {
+      renderList({
+        initialUsers: [
+          {
+            ...users[2],
+            id: 99,
+            email: "seated@example.com",
+            centres: [{ centreName: "EMRS Bhopal", role: "subject_tbd" }],
+          },
+        ] as unknown as typeof users,
+      });
+      const row = screen.getByText("seated@example.com").closest("tr")!;
+      expect(within(row).getByRole("button", { name: "Edit" })).toBeDisabled();
+      expect(
+        within(row).getByText("Edit in Staff Management only")
+      ).toBeInTheDocument();
+    });
+
+    it("keeps Edit enabled for users with no centre seat", () => {
+      renderList();
+      const row = screen.getByText("teacher@example.com").closest("tr")!;
+      expect(
+        within(row).getByRole("button", { name: "Edit" })
+      ).toBeEnabled();
+    });
+
     it("does not show (you) for other users", () => {
       renderList();
       const cell = screen.getByText("pm@avantifellows.org").closest("td")!;

@@ -78,6 +78,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
     const userRole = role && validRoles.includes(role) ? role : undefined;
 
+    // Centre seats are the source of truth for a seated user's school scope
+    // (staff-admin clears school_codes/regions on assignment; resolveScope derives
+    // schools from the seat). Editing explicit scope here would re-introduce the
+    // over-grant / move-doesn't-revoke staleness, so it's disabled for seated
+    // users: reject any attempt to set school_codes/regions, and keep both NULL.
+    const seated = await query<{ one: number }>(
+      `SELECT 1 AS one
+       FROM centre_positions cp
+       JOIN user_permission up ON up.user_id = cp.user_id
+       WHERE up.id = $1 AND cp.deleted_at IS NULL
+       LIMIT 1`,
+      [id]
+    );
+    const isSeated = seated.length > 0;
+    const wantsScopeEdit =
+      (Array.isArray(school_codes) && school_codes.length > 0) ||
+      (Array.isArray(regions) && regions.length > 0);
+    if (isSeated && wantsScopeEdit) {
+      return NextResponse.json(
+        {
+          error:
+            "This user is assigned to a centre, so their school scope is derived from that centre and can't be edited here. Change their centre assignment instead.",
+        },
+        { status: 409 }
+      );
+    }
+
     await query(
       `UPDATE user_permission
        SET level = COALESCE($1, level),
@@ -89,7 +116,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
            full_name = $7,
            updated_at = NOW()
        WHERE id = $8`,
-      [level, userRole, school_codes || null, regions || null, program_ids || null, read_only, full_name ?? null, id]
+      [level, userRole, isSeated ? null : school_codes || null, isSeated ? null : regions || null, program_ids || null, read_only, full_name ?? null, id]
     );
 
     return NextResponse.json({ success: true });
