@@ -194,8 +194,6 @@ export default function EnrollmentTabContent({
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         hideGradeFilterUI
-        consentByStudentId={consent}
-        consentLoading={consentLoading}
         onDataChanged={() => setConsentReloadKey((k) => k + 1)}
       />
     </>

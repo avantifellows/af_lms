@@ -149,20 +149,14 @@ export default function EnrollmentStatsCards({
             >
               <span
                 className="text-xs font-bold uppercase tracking-wide text-text-muted min-w-[5rem]"
-                title="Grades 11 & 12 — consent uploaded on the LMS"
+                title="Grades 11 & 12 — info completeness & consent docs uploaded"
               >
                 Admission
               </span>
               <div className="flex flex-wrap gap-1.5">
                 <MetricPill
-                  label="Reported"
-                  value={
-                    consentLoading
-                      ? "…"
-                      : consentError
-                        ? "—"
-                        : `${admission.reported}/${admission.total}`
-                  }
+                  label="Students"
+                  value={`${admission.total}`}
                 />
                 <MetricPill
                   label="% Info"

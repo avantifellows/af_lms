@@ -6,8 +6,6 @@ import {
   INFO_REQUIRED_FIELDS,
   isAdmissionGrade,
   isInfoComplete,
-  isReported,
-  missingConsentDocs,
   buildAdmissionSummary,
 } from "./enrollment-readiness";
 
@@ -78,60 +76,17 @@ describe("isInfoComplete", () => {
   });
 });
 
-describe("isReported", () => {
-  it("true only when all required consent docs present", () => {
-    expect(isReported(["parent_undertaking", "wise_research_consent"])).toBe(
-      true,
-    );
-  });
-
-  it("false when missing one consent doc", () => {
-    expect(isReported(["parent_undertaking"])).toBe(false);
-  });
-
-  it("false for undefined / empty", () => {
-    expect(isReported(undefined)).toBe(false);
-    expect(isReported([])).toBe(false);
-  });
-
-  it("extra non-required docs don't satisfy the requirement", () => {
-    expect(isReported(["income_certificate"])).toBe(false);
-  });
-});
-
-describe("missingConsentDocs", () => {
-  it("lists the required docs that are absent", () => {
-    expect(missingConsentDocs(["parent_undertaking"])).toEqual([
-      "wise_research_consent",
-    ]);
-  });
-
-  it("returns empty when all present", () => {
-    expect(
-      missingConsentDocs(["parent_undertaking", "wise_research_consent"]),
-    ).toEqual([]);
-  });
-
-  it("returns all when none present", () => {
-    expect(missingConsentDocs(undefined)).toEqual([
-      "parent_undertaking",
-      "wise_research_consent",
-    ]);
-  });
-});
-
 describe("buildAdmissionSummary", () => {
   it("returns zeros for an empty roster", () => {
     expect(buildAdmissionSummary([], {})).toEqual({
       total: 0,
-      reported: 0,
       infoAvailable: 0,
       infoAvailablePct: 0,
       docsAvailablePct: 0,
     });
   });
 
-  it("counts reported, info, and doc-slot percentages", () => {
+  it("counts info and doc-slot percentages", () => {
     const students = [
       completeStudent({ student_pk_id: "1" }), // info complete
       completeStudent({ student_pk_id: "2", phone: null }), // info incomplete
@@ -139,15 +94,14 @@ describe("buildAdmissionSummary", () => {
       completeStudent({ student_pk_id: "4" }), // info complete
     ];
     const consent = {
-      "1": ["parent_undertaking", "wise_research_consent"], // reported, 2 slots
-      "2": ["parent_undertaking"], // not reported, 1 slot
-      "3": [], // not reported, 0 slots
+      "1": ["parent_undertaking", "wise_research_consent"], // 2 slots
+      "2": ["parent_undertaking"], // 1 slot
+      "3": [], // 0 slots
       // "4" absent → 0 slots
     };
 
     const summary = buildAdmissionSummary(students, consent);
     expect(summary.total).toBe(4);
-    expect(summary.reported).toBe(1); // only student 1 has both
     expect(summary.infoAvailable).toBe(3); // 1, 3, 4
     expect(summary.infoAvailablePct).toBe(75); // 3/4
     // doc slots: (2 + 1 + 0 + 0) / (4 students * 2 required) = 3/8 = 37.5 → 38
@@ -160,13 +114,12 @@ describe("buildAdmissionSummary", () => {
     const summary = buildAdmissionSummary(students, consent);
     // only parent_undertaking counts → 1 / (1*2) = 50%
     expect(summary.docsAvailablePct).toBe(50);
-    expect(summary.reported).toBe(0);
   });
 
-  it("treats students with no pk id as unreported", () => {
+  it("counts total even for students with no pk id", () => {
     const students = [completeStudent({ student_pk_id: null })];
     const summary = buildAdmissionSummary(students, {});
-    expect(summary.reported).toBe(0);
     expect(summary.total).toBe(1);
+    expect(summary.docsAvailablePct).toBe(0);
   });
 });

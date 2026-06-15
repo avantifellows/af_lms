@@ -59,7 +59,6 @@ function Harness({
 
 const admissionSummary: AdmissionSummary = {
   total: 40,
-  reported: 8,
   infoAvailable: 30,
   infoAvailablePct: 75,
   docsAvailablePct: 60,
@@ -133,7 +132,7 @@ describe("EnrollmentStatsCards", () => {
     render(<Harness programs={[coeStats]} admission={admissionSummary} />);
     const row = screen.getByTestId("admission-stats-row");
     expect(within(row).getByText("Admission")).toBeInTheDocument();
-    expect(within(row).getByText("8/40")).toBeInTheDocument(); // reported/total
+    expect(within(row).getByText("40")).toBeInTheDocument(); // total students
     expect(within(row).getByText("75%")).toBeInTheDocument(); // info
     expect(within(row).getByText("60%")).toBeInTheDocument(); // docs
   });
@@ -143,9 +142,9 @@ describe("EnrollmentStatsCards", () => {
       <Harness programs={[coeStats]} admission={admissionSummary} consentLoading />,
     );
     const row = screen.getByTestId("admission-stats-row");
-    // info is computed locally so it still shows; reported + docs are pending
+    // total + info are computed locally so they still show; docs is pending
+    expect(within(row).getByText("40")).toBeInTheDocument();
     expect(within(row).getByText("75%")).toBeInTheDocument();
-    expect(within(row).queryByText("8/40")).not.toBeInTheDocument();
-    expect(within(row).getAllByText("…").length).toBe(2);
+    expect(within(row).getAllByText("…").length).toBe(1);
   });
 });

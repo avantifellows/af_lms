@@ -5,13 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
-import {
-  isAdmissionGrade,
-  isReported,
-  missingConsentDocs,
-  type ConsentByStudentId,
-} from "@/lib/enrollment-readiness";
-import { labelFor, type DocumentType } from "@/lib/document-types";
 
 export interface Student {
   group_user_id: string;
@@ -83,12 +76,9 @@ interface StudentTableProps {
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
   hideGradeFilterUI?: boolean;
-  // Grade-11 consent status keyed by student_pk_id, used to flag each card's
-  // admission/consent state. Absent for non-admission contexts.
-  consentByStudentId?: ConsentByStudentId;
-  consentLoading?: boolean;
   // Called after a save/upload (in addition to the internal router.refresh) so
-  // the parent can refetch data it owns — e.g. the consent map for the flags.
+  // the parent can refetch data it owns — e.g. the consent map behind the
+  // admission summary.
   onDataChanged?: () => void;
 }
 
@@ -139,12 +129,6 @@ interface StudentCardProps {
    * to the inline DocumentsList so it refetches.
    */
   documentsRefreshNonce?: number;
-  /**
-   * Grade-11 consent flag state. `present` is the list of required consent
-   * doc types uploaded for this student; `show` gates rendering (grade-11
-   * only); `loading` shows a neutral pending state until data arrives.
-   */
-  consent?: { show: boolean; present: string[]; loading: boolean };
 }
 
 // Coerce a `string | null` PK into a safe positive integer; rejects NaN +
@@ -155,31 +139,6 @@ function parseStudentPkId(raw: string | null): number | null {
   if (!/^\d+$/.test(raw)) return null;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-// Renders the grade-11 admission consent flag: green when reported (all
-// required consent docs uploaded), red with the missing docs otherwise.
-function ConsentFlag({
-  present,
-  loading,
-}: {
-  present: string[];
-  loading: boolean;
-}) {
-  if (loading) {
-    return <Badge variant="default">Consent …</Badge>;
-  }
-  if (isReported(present)) {
-    return <Badge variant="success">Consent ✓</Badge>;
-  }
-  const missing = missingConsentDocs(present)
-    .map((t) => labelFor(t as DocumentType))
-    .join(", ");
-  return (
-    <Badge variant="danger" title={`Missing: ${missing}`}>
-      Consent ✕
-    </Badge>
-  );
 }
 
 // A compact labeled field for the collapsed card summary grid.
@@ -206,7 +165,6 @@ function StudentCard({
   onEdit,
   onDropout,
   documentsRefreshNonce,
-  consent,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isDropout = student.status === "dropout";
@@ -216,7 +174,7 @@ function StudentCard({
     <Card elevation="md" className="overflow-hidden">
       {/* Main card content - always visible */}
       <div className="p-3 sm:p-4">
-        {/* Top row: name + badges (left), consent flag + expand (right) */}
+        {/* Top row: name + badges (left), expand (right) */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-gray-900">
@@ -228,9 +186,6 @@ function StudentCard({
             {isDropout && <Badge variant="danger">Dropout</Badge>}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {consent?.show && !isDropout && (
-              <ConsentFlag present={consent.present} loading={consent.loading} />
-            )}
             <Button
               variant="icon"
               onClick={() => setExpanded(!expanded)}
@@ -469,8 +424,6 @@ export default function StudentTable({
   selectedGrade: controlledGrade,
   onGradeChange,
   hideGradeFilterUI = false,
-  consentByStudentId,
-  consentLoading = false,
   onDataChanged,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -622,16 +575,6 @@ export default function StudentTable({
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
               documentsRefreshNonce={documentsRefresh}
-              consent={
-                consentByStudentId
-                  ? {
-                      show: isAdmissionGrade(student.grade),
-                      present:
-                        consentByStudentId[student.student_pk_id ?? ""] ?? [],
-                      loading: consentLoading,
-                    }
-                  : undefined
-              }
             />
           ))
         )}

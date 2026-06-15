@@ -1,15 +1,9 @@
 // Admission readiness metrics (grades 11 & 12).
 //
 // Tracks, per school, how far admissions have progressed for each grade:
-//   • total students        — grade-11 roster size
-//   • reported              — students whose admission is complete (all the
-//                             required consent docs uploaded on the LMS)
+//   • total students        — grade-11/12 roster size
 //   • % info available      — students whose core profile fields are filled
 //   • % documents available — share of required consent docs uploaded overall
-//
-// "Reported" uses consent uploads as a proxy because admission is only
-// considered complete once consent is on the LMS (confirmed with Vishal,
-// 2026-06-05). The required consent set is parent consent + WISE consent.
 
 import type { Student } from "@/components/StudentTable";
 
@@ -21,10 +15,10 @@ export function isAdmissionGrade(grade: number | null | undefined): boolean {
   return grade != null && (ADMISSION_GRADES as readonly number[]).includes(grade);
 }
 
-// Document types that together mark a student as "reported" / admitted.
+// Required consent document types, counted toward "% documents available".
 //   parent_undertaking   → parent consent
 //   wise_research_consent → WISE consent
-// Both must be present. Edit this list to change what "reported" requires.
+// Edit this list to change which docs the documents metric expects.
 export const CONSENT_REQUIRED_DOC_TYPES = [
   "parent_undertaking",
   "wise_research_consent",
@@ -65,25 +59,9 @@ export function isInfoComplete(student: Student): boolean {
  */
 export type ConsentByStudentId = Record<string, ConsentDocType[]>;
 
-/** A student is reported once all required consent docs are present. */
-export function isReported(present: readonly string[] | undefined): boolean {
-  if (!present) return false;
-  return CONSENT_REQUIRED_DOC_TYPES.every((type) => present.includes(type));
-}
-
-/** Required consent doc types that are still missing for a student. */
-export function missingConsentDocs(
-  present: readonly string[] | undefined,
-): ConsentDocType[] {
-  const have = new Set(present ?? []);
-  return CONSENT_REQUIRED_DOC_TYPES.filter((type) => !have.has(type));
-}
-
 export interface AdmissionSummary {
-  /** Grade-11 roster size. */
+  /** Grade-11/12 roster size. */
   total: number;
-  /** Students with all required consent docs uploaded. */
-  reported: number;
   /** Students with all INFO_REQUIRED_FIELDS filled. */
   infoAvailable: number;
   /** infoAvailable / total, rounded to a whole percent (0 when total is 0). */
@@ -103,7 +81,6 @@ export function buildAdmissionSummary(
   const total = students.length;
   const requiredPerStudent = CONSENT_REQUIRED_DOC_TYPES.length;
 
-  let reported = 0;
   let infoAvailable = 0;
   let docSlotsFilled = 0;
 
@@ -113,7 +90,6 @@ export function buildAdmissionSummary(
     const present = student.student_pk_id
       ? consentByStudentId[student.student_pk_id]
       : undefined;
-    if (isReported(present)) reported++;
     // Only count presence of *required* doc types toward the slot fill.
     if (present) {
       for (const type of CONSENT_REQUIRED_DOC_TYPES) {
@@ -127,7 +103,6 @@ export function buildAdmissionSummary(
 
   return {
     total,
-    reported,
     infoAvailable,
     infoAvailablePct: pct(infoAvailable, total),
     docsAvailablePct: pct(docSlotsFilled, total * requiredPerStudent),
