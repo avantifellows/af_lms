@@ -51,6 +51,7 @@ const SEAT_ROLE_LABELS: Record<SeatRole, string> = {
   apm: "APM",
   spm: "SPM",
   ph: "PH",
+  subject_tbd: "Subject TBD",
 };
 
 function rowKey(row: StaffRosterRow): string {
