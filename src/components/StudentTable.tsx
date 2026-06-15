@@ -235,7 +235,7 @@ function StudentCard({
 
       {/* Expanded content */}
       {expanded && (
-        <div className="space-y-3 border-t border-gray-100 bg-gray-50 px-4 pb-4 pt-4">
+        <div className="space-y-3 border-t border-border bg-bg-card-alt px-4 pb-4 pt-4">
           {/* Phone / Gender / Category / Program now live in the always-visible
               card summary above, so the expanded view covers the rest. */}
           <DetailGroup title="Personal">
@@ -285,8 +285,8 @@ function StudentCard({
           </DetailGroup>
 
           {studentPkId !== null && (
-            <section className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
-              <h4 className="mb-3 border-b border-gray-100 pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+            <section className="rounded-lg border border-border bg-bg-card p-4 shadow-sm">
+              <h4 className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
                 Documents
               </h4>
               <DocumentsList

@@ -81,6 +81,19 @@ export default function CurriculumTab({
       : "chapters"
   );
 
+  const resetScopeInteractionState = useCallback(() => {
+    setLogError(null);
+    setCompletionError(null);
+    setEditingLog(null);
+    setIsLogSessionModalOpen(false);
+    setExpandedChapterIds([]);
+    setIsDataLoading(true);
+    setChapters([]);
+    setLogs([]);
+    setProgress({});
+    setSubjectTotalTimeMinutes(0);
+  }, []);
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -131,6 +144,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setIsDataLoading(false);
       return;
     }
 
@@ -145,6 +159,10 @@ export default function CurriculumTab({
       setError(null);
       setLogError(null);
       setCompletionError(null);
+      setChapters([]);
+      setLogs([]);
+      setProgress({});
+      setSubjectTotalTimeMinutes(0);
 
       const params = new URLSearchParams({
         school_code: schoolCode,
@@ -264,6 +282,7 @@ export default function CurriculumTab({
 
   function handleExamTrackChange(track: ExamTrack) {
     const first = selectFirstGradeSubject(options?.gradeSubjects ?? [], track);
+    resetScopeInteractionState();
     setSelectedExamTrack(track);
     setSelectedGrade(first?.grade ?? null);
     setSelectedSubject(first?.subject ?? null);
@@ -275,6 +294,7 @@ export default function CurriculumTab({
       selectedExamTrack,
       grade
     );
+    resetScopeInteractionState();
     setSelectedGrade(grade);
     setSelectedSubject(first?.subject ?? null);
   }
@@ -465,7 +485,10 @@ export default function CurriculumTab({
               <select
                 id="curriculum-program"
                 value={selectedProgramId ?? ""}
-                onChange={(event) => setSelectedProgramId(Number(event.target.value))}
+                onChange={(event) => {
+                  resetScopeInteractionState();
+                  setSelectedProgramId(Number(event.target.value));
+                }}
                 className="block w-36 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
               >
                 {options.programs.map((program) => (
@@ -534,7 +557,10 @@ export default function CurriculumTab({
               id="subject"
               value={selectedSubject ?? ""}
               disabled={subjectOptions.length === 0}
-              onChange={(event) => setSelectedSubject(event.target.value as SubjectName)}
+              onChange={(event) => {
+                resetScopeInteractionState();
+                setSelectedSubject(event.target.value as SubjectName);
+              }}
               className="block w-32 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
               {subjectOptions.map((option) => (
@@ -549,7 +575,7 @@ export default function CurriculumTab({
 
           {canEdit && (
             <button
-              disabled={!selectedProgramId || chapters.length === 0}
+              disabled={!selectedProgramId || isDataLoading || chapters.length === 0}
               onClick={() => {
                 setLogError(null);
                 setEditingLog(null);

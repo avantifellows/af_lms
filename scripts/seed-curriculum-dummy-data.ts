@@ -124,6 +124,12 @@ const SEED_CASES: SeedCase[] = [
   },
 ];
 
+const EXAM_TRACK_CURRICULUM_IDS: Record<SeedCase["examTrack"], number> = {
+  jee_main: 1,
+  jee_advanced: 9,
+  neet: 2,
+};
+
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     mode: "seed",
@@ -278,7 +284,12 @@ async function fetchChaptersForCase(
      JOIN chapter ch ON ch.id = cfg.chapter_id
      JOIN grade g ON g.id = ch.grade_id
      JOIN subject s ON s.id = ch.subject_id
-     LEFT JOIN topic t ON t.chapter_id = ch.id
+     LEFT JOIN (
+       topic t
+       JOIN topic_curriculum tc
+         ON tc.topic_id = t.id
+        AND tc.curriculum_id = $5
+     ) ON t.chapter_id = ch.id
      WHERE cfg.is_in_syllabus = true
        AND cfg.exam_track = $1
        AND g.number = $2
@@ -306,6 +317,7 @@ async function fetchChaptersForCase(
       seedCase.grade,
       seedCase.subjectName,
       seedCase.chapterLimit,
+      EXAM_TRACK_CURRICULUM_IDS[seedCase.examTrack],
     ]
   );
 

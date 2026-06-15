@@ -8,6 +8,7 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 import { getServerSession } from "next-auth";
 import { getAccessibleSchoolCodes } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { GET } from "./route";
 import { NO_SESSION, ADMIN_SESSION } from "../../__test-utils__/api-test-helpers";
 
@@ -59,8 +60,13 @@ describe("GET /api/students/search", () => {
     expect(json).toEqual(results);
     expect(mockQuery).toHaveBeenCalledWith(
       expect.stringContaining("af_school_category = 'JNV'"),
-      ["%john%"],
+      ["%john%", CURRENT_ACADEMIC_YEAR],
     );
+    // Current-cohort rule shared with the canonical roster: results are
+    // restricted to students enrolled for the current academic year.
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("er.academic_year = $2");
+    expect(sql).not.toContain("s.grade_id");
   });
 
   it("searches specific schools when user has limited access", async () => {
@@ -73,7 +79,9 @@ describe("GET /api/students/search", () => {
     expect(res.status).toBe(200);
     expect(mockQuery).toHaveBeenCalledWith(
       expect.stringContaining("sch.code = ANY($1)"),
-      [["70705", "70706"], "%test%"],
+      [["70705", "70706"], "%test%", CURRENT_ACADEMIC_YEAR],
     );
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("er.academic_year = $3");
   });
 });

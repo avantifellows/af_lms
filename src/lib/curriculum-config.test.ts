@@ -491,13 +491,15 @@ describe("curriculum config chapter option helpers", () => {
     });
 
     const sql = mockQuery.mock.calls[0][0] as string;
-    expect(sql).toContain("LEFT JOIN topic t ON t.chapter_id = ch.id");
+    expect(sql).toContain("JOIN topic_curriculum tc");
+    expect(sql).toContain("tc.curriculum_id = $2");
     expect(sql).toContain("cfg.exam_track = $1");
-    expect(sql).toContain("grade = $2::int");
-    expect(sql).toContain("subject_id::text = $3::text");
-    expect(sql).toContain("LOWER(chapter_name) LIKE $4::text");
+    expect(sql).toContain("grade = $3::int");
+    expect(sql).toContain("subject_id::text = $4::text");
+    expect(sql).toContain("LOWER(chapter_name) LIKE $5::text");
     expect(mockQuery.mock.calls[0][1]).toEqual([
       "jee_main",
+      1,
       11,
       "4",
       "%motion%",

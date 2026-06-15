@@ -1,0 +1,55 @@
+source_id,centre_name,cost_centre_type,source_school_name,status,school_id,notes
+1,JNV Barwani,CoE,JNV Barwani,unresolved,,Needs approved school_id before apply
+2,JNV Ujjain 2,CoE,JNV Ujjain 2,approved,51,Matched to JNV Ujjain-2 by normalized name
+3,EMRS Bhopal,CoE,EMRS Bhopal,unresolved,,Needs approved school_id before apply
+4,JNV Cuttack,CoE,JNV Cuttack,unresolved,,Needs approved school_id before apply
+5,JNV Puri,CoE,JNV Puri,unresolved,,Needs approved school_id before apply
+6,JNV Kottayam,CoE,JNV Kottayam,unresolved,,Needs approved school_id before apply
+7,JNV Thiruvananthapuram,CoE,JNV Thiruvananthapuram,unresolved,,Needs approved school_id before apply
+8,JNV Adilabad,CoE,JNV Adilabad,unresolved,,Needs approved school_id before apply
+9,JNV Medak,CoE,JNV Medak,unresolved,,Needs approved school_id before apply
+10,JNV Karimnagar,CoE,JNV Karimnagar,unresolved,,Needs approved school_id before apply
+11,JNV Adilabad,Nodal,JNV Adilabad,unresolved,,Needs approved school_id before apply
+12,JNV Kurnool,CoE,JNV Kurnool,unresolved,,Needs approved school_id before apply
+13,JNV Nellore,CoE,JNV Nellore,unresolved,,Needs approved school_id before apply
+14,JNV Kokrajhar,CoE,JNV Kokrajhar,approved,294,Duplicate exact match; selected row with UDISE
+15,JNV Kohima,CoE,JNV Kohima,unresolved,,Needs approved school_id before apply
+16,Nagaland Foundation,,Nagaland Foundation,unlinked,,Special non-school Centre row
+17,Mumbai Foundation,,Mumbai Foundation,unlinked,,Special non-school Centre row
+18,Mumbai - Andheri,Nodal,Mumbai - Andheri,unresolved,,Needs approved school_id before apply
+19,Mumbai - Dadar,Nodal,Mumbai - Dadar,unresolved,,Needs approved school_id before apply
+20,JNV South Canara,CoE,JNV South Canara,unresolved,,Needs approved school_id before apply
+21,JNV Bellary,CoE,JNV Bellary,unresolved,,Needs approved school_id before apply
+22,JNV Hassan,CoE,JNV Hassan,unresolved,,Needs approved school_id before apply
+23,JNV Bundi,CoE,JNV Bundi,unresolved,,Needs approved school_id before apply
+24,JNV Lucknow,CoE,JNV Lucknow,approved,173,Duplicate exact match; selected row with UDISE
+25,JNV Mahisagar,CoE,JNV Mahisagar,unresolved,,Needs approved school_id before apply
+26,JNV Nandurbar 2,CoE,JNV Nandurbar 2,approved,405,Matched to JNV Nandurbar-2 by normalized name
+27,JNV Bharuch,Nodal,JNV Bharuch,unresolved,,Needs approved school_id before apply
+28,JNV Chandigarh,CoE,JNV Chandigarh,approved,9590,Duplicate exact match; selected row with UDISE
+29,"Live Class - Punjab, Himachal, Uttarakhand, Delhi",,"Live Class - Punjab, Himachal, Uttarakhand, Delhi",unlinked,,Special non-school Centre row
+30,Meritorious School Bhatinda,CoE,Meritorious School Bhatinda,unresolved,,Needs approved school_id before apply
+31,Meritorious School Mohali,CoE,Meritorious School Mohali,unresolved,,Needs approved school_id before apply
+32,RGJNV Dehradun,CoE,RGJNV Dehradun,unresolved,,Needs approved school_id before apply
+33,Meritorious School Bhatinda 2,CoE,Meritorious School Bhatinda 2,unresolved,,Needs approved school_id before apply
+34,Meritorious School Mohali 2,CoE,Meritorious School Mohali 2,unresolved,,Needs approved school_id before apply
+35,JNV Durgapur,CoE,JNV Durgapur,unresolved,,Needs approved school_id before apply
+36,JNV Vaishali,CoE,JNV Vaishali,unresolved,,Needs approved school_id before apply
+37,JNV Bhagalpur,Nodal,JNV Bhagalpur,unresolved,,Needs approved school_id before apply
+38,JNV Chandrapur,CoE,JNV Chandrapur,unresolved,,Needs approved school_id before apply
+39,JNV Kolhapur,CoE,JNV Kolhapur,unresolved,,Needs approved school_id before apply
+40,JNV Palghar,CoE,JNV Palghar,unresolved,,Needs approved school_id before apply
+41,JNV Wardha,CoE,JNV Wardha,unresolved,,Needs approved school_id before apply
+42,JNV Bangalore South,CoE,JNV Bangalore South,unresolved,,Needs approved school_id before apply
+43,JNV Puducherry,CoE,JNV Puducherry,unresolved,,Needs approved school_id before apply
+44,EMRS Tumkur,CoE,EMRS Tumkur,unresolved,,Needs approved school_id before apply
+45,JNV Chamarajanagar,Nodal,JNV Chamarajanagar,unresolved,,Needs approved school_id before apply
+46,JNV Mandya,Nodal,JNV Mandya,unresolved,,Needs approved school_id before apply
+47,JNV Udupi,Nodal,JNV Udupi,unresolved,,Needs approved school_id before apply
+48,Pune Foundation,,Pune Foundation,unlinked,,Special non-school Centre row
+49,Pune - Dapodi,Nodal,Pune - Dapodi,unresolved,,Needs approved school_id before apply
+50,Pune - FC Road,Nodal,Pune - FC Road,unresolved,,Needs approved school_id before apply
+51,JNV Nagpur,Nodal,JNV Nagpur,unresolved,,Needs approved school_id before apply
+52,Online / Boot Camp - JNV Hyderabad Region,,Online / Boot Camp - JNV Pune Region,unlinked,,Special non-school Centre row
+54,Bench Teachers - Subramanya,,,unlinked,,Special non-school Centre row
+55,Bench Teachers - Siva,,,unlinked,,Special non-school Centre row

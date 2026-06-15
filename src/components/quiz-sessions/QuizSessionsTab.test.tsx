@@ -52,6 +52,32 @@ function makeBatches() {
   ];
 }
 
+function makeTargetProgramBatches() {
+  return [
+    {
+      id: 958,
+      name: "JNV CoE 2028 Engineering Quiz Batch",
+      batch_id: "EN-TP-2028-engg-C01",
+      parent_id: null,
+      program_id: 1,
+    },
+    {
+      id: 5541,
+      name: "CoE JNV Hassan 2028 Engineering",
+      batch_id: "EnableStudents_TP_2028_engg_C013",
+      parent_id: 958,
+      program_id: 1,
+    },
+    {
+      id: 5542,
+      name: "CoE JNV Kottayam 2028 Engineering",
+      batch_id: "EnableStudents_TP_2028_engg_C017",
+      parent_id: 958,
+      program_id: 1,
+    },
+  ];
+}
+
 function makeSessions() {
   return [
     {
@@ -274,10 +300,13 @@ describe("QuizSessionsTab", () => {
 
     expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Create Quiz Session" }));
+    await user.click(
+      screen.getByRole("button", { name: "Create Quiz Session" })
+    );
     await user.click(screen.getByLabelText("Class 11 Engg A"));
     await user.click(screen.getByLabelText("Class 11 Engg B"));
-    await user.selectOptions(screen.getAllByRole("combobox")[1], "part_test");
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
 
     expect(await screen.findByText("Part Test 11")).toBeInTheDocument();
     await user.click(screen.getByText("Part Test 11"));
@@ -316,6 +345,109 @@ describe("QuizSessionsTab", () => {
     expect(templateParams.get("grade")).toBe("11");
     expect(templateParams.get("stream")).toBe("engineering");
     expect(templateParams.get("testFormat")).toBe("part_test");
+  });
+
+  it("creates a session from target-program batch IDs", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.startsWith("/api/quiz-sessions/batches")) {
+        return jsonResponse({ batches: makeTargetProgramBatches() });
+      }
+
+      if (url.startsWith("/api/quiz-sessions/templates")) {
+        return jsonResponse({ templates: [makeTemplate()] });
+      }
+
+      if (url.startsWith("/api/quiz-sessions?")) {
+        return jsonResponse({ sessions: [], hasMore: false });
+      }
+
+      if (url === "/api/quiz-sessions" && init?.method === "POST") {
+        createdPayload = JSON.parse(String(init.body));
+        return jsonResponse({ id: 99 });
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    await user.click(await screen.findByRole("button", { name: "Create Quiz Session" }));
+    await user.click(screen.getByLabelText("CoE JNV Hassan 2028 Engineering"));
+    await user.click(screen.getByLabelText("CoE JNV Kottayam 2028 Engineering"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+
+    expect(await screen.findByText("Part Test 11")).toBeInTheDocument();
+    await user.click(screen.getByText("Part Test 11"));
+    await user.click(screen.getByRole("button", { name: "Create Session" }));
+
+    await waitFor(() => {
+      expect(createdPayload).toMatchObject({
+        grade: 11,
+        parentBatchId: "EN-TP-2028-engg-C01",
+        classBatchIds: [
+          "EnableStudents_TP_2028_engg_C013",
+          "EnableStudents_TP_2028_engg_C017",
+        ],
+        stream: "engineering",
+      });
+    });
+
+    const templateCallUrl = String(getFetchCalls(mockFetch, "/api/quiz-sessions/templates?")[0][0]);
+    const templateParams = new URL(templateCallUrl, "http://localhost").searchParams;
+    expect(templateParams.get("grade")).toBe("11");
+    expect(templateParams.get("stream")).toBe("engineering");
+  });
+
+  it("allows a selected paper to be deselected", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Create Quiz Session" })
+    );
+    await user.click(screen.getByLabelText("Class 11 Engg A"));
+    await user.selectOptions(screen.getByLabelText("Grade"), "11");
+    await user.selectOptions(screen.getByLabelText("Test Format"), "part_test");
+
+    const paper = await screen.findByRole("button", { name: /Part Test 11/ });
+    await user.click(paper);
+    expect(paper).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(paper);
+    expect(paper).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: "Create Session" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Please select a paper."
+    );
+    expect(createdPayload).toBeNull();
+  });
+
+  it("does not offer hiring or evaluation test formats in session creation", async () => {
+    const user = userEvent.setup();
+
+    render(<QuizSessionsTab schoolId="school-1" canEdit />);
+
+    expect(await screen.findByText("Existing Quiz")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Create Quiz Session" })
+    );
+
+    const formatSelect = screen.getByLabelText("Test Format");
+    expect(
+      within(formatSelect).queryByRole("option", { name: "Hiring Test" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(formatSelect).queryByRole("option", { name: "Evaluation Test" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows compact sync status without manual sync controls", async () => {

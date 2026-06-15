@@ -10,6 +10,10 @@ Student enrollment management and PM school-visit tracking for Avanti Fellows �
 A government school enrolled in an Avanti Fellows program, identified by UDISE code.
 _Avoid_: Institution, center
 
+**Centre**:
+An Avanti billing and funder-facing operational unit that may be linked to a School but can differ from school boundaries.
+_Avoid_: Center, School
+
 **Student**:
 A learner enrolled at a school, linked via `group_user` membership.
 _Avoid_: Learner, pupil
@@ -21,6 +25,10 @@ _Avoid_: Cohort, section
 **Program**:
 An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
 _Avoid_: Course, stream
+
+**Centre Stream**:
+One or more academic delivery streams attached to a Centre, such as JEE, NEET, or Math Foundation.
+_Avoid_: Program, Exam Track, comma-separated stream
 
 **UDISE Code**:
 A unique government-issued identifier for a school.
@@ -112,6 +120,41 @@ _Avoid_: Access tier, role level
 
 - A **School** has many **Students** (via `group` → `group_user`)
 - A **School** has many **Batches**
+- A **School** can have many **Centres**
+- A **Centre** can be linked to one **School**, but not every **Centre** is school-linked
+- **Centre** links to **School** through `school.id`; school code and UDISE code are display/search identifiers, not the Centre relationship key
+- A **Centre** name is not globally unique; the same School can have separate billing/funder centres for different operational setups
+- In v1, **Centre** rows do not have a uniqueness constraint beyond their primary key
+- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, non-null `stream_codes`, `is_physical`, `is_active`, and normal timestamps
+- In v1, **Centre** classification fields are current-state fields on the Centre itself, not separate academic-year history records
+- In v1, **Centre** rows use normal inserted/updated timestamps without a dedicated audit actor or changelog model
+- In v1, **Centre** type, category, and sub-category can be null so incomplete source rows can be imported and cleaned later
+- A **Centre** can have multiple **Centre Streams**
+- In v1, a **Centre** can have no Centre Streams assigned; empty streams are valid for special rows such as bench teacher buckets
+- In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
+- In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
+- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
+- In v1, **Centre** administration displays linked School metadata such as school name, code, UDISE, region, state, and district as read-only values derived from School
+- In v1, unlinked **Centres** do not store centre-level location fields; location columns remain blank until the Centre is linked to a School or a later feature adds centre-level location
+- In v1, Centre option code validity is enforced by AF LMS APIs and import scripts rather than foreign keys from Centre rows to option rows
+- In v1, **Centre** administration is global admin-only reference-data management; it is not scoped by region, school, or Program Admin permissions
+- In v1, AF LMS exposes Centre APIs only under admin routes for Centre grid management and Centre option configuration
+- In v1, Centre option codes are immutable after creation; admins can edit labels, ordering, and active state without rewriting Centre rows
+- In v1, creating a Centre option uses a suggested code derived from the label, but the Admin confirms the code before save; after creation the code is read-only
+- In v1, **Centres** are deactivated with `is_active = false`; the admin UI does not hard-delete Centre rows
+- In v1, Centre options are deactivated with `is_active = false`; the admin UI does not hard-delete option rows because Centre rows may still reference their codes
+- In v1, inactive Centre options remain displayable on existing Centre rows but are not offered for new selections
+- In v1, Centre option sets are fixed to type, category, sub-category, and stream; admins configure options inside those sets rather than creating new sets
+- In v1, admins cannot create or delete Centre option sets; option set editing, if exposed, is limited to display label and ordering
+- In v1, Centre option configuration is stored in `centre_option_sets` and `centre_options`; option sets define fixed fields, while options define stable codes, labels, ordering, and active state
+- Centre schema changes are introduced through db-service migrations, while AF LMS owns the data scripts for seeding Centre options and importing the initial Centre CSV data
+- AF LMS Centre data scripts are split into two scripts: one seeds fixed option sets and initial options, and another performs the deterministic insert-only Centre row import with a required dry-run mode
+- The AF LMS Centre option seed script is rerunnable and may create or update seed-managed option labels/order, but it does not delete options or overwrite unrelated admin-created options
+- The initial Centre import is a one-time bootstrap; if it fails, the intended recovery is to clear the new Centre tables and rerun rather than upserting into partially imported data
+- The initial Centre import includes all rows from the source `centres.csv`; non-physical, unlinked, or special rows are imported and can be cleaned up later through admin workflows
+- The initial Centre import requires a checked-in mapping file with one row per source Centre and explicit school-link status; unresolved or ambiguous mappings block apply mode
+- Yearly planning fields such as `plan_status_2627` are out of scope for Centre v1
+- Centre v1 should be delivered in slices: db-service schema, AF LMS option seed script, AF LMS Centre import script, admin Centre APIs, Centre grid UI, and Centre option config UI
 - A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program** and **Exam Track**
 - An **LMS Curriculum Log** has many covered topics
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
@@ -163,5 +206,9 @@ _Avoid_: Access tier, role level
 ## Flagged ambiguities
 
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
+- "center/centre" in the imported CRUD export means **Centre**, not **School**.
+- Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
+- The source `program` column maps to **Centre Stream**, not **Program** or **Exam Track**; it should be stored as an array, not a comma-separated string.
+- Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getAccessibleSchoolCodes } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
 interface StudentSearchResult {
   user_id: string;
@@ -58,7 +59,16 @@ export async function GET(request: NextRequest) {
       JOIN group_user gu ON gu.user_id = u.id
       JOIN "group" g ON gu.group_id = g.id AND g.type = 'school'
       JOIN school sch ON g.child_id = sch.id
-      LEFT JOIN grade gr ON s.grade_id = gr.id
+      -- Same current-cohort rule as the canonical school roster: only
+      -- students enrolled for the current academic year. Passed-out cohorts
+      -- keep is_current=true grade records forever, so the year filter is
+      -- what excludes them. Grade comes from the enrollment record (the
+      -- roster's source), not the stale student.grade_id column.
+      JOIN enrollment_record er ON er.user_id = u.id
+        AND er.group_type = 'grade'
+        AND er.is_current = true
+        AND er.academic_year = $2
+      LEFT JOIN grade gr ON er.group_id = gr.id
       WHERE sch.af_school_category = 'JNV'
         AND (
           u.first_name ILIKE $1
@@ -69,7 +79,7 @@ export async function GET(request: NextRequest) {
         )
       ORDER BY u.first_name, u.last_name
       LIMIT 20`,
-      [searchPattern]
+      [searchPattern, CURRENT_ACADEMIC_YEAR]
     );
   } else {
     // User has access to specific schools only
@@ -88,7 +98,13 @@ export async function GET(request: NextRequest) {
       JOIN group_user gu ON gu.user_id = u.id
       JOIN "group" g ON gu.group_id = g.id AND g.type = 'school'
       JOIN school sch ON g.child_id = sch.id
-      LEFT JOIN grade gr ON s.grade_id = gr.id
+      -- See the all-schools query above: current-cohort rule shared with the
+      -- canonical school roster.
+      JOIN enrollment_record er ON er.user_id = u.id
+        AND er.group_type = 'grade'
+        AND er.is_current = true
+        AND er.academic_year = $3
+      LEFT JOIN grade gr ON er.group_id = gr.id
       WHERE sch.code = ANY($1)
         AND sch.af_school_category = 'JNV'
         AND (
@@ -100,7 +116,7 @@ export async function GET(request: NextRequest) {
         )
       ORDER BY u.first_name, u.last_name
       LIMIT 20`,
-      [schoolCodes, searchPattern]
+      [schoolCodes, searchPattern, CURRENT_ACADEMIC_YEAR]
     );
   }
 
