@@ -155,10 +155,6 @@ export default function EnrollmentStatsCards({
               </span>
               <div className="flex flex-wrap gap-1.5">
                 <MetricPill
-                  label="Students"
-                  value={`${admission.total}`}
-                />
-                <MetricPill
                   label="% Info"
                   value={`${admission.infoAvailablePct}%`}
                 />
