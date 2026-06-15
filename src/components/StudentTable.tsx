@@ -487,8 +487,9 @@ export default function StudentTable({
   const handleSave = () => {
     router.refresh();
     setDocumentsRefresh((n) => n + 1);
-    // Lets the parent refetch data it owns (e.g. consent flags/summary) so an
-    // uploaded consent doc reflects without a full page reload.
+    // Lets the parent refetch data it owns (e.g. the consent map behind the
+    // admission summary) so an uploaded consent doc reflects without a full
+    // page reload.
     onDataChanged?.();
   };
 

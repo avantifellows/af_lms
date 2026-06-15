@@ -24,7 +24,7 @@ interface Props {
   grades: Grade[];
   batches: Batch[];
   nvsStreams: string[];
-  /** School code/UDISE used to fetch grade-11 consent status. */
+  /** School code/UDISE used to fetch grade 11/12 consent status. */
   schoolCode: string;
 }
 
@@ -46,14 +46,14 @@ export default function EnrollmentTabContent({
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
 
-  // Consent status for the school's grade-11 students, keyed by student_pk_id.
-  // Fetched client-side so the (default) enrollment tab isn't blocked on the
-  // per-student document lookups.
+  // Consent status for the school's grade 11/12 students, keyed by
+  // student_pk_id. Fetched client-side so the (default) enrollment tab isn't
+  // blocked on the per-student document lookups.
   const [consent, setConsent] = useState<ConsentByStudentId>({});
   const [consentLoading, setConsentLoading] = useState(true);
   const [consentError, setConsentError] = useState(false);
   // Bumped after a save/upload in the roster so the consent map refetches and
-  // the flags/summary update without a full page reload.
+  // the admission summary updates without a full page reload.
   const [consentReloadKey, setConsentReloadKey] = useState(0);
 
   // Refetch when the school changes or after an upload. State is only mutated

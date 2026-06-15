@@ -28,7 +28,7 @@ function Pill({ label, count }: { label: string; count: number }) {
   );
 }
 
-// Like Pill, but the value is a preformatted string (e.g. "8/40", "75%", "…").
+// Like Pill, but the value is a preformatted string (e.g. "75%", "…", "—").
 function MetricPill({ label, value }: { label: string; value: string }) {
   return (
     <span className="inline-flex items-baseline gap-1.5 rounded-full border border-border bg-bg-card-alt px-2.5 py-0.5 text-xs">

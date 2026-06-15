@@ -23,12 +23,18 @@ function jsonError(status: number, message: string) {
 
 const REQUIRED = new Set<string>(CONSENT_REQUIRED_DOC_TYPES);
 
+// Max concurrent per-student document lookups against the db-service. The docs
+// API is one-student-at-a-time, so a large grade roster would otherwise fan out
+// into hundreds of simultaneous requests; cap it to keep the db-service (and
+// our outbound socket pool) from being swamped on each enrollment-tab load.
+const DOC_FETCH_CONCURRENCY = 8;
+
 // GET /api/schools/[code]/consent-status[?grade=11]
 //
 // Returns the required consent doc types currently uploaded for each student
 // at the school: `{ consent: { [student_pk_id]: string[] } }`. Defaults to the
 // admission grades (11 & 12); pass `?grade=N` to scope to a single grade.
-// Powers the admission-readiness summary + per-student consent flags.
+// Powers the admission-readiness summary (% documents available).
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ code: string }> },
@@ -107,26 +113,30 @@ export async function GET(
   );
 
   // Fetch each student's documents from the db-service. The docs API is
-  // per-student, so this fans out over the grade roster (bounded). A failed
+  // per-student, so this fans out over the grade roster — processed in capped
+  // batches (see DOC_FETCH_CONCURRENCY) rather than all at once. A failed
   // lookup degrades to "no consent" rather than failing the whole summary.
   const ids = [...new Set(students.map((s) => s.student_pk_id).filter(Boolean))];
-  const results = await Promise.allSettled(
-    ids.map(async (id) => {
-      const docs = await listDocuments(Number(id));
-      const present = new Set<ConsentDocType>();
-      for (const doc of docs) {
-        if (doc.deleted_at == null && REQUIRED.has(doc.document_type)) {
-          present.add(doc.document_type as ConsentDocType);
-        }
+
+  const requiredDocsFor = async (id: string): Promise<ConsentDocType[]> => {
+    const docs = await listDocuments(Number(id));
+    const present = new Set<ConsentDocType>();
+    for (const doc of docs) {
+      if (doc.deleted_at == null && REQUIRED.has(doc.document_type)) {
+        present.add(doc.document_type as ConsentDocType);
       }
-      return [id, [...present]] as [string, ConsentDocType[]];
-    }),
-  );
+    }
+    return [...present];
+  };
 
   const consent: ConsentByStudentId = {};
-  results.forEach((result, i) => {
-    consent[ids[i]] = result.status === "fulfilled" ? result.value[1] : [];
-  });
+  for (let start = 0; start < ids.length; start += DOC_FETCH_CONCURRENCY) {
+    const batch = ids.slice(start, start + DOC_FETCH_CONCURRENCY);
+    const settled = await Promise.allSettled(batch.map(requiredDocsFor));
+    settled.forEach((result, i) => {
+      consent[batch[i]] = result.status === "fulfilled" ? result.value : [];
+    });
+  }
 
   return NextResponse.json({ consent });
 }

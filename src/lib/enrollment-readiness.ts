@@ -69,7 +69,7 @@ export interface AdmissionSummary {
   /**
    * Share of required consent docs uploaded across the roster, rounded to a
    * whole percent. Counts each (student × required doc) slot, so it moves as
-   * partial consent comes in — distinct from `reported`, which needs all docs.
+   * partial consent comes in (not all-or-nothing per student).
    */
   docsAvailablePct: number;
 }
