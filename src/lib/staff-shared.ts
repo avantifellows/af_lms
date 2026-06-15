@@ -11,7 +11,13 @@ export const SEAT_ROLES = [
   "biology",
   "apc",
   "pm",
+  "apm",
+  "spm",
+  "ph",
 ] as const;
+
+/** Program-management seat tiers (vs subject-teaching seats). */
+export const PM_SEAT_ROLES = ["apm", "pm", "spm", "ph"] as const;
 
 export type SeatRole = (typeof SEAT_ROLES)[number];
 

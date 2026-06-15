@@ -48,10 +48,29 @@ const SEAT_ROLE_LABELS: Record<SeatRole, string> = {
   biology: "Biology",
   apc: "APC",
   pm: "PM",
+  apm: "APM",
+  spm: "SPM",
+  ph: "PH",
 };
 
 function rowKey(row: StaffRosterRow): string {
   return `${row.kind}:${row.recordId}`;
+}
+
+// In the centre-grouped view a staff member's role is the tier of the seat they
+// hold AT THAT centre (PH/SPM/APM/PM) — not the coarse roster kind, which
+// collapses every staff tier to "PM". Teachers keep "Teacher" (their subject is
+// shown in its own column, so the seat role would just duplicate it). Falls back
+// to the kind label when there's no seat for the centre (e.g. "No Centre").
+function roleLabelForCentre(
+  row: StaffRosterRow,
+  centreId: number | null
+): string {
+  if (row.kind === "staff" && centreId !== null) {
+    const seat = row.seats.find((s) => s.centreId === centreId);
+    if (seat) return SEAT_ROLE_LABELS[seat.role];
+  }
+  return ROLE_LABELS[row.kind];
 }
 
 interface CentreGroup {
@@ -510,7 +529,10 @@ export default function StaffGrid({
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 md:grid-cols-4">
                       <DetailField label="Email" value={row.email ?? "—"} />
-                      <DetailField label="Role" value={ROLE_LABELS[row.kind]} />
+                      <DetailField
+                        label="Role"
+                        value={roleLabelForCentre(row, group.centreId)}
+                      />
                       <DetailField
                         label="Subject"
                         value={row.subjectName ?? "—"}

@@ -133,6 +133,38 @@ describe("StaffGrid", () => {
     expect(screen.getByText("Physics")).toBeTruthy();
   });
 
+  it("shows the staff seat tier at a centre, not the generic PM", () => {
+    const phRows: StaffRosterRow[] = [
+      {
+        kind: "staff",
+        recordId: 20,
+        userId: 80,
+        name: "Subramanya A",
+        email: "subramanya@avantifellows.org",
+        employeeCode: "AF183",
+        subjectName: null,
+        staffType: "program_manager",
+        designation: "Director, Operations",
+        exitDate: null,
+        seats: [
+          { id: 99, centreId: 8, centreName: "JNV Adilabad - CoE", role: "ph" },
+        ],
+      },
+    ];
+    stubFetch();
+    render(
+      <StaffGrid
+        initialRows={phRows}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    expect(screen.getByText("Subramanya A")).toBeTruthy();
+    // Role column reflects the seat tier (PH), not the kind-derived "PM".
+    expect(screen.getByText("PH")).toBeTruthy();
+    expect(screen.queryByText("PM")).toBeNull();
+  });
+
   it("offers a Centre filter fed by the centres API", async () => {
     stubFetch();
     renderGrid();
