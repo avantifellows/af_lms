@@ -1,0 +1,36 @@
+name: Fallow
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: fallow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Fallow audit
+        uses: fallow-rs/fallow@v2
+        with:
+          command: audit
+          annotations: true
+          comment: true
+          review-comments: true
+          review-guidance: false
+          diff-filter: added
+          max-comments: 30
+          artifacts-dir: .var/fallow

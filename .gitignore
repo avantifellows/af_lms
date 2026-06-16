@@ -27,6 +27,10 @@ e2e/fixtures/db-dump.sql
 # coverage - unit tests (generated locally and in CI, never committed)
 /unit-coverage/
 
+# fallow
+/.fallow/
+/.var/fallow/
+
 # next.js
 /.next/
 /.next-test/
