@@ -137,42 +137,58 @@ interface ClassroomObservationStats {
   maxScore: number;
 }
 
-function getClassroomObservationStats(data: Record<string, unknown> | undefined): ClassroomObservationStats | null {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
+function readStatsString(data: Record<string, unknown>, key: string): string | null {
+  const value = data[key];
+  return typeof value === "string" ? value : null;
+}
 
-  const teacherName = typeof data.teacher_name === "string" ? data.teacher_name : null;
-  const grade = typeof data.grade === "string" ? data.grade : null;
-  const curriculumName = typeof data.curriculum_name === "string" ? data.curriculum_name : null;
-  const chapterName = typeof data.chapter_name === "string" ? data.chapter_name : null;
-  const subjectName = typeof data.subject_name === "string" ? data.subject_name : null;
-  const topicName = typeof data.topic_name === "string" ? data.topic_name : null;
-  const params = data.params && typeof data.params === "object" && !Array.isArray(data.params)
+function readClassroomObservationParams(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  return data.params && typeof data.params === "object" && !Array.isArray(data.params)
     ? (data.params as Record<string, unknown>)
     : {};
+}
 
+function summarizeClassroomObservationScores(params: Record<string, unknown>): {
+  answeredCount: number;
+  score: number;
+} {
   let answeredCount = 0;
   let score = 0;
 
   for (const parameter of CLASSROOM_OBSERVATION_RUBRIC.parameters) {
     const paramValue = params[parameter.key];
-    if (paramValue && typeof paramValue === "object" && "score" in paramValue) {
-      const paramScore = (paramValue as { score: unknown }).score;
-      if (typeof paramScore === "number" && parameter.options.some((o) => o.score === paramScore)) {
-        answeredCount += 1;
-        score += paramScore;
-      }
+    if (!paramValue || typeof paramValue !== "object" || !("score" in paramValue)) {
+      continue;
+    }
+
+    const paramScore = (paramValue as { score: unknown }).score;
+    if (typeof paramScore === "number" && parameter.options.some((o) => o.score === paramScore)) {
+      answeredCount += 1;
+      score += paramScore;
     }
   }
 
+  return { answeredCount, score };
+}
+
+function getClassroomObservationStats(data: Record<string, unknown> | undefined): ClassroomObservationStats | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const { answeredCount, score } = summarizeClassroomObservationScores(
+    readClassroomObservationParams(data)
+  );
+
   return {
-    teacherName,
-    grade,
-    curriculumName,
-    chapterName,
-    subjectName,
-    topicName,
+    teacherName: readStatsString(data, "teacher_name"),
+    grade: readStatsString(data, "grade"),
+    curriculumName: readStatsString(data, "curriculum_name"),
+    chapterName: readStatsString(data, "chapter_name"),
+    subjectName: readStatsString(data, "subject_name"),
+    topicName: readStatsString(data, "topic_name"),
     answeredCount,
     totalParams: CLASSROOM_OBSERVATION_RUBRIC.parameters.length,
     score,

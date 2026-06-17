@@ -314,6 +314,30 @@ const ALLOWED_TOP_LEVEL_KEYS = new Set([
   ACTION_ADDITIONAL_NOTES_KEY,
 ]);
 
+const OPTIONAL_STRING_FIELD_KEYS = [
+  "teacher_name",
+  "curriculum_name",
+  "curriculum_code",
+  "chapter_name",
+  "chapter_code",
+  "subject_name",
+  "topic_name",
+  "topic_code",
+] as const;
+
+const OPTIONAL_POSITIVE_INTEGER_FIELD_KEYS = [
+  "teacher_id",
+  "curriculum_id",
+  "chapter_id",
+  "subject_id",
+  "topic_id",
+] as const;
+
+const REQUIRED_COMPLETION_CONTEXT = {
+  integerKeys: ["curriculum_id", "chapter_id", "subject_id"] as const,
+  stringKeys: ["curriculum_name", "chapter_name", "subject_name"] as const,
+};
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -332,6 +356,13 @@ function validateOptionalStringField(
   }
 
   return typeof payload[key] === "string" ? [] : [`${label} must be a string`];
+}
+
+function validateOptionalStringFields(
+  payload: Record<string, unknown>,
+  keys: readonly string[]
+): string[] {
+  return keys.flatMap((key) => validateOptionalStringField(payload, key));
 }
 
 function validateOptionalIntegerField(
@@ -362,12 +393,30 @@ function validateOptionalPositiveIntegerField(
   return validateOptionalIntegerField(payload, key, 1, "positive integer", label);
 }
 
+function validateOptionalPositiveIntegerFields(
+  payload: Record<string, unknown>,
+  keys: readonly string[]
+): string[] {
+  return keys.flatMap((key) => validateOptionalPositiveIntegerField(payload, key));
+}
+
 function validateOptionalNonNegativeIntegerField(
   payload: Record<string, unknown>,
   key: string,
   label = key
 ): string[] {
   return validateOptionalIntegerField(payload, key, 0, "non-negative integer", label);
+}
+
+function validateOptionalGrade(payload: Record<string, unknown>): string[] {
+  if (!("grade" in payload) || payload.grade === undefined) {
+    return [];
+  }
+
+  return typeof payload.grade === "string" &&
+    (VALID_GRADES as readonly string[]).includes(payload.grade)
+    ? []
+    : ["grade must be one of: 10, 11, 12"];
 }
 
 function validateTopLevelShape(data: unknown): {
@@ -389,57 +438,16 @@ function validateTopLevelShape(data: unknown): {
     errors.push(`Unknown top-level field: ${key}`);
   }
   errors.push(...validateActionAdditionalNotes(payload));
-
-  if (
-    "observer_summary_strengths" in payload &&
-    payload.observer_summary_strengths !== undefined &&
-    typeof payload.observer_summary_strengths !== "string"
-  ) {
-    errors.push("observer_summary_strengths must be a string");
-  }
-
-  if (
-    "observer_summary_improvements" in payload &&
-    payload.observer_summary_improvements !== undefined &&
-    typeof payload.observer_summary_improvements !== "string"
-  ) {
-    errors.push("observer_summary_improvements must be a string");
-  }
-
-  if ("teacher_id" in payload && payload.teacher_id !== undefined) {
-    if (
-      typeof payload.teacher_id !== "number" ||
-      !Number.isFinite(payload.teacher_id) ||
-      payload.teacher_id <= 0 ||
-      !Number.isInteger(payload.teacher_id)
-    ) {
-      errors.push("teacher_id must be a positive integer");
-    }
-  }
-
-  errors.push(...validateOptionalStringField(payload, "teacher_name"));
-
-  if ("grade" in payload && payload.grade !== undefined) {
-    if (
-      typeof payload.grade !== "string" ||
-      !(VALID_GRADES as readonly string[]).includes(payload.grade)
-    ) {
-      errors.push("grade must be one of: 10, 11, 12");
-    }
-  }
-
-  errors.push(...validateOptionalPositiveIntegerField(payload, "curriculum_id"));
-  errors.push(...validateOptionalStringField(payload, "curriculum_name"));
-  errors.push(...validateOptionalStringField(payload, "curriculum_code"));
-  errors.push(...validateOptionalPositiveIntegerField(payload, "chapter_id"));
-  errors.push(...validateOptionalStringField(payload, "chapter_name"));
-  errors.push(...validateOptionalStringField(payload, "chapter_code"));
+  errors.push(
+    ...validateOptionalStringFields(payload, [
+      "observer_summary_strengths",
+      "observer_summary_improvements",
+      ...OPTIONAL_STRING_FIELD_KEYS,
+    ])
+  );
+  errors.push(...validateOptionalPositiveIntegerFields(payload, OPTIONAL_POSITIVE_INTEGER_FIELD_KEYS));
+  errors.push(...validateOptionalGrade(payload));
   errors.push(...validateOptionalNonNegativeIntegerField(payload, "chapter_topic_count"));
-  errors.push(...validateOptionalPositiveIntegerField(payload, "subject_id"));
-  errors.push(...validateOptionalStringField(payload, "subject_name"));
-  errors.push(...validateOptionalPositiveIntegerField(payload, "topic_id"));
-  errors.push(...validateOptionalStringField(payload, "topic_name"));
-  errors.push(...validateOptionalStringField(payload, "topic_code"));
 
   return { errors, payload };
 }
@@ -589,76 +597,98 @@ export function validateClassroomObservationSave(data: unknown): ValidationResul
   return { valid: errors.length === 0, errors };
 }
 
+function resolveRequiredRubric(
+  payload: Record<string, unknown>,
+  errors: string[]
+): RubricConfig | null {
+  const rubricVersion = payload.rubric_version;
+  if (rubricVersion === undefined) {
+    errors.push("rubric_version is required");
+    return null;
+  }
+
+  if (typeof rubricVersion !== "string") {
+    errors.push("rubric_version must be a string");
+    return null;
+  }
+
+  const rubric = getRubricConfig(rubricVersion);
+  if (!rubric) {
+    errors.push(`Unsupported classroom observation rubric_version: ${rubricVersion}`);
+    return null;
+  }
+
+  return rubric;
+}
+
+function validateRequiredField(
+  payload: Record<string, unknown>,
+  key: string,
+  isPresent: (value: unknown) => boolean
+): string[] {
+  return isPresent(payload[key]) ? [] : [`${key} is required`];
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value !== "";
+}
+
+function hasValue(value: unknown): boolean {
+  return value !== undefined;
+}
+
+function requiresCurriculumContext(grade: unknown): boolean {
+  return grade === "11" || grade === "12";
+}
+
+function chapterHasActiveTopics(payload: Record<string, unknown>): boolean {
+  return typeof payload.chapter_topic_count === "number" && payload.chapter_topic_count > 0;
+}
+
+function validateRequiredCurriculumContext(payload: Record<string, unknown>): string[] {
+  if (!requiresCurriculumContext(payload.grade)) {
+    return [];
+  }
+
+  const errors = [
+    ...REQUIRED_COMPLETION_CONTEXT.integerKeys.flatMap((key) =>
+      validateRequiredField(payload, key, hasValue)
+    ),
+    ...REQUIRED_COMPLETION_CONTEXT.stringKeys.flatMap((key) =>
+      validateRequiredField(payload, key, hasNonEmptyString)
+    ),
+    ...validateRequiredField(payload, "chapter_topic_count", hasValue),
+  ];
+
+  if (chapterHasActiveTopics(payload)) {
+    errors.push(...validateRequiredField(payload, "topic_id", hasValue));
+    errors.push(...validateRequiredField(payload, "topic_name", hasNonEmptyString));
+  }
+
+  return errors;
+}
+
+function validateRequiredCompletionContext(payload: Record<string, unknown>): string[] {
+  return [
+    ...validateRequiredField(payload, "teacher_id", hasValue),
+    ...validateRequiredField(payload, "teacher_name", hasNonEmptyString),
+    ...validateRequiredField(payload, "grade", hasValue),
+    ...validateRequiredCurriculumContext(payload),
+  ];
+}
+
 export function validateClassroomObservationComplete(data: unknown): ValidationResult {
   const { errors, payload } = validateTopLevelShape(data);
   if (!payload) {
     return { valid: false, errors };
   }
 
-  const rubricVersion = payload.rubric_version;
-  if (rubricVersion === undefined) {
-    errors.push("rubric_version is required");
-    return { valid: false, errors };
-  }
-
-  if (typeof rubricVersion !== "string") {
-    errors.push("rubric_version must be a string");
-    return { valid: false, errors };
-  }
-
-  const rubric = getRubricConfig(rubricVersion);
+  const rubric = resolveRequiredRubric(payload, errors);
   if (!rubric) {
-    errors.push(`Unsupported classroom observation rubric_version: ${rubricVersion}`);
     return { valid: false, errors };
   }
 
-  if (payload.teacher_id === undefined) {
-    errors.push("teacher_id is required");
-  }
-
-  if (payload.teacher_name === undefined || payload.teacher_name === "") {
-    errors.push("teacher_name is required");
-  }
-
-  if (payload.grade === undefined) {
-    errors.push("grade is required");
-  }
-
-  if (payload.grade === "11" || payload.grade === "12") {
-    if (payload.curriculum_id === undefined) {
-      errors.push("curriculum_id is required");
-    }
-    if (payload.curriculum_name === undefined || payload.curriculum_name === "") {
-      errors.push("curriculum_name is required");
-    }
-    if (payload.chapter_id === undefined) {
-      errors.push("chapter_id is required");
-    }
-    if (payload.chapter_name === undefined || payload.chapter_name === "") {
-      errors.push("chapter_name is required");
-    }
-    if (payload.chapter_topic_count === undefined) {
-      errors.push("chapter_topic_count is required");
-    }
-    if (payload.subject_id === undefined) {
-      errors.push("subject_id is required");
-    }
-    if (payload.subject_name === undefined || payload.subject_name === "") {
-      errors.push("subject_name is required");
-    }
-    if (
-      typeof payload.chapter_topic_count === "number" &&
-      payload.chapter_topic_count > 0
-    ) {
-      if (payload.topic_id === undefined) {
-        errors.push("topic_id is required");
-      }
-      if (payload.topic_name === undefined || payload.topic_name === "") {
-        errors.push("topic_name is required");
-      }
-    }
-  }
-
+  errors.push(...validateRequiredCompletionContext(payload));
   errors.push(...validateParams(payload.params, rubric, true));
 
   return { valid: errors.length === 0, errors };

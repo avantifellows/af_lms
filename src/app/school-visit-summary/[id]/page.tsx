@@ -132,67 +132,71 @@ function formatNumber(value: unknown): string | null {
     : null;
 }
 
-function statsChips(actionType: string, stats: unknown): string[] {
-  if (!isStats(stats)) {
-    return [];
-  }
+type StatsChipBuilder = (stats: InlineStats) => string[];
 
-  if (actionType === "classroom_observation") {
-    const chips = [
-      `Score ${stats.totalScore}/${stats.maxScore}`,
-      `Remarks ${stats.remarkCount}`,
-    ];
-    if (typeof stats.curriculumName === "string" && stats.curriculumName) {
-      chips.push(`Curriculum ${stats.curriculumName}`);
-    }
-    if (typeof stats.chapterName === "string" && stats.chapterName) {
-      const subjectPrefix =
-        typeof stats.subjectName === "string" && stats.subjectName
-          ? `${stats.subjectName} - `
-          : "";
-      chips.push(`Chapter ${subjectPrefix}${stats.chapterName}`);
-    }
-    if (typeof stats.topicName === "string" && stats.topicName) {
-      chips.push(`Topic ${stats.topicName}`);
-    }
-    return chips;
+function classroomObservationChips(stats: InlineStats): string[] {
+  const chips = [
+    `Score ${stats.totalScore}/${stats.maxScore}`,
+    `Remarks ${stats.remarkCount}`,
+  ];
+  if (typeof stats.curriculumName === "string" && stats.curriculumName) {
+    chips.push(`Curriculum ${stats.curriculumName}`);
   }
-  if (actionType === "af_team_interaction") {
-    return [
-      `Answered ${stats.answeredCount}/${stats.totalQuestions}`,
-      `Teachers ${stats.teacherCount}`,
-    ];
+  if (typeof stats.chapterName === "string" && stats.chapterName) {
+    const subjectPrefix =
+      typeof stats.subjectName === "string" && stats.subjectName
+        ? `${stats.subjectName} - `
+        : "";
+    chips.push(`Chapter ${subjectPrefix}${stats.chapterName}`);
   }
-  if (actionType === "individual_af_teacher_interaction") {
-    const avgAnswered = formatNumber(stats.avgAnswered);
-    return [
-      `Teachers ${stats.teacherCount} (${stats.presentCount} present, ${stats.onLeaveCount} on leave, ${stats.absentCount} absent)`,
-      `Avg answered ${avgAnswered ?? "-"}/${stats.totalQuestions}`,
-    ];
+  if (typeof stats.topicName === "string" && stats.topicName) {
+    chips.push(`Topic ${stats.topicName}`);
   }
-  if (actionType === "principal_interaction") {
-    return [`Answered ${stats.answeredCount}/${stats.totalQuestions}`];
+  return chips;
+}
+
+function individualTeacherInteractionChips(stats: InlineStats): string[] {
+  const avgAnswered = formatNumber(stats.avgAnswered);
+  return [
+    `Teachers ${stats.teacherCount} (${stats.presentCount} present, ${stats.onLeaveCount} on leave, ${stats.absentCount} absent)`,
+    `Avg answered ${avgAnswered ?? "-"}/${stats.totalQuestions}`,
+  ];
+}
+
+function groupStudentDiscussionChips(stats: InlineStats): string[] {
+  return [
+    stats.grade === null || stats.grade === undefined ? "Grade -" : `Grade ${stats.grade}`,
+    `Answered ${stats.answeredCount}/${stats.totalQuestions}`,
+  ];
+}
+
+function individualStudentDiscussionChips(stats: InlineStats): string[] {
+  const avgAnswered = formatNumber(stats.avgAnswered);
+  const chips: string[] = [];
+  if (stats.entryCount !== null) {
+    chips.push(`Entries ${stats.entryCount}`);
   }
-  if (actionType === "group_student_discussion") {
-    return [
-      stats.grade === null || stats.grade === undefined ? "Grade -" : `Grade ${stats.grade}`,
-      `Answered ${stats.answeredCount}/${stats.totalQuestions}`,
-    ];
-  }
-  if (actionType === "individual_student_discussion") {
-    const avgAnswered = formatNumber(stats.avgAnswered);
-    const chips: string[] = [];
-    if (stats.entryCount !== null) {
-      chips.push(`Entries ${stats.entryCount}`);
-    }
-    chips.push(`Students ${stats.studentCount}`);
-    chips.push(`Avg answered ${avgAnswered ?? "-"}/${stats.totalQuestions}`);
-    return chips;
-  }
-  if (actionType === "school_staff_interaction") {
-    return [`Answered ${stats.answeredCount}/${stats.totalQuestions}`];
-  }
-  return [];
+  chips.push(`Students ${stats.studentCount}`);
+  chips.push(`Avg answered ${avgAnswered ?? "-"}/${stats.totalQuestions}`);
+  return chips;
+}
+
+const STATS_CHIP_BUILDERS: Record<string, StatsChipBuilder> = {
+  classroom_observation: classroomObservationChips,
+  af_team_interaction: (stats) => [
+    `Answered ${stats.answeredCount}/${stats.totalQuestions}`,
+    `Teachers ${stats.teacherCount}`,
+  ],
+  individual_af_teacher_interaction: individualTeacherInteractionChips,
+  principal_interaction: (stats) => [`Answered ${stats.answeredCount}/${stats.totalQuestions}`],
+  group_student_discussion: groupStudentDiscussionChips,
+  individual_student_discussion: individualStudentDiscussionChips,
+  school_staff_interaction: (stats) => [`Answered ${stats.answeredCount}/${stats.totalQuestions}`],
+};
+
+function statsChips(actionType: string, stats: unknown): string[] {
+  const buildChips = STATS_CHIP_BUILDERS[actionType];
+  return buildChips && isStats(stats) ? buildChips(stats) : [];
 }
 
 function actionTypeLabel(actionType: string): string {
