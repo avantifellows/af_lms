@@ -138,10 +138,24 @@ function statsChips(actionType: string, stats: unknown): string[] {
   }
 
   if (actionType === "classroom_observation") {
-    return [
+    const chips = [
       `Score ${stats.totalScore}/${stats.maxScore}`,
       `Remarks ${stats.remarkCount}`,
     ];
+    if (typeof stats.curriculumName === "string" && stats.curriculumName) {
+      chips.push(`Curriculum ${stats.curriculumName}`);
+    }
+    if (typeof stats.chapterName === "string" && stats.chapterName) {
+      const subjectPrefix =
+        typeof stats.subjectName === "string" && stats.subjectName
+          ? `${stats.subjectName} - `
+          : "";
+      chips.push(`Chapter ${subjectPrefix}${stats.chapterName}`);
+    }
+    if (typeof stats.topicName === "string" && stats.topicName) {
+      chips.push(`Topic ${stats.topicName}`);
+    }
+    return chips;
   }
   if (actionType === "af_team_interaction") {
     return [

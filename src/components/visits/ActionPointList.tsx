@@ -127,6 +127,10 @@ function formatTimestamp(value: string | null): string {
 interface ClassroomObservationStats {
   teacherName: string | null;
   grade: string | null;
+  curriculumName: string | null;
+  chapterName: string | null;
+  subjectName: string | null;
+  topicName: string | null;
   answeredCount: number;
   totalParams: number;
   score: number;
@@ -140,6 +144,10 @@ function getClassroomObservationStats(data: Record<string, unknown> | undefined)
 
   const teacherName = typeof data.teacher_name === "string" ? data.teacher_name : null;
   const grade = typeof data.grade === "string" ? data.grade : null;
+  const curriculumName = typeof data.curriculum_name === "string" ? data.curriculum_name : null;
+  const chapterName = typeof data.chapter_name === "string" ? data.chapter_name : null;
+  const subjectName = typeof data.subject_name === "string" ? data.subject_name : null;
+  const topicName = typeof data.topic_name === "string" ? data.topic_name : null;
   const params = data.params && typeof data.params === "object" && !Array.isArray(data.params)
     ? (data.params as Record<string, unknown>)
     : {};
@@ -161,6 +169,10 @@ function getClassroomObservationStats(data: Record<string, unknown> | undefined)
   return {
     teacherName,
     grade,
+    curriculumName,
+    chapterName,
+    subjectName,
+    topicName,
     answeredCount,
     totalParams: CLASSROOM_OBSERVATION_RUBRIC.parameters.length,
     score,
@@ -714,6 +726,23 @@ export default function ActionPointList({
                     {stats.grade && (
                       <span className="text-text-secondary">
                         <span className="text-text-muted">Grade:</span> {stats.grade}
+                      </span>
+                    )}
+                    {stats.curriculumName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Curriculum:</span> {stats.curriculumName}
+                      </span>
+                    )}
+                    {stats.chapterName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Chapter:</span>{" "}
+                        {stats.subjectName ? `${stats.subjectName} - ` : ""}
+                        {stats.chapterName}
+                      </span>
+                    )}
+                    {stats.topicName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Topic:</span> {stats.topicName}
                       </span>
                     )}
                     <span className="font-mono text-accent font-bold">

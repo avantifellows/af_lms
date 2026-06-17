@@ -296,6 +296,15 @@ describe("VisitActionDetailPage", () => {
               teacher_on_time: { score: 1, remarks: "Observed" },
             },
             observer_summary_strengths: "Strong opening",
+            curriculum_id: 1,
+            curriculum_name: "JEE Mains",
+            chapter_id: 44,
+            chapter_name: "Units and Measurement",
+            chapter_topic_count: 2,
+            subject_id: 4,
+            subject_name: "Physics",
+            topic_id: 101,
+            topic_name: "Physical Quantities",
           },
         }),
       ]);
@@ -315,6 +324,15 @@ describe("VisitActionDetailPage", () => {
                     teacher_on_time: { score: 1, remarks: "Observed" },
                   },
                   observer_summary_strengths: "Strong opening",
+                  curriculum_id: 1,
+                  curriculum_name: "JEE Mains",
+                  chapter_id: 44,
+                  chapter_name: "Units and Measurement",
+                  chapter_topic_count: 2,
+                  subject_id: 4,
+                  subject_name: "Physics",
+                  topic_id: 101,
+                  topic_name: "Physical Quantities",
                 },
               }),
             }),
@@ -342,6 +360,17 @@ describe("VisitActionDetailPage", () => {
       teacher_on_time: { score: 1, remarks: "Observed" },
     });
     expect(body.data.observer_summary_strengths).toBe("Strong opening");
+    expect(body.data).toMatchObject({
+      curriculum_id: 1,
+      curriculum_name: "JEE Mains",
+      chapter_id: 44,
+      chapter_name: "Units and Measurement",
+      chapter_topic_count: 2,
+      subject_id: 4,
+      subject_name: "Physics",
+      topic_id: 101,
+      topic_name: "Physical Quantities",
+    });
     expect(body.data).not.toHaveProperty("class_details");
     expect(body.data).not.toHaveProperty("observations");
     expect(body.data).not.toHaveProperty("support_needed");

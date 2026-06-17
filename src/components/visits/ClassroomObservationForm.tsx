@@ -12,6 +12,7 @@ import {
 import { getTeacherDisplayName, type Teacher } from "@/lib/teacher-utils";
 import { isPlainObject } from "@/lib/visit-form-utils";
 import { FormSection, Select, StickyProgressBar } from "@/components/ui";
+import ClassroomObservationContextFields from "./ClassroomObservationContextFields";
 
 interface ClassroomObservationFormProps {
   data: Record<string, unknown>;
@@ -20,8 +21,34 @@ interface ClassroomObservationFormProps {
   schoolCode: string;
 }
 
+const CURRICULUM_FIELD_KEYS = [
+  "curriculum_id",
+  "curriculum_name",
+  "curriculum_code",
+  "chapter_id",
+  "chapter_name",
+  "chapter_code",
+  "chapter_topic_count",
+  "subject_id",
+  "subject_name",
+  "topic_id",
+  "topic_name",
+  "topic_code",
+] as const;
+
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function clearFields(
+  data: Record<string, unknown>,
+  keys: readonly string[]
+): Record<string, unknown> {
+  const next = { ...data };
+  for (const key of keys) {
+    delete next[key];
+  }
+  return next;
 }
 
 function getParams(data: Record<string, unknown>): Record<string, ParamData> {
@@ -126,7 +153,7 @@ export default function ClassroomObservationForm({
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const grade = event.target.value;
       setData((current) => ({
-        ...current,
+        ...clearFields(current, CURRICULUM_FIELD_KEYS),
         grade,
       }));
     },
@@ -156,6 +183,7 @@ export default function ClassroomObservationForm({
   const hasTeacher = selectedTeacherId !== null;
   const hasGrade = selectedGrade !== null && (VALID_GRADES as readonly string[]).includes(selectedGrade);
   const showRubric = hasTeacher && hasGrade;
+  const showCurriculumFields = hasTeacher && hasGrade;
 
   return (
     <div className="space-y-4" data-testid="classroom-observation-form">
@@ -224,6 +252,16 @@ export default function ClassroomObservationForm({
             </Select>
           )}
         </FormSection>
+      )}
+
+      {showCurriculumFields && selectedGrade && (
+        <ClassroomObservationContextFields
+          data={data}
+          setData={setData}
+          disabled={disabled}
+          schoolCode={schoolCode}
+          selectedGrade={selectedGrade}
+        />
       )}
 
       {/* Gating messages */}

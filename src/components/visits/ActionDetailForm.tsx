@@ -198,6 +198,38 @@ function assignStringField(
   }
 }
 
+function assignPositiveNumberField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+): void {
+  const value = source[key];
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value > 0
+  ) {
+    target[key] = value;
+  }
+}
+
+function assignNonNegativeNumberField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+): void {
+  const value = source[key];
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= 0
+  ) {
+    target[key] = value;
+  }
+}
+
 function sanitizeRubricParam(value: unknown): Record<string, unknown> | null {
   if (!isPlainObject(value)) {
     return null;
@@ -305,12 +337,21 @@ function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
   assignStringField(sanitized, data, "observer_summary_strengths");
   assignStringField(sanitized, data, "observer_summary_improvements");
 
-  if (typeof data.teacher_id === "number" && Number.isFinite(data.teacher_id) && data.teacher_id > 0) {
-    sanitized.teacher_id = data.teacher_id;
-  }
-
+  assignPositiveNumberField(sanitized, data, "teacher_id");
   assignStringField(sanitized, data, "teacher_name");
   assignStringField(sanitized, data, "grade");
+  assignPositiveNumberField(sanitized, data, "curriculum_id");
+  assignStringField(sanitized, data, "curriculum_name");
+  assignStringField(sanitized, data, "curriculum_code");
+  assignPositiveNumberField(sanitized, data, "chapter_id");
+  assignStringField(sanitized, data, "chapter_name");
+  assignStringField(sanitized, data, "chapter_code");
+  assignNonNegativeNumberField(sanitized, data, "chapter_topic_count");
+  assignPositiveNumberField(sanitized, data, "subject_id");
+  assignStringField(sanitized, data, "subject_name");
+  assignPositiveNumberField(sanitized, data, "topic_id");
+  assignStringField(sanitized, data, "topic_name");
+  assignStringField(sanitized, data, "topic_code");
 
   appendActionAdditionalNotes(sanitized, data);
 
