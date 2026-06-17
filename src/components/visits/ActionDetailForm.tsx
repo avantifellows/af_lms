@@ -187,6 +187,105 @@ function isLocationCancelled(error: unknown): boolean {
   );
 }
 
+function assignStringField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+): void {
+  const value = source[key];
+  if (typeof value === "string") {
+    target[key] = value;
+  }
+}
+
+function sanitizeRubricParam(value: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const nextValue: Record<string, unknown> = {};
+
+  if (typeof value.score === "number" && Number.isFinite(value.score)) {
+    nextValue.score = value.score;
+  }
+
+  if (typeof value.remarks === "string") {
+    nextValue.remarks = value.remarks;
+  }
+
+  return Object.keys(nextValue).length > 0 ? nextValue : null;
+}
+
+function sanitizeRubricParams(paramsValue: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(paramsValue)) {
+    return null;
+  }
+
+  const params: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(paramsValue)) {
+    const sanitizedParam = sanitizeRubricParam(value);
+    if (sanitizedParam) {
+      params[key] = sanitizedParam;
+    }
+  }
+
+  return params;
+}
+
+function sanitizeQuestionEntry(value: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const entry: Record<string, unknown> = {};
+  if (value.answer === null || typeof value.answer === "boolean") {
+    entry.answer = value.answer;
+  }
+  if (typeof value.remark === "string") {
+    entry.remark = value.remark;
+  }
+
+  return Object.keys(entry).length > 0 ? entry : null;
+}
+
+function sanitizeQuestionMap(
+  questionsValue: unknown,
+  questionKeys: readonly string[]
+): Record<string, unknown> {
+  const questions: Record<string, unknown> = {};
+  if (!isPlainObject(questionsValue)) {
+    return questions;
+  }
+
+  for (const key of questionKeys) {
+    const entry = sanitizeQuestionEntry(questionsValue[key]);
+    if (entry) {
+      questions[key] = entry;
+    }
+  }
+
+  return questions;
+}
+
+function sanitizeTeacherRefs(value: unknown): Array<{ id: number; name: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (
+      isPlainObject(entry) &&
+      typeof entry.id === "number" &&
+      Number.isFinite(entry.id) &&
+      typeof entry.name === "string"
+    ) {
+      return [{ id: entry.id, name: entry.name }];
+    }
+
+    return [];
+  });
+}
+
 function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
   if (!isPlainObject(data)) {
     return {};
@@ -198,51 +297,20 @@ function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
     sanitized.rubric_version = data.rubric_version;
   }
 
-  if (isPlainObject(data.params)) {
-    const params: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(data.params)) {
-      if (!isPlainObject(value)) {
-        continue;
-      }
-
-      const nextValue: Record<string, unknown> = {};
-
-      if (typeof value.score === "number" && Number.isFinite(value.score)) {
-        nextValue.score = value.score;
-      }
-
-      if (typeof value.remarks === "string") {
-        nextValue.remarks = value.remarks;
-      }
-
-      if (Object.keys(nextValue).length > 0) {
-        params[key] = nextValue;
-      }
-    }
-
+  const params = sanitizeRubricParams(data.params);
+  if (params) {
     sanitized.params = params;
   }
 
-  if (typeof data.observer_summary_strengths === "string") {
-    sanitized.observer_summary_strengths = data.observer_summary_strengths;
-  }
-
-  if (typeof data.observer_summary_improvements === "string") {
-    sanitized.observer_summary_improvements = data.observer_summary_improvements;
-  }
+  assignStringField(sanitized, data, "observer_summary_strengths");
+  assignStringField(sanitized, data, "observer_summary_improvements");
 
   if (typeof data.teacher_id === "number" && Number.isFinite(data.teacher_id) && data.teacher_id > 0) {
     sanitized.teacher_id = data.teacher_id;
   }
 
-  if (typeof data.teacher_name === "string") {
-    sanitized.teacher_name = data.teacher_name;
-  }
-
-  if (typeof data.grade === "string") {
-    sanitized.grade = data.grade;
-  }
+  assignStringField(sanitized, data, "teacher_name");
+  assignStringField(sanitized, data, "grade");
 
   appendActionAdditionalNotes(sanitized, data);
 
@@ -259,45 +327,18 @@ function bootstrapClassroomPayload(data: unknown): Record<string, unknown> {
   return sanitized;
 }
 
-function sanitizeAFTeamPayload(data: Record<string, unknown>): Record<string, unknown> {
+function sanitizeAFTeamPayload(data: unknown): Record<string, unknown> {
   if (!isPlainObject(data)) {
     return { teachers: [], questions: {} };
   }
 
-  const teachers: Array<{ id: number; name: string }> = [];
-  if (Array.isArray(data.teachers)) {
-    for (const entry of data.teachers) {
-      if (
-        isPlainObject(entry) &&
-        typeof entry.id === "number" &&
-        Number.isFinite(entry.id) &&
-        typeof entry.name === "string"
-      ) {
-        teachers.push({ id: entry.id, name: entry.name });
-      }
-    }
-  }
-
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  const sanitized = { teachers, questions };
+  const sanitized = {
+    teachers: sanitizeTeacherRefs(data.teachers),
+    questions: sanitizeQuestionMap(
+      data.questions,
+      AF_TEAM_INTERACTION_CONFIG.allQuestionKeys
+    ),
+  };
   appendActionAdditionalNotes(sanitized, data);
   return sanitized;
 }
@@ -373,26 +414,12 @@ function sanitizePrincipalInteractionPayload(data: unknown): Record<string, unkn
     return { questions: {} };
   }
 
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  const sanitized = { questions };
+  const sanitized = {
+    questions: sanitizeQuestionMap(
+      data.questions,
+      PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys
+    ),
+  };
   appendActionAdditionalNotes(sanitized, data);
   return sanitized;
 }
@@ -410,27 +437,13 @@ function sanitizeGroupStudentDiscussionPayload(data: unknown): Record<string, un
   }
 
   const grade = typeof data.grade === "number" && Number.isFinite(data.grade) ? data.grade : null;
-
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  const sanitized = { grade, questions };
+  const sanitized = {
+    grade,
+    questions: sanitizeQuestionMap(
+      data.questions,
+      GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys
+    ),
+  };
   appendActionAdditionalNotes(sanitized, data);
   return sanitized;
 }
@@ -518,26 +531,12 @@ function sanitizeSchoolStaffInteractionPayload(data: unknown): Record<string, un
     return { questions: {} };
   }
 
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  const sanitized = { questions };
+  const sanitized = {
+    questions: sanitizeQuestionMap(
+      data.questions,
+      SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys
+    ),
+  };
   appendActionAdditionalNotes(sanitized, data);
   return sanitized;
 }
