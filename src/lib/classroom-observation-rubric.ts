@@ -1,4 +1,8 @@
 import type { RemarkEntry } from "./visit-summary";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  validateActionAdditionalNotes,
+} from "./visit-form-utils";
 
 export interface RubricOption {
   label: string;
@@ -39,6 +43,7 @@ export interface ClassroomObservationData {
   teacher_id?: number;
   teacher_name?: string;
   grade?: string;
+  additional_notes?: string;
 }
 
 export interface ValidationResult {
@@ -305,6 +310,7 @@ const ALLOWED_TOP_LEVEL_KEYS = new Set([
   "teacher_id",
   "teacher_name",
   "grade",
+  ACTION_ADDITIONAL_NOTES_KEY,
 ]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -333,6 +339,7 @@ function validateTopLevelShape(data: unknown): {
   for (const key of unknownTopLevel) {
     errors.push(`Unknown top-level field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   if (
     "observer_summary_strengths" in payload &&

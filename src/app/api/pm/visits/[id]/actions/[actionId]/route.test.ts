@@ -1052,6 +1052,30 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     await expect(res.json()).resolves.toEqual({ action: updated });
   });
 
+  it("accepts action-level additional notes for in-progress principal interaction", async () => {
+    setupPmView();
+    const action = { ...BASE_ACTION_ROW, action_type: "principal_interaction" };
+    const payload = { questions: {}, additional_notes: "Follow up on timetable changes" };
+    const updated = { ...action, data: payload };
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([action])
+      .mockResolvedValueOnce([updated]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
+      method: "PATCH",
+      body: JSON.stringify({ data: payload }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: updated });
+    const [updateQueryText, updateParams] = mockQuery.mock.calls[2] as [string, unknown[]];
+    expect(updateQueryText).toContain("UPDATE lms_pm_school_visit_actions");
+    expect(JSON.parse(String(updateParams[2]))).toEqual(payload);
+  });
+
   it("returns 422 for principal interaction with unknown top-level keys (lenient)", async () => {
     setupPmView();
     mockQuery

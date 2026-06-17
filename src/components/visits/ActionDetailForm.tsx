@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useAutoSave, type AutoSaveStatus } from "@/hooks/use-auto-save";
 
 import Toast from "@/components/Toast";
+import { FormSection, baseInputClasses } from "@/components/ui";
 import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
 import IndividualAFTeacherInteractionForm from "@/components/visits/IndividualAFTeacherInteractionForm";
@@ -26,7 +27,13 @@ import {
 } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
 import { getActionTypeLabel, isActionType, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
-import { isPlainObject } from "@/lib/visit-form-utils";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  ACTION_ADDITIONAL_NOTES_LABEL,
+  appendActionAdditionalNotes,
+  isPlainObject,
+  readActionAdditionalNotes,
+} from "@/lib/visit-form-utils";
 
 interface ActionRecord {
   id: number;
@@ -237,6 +244,8 @@ function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
     sanitized.grade = data.grade;
   }
 
+  appendActionAdditionalNotes(sanitized, data);
+
   return sanitized;
 }
 
@@ -288,7 +297,9 @@ function sanitizeAFTeamPayload(data: Record<string, unknown>): Record<string, un
     }
   }
 
-  return { teachers, questions };
+  const sanitized = { teachers, questions };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapAFTeamPayload(data: unknown): Record<string, unknown> {
@@ -345,7 +356,9 @@ function sanitizeIndividualTeacherPayload(data: unknown): Record<string, unknown
     }
   }
 
-  return { teachers };
+  const sanitized = { teachers };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapIndividualTeacherPayload(data: unknown): Record<string, unknown> {
@@ -379,7 +392,9 @@ function sanitizePrincipalInteractionPayload(data: unknown): Record<string, unkn
     }
   }
 
-  return { questions };
+  const sanitized = { questions };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapPrincipalInteractionPayload(data: unknown): Record<string, unknown> {
@@ -415,7 +430,9 @@ function sanitizeGroupStudentDiscussionPayload(data: unknown): Record<string, un
     }
   }
 
-  return { grade, questions };
+  const sanitized = { grade, questions };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapGroupStudentDiscussionPayload(data: unknown): Record<string, unknown> {
@@ -484,12 +501,14 @@ function sanitizeIndividualStudentDiscussionPayload(data: unknown): Record<strin
     }
   }
 
-  return { entries };
+  const sanitized = { entries };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
-  if (data && typeof data === "object" && !Array.isArray(data) && "entries" in data) {
-    return data as Record<string, unknown>;
+  if (isPlainObject(data)) {
+    return sanitizeIndividualStudentDiscussionPayload(data);
   }
   return { entries: [] };
 }
@@ -518,7 +537,9 @@ function sanitizeSchoolStaffInteractionPayload(data: unknown): Record<string, un
     }
   }
 
-  return { questions };
+  const sanitized = { questions };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapSchoolStaffInteractionPayload(data: unknown): Record<string, unknown> {
@@ -746,6 +767,7 @@ export default function ActionDetailForm({
     isClassroomObservation && rubricVersion !== null && getRubricConfig(rubricVersion) === null;
 
   const isVisitCompleted = visitStatus === "completed";
+  const additionalNotes = readActionAdditionalNotes(formData);
   const canSave =
     !isVisitCompleted &&
     canWrite &&
@@ -1097,6 +1119,29 @@ export default function ActionDetailForm({
             </label>
           ))
         )}
+
+        <FormSection spacing="space-y-2" className="bg-bg-card-alt">
+          <label className="block">
+            <span className="mb-1 block text-sm font-semibold uppercase text-text-primary">
+              {ACTION_ADDITIONAL_NOTES_LABEL}
+            </span>
+            <textarea
+              value={additionalNotes}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setFormData((current) => ({
+                  ...current,
+                  [ACTION_ADDITIONAL_NOTES_KEY]: nextValue,
+                }));
+              }}
+              disabled={!canSave || isBusy}
+              rows={4}
+              placeholder="Capture extra context, observations, or concerns"
+              className={`w-full ${baseInputClasses}`}
+              data-testid="action-additional-notes"
+            />
+          </label>
+        </FormSection>
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
           {canSave && (

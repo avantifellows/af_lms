@@ -1,4 +1,8 @@
 import type { RemarkEntry } from "./visit-summary";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  validateActionAdditionalNotes,
+} from "./visit-form-utils";
 
 export interface ValidationResult {
   valid: boolean;
@@ -22,6 +26,7 @@ export interface PrincipalInteractionConfig {
 
 export interface PrincipalInteractionData {
   questions: Record<string, { answer: boolean | null; remark?: string }>;
+  additional_notes?: string;
 }
 
 const sections: SectionConfig[] = [
@@ -91,7 +96,10 @@ export const PRINCIPAL_INTERACTION_CONFIG: PrincipalInteractionConfig = {
   allQuestionKeys: sections.flatMap((s) => s.questions.map((q) => q.key)),
 };
 
-const ALLOWED_TOP_LEVEL_KEYS = new Set(["questions"]);
+const ALLOWED_TOP_LEVEL_KEYS = new Set([
+  "questions",
+  ACTION_ADDITIONAL_NOTES_KEY,
+]);
 
 const questionKeyToLabel = new Map<string, string>(
   PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys.map((key) => {
@@ -176,6 +184,7 @@ export function validatePrincipalInteractionSave(data: unknown): ValidationResul
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   if ("questions" in payload) {
     errors.push(...validateQuestions(payload.questions, false));
@@ -198,6 +207,7 @@ export function validatePrincipalInteractionComplete(data: unknown): ValidationR
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   errors.push(...validateQuestions(payload.questions, true));
 

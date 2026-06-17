@@ -143,6 +143,7 @@ describe("summary action dispatch", () => {
   it("delegates known action types and handles unknown types gracefully", () => {
     expect(
       dispatchExtractRemarks("principal_interaction", {
+        additional_notes: "Bring district schedule next visit",
         questions: {
           oh_program_feedback: { answer: true, remark: "Principal wants monthly updates" },
         },
@@ -151,6 +152,10 @@ describe("summary action dispatch", () => {
       {
         label: "Does the Principal have any feedback or concerns on the program implementation?",
         text: "Principal wants monthly updates",
+      },
+      {
+        label: "Additional Notes or Concerns",
+        text: "Bring district schedule next visit",
       },
     ]);
 
@@ -164,6 +169,14 @@ describe("summary action dispatch", () => {
     ).toEqual({ answeredCount: 1, totalQuestions: 7 });
 
     expect(dispatchExtractRemarks("unknown_action", {})).toEqual([]);
+    expect(dispatchExtractRemarks("unknown_action", {
+      additional_notes: "Unclassified follow-up",
+    })).toEqual([
+      {
+        label: "Additional Notes or Concerns",
+        text: "Unclassified follow-up",
+      },
+    ]);
     expect(dispatchComputeInlineStats("unknown_action", {})).toBeNull();
   });
 

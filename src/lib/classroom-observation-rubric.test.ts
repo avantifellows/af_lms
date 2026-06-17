@@ -117,6 +117,7 @@ describe("validateClassroomObservationSave", () => {
           recall_test: { score: 2, remarks: "interactive" },
         },
         observer_summary_strengths: "strong structure",
+        additional_notes: "Teacher requested chapter-level support",
       })
     ).toEqual({ valid: true, errors: [] });
   });
@@ -144,6 +145,14 @@ describe("validateClassroomObservationSave", () => {
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("Unknown top-level field: legacy_key");
+  });
+
+  it("rejects non-string action-level additional notes", () => {
+    const result = validateClassroomObservationSave({
+      additional_notes: 42,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("additional_notes must be a string");
   });
 
   it("rejects unknown rubric versions when provided", () => {

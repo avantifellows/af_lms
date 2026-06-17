@@ -168,6 +168,7 @@ const actions = [
     action_type: "principal_interaction",
     status: "completed",
     data: {
+      additional_notes: "Bring district schedule next visit",
       questions: {
         oh_program_feedback: { answer: true, remark: "Principal asked for monthly updates" },
       },
@@ -338,6 +339,8 @@ describe("SchoolVisitSummaryDetailPage", () => {
     expect(within(remarks).getByText("Students were engaged")).toBeInTheDocument();
     expect(within(remarks).getByText("Classes are on schedule")).toBeInTheDocument();
     expect(within(remarks).getByText("Principal asked for monthly updates")).toBeInTheDocument();
+    expect(within(remarks).getByText("Additional Notes or Concerns")).toBeInTheDocument();
+    expect(within(remarks).getByText("Bring district schedule next visit")).toBeInTheDocument();
     expect(within(remarks).getByText("Students want slower pacing")).toBeInTheDocument();
 
     expect(screen.queryByText("Delete")).not.toBeInTheDocument();

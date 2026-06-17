@@ -1,5 +1,9 @@
 import { ACTION_TYPE_VALUES, isActionType, type ActionType } from "./visit-actions";
 import {
+  ACTION_ADDITIONAL_NOTES_LABEL,
+  readActionAdditionalNotes,
+} from "./visit-form-utils";
+import {
   computeInlineStats as computeAFTeamInlineStats,
   extractRemarks as extractAFTeamRemarks,
 } from "./af-team-interaction";
@@ -121,23 +125,28 @@ export function resolvePresetDateRange(
 }
 
 export function dispatchExtractRemarks(actionType: string, data: unknown): RemarkEntry[] {
+  const additionalNotes = readActionAdditionalNotes(data).trim();
+  const actionNotes = additionalNotes
+    ? [{ label: ACTION_ADDITIONAL_NOTES_LABEL, text: additionalNotes }]
+    : [];
+
   switch (actionType) {
     case "classroom_observation":
-      return extractClassroomRemarks(data);
+      return [...extractClassroomRemarks(data), ...actionNotes];
     case "af_team_interaction":
-      return extractAFTeamRemarks(data);
+      return [...extractAFTeamRemarks(data), ...actionNotes];
     case "individual_af_teacher_interaction":
-      return extractIndividualTeacherRemarks(data);
+      return [...extractIndividualTeacherRemarks(data), ...actionNotes];
     case "principal_interaction":
-      return extractPrincipalRemarks(data);
+      return [...extractPrincipalRemarks(data), ...actionNotes];
     case "group_student_discussion":
-      return extractGroupStudentRemarks(data);
+      return [...extractGroupStudentRemarks(data), ...actionNotes];
     case "individual_student_discussion":
-      return extractIndividualStudentRemarks(data);
+      return [...extractIndividualStudentRemarks(data), ...actionNotes];
     case "school_staff_interaction":
-      return extractSchoolStaffRemarks(data);
+      return [...extractSchoolStaffRemarks(data), ...actionNotes];
     default:
-      return [];
+      return actionNotes;
   }
 }
 
