@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { apiError, canAccessVisitSchoolScope, requireVisitsAccess } from "@/lib/visits-policy";
+import { apiError, requireVisitsAccess, resolveAccessibleVisitSchoolRegion } from "@/lib/visits-policy";
 
 interface TeacherRow {
   id: number;
@@ -24,18 +24,10 @@ export async function GET(request: NextRequest) {
     return apiError(400, "school_code query parameter is required");
   }
 
-  // Find the school's region so we can include region-level teachers
-  const schoolRows = await query<{ region: string | null }>(
-    `SELECT region FROM school WHERE code = $1`,
-    [schoolCode]
-  );
-  const schoolRegion = schoolRows[0]?.region ?? null;
-
-  // Check if the user can access this school
-  if (!canAccessVisitSchoolScope(access.actor, schoolCode, schoolRegion)) {
-    return apiError(403, "Forbidden");
+  const schoolAccess = await resolveAccessibleVisitSchoolRegion(access.actor, schoolCode);
+  if (!schoolAccess.ok) {
+    return schoolAccess.response;
   }
-
 
   // Match teachers who either:
   // 1. Have this school_code in their school_codes array (level 1), OR
@@ -51,7 +43,7 @@ export async function GET(request: NextRequest) {
          OR level = 3
        )
      ORDER BY full_name NULLS LAST, email`,
-    [schoolCode, schoolRegion]
+    [schoolCode, schoolAccess.schoolRegion]
   );
 
   return NextResponse.json({ teachers });

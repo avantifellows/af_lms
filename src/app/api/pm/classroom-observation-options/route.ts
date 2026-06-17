@@ -6,12 +6,7 @@ import {
   getClassroomObservationCurriculumOptions,
   isClassroomObservationGrade,
 } from "@/lib/classroom-observation-curriculum";
-import { query } from "@/lib/db";
-import { apiError, canAccessVisitSchoolScope, requireVisitsAccess } from "@/lib/visits-policy";
-
-interface SchoolRow {
-  region: string | null;
-}
+import { apiError, requireVisitsAccess, resolveAccessibleVisitSchoolRegion } from "@/lib/visits-policy";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -30,14 +25,9 @@ export async function GET(request: NextRequest) {
     return apiError(400, "grade must be one of: 10, 11, 12");
   }
 
-  const schoolRows = await query<SchoolRow>(
-    `SELECT region FROM school WHERE code = $1`,
-    [schoolCode]
-  );
-  const schoolRegion = schoolRows[0]?.region ?? null;
-
-  if (!canAccessVisitSchoolScope(access.actor, schoolCode, schoolRegion)) {
-    return apiError(403, "Forbidden");
+  const schoolAccess = await resolveAccessibleVisitSchoolRegion(access.actor, schoolCode);
+  if (!schoolAccess.ok) {
+    return schoolAccess.response;
   }
 
   const options = await getClassroomObservationCurriculumOptions({ grade });

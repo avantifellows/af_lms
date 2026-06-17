@@ -334,9 +334,11 @@ function validateOptionalStringField(
   return typeof payload[key] === "string" ? [] : [`${label} must be a string`];
 }
 
-function validateOptionalPositiveIntegerField(
+function validateOptionalIntegerField(
   payload: Record<string, unknown>,
   key: string,
+  minimum: number,
+  description: string,
   label = key
 ): string[] {
   if (!(key in payload) || payload[key] === undefined) {
@@ -346,10 +348,18 @@ function validateOptionalPositiveIntegerField(
   const value = payload[key];
   return typeof value === "number" &&
     Number.isFinite(value) &&
-    value > 0 &&
+    value >= minimum &&
     Number.isInteger(value)
     ? []
-    : [`${label} must be a positive integer`];
+    : [`${label} must be a ${description}`];
+}
+
+function validateOptionalPositiveIntegerField(
+  payload: Record<string, unknown>,
+  key: string,
+  label = key
+): string[] {
+  return validateOptionalIntegerField(payload, key, 1, "positive integer", label);
 }
 
 function validateOptionalNonNegativeIntegerField(
@@ -357,17 +367,7 @@ function validateOptionalNonNegativeIntegerField(
   key: string,
   label = key
 ): string[] {
-  if (!(key in payload) || payload[key] === undefined) {
-    return [];
-  }
-
-  const value = payload[key];
-  return typeof value === "number" &&
-    Number.isFinite(value) &&
-    value >= 0 &&
-    Number.isInteger(value)
-    ? []
-    : [`${label} must be a non-negative integer`];
+  return validateOptionalIntegerField(payload, key, 0, "non-negative integer", label);
 }
 
 function validateTopLevelShape(data: unknown): {

@@ -7,6 +7,7 @@ import {
   useState,
   type ChangeEventHandler,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 
@@ -86,6 +87,35 @@ function topicLabel(topic: ClassroomObservationTopicOption): string {
   return `${topic.name}${suffix}`;
 }
 
+function normalizeOptionsBody(body: unknown): CurriculumOptionsState {
+  if (!body || typeof body !== "object") {
+    return EMPTY_CURRICULUM_OPTIONS;
+  }
+
+  const record = body as Record<string, unknown>;
+  return {
+    curricula: Array.isArray(record.curricula) ? record.curricula : [],
+    chapters: Array.isArray(record.chapters) ? record.chapters : [],
+    topics: Array.isArray(record.topics) ? record.topics : [],
+  };
+}
+
+async function loadCurriculumOptions(
+  schoolCode: string,
+  selectedGrade: string
+): Promise<CurriculumOptionsState> {
+  const params = new URLSearchParams({
+    school_code: schoolCode,
+    grade: selectedGrade,
+  });
+  const response = await fetch(`/api/pm/classroom-observation-options?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error("Failed to load curriculum options");
+  }
+
+  return normalizeOptionsBody(await response.json());
+}
+
 function useCurriculumOptions(schoolCode: string, selectedGrade: string) {
   const [options, setOptions] = useState<CurriculumOptionsState>(EMPTY_CURRICULUM_OPTIONS);
   const [loading, setLoading] = useState(false);
@@ -106,22 +136,9 @@ function useCurriculumOptions(schoolCode: string, selectedGrade: string) {
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          school_code: schoolCode,
-          grade: selectedGrade,
-        });
-        const response = await fetch(`/api/pm/classroom-observation-options?${params.toString()}`);
-        if (!response.ok) {
-          throw new Error("Failed to load curriculum options");
-        }
-
-        const body = await response.json();
+        const nextOptions = await loadCurriculumOptions(schoolCode, selectedGrade);
         if (!cancelled) {
-          setOptions({
-            curricula: Array.isArray(body.curricula) ? body.curricula : [],
-            chapters: Array.isArray(body.chapters) ? body.chapters : [],
-            topics: Array.isArray(body.topics) ? body.topics : [],
-          });
+          setOptions(nextOptions);
         }
       } catch {
         if (!cancelled) {
@@ -162,34 +179,41 @@ function CurriculumField({
   selectedCurriculumName: string;
   onChange: ChangeEventHandler<HTMLSelectElement>;
 }) {
+  let content: ReactNode;
+  if (disabled) {
+    content = (
+      <p className="text-sm text-text-primary" data-testid="curriculum-display">
+        {selectedCurriculumName || "No curriculum selected"}
+      </p>
+    );
+  } else if (loading) {
+    content = <p className="text-sm text-text-muted" data-testid="curriculum-loading">Loading curriculum...</p>;
+  } else if (error) {
+    content = <p className="text-sm text-danger" data-testid="curriculum-error">{error}</p>;
+  } else {
+    content = (
+      <Select
+        value={selectedCurriculumId !== null ? String(selectedCurriculumId) : ""}
+        onChange={onChange}
+        className="w-full"
+        data-testid="curriculum-select"
+      >
+        <option value="" disabled>
+          {options.length === 0 ? "No curricula found" : "Select a curriculum"}
+        </option>
+        {options.map((curriculum) => (
+          <option key={curriculum.id} value={String(curriculum.id)}>
+            {curriculum.name}
+          </option>
+        ))}
+      </Select>
+    );
+  }
+
   return (
     <FormSection spacing="" data-testid="curriculum-selection">
       <h3 className="mb-2 text-sm font-semibold text-text-primary uppercase">Curriculum</h3>
-      {disabled ? (
-        <p className="text-sm text-text-primary" data-testid="curriculum-display">
-          {selectedCurriculumName || "No curriculum selected"}
-        </p>
-      ) : loading ? (
-        <p className="text-sm text-text-muted" data-testid="curriculum-loading">Loading curriculum...</p>
-      ) : error ? (
-        <p className="text-sm text-danger" data-testid="curriculum-error">{error}</p>
-      ) : (
-        <Select
-          value={selectedCurriculumId !== null ? String(selectedCurriculumId) : ""}
-          onChange={onChange}
-          className="w-full"
-          data-testid="curriculum-select"
-        >
-          <option value="" disabled>
-            {options.length === 0 ? "No curricula found" : "Select a curriculum"}
-          </option>
-          {options.map((curriculum) => (
-            <option key={curriculum.id} value={String(curriculum.id)}>
-              {curriculum.name}
-            </option>
-          ))}
-        </Select>
-      )}
+      {content}
     </FormSection>
   );
 }
@@ -211,35 +235,42 @@ function ChapterField({
   selectedSubjectName: string;
   onChange: ChangeEventHandler<HTMLSelectElement>;
 }) {
+  let content: ReactNode;
+  if (disabled) {
+    content = (
+      <p className="text-sm text-text-primary" data-testid="chapter-display">
+        {selectedChapterName
+          ? `${selectedSubjectName ? `${selectedSubjectName} - ` : ""}${selectedChapterName}`
+          : "No chapter selected"}
+      </p>
+    );
+  } else if (loading) {
+    content = <p className="text-sm text-text-muted" data-testid="chapter-loading">Loading chapters...</p>;
+  } else {
+    content = (
+      <Select
+        value={selectedChapterId !== null ? String(selectedChapterId) : ""}
+        onChange={onChange}
+        className="w-full"
+        data-testid="chapter-select"
+        disabled={chapters.length === 0}
+      >
+        <option value="" disabled>
+          {chapters.length === 0 ? "No chapters found" : "Select a chapter"}
+        </option>
+        {chapters.map((chapter) => (
+          <option key={`${chapter.curriculumId}-${chapter.id}`} value={String(chapter.id)}>
+            {chapterLabel(chapter)}
+          </option>
+        ))}
+      </Select>
+    );
+  }
+
   return (
     <FormSection spacing="" data-testid="chapter-selection">
       <h3 className="mb-2 text-sm font-semibold text-text-primary uppercase">Chapter</h3>
-      {disabled ? (
-        <p className="text-sm text-text-primary" data-testid="chapter-display">
-          {selectedChapterName
-            ? `${selectedSubjectName ? `${selectedSubjectName} - ` : ""}${selectedChapterName}`
-            : "No chapter selected"}
-        </p>
-      ) : loading ? (
-        <p className="text-sm text-text-muted" data-testid="chapter-loading">Loading chapters...</p>
-      ) : (
-        <Select
-          value={selectedChapterId !== null ? String(selectedChapterId) : ""}
-          onChange={onChange}
-          className="w-full"
-          data-testid="chapter-select"
-          disabled={chapters.length === 0}
-        >
-          <option value="" disabled>
-            {chapters.length === 0 ? "No chapters found" : "Select a chapter"}
-          </option>
-          {chapters.map((chapter) => (
-            <option key={`${chapter.curriculumId}-${chapter.id}`} value={String(chapter.id)}>
-              {chapterLabel(chapter)}
-            </option>
-          ))}
-        </Select>
-      )}
+      {content}
     </FormSection>
   );
 }

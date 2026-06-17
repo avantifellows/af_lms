@@ -133,6 +133,17 @@ function withTeacherAndGrade(extra: Record<string, unknown> = {}): Record<string
   };
 }
 
+async function waitForCurriculumSelectOptions() {
+  await waitFor(() => {
+    expect(screen.getByTestId("curriculum-select")).toBeInTheDocument();
+  });
+
+  await waitFor(() => {
+    const select = screen.getByTestId("curriculum-select") as HTMLSelectElement;
+    expect(select.options).toHaveLength(4);
+  });
+}
+
 describe("ClassroomObservationForm", () => {
   beforeEach(() => {
     mockFetchTeachers();
@@ -441,14 +452,7 @@ describe("ClassroomObservationForm", () => {
         />
       );
 
-      await waitFor(() => {
-        expect(screen.getByTestId("curriculum-select")).toBeInTheDocument();
-      });
-
-      await waitFor(() => {
-        const select = screen.getByTestId("curriculum-select") as HTMLSelectElement;
-        expect(select.options).toHaveLength(4);
-      });
+      await waitForCurriculumSelectOptions();
 
       await user.selectOptions(screen.getByTestId("curriculum-select"), "1");
       expect(latestData).toMatchObject({
@@ -521,14 +525,7 @@ describe("ClassroomObservationForm", () => {
 
       render(<Harness initialData={withTeacherAndGrade({ grade: "11" })} />);
 
-      await waitFor(() => {
-        expect(screen.getByTestId("curriculum-select")).toBeInTheDocument();
-      });
-
-      await waitFor(() => {
-        const select = screen.getByTestId("curriculum-select") as HTMLSelectElement;
-        expect(select.options).toHaveLength(4);
-      });
+      await waitForCurriculumSelectOptions();
 
       await user.selectOptions(screen.getByTestId("curriculum-select"), "2");
       await user.selectOptions(screen.getByTestId("chapter-select"), "45");
