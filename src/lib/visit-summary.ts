@@ -1,4 +1,9 @@
-import { ACTION_TYPE_VALUES, isActionType, type ActionType } from "./visit-actions";
+import {
+  ACTION_TYPE_VALUES,
+  REQUIRED_ACTION_TYPE_VALUES,
+  isActionType,
+  type ActionType,
+} from "./visit-actions";
 import {
   ACTION_ADDITIONAL_NOTES_LABEL,
   readActionAdditionalNotes,
@@ -80,20 +85,20 @@ export function rollupActionTypes(
 export function classifyActionCompletion(
   rollup: Record<ActionType, ActionTypeRollupStatus>
 ): ActionCompletionBucket {
-  const touchedCount = ACTION_TYPE_VALUES.filter(
+  const touchedCount = REQUIRED_ACTION_TYPE_VALUES.filter(
     (actionType) => rollup[actionType] !== "not_started"
   ).length;
-  const completedCount = ACTION_TYPE_VALUES.filter(
+  const completedCount = REQUIRED_ACTION_TYPE_VALUES.filter(
     (actionType) => rollup[actionType] === "completed"
   ).length;
 
-  if (completedCount === ACTION_TYPE_VALUES.length) {
+  if (completedCount === REQUIRED_ACTION_TYPE_VALUES.length) {
     return "all_complete";
   }
   if (touchedCount === 0) {
     return "none";
   }
-  if (touchedCount === ACTION_TYPE_VALUES.length) {
+  if (touchedCount === REQUIRED_ACTION_TYPE_VALUES.length) {
     return "all_present";
   }
   return "partial";
@@ -102,7 +107,7 @@ export function classifyActionCompletion(
 export function computeAverageCompletion(
   completedTypeCountSum: number,
   visitCount: number,
-  knownTypeCount = ACTION_TYPE_VALUES.length
+  knownTypeCount = REQUIRED_ACTION_TYPE_VALUES.length
 ): number | null {
   if (visitCount === 0) {
     return null;

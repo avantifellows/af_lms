@@ -4,8 +4,11 @@ import {
   ACTION_STATUS_VALUES,
   ACTION_TYPES,
   ACTION_TYPE_VALUES,
+  OPTIONAL_ACTION_TYPE_VALUES,
+  REQUIRED_ACTION_TYPE_VALUES,
   getActionTypeLabel,
   isActionType,
+  isOptionalActionType,
   statusBadgeClass,
   type ActionType,
 } from "./visit-actions";
@@ -34,6 +37,14 @@ describe("visit-actions", () => {
     expect(getActionTypeLabel("school_staff_interaction")).toBe(
       "School Staff Interaction"
     );
+  });
+
+  it("marks school staff interaction as optional while keeping the other action types required", () => {
+    expect(OPTIONAL_ACTION_TYPE_VALUES).toEqual(["school_staff_interaction"]);
+    expect(REQUIRED_ACTION_TYPE_VALUES).toHaveLength(6);
+    expect(REQUIRED_ACTION_TYPE_VALUES).not.toContain("school_staff_interaction");
+    expect(isOptionalActionType("school_staff_interaction")).toBe(true);
+    expect(isOptionalActionType("principal_interaction")).toBe(false);
   });
 
   it("defines allowed action statuses", () => {
