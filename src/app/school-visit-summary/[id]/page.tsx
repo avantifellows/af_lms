@@ -62,6 +62,16 @@ interface VisitActionDetail {
 
 type InlineStats = Record<string, unknown>;
 
+interface RemarkGroup {
+  actionId: number;
+  actionType: string;
+  actionLabel: string;
+  status: string;
+  detailHref: string;
+  chips: string[];
+  remarks: RemarkEntry[];
+}
+
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -199,6 +209,39 @@ function statsChips(actionType: string, stats: unknown): string[] {
   return buildChips && isStats(stats) ? buildChips(stats) : [];
 }
 
+function isDataRecord(data: unknown): data is Record<string, unknown> {
+  return data !== null && typeof data === "object" && !Array.isArray(data);
+}
+
+function nonEmptyDataString(data: Record<string, unknown>, key: string): string | null {
+  const value = data[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function classroomRemarkContextChips(data: unknown): string[] {
+  if (!isDataRecord(data)) {
+    return [];
+  }
+
+  const teacherName = nonEmptyDataString(data, "teacher_name");
+  const grade = nonEmptyDataString(data, "grade");
+  return [
+    ...(teacherName ? [`Teacher ${teacherName}`] : []),
+    ...(grade ? [`Grade ${grade}`] : []),
+  ];
+}
+
+function remarkGroupChips(action: VisitActionDetail): string[] {
+  const summaryChips = statsChips(
+    action.action_type,
+    dispatchComputeInlineStats(action.action_type, action.data)
+  ).filter((chip) => !chip.startsWith("Remarks "));
+
+  return action.action_type === "classroom_observation"
+    ? [...classroomRemarkContextChips(action.data), ...summaryChips]
+    : summaryChips;
+}
+
 function actionTypeLabel(actionType: string): string {
   return isActionType(actionType) ? ACTION_TYPES[actionType] : "Other";
 }
@@ -225,17 +268,23 @@ function groupActions(actions: VisitActionDetail[]): Array<{
   ];
 }
 
-function collectRemarks(actions: VisitActionDetail[]): Array<RemarkEntry & {
-  actionId: number;
-  actionLabel: string;
-}> {
-  return actions.flatMap((action) =>
-    dispatchExtractRemarks(action.action_type, action.data).map((remark) => ({
-      ...remark,
+function collectRemarkGroups(actions: VisitActionDetail[]): RemarkGroup[] {
+  return actions.flatMap((action) => {
+    const remarks = dispatchExtractRemarks(action.action_type, action.data);
+    if (remarks.length === 0) {
+      return [];
+    }
+
+    return [{
       actionId: action.id,
+      actionType: action.action_type,
       actionLabel: actionTypeLabel(action.action_type),
-    }))
-  );
+      status: action.status,
+      detailHref: `/visits/${action.visit_id}/actions/${action.id}?from=summary`,
+      chips: remarkGroupChips(action),
+      remarks,
+    }];
+  });
 }
 
 async function getVisitSummaryDetail(id: string, actorEmail: string, permission: NonNullable<Awaited<ReturnType<typeof getUserPermission>>>) {
@@ -388,22 +437,63 @@ function ActionsSection({ actions }: { actions: VisitActionDetail[] }) {
   );
 }
 
-function RemarksSection({ remarks }: { remarks: ReturnType<typeof collectRemarks> }) {
+function RemarksSection({ groups }: { groups: RemarkGroup[] }) {
   return (
     <Card elevation="sm" className="p-4" role="region" aria-label="Remarks">
       <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">Remarks</h2>
-      {remarks.length === 0 ? (
+      {groups.length === 0 ? (
         <p className="mt-3 text-sm text-text-muted">No remarks</p>
       ) : (
-        <div className="mt-4 space-y-3">
-          {remarks.map((remark, index) => (
-            <div key={`${remark.actionId}-${index}`} className="border-l-4 border-border-accent pl-3">
-              <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                {remark.actionLabel} #{remark.actionId}
+        <div className="mt-4 space-y-4">
+          {groups.map((group) => (
+            <section
+              key={`${group.actionType}-${group.actionId}`}
+              role="group"
+              aria-label={`${group.actionLabel} #${group.actionId}`}
+              className="border border-border bg-bg-card-alt"
+            >
+              <div className="border-b border-border bg-bg-card px-3 py-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="font-mono text-xs text-text-muted">Action #{group.actionId}</div>
+                    <h3 className="mt-1 text-sm font-bold uppercase tracking-wide text-text-primary">
+                      {group.actionLabel}
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-flex ${statusBadgeClass(group.status)}`}>
+                      {formatStatus(group.status)}
+                    </span>
+                    <Link
+                      href={group.detailHref}
+                      className="text-xs font-bold uppercase text-accent hover:text-accent-hover"
+                    >
+                      Open action
+                    </Link>
+                  </div>
+                </div>
+                {group.chips.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {group.chips.map((chip) => (
+                      <span
+                        key={chip}
+                        className="border border-border bg-bg-card-alt px-2 py-1 font-mono text-xs text-text-secondary"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="mt-1 text-sm font-medium text-text-primary">{remark.label}</div>
-              <p className="mt-1 text-sm text-text-secondary">{remark.text}</p>
-            </div>
+              <div className="divide-y divide-border/70">
+                {group.remarks.map((remark, index) => (
+                  <div key={`${group.actionId}-${index}`} className="px-3 py-3">
+                    <div className="text-sm font-medium text-text-primary">{remark.label}</div>
+                    <p className="mt-1 text-sm text-text-secondary">{remark.text}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
@@ -456,7 +546,7 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
     notFound();
   }
 
-  const remarks = collectRemarks(actions);
+  const remarkGroups = collectRemarkGroups(actions);
 
   return (
     <div className="min-h-screen bg-bg">
@@ -502,7 +592,7 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
           <ActionsSection actions={actions} />
         </section>
 
-        <RemarksSection remarks={remarks} />
+        <RemarksSection groups={remarkGroups} />
       </main>
     </div>
   );
