@@ -1,3 +1,4 @@
+import { compareCurriculumCodes } from "./curriculum-code-sort";
 import { query } from "./db";
 import {
   PROGRAM_IDS,
@@ -22,11 +23,6 @@ const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_advanced: 9,
   neet: 2,
 };
-const CURRICULUM_CODE_COLLATOR = new Intl.Collator("en", {
-  numeric: true,
-  sensitivity: "base",
-});
-
 interface SchoolScopeRow {
   code: string;
   region: string | null;
@@ -118,10 +114,6 @@ export function isSubjectName(value: string): value is SubjectName {
 
 export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
   return EXAM_TRACK_CURRICULUM_IDS[examTrack];
-}
-
-function compareCurriculumCodes(a: string, b: string): number {
-  return CURRICULUM_CODE_COLLATOR.compare(a, b);
 }
 
 function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; subject: SubjectName }>(

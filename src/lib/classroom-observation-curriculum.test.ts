@@ -104,6 +104,54 @@ describe("classroom-observation-curriculum", () => {
     ]);
   });
 
+  it("sorts chapters and topics by code using natural numeric order", async () => {
+    mockQuery
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([
+        {
+          chapter_id: "10",
+          chapter_code: "11P10",
+          chapter_name: [{ lang_code: "en", chapter: "Tenth" }],
+          grade: "11",
+          subject_id: "4",
+          subject_name: [{ lang_code: "en", subject: "Physics" }],
+          curriculum_id: "1",
+          topic_count: "0",
+        },
+        {
+          chapter_id: "2",
+          chapter_code: "11P2",
+          chapter_name: [{ lang_code: "en", chapter: "Second" }],
+          grade: "11",
+          subject_id: "4",
+          subject_name: [{ lang_code: "en", subject: "Physics" }],
+          curriculum_id: "1",
+          topic_count: "0",
+        },
+      ] as never)
+      .mockResolvedValueOnce([
+        {
+          topic_id: "910",
+          topic_code: "11P2.10",
+          topic_name: [{ lang_code: "en", topic: "Topic Ten" }],
+          chapter_id: "2",
+          curriculum_id: "1",
+        },
+        {
+          topic_id: "92",
+          topic_code: "11P2.2",
+          topic_name: [{ lang_code: "en", topic: "Topic Two" }],
+          chapter_id: "2",
+          curriculum_id: "1",
+        },
+      ] as never);
+
+    const result = await getClassroomObservationCurriculumOptions({ grade: 11 });
+
+    expect(result.chapters.map((chapter) => chapter.code)).toEqual(["11P2", "11P10"]);
+    expect(result.topics.map((topic) => topic.code)).toEqual(["11P2.2", "11P2.10"]);
+  });
+
   it("filters archived CMS chapters and topics in SQL", async () => {
     mockQuery
       .mockResolvedValueOnce([] as never)

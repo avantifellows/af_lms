@@ -1,3 +1,4 @@
+import { compareCurriculumCodes } from "./curriculum-code-sort";
 import { query } from "./db";
 
 export const CLASSROOM_OBSERVATION_CURRICULUM_IDS = [1, 2, 9] as const;
@@ -203,9 +204,21 @@ export async function getClassroomObservationCurriculumOptions(params: {
     [CLASSROOM_OBSERVATION_CURRICULUM_IDS, params.grade]
   );
 
+  const mappedChapters = chapters.map(mapChapter).sort((a, b) => {
+    if (a.curriculumId !== b.curriculumId) return a.curriculumId - b.curriculumId;
+    if (a.subjectId !== b.subjectId) return a.subjectId - b.subjectId;
+    return compareCurriculumCodes(a.code, b.code);
+  });
+
+  const mappedTopics = topics.map(mapTopic).sort((a, b) => {
+    if (a.curriculumId !== b.curriculumId) return a.curriculumId - b.curriculumId;
+    if (a.chapterId !== b.chapterId) return a.chapterId - b.chapterId;
+    return compareCurriculumCodes(a.code, b.code);
+  });
+
   return {
     curricula: curricula.map(mapCurriculum),
-    chapters: chapters.map(mapChapter),
-    topics: topics.map(mapTopic),
+    chapters: mappedChapters,
+    topics: mappedTopics,
   };
 }
