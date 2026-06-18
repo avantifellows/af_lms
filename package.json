@@ -22,7 +22,8 @@
     "test:e2e": "NODE_V8_COVERAGE=.v8-coverage playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "pm:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-pm-centres.ts"
+    "pm:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-pm-centres.ts",
+    "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1025.0",
