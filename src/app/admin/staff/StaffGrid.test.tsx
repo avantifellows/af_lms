@@ -365,6 +365,49 @@ describe("StaffGrid", () => {
     });
   });
 
+  it("adds a new teacher from scratch via POST /api/admin/staff", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Add user")); // header button opens modal
+
+    // Subject + centre dropdowns are fed by the mount fetches.
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Subject") as HTMLSelectElement).querySelectorAll(
+          "option"
+        ).length
+      ).toBe(3); // placeholder + 2 subjects
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "new@avantifellows.org" },
+    });
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Centre"), { target: { value: "8" } });
+    // The modal's submit button (distinct from the header's "Add user").
+    fireEvent.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            email: "new@avantifellows.org",
+            kind: "teacher",
+            centre_id: 8,
+            subject_id: 4,
+          }),
+        })
+      );
+    });
+  });
+
   it("completes a pending_teacher via POST /staff/teachers (subject + centre + optional AF)", async () => {
     const mockFetch = stubFetch((url, init) => {
       if (url === "/api/admin/staff/teachers" && init?.method === "POST") {

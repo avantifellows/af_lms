@@ -25,6 +25,7 @@ vi.mock("./permissions", () => ({
 import {
   STAFF_REQUIRED_COLUMNS,
   createPosition,
+  createSeatedUser,
   createStaffMember,
   createTeacher,
   deletePosition,
@@ -727,6 +728,121 @@ describe("positions", () => {
     expect(
       await createTeacher({ body: { user_permission_id: 88, subject_id: 4, centre_id: 8 } })
     ).toMatchObject({ ok: false, status: 409 });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser creates a teacher + permission + seat atomically", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre + program
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockQuery.mockResolvedValueOnce([]); // existing teacher/staff record (none)
+    mockQuery.mockResolvedValueOnce([]); // AF clash (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 600 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 700 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: {
+          email: "new@x.org",
+          full_name: "New Teach",
+          kind: "teacher",
+          centre_id: 8,
+          subject_id: 4,
+          af_id: "af9",
+        },
+      })
+    ).toEqual({ ok: true });
+    const permInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO user_permission")
+    );
+    expect(permInsert![1]).toEqual(["new@x.org", "teacher", [2], "New Teach"]);
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([700, 4, "AF9"]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "subject_tbd", 700]);
+  });
+
+  it("createSeatedUser creates a PM/staff member + tier seat (AF optional)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockQuery.mockResolvedValueOnce([]); // existing teacher/staff record (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 601 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 701 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: { email: "pm@x.org", kind: "staff", role: "spm", centre_id: 8 },
+      })
+    ).toEqual({ ok: true });
+    const permInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO user_permission")
+    );
+    expect(permInsert![1]).toEqual(["pm@x.org", "program_manager", [2], null]);
+    const staffInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO staff")
+    );
+    expect(staffInsert![1]).toEqual([701, null]); // employee_code null (no AF)
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "spm", 701]);
+  });
+
+  it("createSeatedUser refuses an email that already exists", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 593 }]); // existing permission → conflict
+    expect(
+      await createSeatedUser({
+        body: { email: "dup@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
+      })
+    ).toMatchObject({ ok: false, status: 409 });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser refuses an orphaned teacher record (re-add after delete)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none — was deleted)
+    mockQuery.mockResolvedValueOnce([{ id: 3098 }]); // orphaned teacher record exists
+    expect(
+      await createSeatedUser({
+        body: { email: "orphan@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
+      })
+    ).toMatchObject({ ok: false, status: 409 });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser blocks a centre with no program", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: null }]); // no program
+    expect(
+      await createSeatedUser({
+        body: { email: "x@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
+      })
+    ).toMatchObject({ ok: false, status: 422, fields: { centre_id: expect.any(String) } });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser requires a subject for teachers and a valid tier for staff", async () => {
+    mockSchemaReady();
+    expect(
+      await createSeatedUser({ body: { email: "x@x.org", kind: "teacher", centre_id: 8 } })
+    ).toMatchObject({ ok: false, status: 422, fields: { subject_id: expect.any(String) } });
+    resetStaffSchemaCheckForTests();
+    mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
+    expect(
+      await createSeatedUser({
+        body: { email: "x@x.org", kind: "staff", role: "principal", centre_id: 8 },
+      })
+    ).toMatchObject({ ok: false, status: 422, fields: { role: expect.any(String) } });
     expect(mockClientQuery).not.toHaveBeenCalled();
   });
 

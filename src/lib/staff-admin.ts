@@ -111,6 +111,7 @@ export function resetStaffSchemaCheckForTests() {
 // --- Shared shapes (client-safe values/types live in staff-shared) ---
 
 import {
+  PM_SEAT_ROLES,
   SEAT_ROLES,
   isSeatRole,
   normalizeEmployeeCode,
@@ -211,6 +212,14 @@ const ROSTER_CTE = `
     JOIN "user" u ON u.id = t.user_id
     LEFT JOIN subject sub ON sub.id = t.subject_id
     WHERE t.is_af_teacher = true
+      -- An active user_permission is the source of truth for personhood:
+      -- deleting a user from the permissions screen removes them from the roster
+      -- (and orphaned teacher/staff rows with no live permission stay hidden).
+      AND EXISTS (
+        SELECT 1 FROM user_permission up
+        WHERE (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
+          AND up.revoked_at IS NULL
+      )
     UNION ALL
     SELECT
       'staff', s.id, u.id,
@@ -219,6 +228,11 @@ const ROSTER_CTE = `
       s.exit_date::text
     FROM staff s
     JOIN "user" u ON u.id = s.user_id
+    WHERE EXISTS (
+      SELECT 1 FROM user_permission up
+      WHERE (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
+        AND up.revoked_at IS NULL
+    )
     UNION ALL
     SELECT
       CASE WHEN up.role = 'teacher' THEN 'pending_teacher' ELSE 'pending_pm' END,
@@ -922,6 +936,216 @@ export async function createTeacher(params: {
       [centreId, userId]
     );
     await clearExplicitSchoolScope(client, userId);
+  });
+
+  return { ok: true };
+}
+
+// --- Add centre staff from scratch (self-contained Staff Management) ---
+
+export interface CreateSeatedUserBody {
+  email?: unknown;
+  full_name?: unknown;
+  kind?: unknown; // "teacher" | "staff"
+  centre_id?: unknown;
+  subject_id?: unknown; // teacher only (required)
+  role?: unknown; // staff only: PM tier (apm/pm/spm/ph)
+  af_id?: unknown; // optional AF code
+}
+
+function isPmSeatRole(value: unknown): value is SeatRole {
+  return (
+    typeof value === "string" &&
+    (PM_SEAT_ROLES as readonly string[]).includes(value)
+  );
+}
+
+// Create a brand-new centre-staff person and seat them in ONE transaction —
+// permission + user + teacher/staff record + centre seat — so the Staff
+// Management page is self-contained (no separate Add User on /admin/users).
+// Centre staff are level-1, seat-scoped: program_ids derive from the centre's
+// program and explicit school scope is left NULL (resolveScope uses the seat).
+// Atomic by design: a failure rolls back the whole thing rather than leaving an
+// orphaned user_permission (the phantom-duplicate failure mode).
+export async function createSeatedUser(params: {
+  body: CreateSeatedUserBody;
+}): Promise<StaffMutationResult> {
+  const schema = await checkStaffManagementSchema();
+  if (!schema.ok) return schema;
+
+  const fields: Record<string, string> = {};
+  const email =
+    typeof params.body.email === "string" ? params.body.email.trim() : "";
+  if (!email || !email.includes("@")) {
+    fields.email = "A valid email is required";
+  }
+  const kind = params.body.kind;
+  if (kind !== "teacher" && kind !== "staff") {
+    fields.kind = "kind must be 'teacher' or 'staff'";
+  }
+  const centreId = Number(params.body.centre_id);
+  if (!Number.isInteger(centreId) || centreId <= 0) {
+    fields.centre_id = "Centre is required";
+  }
+  let subjectId: number | null = null;
+  let seatRole: SeatRole = "subject_tbd";
+  if (kind === "teacher") {
+    subjectId = Number(params.body.subject_id);
+    if (!Number.isInteger(subjectId) || subjectId <= 0) {
+      fields.subject_id = "Subject is required";
+    }
+    seatRole = "subject_tbd";
+  } else if (kind === "staff") {
+    if (!isPmSeatRole(params.body.role)) {
+      fields.role = `Role must be one of: ${PM_SEAT_ROLES.join(", ")}`;
+    } else {
+      seatRole = params.body.role as SeatRole;
+    }
+  }
+  let code: string | null = null;
+  const rawCode = params.body.af_id;
+  if (rawCode !== undefined && rawCode !== null && String(rawCode).trim() !== "") {
+    code = normalizeEmployeeCode(rawCode);
+    if (!code) {
+      fields.af_id = "AF id must look like AF123";
+    }
+  }
+  if (Object.keys(fields).length > 0) {
+    return { ok: false, status: 422, error: "Validation failed", fields };
+  }
+
+  const fullName =
+    typeof params.body.full_name === "string"
+      ? params.body.full_name.trim()
+      : "";
+
+  // The centre supplies the program scope (level-1 centre staff see students by
+  // program ∩ school). A centre with no program can't seed program_ids.
+  const centres = await query<{ id: number; program_id: number | null }>(
+    `SELECT id, program_id FROM centres WHERE id = $1`,
+    [centreId]
+  );
+  if (centres.length === 0) {
+    return { ok: false, status: 404, error: "Centre not found" };
+  }
+  const programId = centres[0].program_id;
+  if (programId == null) {
+    return {
+      ok: false,
+      status: 422,
+      error:
+        "This centre has no program set — set its program in Centres first, then add staff.",
+      fields: { centre_id: "Centre has no program" },
+    };
+  }
+
+  // "Add" is for NEW people. Refuse (case-insensitively, closing the
+  // case-variant dup gap for this path) when a permission already exists — the
+  // admin should edit that person from the roster instead.
+  const existingPerm = await query<{ id: number }>(
+    `SELECT id FROM user_permission WHERE LOWER(email) = LOWER($1)`,
+    [email]
+  );
+  if (existingPerm.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "A user with this email already exists — edit them from the roster instead of adding again.",
+    };
+  }
+
+  // Even with no permission, the email may still own an orphaned teacher/staff
+  // record (e.g. left behind when its permission was hard-deleted). Re-creating
+  // one would duplicate the person in the roster (two records, same user → seats
+  // cross-product), so refuse — they should be edited/cleaned from the roster.
+  const dupRecord = await query<{ id: number }>(
+    kind === "teacher"
+      ? `SELECT t.id FROM teacher t JOIN "user" u ON u.id = t.user_id
+         WHERE t.is_af_teacher = true AND LOWER(u.email) = LOWER($1)`
+      : `SELECT s.id FROM staff s JOIN "user" u ON u.id = s.user_id
+         WHERE LOWER(u.email) = LOWER($1)`,
+    [email]
+  );
+  if (dupRecord.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "This person already has a teacher/staff record — edit them from the roster instead of adding again.",
+    };
+  }
+
+  if (code) {
+    const codeClash = await query<{ id: number }>(
+      kind === "teacher"
+        ? `SELECT id FROM teacher WHERE teacher_id = $1`
+        : `SELECT id FROM staff WHERE employee_code = $1`,
+      [code]
+    );
+    if (codeClash.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        error: `AF id ${code} is already in use`,
+      };
+    }
+  }
+
+  const role = kind === "teacher" ? "teacher" : "program_manager";
+
+  await withTransaction(async (client) => {
+    const permIns = await client.query(
+      `INSERT INTO user_permission
+         (email, level, role, school_codes, regions, program_ids, read_only, full_name, inserted_at, updated_at)
+       VALUES ($1, 1, $2, NULL, NULL, $3, false, $4, now(), now())
+       RETURNING id`,
+      [email, role, [programId], fullName || null]
+    );
+    const permissionId = Number(permIns.rows[0].id);
+
+    // Reuse an existing user row for this email if one somehow exists; else mint.
+    let userId: number | null = null;
+    const foundUser = await client.query<{ id: number | string }>(
+      `SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) ORDER BY id LIMIT 1`,
+      [email]
+    );
+    if (foundUser.rows.length > 0) {
+      userId = Number(foundUser.rows[0].id);
+    } else {
+      const tokens = fullName.split(/\s+/).filter(Boolean);
+      const userIns = await client.query(
+        `INSERT INTO "user" (first_name, last_name, email, inserted_at, updated_at)
+         VALUES ($1, $2, $3, now(), now()) RETURNING id`,
+        [tokens[0] ?? null, tokens.length > 1 ? tokens.slice(1).join(" ") : null, email]
+      );
+      userId = Number(userIns.rows[0].id);
+    }
+
+    await client.query(
+      `UPDATE user_permission SET user_id = $1, updated_at = now() WHERE id = $2`,
+      [userId, permissionId]
+    );
+
+    if (kind === "teacher") {
+      await client.query(
+        `INSERT INTO teacher (user_id, is_af_teacher, subject_id, teacher_id, inserted_at, updated_at)
+         VALUES ($1, true, $2, $3, now(), now())`,
+        [userId, subjectId, code]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO staff (user_id, employee_code, staff_type, inserted_at, updated_at)
+         VALUES ($1, $2, 'program_manager', now(), now())`,
+        [userId, code]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
+       VALUES ($1, $2, $3, now(), now())`,
+      [centreId, seatRole, userId]
+    );
   });
 
   return { ok: true };
