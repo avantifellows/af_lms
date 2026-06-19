@@ -229,10 +229,22 @@ const ROSTER_CTE = `
     FROM user_permission up
     WHERE up.role IN ('teacher', 'program_manager')
       AND up.revoked_at IS NULL
+      -- A permission row is "pending" only if no real teacher/staff record
+      -- exists for this person. Match by user_id OR email: an orphaned
+      -- user_permission (user_id never linked) whose email already has a
+      -- teacher/staff record is the SAME person, not a second account — keying
+      -- on email too dedupes that phantom out of the roster.
       AND NOT EXISTS (
-        SELECT 1 FROM teacher t WHERE t.user_id = up.user_id AND t.is_af_teacher = true
+        SELECT 1 FROM teacher t
+        JOIN "user" u ON u.id = t.user_id
+        WHERE t.is_af_teacher = true
+          AND (t.user_id = up.user_id OR LOWER(u.email) = LOWER(up.email))
       )
-      AND NOT EXISTS (SELECT 1 FROM staff s WHERE s.user_id = up.user_id)
+      AND NOT EXISTS (
+        SELECT 1 FROM staff s
+        JOIN "user" u ON u.id = s.user_id
+        WHERE (s.user_id = up.user_id OR LOWER(u.email) = LOWER(up.email))
+      )
   )
 `;
 
@@ -741,6 +753,191 @@ export async function createStaffMember(params: {
   });
 
   return { ok: true };
+}
+
+// --- Teachers: LMS-direct create + seat (closes the pending_teacher dead-end) ---
+
+export interface CreateTeacherBody {
+  user_permission_id?: unknown;
+  subject_id?: unknown;
+  centre_id?: unknown;
+  teacher_id?: unknown; // optional AF code; blank => not-yet-hired (TBH)
+}
+
+// Complete a pending_teacher (a role=teacher user_permission with no teacher
+// row) entirely from the UI: create/reuse the user, link it, create the teacher
+// record (subject required), and seat them at a centre — mirroring the PM path
+// (createStaffMember + createPosition) and preserving the seat-as-source-of-truth
+// invariant (clear explicit school scope on seat creation).
+export async function createTeacher(params: {
+  body: CreateTeacherBody;
+}): Promise<StaffMutationResult> {
+  const schema = await checkStaffManagementSchema();
+  if (!schema.ok) return schema;
+
+  const fields: Record<string, string> = {};
+  const permissionId = Number(params.body.user_permission_id);
+  if (!Number.isInteger(permissionId) || permissionId <= 0) {
+    fields.user_permission_id = "user_permission_id is required";
+  }
+  const subjectId = Number(params.body.subject_id);
+  if (!Number.isInteger(subjectId) || subjectId <= 0) {
+    fields.subject_id = "Subject is required";
+  }
+  const centreId = Number(params.body.centre_id);
+  if (!Number.isInteger(centreId) || centreId <= 0) {
+    fields.centre_id = "Centre is required";
+  }
+  // AF id is optional — blank means a not-yet-hired teacher, set later via edit.
+  let code: string | null = null;
+  const rawCode = params.body.teacher_id;
+  if (rawCode !== undefined && rawCode !== null && String(rawCode).trim() !== "") {
+    code = normalizeEmployeeCode(rawCode);
+    if (!code) {
+      fields.teacher_id = "AF id must look like AF123";
+    }
+  }
+  if (Object.keys(fields).length > 0) {
+    return { ok: false, status: 422, error: "Validation failed", fields };
+  }
+
+  const permissions = await query<{
+    id: number;
+    email: string;
+    full_name: string | null;
+    role: string;
+    level: number | null;
+    user_id: number | null;
+  }>(
+    `SELECT id, lower(email) AS email, full_name, role, level, user_id
+     FROM user_permission WHERE id = $1`,
+    [permissionId]
+  );
+  if (permissions.length === 0 || permissions[0].role !== "teacher") {
+    return { ok: false, status: 404, error: "Teacher permission row not found" };
+  }
+  const permission = permissions[0];
+
+  // Region-level (level 2) users are scoped by region, not by centre seat —
+  // mirror rejectIfRegionLevelUser, but read level off the permission row since
+  // a pending teacher's user_id may not be linked yet.
+  if (permission.level === 2) {
+    return {
+      ok: false,
+      status: 422,
+      error:
+        "Region-level users can't hold centre seats — their access is scoped by region, not by seat.",
+      fields: { user_id: "This user has region-level access" },
+    };
+  }
+
+  const subjects = await query<{ id: number }>(
+    `SELECT id FROM subject WHERE id = $1`,
+    [subjectId]
+  );
+  if (subjects.length === 0) {
+    return { ok: false, status: 404, error: "Subject not found" };
+  }
+
+  const centres = await query<{ id: number }>(
+    `SELECT id FROM centres WHERE id = $1`,
+    [centreId]
+  );
+  if (centres.length === 0) {
+    return { ok: false, status: 404, error: "Centre not found" };
+  }
+
+  if (code) {
+    const codeClash = await query<{ id: number }>(
+      `SELECT id FROM teacher WHERE teacher_id = $1`,
+      [code]
+    );
+    if (codeClash.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        error: `AF id ${code} is already used by another teacher`,
+      };
+    }
+  }
+
+  // Resolve the effective user identity (reuse-by-email; mirrors
+  // createStaffMember) so we never mint a duplicate that orphans links.
+  let existingUserId: number | null =
+    permission.user_id === null ? null : Number(permission.user_id);
+  if (existingUserId === null) {
+    const found = await query<{ id: number | string }>(
+      `SELECT id FROM "user" WHERE LOWER(email) = $1 ORDER BY id LIMIT 1`,
+      [permission.email]
+    );
+    if (found.length > 0) existingUserId = Number(found[0].id);
+  }
+
+  if (existingUserId !== null) {
+    const teacherClash = await query<{ id: number }>(
+      `SELECT id FROM teacher WHERE user_id = $1 AND is_af_teacher = true`,
+      [existingUserId]
+    );
+    if (teacherClash.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        error: "This person already has a teacher record",
+      };
+    }
+  }
+
+  await withTransaction(async (client) => {
+    let userId = existingUserId;
+    if (userId === null) {
+      const name = (permission.full_name ?? "").trim();
+      const tokens = name.split(/\s+/).filter(Boolean);
+      const inserted = await client.query(
+        `INSERT INTO "user" (first_name, last_name, email, inserted_at, updated_at)
+         VALUES ($1, $2, $3, now(), now()) RETURNING id`,
+        [
+          tokens[0] ?? null,
+          tokens.length > 1 ? tokens.slice(1).join(" ") : null,
+          permission.email,
+        ]
+      );
+      userId = Number(inserted.rows[0].id);
+    }
+    if (userId !== permission.user_id) {
+      await client.query(
+        `UPDATE user_permission SET user_id = $1, updated_at = now() WHERE id = $2`,
+        [userId, permission.id]
+      );
+    }
+    // Teacher seats carry role 'subject_tbd' (the displayed subject lives in
+    // teacher.subject_id, not the seat role) — same shape seat-pending-teachers.ts uses.
+    await client.query(
+      `INSERT INTO teacher (user_id, is_af_teacher, subject_id, teacher_id, inserted_at, updated_at)
+       VALUES ($1, true, $2, $3, now(), now())`,
+      [userId, subjectId, code]
+    );
+    await client.query(
+      `INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
+       VALUES ($1, 'subject_tbd', $2, now(), now())`,
+      [centreId, userId]
+    );
+    await clearExplicitSchoolScope(client, userId);
+  });
+
+  return { ok: true };
+}
+
+// Subject options for the create-teacher dropdown. `subject.name` is a
+// multilingual jsonb array; the English label is name->0->>'subject'.
+export async function getSubjectOptions(): Promise<
+  { id: number; name: string }[]
+> {
+  const rows = await query<{ id: number | string; name: string | null }>(
+    `SELECT id, name->0->>'subject' AS name FROM subject
+     WHERE name->0->>'subject' IS NOT NULL
+     ORDER BY name->0->>'subject'`
+  );
+  return rows.map((r) => ({ id: Number(r.id), name: r.name ?? "" }));
 }
 
 export interface UpdateStaffMemberBody {

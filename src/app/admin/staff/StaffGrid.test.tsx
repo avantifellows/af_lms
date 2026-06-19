@@ -86,6 +86,17 @@ function stubFetch(
         { status: 200 }
       );
     }
+    if (url.startsWith("/api/admin/subjects")) {
+      return new Response(
+        JSON.stringify({
+          subjects: [
+            { id: 4, name: "Physics" },
+            { id: 2, name: "Chemistry" },
+          ],
+        }),
+        { status: 200 }
+      );
+    }
     if (url.startsWith("/api/admin/staff?")) {
       return new Response(JSON.stringify({ rows: ROWS, summary: SUMMARY }), {
         status: 200,
@@ -354,14 +365,22 @@ describe("StaffGrid", () => {
     });
   });
 
-  it("hides the Edit button for not-backfilled teachers", () => {
-    stubFetch();
+  it("completes a pending_teacher via POST /staff/teachers (subject + centre + optional AF)", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/teachers" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      return undefined;
+    });
+
     render(
       <StaffGrid
         initialRows={[
           {
             ...ROWS[1],
             kind: "pending_teacher",
+            recordId: 88, // user_permission id for pending rows
+            userId: null,
             name: "Pending Teacher",
           },
         ]}
@@ -369,6 +388,46 @@ describe("StaffGrid", () => {
         initialFilters={FILTERS}
       />
     );
-    expect(screen.queryByLabelText("Edit Pending Teacher")).toBeNull();
+
+    // pending_teacher is now editable — open the create-teacher modal.
+    fireEvent.click(screen.getByLabelText("Edit Pending Teacher"));
+
+    // "Create teacher" stays disabled until subject + centre are chosen.
+    const createBtn = screen.getByText("Create teacher");
+    expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+
+    // Subject dropdown is fed by /api/admin/subjects (fetched on mount).
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Subject") as HTMLSelectElement).querySelectorAll(
+          "option"
+        ).length
+      ).toBe(3); // placeholder + 2 subjects
+    });
+    fireEvent.change(screen.getByLabelText("Subject"), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByLabelText("Centre"), {
+      target: { value: "8" },
+    });
+    fireEvent.change(screen.getByLabelText("Employee code"), {
+      target: { value: "af777" },
+    });
+    fireEvent.click(screen.getByText("Create teacher"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/teachers",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            user_permission_id: 88,
+            subject_id: 4,
+            centre_id: 8,
+            teacher_id: "AF777",
+          }),
+        })
+      );
+    });
   });
 });

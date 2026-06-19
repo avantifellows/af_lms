@@ -28,6 +28,11 @@ interface CentreOptionItem {
   name: string;
 }
 
+interface SubjectOptionItem {
+  id: number;
+  name: string;
+}
+
 const KIND_LABELS: Record<StaffRosterRow["kind"], string> = {
   teacher: "Teacher",
   staff: "PM / Staff",
@@ -148,6 +153,10 @@ export default function StaffGrid({
   const [exitArmed, setExitArmed] = useState(false);
   const [seatCentreDraft, setSeatCentreDraft] = useState("");
   const [seatRoleDraft, setSeatRoleDraft] = useState<SeatRole>("physics");
+  // Create-teacher form (completing a pending_teacher): chosen subject + centre.
+  const [subjects, setSubjects] = useState<SubjectOptionItem[]>([]);
+  const [subjectDraft, setSubjectDraft] = useState("");
+  const [createCentreDraft, setCreateCentreDraft] = useState("");
   const [actionError, setActionError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   // Seat id awaiting a "remove anyway" confirmation (the server flagged it as
@@ -215,6 +224,21 @@ export default function StaffGrid({
     })();
   }, []);
 
+  // Subject list for the create-teacher dropdown.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/admin/subjects");
+        const data = await response.json();
+        if (response.ok && Array.isArray(data.subjects)) {
+          setSubjects(data.subjects);
+        }
+      } catch {
+        // Create-teacher subject dropdown will be empty; form stays blocked.
+      }
+    })();
+  }, []);
+
   const groups = useMemo(() => {
     const grouped = groupByCentre(rows);
     return filters.centreId === null
@@ -229,6 +253,8 @@ export default function StaffGrid({
     setExitArmed(false);
     setSeatCentreDraft("");
     setSeatRoleDraft(row.kind === "teacher" ? "physics" : "pm");
+    setSubjectDraft("");
+    setCreateCentreDraft("");
     setActionError("");
   };
 
@@ -302,6 +328,28 @@ export default function StaffGrid({
           body: JSON.stringify({
             user_permission_id: row.recordId,
             employee_code: code,
+          }),
+        }),
+      { closeOnSuccess: true }
+    );
+  };
+
+  // Complete a pending_teacher: create the teacher record + seat at the chosen
+  // centre. Subject + centre are required; AF id is optional (a not-yet-hired
+  // teacher gets it later via the normal edit flow). row.recordId is the
+  // user_permission id for pending rows.
+  const createTeacher = (row: StaffRosterRow) => {
+    const code = codeDraft.trim().toUpperCase();
+    return runAction(
+      () =>
+        fetch(`/api/admin/staff/teachers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_permission_id: row.recordId,
+            subject_id: Number(subjectDraft),
+            centre_id: Number(createCentreDraft),
+            teacher_id: code || undefined,
           }),
         }),
       { closeOnSuccess: true }
@@ -382,7 +430,6 @@ export default function StaffGrid({
     }
   };
 
-  const canEdit = (row: StaffRosterRow) => row.kind !== "pending_teacher";
 
   return (
     <div className="space-y-6">
@@ -578,16 +625,16 @@ export default function StaffGrid({
                       />
                     </div>
                   </div>
-                  {canEdit(row) && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => openModal(row)}
-                      aria-label={`Edit ${row.name || row.email}`}
-                    >
-                      <Edit2 className="mr-1 h-4 w-4" /> Edit
-                    </Button>
-                  )}
+                  {/* Every row is editable — pending_teacher opens the
+                      create-teacher flow; others open the edit/seat modal. */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openModal(row)}
+                    aria-label={`Edit ${row.name || row.email}`}
+                  >
+                    <Edit2 className="mr-1 h-4 w-4" /> Edit
+                  </Button>
                 </div>
               </Card>
             ))}
@@ -621,7 +668,9 @@ export default function StaffGrid({
               <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
                 {modalRow.kind === "pending_pm"
                   ? "AF code (creates the staff record)"
-                  : "AF code"}
+                  : modalRow.kind === "pending_teacher"
+                    ? "AF id (optional)"
+                    : "AF code"}
               </label>
               <Input
                 value={codeDraft}
@@ -630,7 +679,63 @@ export default function StaffGrid({
                 aria-label="Employee code"
                 className="w-40"
               />
+              {modalRow.kind === "pending_teacher" && (
+                <p className="mt-1 text-xs text-text-muted">
+                  Leave blank for a not-yet-hired teacher — set it later via Edit.
+                </p>
+              )}
             </div>
+
+            {modalRow.kind === "pending_teacher" && (
+              <div className="mt-5">
+                <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                  Create teacher record
+                </h4>
+                <p className="mb-3 text-sm text-text-muted">
+                  Creates the teacher and seats them at a centre.
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <label className="flex-1">
+                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                      Subject
+                    </span>
+                    <Select
+                      value={subjectDraft}
+                      onChange={(event) => setSubjectDraft(event.target.value)}
+                      aria-label="Subject"
+                      className="w-full"
+                    >
+                      <option value="">Select Subject…</option>
+                      {subjects.map((subject) => (
+                        <option key={subject.id} value={subject.id}>
+                          {subject.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="flex-1">
+                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                      Centre
+                    </span>
+                    <Select
+                      value={createCentreDraft}
+                      onChange={(event) =>
+                        setCreateCentreDraft(event.target.value)
+                      }
+                      aria-label="Centre"
+                      className="w-full"
+                    >
+                      <option value="">Select Centre…</option>
+                      {centres.map((centre) => (
+                        <option key={centre.id} value={centre.id}>
+                          {centre.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                </div>
+              </div>
+            )}
 
             {modalRow.userId !== null &&
               (modalRow.kind === "staff" || modalRow.kind === "pending_pm") &&
@@ -821,12 +926,21 @@ export default function StaffGrid({
               <Button variant="secondary" onClick={closeModal}>
                 Cancel
               </Button>
-              <Button
-                onClick={() => void saveCode(modalRow)}
-                disabled={actionBusy}
-              >
-                Save
-              </Button>
+              {modalRow.kind === "pending_teacher" ? (
+                <Button
+                  onClick={() => void createTeacher(modalRow)}
+                  disabled={actionBusy || !subjectDraft || !createCentreDraft}
+                >
+                  Create teacher
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => void saveCode(modalRow)}
+                  disabled={actionBusy}
+                >
+                  Save
+                </Button>
+              )}
             </div>
           </div>
         )}
