@@ -1007,6 +1007,51 @@ export async function updatePosition(params: {
   return { ok: true };
 }
 
+// Org tier (PM/APM/SPM/PH) is a person-level attribute, not per-centre: someone
+// is the same tier at every centre they sit at. It is physically stored on each
+// centre_positions row, so setting a person's role updates *all* their active
+// seats at once, keeping them uniform.
+export interface SetUserRoleBody {
+  user_id?: unknown;
+  role?: unknown;
+}
+
+export async function setUserRole(params: {
+  body: SetUserRoleBody;
+}): Promise<StaffMutationResult> {
+  const schema = await checkStaffManagementSchema();
+  if (!schema.ok) return schema;
+
+  const fields: Record<string, string> = {};
+  const userId = Number(params.body.user_id);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    fields.user_id = "user_id is required";
+  }
+  if (!isSeatRole(params.body.role)) {
+    fields.role = `Role must be one of: ${SEAT_ROLES.join(", ")}`;
+  }
+  if (Object.keys(fields).length > 0) {
+    return { ok: false, status: 422, error: "Validation failed", fields };
+  }
+  const role = params.body.role as SeatRole;
+
+  const updated = await query<{ id: number }>(
+    `UPDATE centre_positions SET role = $1, updated_at = now()
+     WHERE user_id = $2 AND deleted_at IS NULL
+     RETURNING id`,
+    [role, userId]
+  );
+  if (updated.length === 0) {
+    return {
+      ok: false,
+      status: 404,
+      error: "This person has no centre assignments to set a role on",
+    };
+  }
+
+  return { ok: true };
+}
+
 export async function deletePosition(params: {
   id: number;
   force?: boolean;

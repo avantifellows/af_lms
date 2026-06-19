@@ -33,6 +33,7 @@ import {
   normalizeStaffRosterParams,
   requireStaffAdmin,
   resetStaffSchemaCheckForTests,
+  setUserRole,
   updatePosition,
   updateStaffMember,
   updateTeacherRecord,
@@ -607,6 +608,38 @@ describe("positions", () => {
     const clearCall = mockClientQuery.mock.calls[1];
     expect(clearCall[0]).toContain("SET school_codes = NULL, regions = NULL");
     expect(clearCall[1]).toEqual([70]);
+  });
+
+  it("setUserRole updates every active seat for the person", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44 }, { id: 51 }]); // 2 seats updated
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "spm" } })
+    ).toEqual({ ok: true });
+    const updateCall = mockQuery.mock.calls.at(-1)!;
+    expect(updateCall[0]).toContain("UPDATE centre_positions SET role = $1");
+    expect(updateCall[0]).toContain("WHERE user_id = $2 AND deleted_at IS NULL");
+    expect(updateCall[1]).toEqual(["spm", 70]);
+  });
+
+  it("setUserRole validates user_id and role", async () => {
+    mockSchemaReady();
+    expect(
+      await setUserRole({ body: { user_id: 0, role: "spm" } })
+    ).toMatchObject({ ok: false, status: 422, fields: { user_id: expect.any(String) } });
+    resetStaffSchemaCheckForTests();
+    mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "principal" } })
+    ).toMatchObject({ ok: false, status: 422, fields: { role: expect.any(String) } });
+  });
+
+  it("setUserRole 404s when the person holds no active seats", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([]); // no seats updated
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "spm" } })
+    ).toMatchObject({ ok: false, status: 404 });
   });
 
   it("deletePosition soft-deletes a vacant seat", async () => {

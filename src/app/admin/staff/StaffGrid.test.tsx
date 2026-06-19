@@ -281,6 +281,56 @@ describe("StaffGrid", () => {
     });
   });
 
+  it("changes a person's org tier across all seats via PATCH /positions", async () => {
+    const pmRow: StaffRosterRow[] = [
+      {
+        kind: "staff",
+        recordId: 20,
+        userId: 80,
+        name: "Rupesh PM",
+        email: "rupesh@avantifellows.org",
+        employeeCode: "AF462",
+        subjectName: null,
+        staffType: "program_manager",
+        designation: null,
+        exitDate: null,
+        seats: [
+          { id: 99, centreId: 8, centreName: "JNV Adilabad - CoE", role: "pm" },
+          { id: 100, centreId: 9, centreName: "JNV Nirmal - CoE", role: "pm" },
+        ],
+      },
+    ];
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/positions" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    render(
+      <StaffGrid
+        initialRows={pmRow}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    // The person appears under each of their centres; open from the first card.
+    fireEvent.click(screen.getAllByLabelText("Edit Rupesh PM")[0]);
+    const roleSelect = screen.getByLabelText("Edit role") as HTMLSelectElement;
+    expect(roleSelect.value).toBe("pm");
+    fireEvent.change(roleSelect, { target: { value: "spm" } });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/positions",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ user_id: 80, role: "spm" }),
+        })
+      );
+    });
+  });
+
   it("requires arming before marking exited", async () => {
     const mockFetch = stubFetch((url, init) => {
       if (url.startsWith("/api/admin/staff/teachers/") && init?.method === "PATCH") {

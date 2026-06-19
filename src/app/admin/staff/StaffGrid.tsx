@@ -7,6 +7,7 @@ import StatCard from "@/components/StatCard";
 import { Badge, Button, Card, Input, Modal, Select } from "@/components/ui";
 import { DetailField } from "@/components/ui/DetailField";
 import {
+  PM_SEAT_ROLES,
   SEAT_ROLES,
   type RosterCodeFilter,
   type RosterKindFilter,
@@ -53,6 +54,21 @@ const SEAT_ROLE_LABELS: Record<SeatRole, string> = {
   ph: "PH",
   subject_tbd: "Subject TBD",
 };
+
+// Subject-teaching seat roles (everything that isn't a PM/management tier).
+const TEACHER_SEAT_ROLES = SEAT_ROLES.filter(
+  (role) => !(PM_SEAT_ROLES as readonly SeatRole[]).includes(role)
+);
+
+// The roles offered when editing a seat: PM tiers for staff/PM rows, subject
+// roles for teachers. Keeps a PM from being re-tagged "Physics" and vice versa.
+function seatRoleOptionsFor(
+  kind: StaffRosterRow["kind"]
+): readonly SeatRole[] {
+  return kind === "teacher" || kind === "pending_teacher"
+    ? TEACHER_SEAT_ROLES
+    : PM_SEAT_ROLES;
+}
 
 function rowKey(row: StaffRosterRow): string {
   return `${row.kind}:${row.recordId}`;
@@ -321,6 +337,18 @@ export default function StaffGrid({
       })
     );
   };
+
+  // Change a person's org tier (role). It's a person-level attribute, so this
+  // updates every active seat they hold at once; refreshing reflects the new
+  // tier in each centre's Role column.
+  const changeRole = (row: StaffRosterRow, role: SeatRole) =>
+    runAction(() =>
+      fetch(`/api/admin/staff/positions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: row.userId, role }),
+      })
+    );
 
   // Vacate a seat. The server blocks removing a person's *last* seat (409 with
   // code "last_seat") unless force=true; on that block we surface an inline
@@ -603,6 +631,34 @@ export default function StaffGrid({
                 className="w-40"
               />
             </div>
+
+            {modalRow.userId !== null &&
+              (modalRow.kind === "staff" || modalRow.kind === "pending_pm") &&
+              modalRow.seats.length > 0 && (
+                <div className="mt-5">
+                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                    Role
+                  </h4>
+                  <Select
+                    value={modalRow.seats[0].role}
+                    onChange={(event) =>
+                      void changeRole(modalRow, event.target.value as SeatRole)
+                    }
+                    disabled={actionBusy}
+                    aria-label="Edit role"
+                    className="w-40"
+                  >
+                    {seatRoleOptionsFor(modalRow.kind).map((role) => (
+                      <option key={role} value={role}>
+                        {SEAT_ROLE_LABELS[role]}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Applies to all of this person&apos;s centres.
+                  </p>
+                </div>
+              )}
 
             {modalRow.userId !== null && (
               <div className="mt-5">
