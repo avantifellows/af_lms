@@ -735,7 +735,6 @@ describe("positions", () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre + program
     mockQuery.mockResolvedValueOnce([]); // existing permission (none)
-    mockQuery.mockResolvedValueOnce([]); // existing teacher/staff record (none)
     mockQuery.mockResolvedValueOnce([]); // AF clash (none)
     mockClientQuery
       .mockResolvedValueOnce({ rows: [{ id: 600 }] }) // INSERT user_permission
@@ -771,7 +770,6 @@ describe("positions", () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
     mockQuery.mockResolvedValueOnce([]); // existing permission (none)
-    mockQuery.mockResolvedValueOnce([]); // existing teacher/staff record (none)
     mockClientQuery
       .mockResolvedValueOnce({ rows: [{ id: 601 }] }) // INSERT user_permission
       .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
@@ -807,17 +805,31 @@ describe("positions", () => {
     expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
-  it("createSeatedUser refuses an orphaned teacher record (re-add after delete)", async () => {
+  it("createSeatedUser reactivates a dormant teacher record instead of duplicating (re-add after delete)", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
     mockQuery.mockResolvedValueOnce([]); // existing permission (none — was deleted)
-    mockQuery.mockResolvedValueOnce([{ id: 3098 }]); // orphaned teacher record exists
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 602 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [{ id: 246195 }] }) // SELECT user (exists by email)
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE user_permission user_id
+      .mockResolvedValueOnce({ rows: [{ id: 3098 }] }); // dormant teacher row exists
     expect(
       await createSeatedUser({
         body: { email: "orphan@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
       })
-    ).toMatchObject({ ok: false, status: 409 });
-    expect(mockClientQuery).not.toHaveBeenCalled();
+    ).toEqual({ ok: true });
+    // Reuses the dormant row — no duplicate teacher inserted.
+    expect(
+      mockClientQuery.mock.calls.some((c) =>
+        String(c[0]).includes("UPDATE teacher SET")
+      )
+    ).toBe(true);
+    expect(
+      mockClientQuery.mock.calls.some((c) =>
+        String(c[0]).includes("INSERT INTO teacher")
+      )
+    ).toBe(false);
   });
 
   it("createSeatedUser blocks a centre with no program", async () => {

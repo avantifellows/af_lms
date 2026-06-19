@@ -1,13 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { mockQuery, mockWithTransaction } = vi.hoisted(() => {
+  const mockQuery = vi.fn();
+  return {
+    mockQuery,
+    // Run the callback with a client whose query routes to the same mock, so
+    // top-level and in-transaction queries are captured in one call list.
+    mockWithTransaction: vi.fn(
+      async (fn: (client: { query: typeof mockQuery }) => Promise<unknown>) =>
+        fn({ query: mockQuery })
+    ),
+  };
+});
+
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/permissions", () => ({ isAdmin: vi.fn() }));
-vi.mock("@/lib/db", () => ({ query: vi.fn() }));
+vi.mock("@/lib/db", () => ({
+  query: mockQuery,
+  withTransaction: mockWithTransaction,
+}));
 
 import { getServerSession } from "next-auth";
 import { isAdmin } from "@/lib/permissions";
-import { query } from "@/lib/db";
 import { DELETE, PATCH } from "./route";
 import {
   jsonRequest,
@@ -18,10 +33,13 @@ import {
 
 const mockSession = vi.mocked(getServerSession);
 const mockIsAdmin = vi.mocked(isAdmin);
-const mockQuery = vi.mocked(query);
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mockWithTransaction.mockImplementation(
+    async (fn: (client: { query: typeof mockQuery }) => Promise<unknown>) =>
+      fn({ query: mockQuery })
+  );
 });
 
 describe("DELETE /api/admin/users/[id]", () => {
@@ -54,18 +72,29 @@ describe("DELETE /api/admin/users/[id]", () => {
     expect(json.error).toContain("Cannot delete your own");
   });
 
-  it("deletes another user successfully", async () => {
+  it("deletes another user and vacates their centre seats", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
     mockQuery
-      .mockResolvedValueOnce([{ email: "other@test.com" }]) // lookup
-      .mockResolvedValueOnce([]); // delete
+      .mockResolvedValueOnce([{ email: "other@test.com", user_id: 70 }]) // lookup
+      .mockResolvedValueOnce([]) // vacate seats (soft-delete)
+      .mockResolvedValueOnce([]); // delete permission
 
     const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
     const res = await DELETE(req as never, params);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
+    // The seats are soft-deleted (removing them from the centre + roster).
+    expect(
+      mockQuery.mock.calls.some((c) =>
+        String(c[0]).includes("centre_positions SET deleted_at")
+      )
+    ).toBe(true);
+    // The teacher/staff/user identity rows are NOT destroyed.
+    expect(
+      mockQuery.mock.calls.some((c) => /DELETE FROM (teacher|staff|"user")/.test(String(c[0])))
+    ).toBe(false);
   });
 
   it("succeeds when user to delete does not exist", async () => {

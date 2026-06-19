@@ -1055,27 +1055,6 @@ export async function createSeatedUser(params: {
     };
   }
 
-  // Even with no permission, the email may still own an orphaned teacher/staff
-  // record (e.g. left behind when its permission was hard-deleted). Re-creating
-  // one would duplicate the person in the roster (two records, same user → seats
-  // cross-product), so refuse — they should be edited/cleaned from the roster.
-  const dupRecord = await query<{ id: number }>(
-    kind === "teacher"
-      ? `SELECT t.id FROM teacher t JOIN "user" u ON u.id = t.user_id
-         WHERE t.is_af_teacher = true AND LOWER(u.email) = LOWER($1)`
-      : `SELECT s.id FROM staff s JOIN "user" u ON u.id = s.user_id
-         WHERE LOWER(u.email) = LOWER($1)`,
-    [email]
-  );
-  if (dupRecord.length > 0) {
-    return {
-      ok: false,
-      status: 409,
-      error:
-        "This person already has a teacher/staff record — edit them from the roster instead of adding again.",
-    };
-  }
-
   if (code) {
     const codeClash = await query<{ id: number }>(
       kind === "teacher"
@@ -1127,18 +1106,47 @@ export async function createSeatedUser(params: {
       [userId, permissionId]
     );
 
+    // Reuse a dormant teacher/staff record if one exists (e.g. left behind when
+    // this person was previously removed) rather than inserting a duplicate —
+    // this is what makes remove → re-add seamless and dup-free.
     if (kind === "teacher") {
-      await client.query(
-        `INSERT INTO teacher (user_id, is_af_teacher, subject_id, teacher_id, inserted_at, updated_at)
-         VALUES ($1, true, $2, $3, now(), now())`,
-        [userId, subjectId, code]
+      const existing = await client.query<{ id: number }>(
+        `SELECT id FROM teacher WHERE user_id = $1 AND is_af_teacher = true ORDER BY id LIMIT 1`,
+        [userId]
       );
+      if (existing.rows.length > 0) {
+        await client.query(
+          `UPDATE teacher SET subject_id = $1, teacher_id = COALESCE($2, teacher_id),
+             is_af_teacher = true, exit_date = NULL, updated_at = now()
+           WHERE id = $3`,
+          [subjectId, code, existing.rows[0].id]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO teacher (user_id, is_af_teacher, subject_id, teacher_id, inserted_at, updated_at)
+           VALUES ($1, true, $2, $3, now(), now())`,
+          [userId, subjectId, code]
+        );
+      }
     } else {
-      await client.query(
-        `INSERT INTO staff (user_id, employee_code, staff_type, inserted_at, updated_at)
-         VALUES ($1, $2, 'program_manager', now(), now())`,
-        [userId, code]
+      const existing = await client.query<{ id: number }>(
+        `SELECT id FROM staff WHERE user_id = $1 ORDER BY id LIMIT 1`,
+        [userId]
       );
+      if (existing.rows.length > 0) {
+        await client.query(
+          `UPDATE staff SET employee_code = COALESCE($1, employee_code),
+             exit_date = NULL, updated_at = now()
+           WHERE id = $2`,
+          [code, existing.rows[0].id]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO staff (user_id, employee_code, staff_type, inserted_at, updated_at)
+           VALUES ($1, $2, 'program_manager', now(), now())`,
+          [userId, code]
+        );
+      }
     }
 
     await client.query(
