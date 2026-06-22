@@ -23,7 +23,9 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "pm:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-pm-centres.ts",
-    "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts"
+    "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts",
+    "pm:promodiff": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-promotion-school-diff.ts",
+    "pm:mirror": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/mirror-seats-staging-to-prod.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1025.0",
