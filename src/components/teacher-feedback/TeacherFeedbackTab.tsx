@@ -331,10 +331,7 @@ function SetupModal({
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
-            <SectionCard
-              title="1. Select Class Batches"
-              subtitle="Selected batches decide which students see the feedback forms."
-            >
+            <SectionCard title="1. Select Class Batches">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
                 {loading ? (
                   <div className="px-3 py-4 text-sm text-text-secondary">Loading batches…</div>
