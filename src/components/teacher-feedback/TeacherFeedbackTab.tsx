@@ -25,24 +25,39 @@ interface FeedbackTeacher {
   subject: string | null;
 }
 
-interface TeacherResult {
+interface CycleTeacher {
   teacherName: string;
   teacherOrder: number;
-  status: "created" | "failed";
-  sessionId?: string;
-  error?: string;
+  teacherId: string | null;
+  quizId: string | null;
+  sessionId: string | null;
+  status: string;
+  portalLink: string;
+  adminTestingLink: string;
 }
 
-interface SetupResponse {
+interface Cycle {
+  setupRunId: string;
   cycleLabel: string;
-  createdCount: number;
-  failedCount: number;
-  teachers: TeacherResult[];
+  batchClassIds: string[];
+  grade: number;
+  startTime: string | null;
+  endTime: string | null;
+  createdBy: string;
+  createdAt: string;
+  teachers: CycleTeacher[];
 }
-
-type TimingMode = "start_now" | "schedule";
 
 const DEFAULT_DURATION_HOURS = 24;
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "-";
+  const d = new Date(value.includes("T") || value.includes("Z") ? value : value.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("en-IN", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
 
 export default function TeacherFeedbackTab({
   schoolId,
@@ -55,11 +70,13 @@ export default function TeacherFeedbackTab({
 }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [teachers, setTeachers] = useState<FeedbackTeacher[]>([]);
+  const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loadingBatches, setLoadingBatches] = useState(true);
   const [loadingTeachers, setLoadingTeachers] = useState(true);
+  const [loadingCycles, setLoadingCycles] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [analysisQuiz, setAnalysisQuiz] = useState<{ quizId: string; teacherName: string } | null>(null);
   const [toast, setToast] = useState<{ variant: "error" | "success" | "info"; message: string } | null>(null);
-  const [lastResult, setLastResult] = useState<SetupResponse | null>(null);
 
   const fetchBatches = useCallback(async () => {
     setLoadingBatches(true);
@@ -87,10 +104,24 @@ export default function TeacherFeedbackTab({
     }
   }, [schoolCode]);
 
+  const fetchCycles = useCallback(async () => {
+    setLoadingCycles(true);
+    try {
+      const res = await fetch(`/api/teacher-feedback/cycles?school_code=${encodeURIComponent(schoolCode)}`);
+      const body = await res.json();
+      setCycles(Array.isArray(body.cycles) ? body.cycles : []);
+    } catch {
+      setToast({ variant: "error", message: "Failed to load feedback rounds" });
+    } finally {
+      setLoadingCycles(false);
+    }
+  }, [schoolCode]);
+
   useEffect(() => {
     fetchBatches();
     fetchTeachers();
-  }, [fetchBatches, fetchTeachers]);
+    fetchCycles();
+  }, [fetchBatches, fetchTeachers, fetchCycles]);
 
   return (
     <div className="space-y-4">
@@ -122,42 +153,26 @@ export default function TeacherFeedbackTab({
         </div>
       </div>
 
-      {/* Result of the most recent setup (the "list" until the report lands). */}
-      {lastResult ? (
-        <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
-          <div className="border-b-2 border-border-accent px-4 py-3 text-sm font-bold uppercase tracking-wide text-text-muted">
-            {lastResult.cycleLabel} — {lastResult.createdCount} created
-            {lastResult.failedCount > 0 ? `, ${lastResult.failedCount} failed` : ""}
-          </div>
-          <ul className="divide-y divide-border">
-            {lastResult.teachers.map((t) => (
-              <li key={`${t.teacherOrder}-${t.teacherName}`} className="flex items-center gap-3 px-4 py-3 text-sm">
-                <span
-                  className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-                    t.status === "created" ? "bg-success" : "bg-danger"
-                  }`}
-                />
-                <span className="font-medium text-text-primary">{t.teacherName}</span>
-                {t.status === "created" ? (
-                  <span className="text-text-secondary">{t.sessionId}</span>
-                ) : (
-                  <span className="text-danger">{t.error}</span>
-                )}
-              </li>
-            ))}
-          </ul>
+      {loadingCycles ? (
+        <div className="rounded-lg border border-border bg-bg-card px-4 py-10 text-center text-sm text-text-secondary">
+          Loading feedback rounds…
+        </div>
+      ) : cycles.length === 0 ? (
+        <div className="rounded-lg border border-border bg-bg-card-alt px-4 py-10 text-center text-sm text-text-secondary">
+          No feedback rounds yet. Use “Set Up Feedback” to create one.
         </div>
       ) : (
-        <div className="rounded-lg border border-border bg-bg-card-alt px-4 py-10 text-center text-sm text-text-secondary">
-          No feedback rounds set up yet in this session.
+        <div className="space-y-3">
+          {cycles.map((c) => (
+            <CycleCard
+              key={c.setupRunId}
+              cycle={c}
+              onAnalyze={(quizId, teacherName) => setAnalysisQuiz({ quizId, teacherName })}
+              onCopy={(msg) => setToast({ variant: "success", message: msg })}
+            />
+          ))}
         </div>
       )}
-
-      {/* Report placeholder — filled once responses exist (next phase). */}
-      <div className="rounded-lg border border-dashed border-border bg-bg-card-alt px-4 py-6 text-center text-sm text-text-secondary">
-        Feedback analysis (per-teacher scores &amp; comments) will appear here once
-        students submit their responses.
-      </div>
 
       {isCreateOpen && (
         <SetupModal
@@ -167,7 +182,6 @@ export default function TeacherFeedbackTab({
           loading={loadingBatches || loadingTeachers}
           onClose={() => setIsCreateOpen(false)}
           onDone={(result) => {
-            setLastResult(result);
             setIsCreateOpen(false);
             setToast({
               variant: result.failedCount > 0 ? "info" : "success",
@@ -176,22 +190,23 @@ export default function TeacherFeedbackTab({
                   ? `Created ${result.createdCount}, ${result.failedCount} failed`
                   : `Created ${result.createdCount} feedback form(s) for ${result.cycleLabel}`,
             });
+            fetchCycles();
           }}
+        />
+      )}
+
+      {analysisQuiz && (
+        <AnalysisModal
+          quizId={analysisQuiz.quizId}
+          teacherName={analysisQuiz.teacherName}
+          onClose={() => setAnalysisQuiz(null)}
         />
       )}
     </div>
   );
 }
 
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
+function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-bg-card shadow-sm">
       <div className="border-b-2 border-border-accent px-4 py-3">
@@ -202,6 +217,289 @@ function SectionCard({
     </div>
   );
 }
+
+function CopyLink({ label, href, onCopy }: { label: string; href: string; onCopy: (msg: string) => void }) {
+  if (!href) return <span className="text-xs text-text-muted">{label}: -</span>;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(href);
+      onCopy(`${label} copied`);
+    } catch {
+      window.prompt(`Copy ${label}:`, href);
+    }
+  };
+  return (
+    <span className="inline-flex items-center gap-1">
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xs font-medium text-accent hover:underline"
+      >
+        {label}
+      </a>
+      <button
+        type="button"
+        onClick={copy}
+        className="text-text-muted hover:text-text-primary"
+        aria-label={`Copy ${label}`}
+        title={`Copy ${label}`}
+      >
+        ⧉
+      </button>
+    </span>
+  );
+}
+
+function CycleCard({
+  cycle,
+  onAnalyze,
+  onCopy,
+}: {
+  cycle: Cycle;
+  onAnalyze: (quizId: string, teacherName: string) => void;
+  onCopy: (msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Capture "now" once at mount (lazy initializer) to keep render pure.
+  const [nowMs] = useState(() => new Date().getTime());
+  const end = cycle.endTime ? new Date(cycle.endTime.replace(" ", "T") + "Z").getTime() : null;
+  const live = end !== null && end > nowMs;
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-hover-bg"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-text-muted">{open ? "▾" : "▸"}</span>
+          <span className="text-sm font-semibold text-text-primary">{cycle.cycleLabel}</span>
+          <span className="text-xs text-text-secondary">
+            {cycle.teachers.length} teacher{cycle.teachers.length === 1 ? "" : "s"} ·{" "}
+            {cycle.batchClassIds.length} batch{cycle.batchClassIds.length === 1 ? "" : "es"}
+          </span>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+            live ? "bg-success-bg text-accent-hover" : "bg-bg-card-alt text-text-secondary"
+          }`}
+        >
+          {live ? "Live" : "Ended"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-border">
+          <div className="px-4 py-2 text-xs text-text-secondary">
+            Window: {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)} · by {cycle.createdBy}
+          </div>
+          <ul className="divide-y divide-border">
+            {cycle.teachers.map((t) => (
+              <li
+                key={`${t.teacherOrder}-${t.teacherName}`}
+                className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+                      t.status === "created" ? "bg-success" : "bg-danger"
+                    }`}
+                  />
+                  <span className="text-sm font-medium text-text-primary">{t.teacherName}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <CopyLink label="Student link" href={t.portalLink} onCopy={onCopy} />
+                  <CopyLink label="Admin test" href={t.adminTestingLink} onCopy={onCopy} />
+                  <button
+                    type="button"
+                    disabled={!t.quizId}
+                    onClick={() => t.quizId && onAnalyze(t.quizId, t.teacherName)}
+                    className="rounded-md border border-border px-3 py-1 text-xs font-medium text-text-secondary hover:bg-hover-bg disabled:opacity-40"
+                  >
+                    Analysis
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Analysis modal -----------------------------------------------------------
+
+interface ParameterScore {
+  parameter: string;
+  score: number;
+  maxScore: number;
+}
+interface ReportData {
+  teacherName: string;
+  responseCount: number;
+  totalScore: number;
+  maxTotalScore: number;
+  percentage: number;
+  parameters: ParameterScore[];
+  comments: { role: "liked" | "improve"; text: string }[];
+  batches: { batch: string; responseCount: number }[];
+}
+
+function AnalysisModal({
+  quizId,
+  teacherName,
+  onClose,
+}: {
+  quizId: string;
+  teacherName: string;
+  onClose: () => void;
+}) {
+  const [data, setData] = useState<ReportData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/teacher-feedback/report?quiz_id=${encodeURIComponent(quizId)}`);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || "Failed to load report");
+        if (!cancelled) setData(body);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [quizId]);
+
+  const liked = data?.comments.filter((c) => c.role === "liked") ?? [];
+  const improve = data?.comments.filter((c) => c.role === "improve") ?? [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="relative flex max-h-[92vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-bg-card shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
+          <div>
+            <h2 className="text-lg font-bold text-text-primary">{teacherName}</h2>
+            <div className="text-xs text-text-secondary">Feedback analysis</div>
+          </div>
+          <button onClick={onClose} className="text-text-secondary hover:text-text-primary" aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? (
+            <p className="text-sm text-text-secondary">Loading analysis…</p>
+          ) : error ? (
+            <p className="text-sm text-danger">{error}</p>
+          ) : !data || data.responseCount === 0 ? (
+            <p className="text-sm text-text-secondary">
+              No student responses yet for this teacher.
+            </p>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex items-baseline gap-4">
+                <div className="text-3xl font-bold text-text-primary">{data.percentage.toFixed(1)}%</div>
+                <div className="text-sm text-text-secondary">
+                  {data.totalScore.toFixed(1)} / {data.maxTotalScore} ·{" "}
+                  {data.responseCount} response{data.responseCount === 1 ? "" : "s"}
+                </div>
+              </div>
+
+              <SectionCard title="Parameter scores">
+                <div className="space-y-2">
+                  {data.parameters.map((p) => {
+                    const pct = p.maxScore > 0 ? (p.score / p.maxScore) * 100 : 0;
+                    return (
+                      <div key={p.parameter}>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-text-primary">{p.parameter}</span>
+                          <span className="text-text-secondary">
+                            {p.score.toFixed(1)} / {p.maxScore}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-2 w-full rounded-full bg-bg-card-alt">
+                          <div className="h-2 rounded-full bg-accent" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </SectionCard>
+
+              {data.batches.length > 0 && (
+                <SectionCard title="Responses by batch">
+                  <ul className="space-y-1 text-sm">
+                    {data.batches.map((b) => (
+                      <li key={b.batch} className="flex justify-between">
+                        <span className="text-text-primary">{b.batch}</span>
+                        <span className="text-text-secondary">{b.responseCount}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </SectionCard>
+              )}
+
+              <SectionCard title="What students liked">
+                {liked.length === 0 ? (
+                  <p className="text-sm text-text-muted">No comments.</p>
+                ) : (
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-text-primary">
+                    {liked.map((c, i) => (
+                      <li key={i}>{c.text}</li>
+                    ))}
+                  </ul>
+                )}
+              </SectionCard>
+
+              <SectionCard title="What could improve">
+                {improve.length === 0 ? (
+                  <p className="text-sm text-text-muted">No comments.</p>
+                ) : (
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-text-primary">
+                    {improve.map((c, i) => (
+                      <li key={i}>{c.text}</li>
+                    ))}
+                  </ul>
+                )}
+              </SectionCard>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Setup modal --------------------------------------------------------------
+
+interface SetupResponse {
+  cycleLabel: string;
+  createdCount: number;
+  failedCount: number;
+}
+
+type TimingMode = "start_now" | "schedule";
 
 function SetupModal({
   schoolCode,
@@ -234,7 +532,6 @@ function SetupModal({
     return () => window.removeEventListener("keydown", onEsc);
   }, [onClose]);
 
-  // Class batches = leaf batches (have a parent, are not themselves a parent).
   const parentIdSet = useMemo(() => {
     const set = new Set<number>();
     batches.forEach((b) => b.parent_id !== null && set.add(b.parent_id));
@@ -245,10 +542,7 @@ function SetupModal({
     [batches, parentIdSet]
   );
 
-  // A feedback round can span batches and grades (a JNV teacher often teaches
-  // both 11 and 12), so we don't require one parent or a derived grade. Students
-  // see the form via meta_data.batch_id overlap, not the group attach. We pass
-  // the first selected batch's parent for the (best-effort) group attach.
+  // parentBatchId is best-effort (first selected batch's parent) for the group attach.
   const parentBatchId = useMemo(() => {
     const rows = classBatchIds
       .map((id) => batches.find((b) => b.batch_id === id))
@@ -262,16 +556,17 @@ function SetupModal({
       prev.includes(batchId) ? prev.filter((x) => x !== batchId) : [...prev, batchId]
     );
 
+  const teacherKey = (t: FeedbackTeacher) => t.id ?? t.name;
+  const isTeacherSelected = (t: FeedbackTeacher) =>
+    selectedTeachers.some((x) => teacherKey(x) === teacherKey(t));
   const toggleTeacher = (t: FeedbackTeacher) =>
-    setSelectedTeachers((prev) => {
-      const key = (x: FeedbackTeacher) => x.id ?? x.name;
-      return prev.some((x) => key(x) === key(t))
-        ? prev.filter((x) => key(x) !== key(t))
-        : [...prev, t];
-    });
+    setSelectedTeachers((prev) =>
+      prev.some((x) => teacherKey(x) === teacherKey(t))
+        ? prev.filter((x) => teacherKey(x) !== teacherKey(t))
+        : [...prev, t]
+    );
 
-  const canSubmit =
-    classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
+  const canSubmit = classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -311,10 +606,6 @@ function SetupModal({
       setSaving(false);
     }
   };
-
-  const teacherKey = (t: FeedbackTeacher) => t.id ?? t.name;
-  const isTeacherSelected = (t: FeedbackTeacher) =>
-    selectedTeachers.some((x) => teacherKey(x) === teacherKey(t));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -366,9 +657,7 @@ function SetupModal({
                 {loading ? (
                   <div className="px-3 py-4 text-sm text-text-secondary">Loading teachers…</div>
                 ) : teachers.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-text-secondary">
-                    No teachers found for this school.
-                  </div>
+                  <div className="px-3 py-4 text-sm text-text-secondary">No teachers found for this school.</div>
                 ) : (
                   teachers.map((t) => {
                     const checked = isTeacherSelected(t);
@@ -463,21 +752,19 @@ function SetupModal({
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-border px-5 py-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={submit}
-              disabled={!canSubmit}
-              className="rounded-lg bg-accent px-5 py-2 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:opacity-50"
-            >
-              {saving ? "Setting up…" : "Create Feedback Forms"}
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-hover-bg"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!canSubmit}
+            className="rounded-lg bg-accent px-5 py-2 text-sm font-bold uppercase tracking-wide text-text-on-accent shadow-sm hover:bg-accent-hover disabled:opacity-50"
+          >
+            {saving ? "Setting up…" : "Create Feedback Forms"}
+          </button>
         </div>
       </div>
     </div>
