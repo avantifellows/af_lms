@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import Toast from "@/components/Toast";
-import { parseBatchStream } from "@/lib/batch-code";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 
 interface BatchOption {
@@ -371,7 +370,6 @@ function SetupModal({
                 ) : (
                   availableClassBatches.map((b) => {
                     const checked = classBatchIds.includes(b.batch_id);
-                    const stream = parseBatchStream(b.batch_id);
                     return (
                       <label
                         key={b.id}
@@ -385,10 +383,7 @@ function SetupModal({
                           onChange={() => toggleBatch(b.batch_id)}
                           className="mt-0.5 h-4 w-4 accent-accent"
                         />
-                        <span className="block font-medium text-text-primary">
-                          {b.name}
-                          {stream ? <span className="ml-2 text-xs text-text-secondary">{stream}</span> : null}
-                        </span>
+                        <span className="block font-medium text-text-primary">{b.name}</span>
                       </label>
                     );
                   })
