@@ -237,16 +237,27 @@ export async function createFeedbackSession(
     throw new Error("db-service session create returned no id");
   }
 
-  const groupId = await getBatchGroupId(params.parentBatchId);
-  const groupSessionResp = await fetch(`${base}/group-session`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify({ session_id: written.id, group_id: groupId }),
-  });
-  if (!groupSessionResp.ok) {
-    const errorText = await groupSessionResp.text();
-    console.error("db-service group-session error:", groupSessionResp.status, errorText);
-    throw new Error(`Failed to attach session to group (status ${groupSessionResp.status})`);
+  // Group attach is BEST-EFFORT: student visibility comes from the
+  // meta_data.batch_id overlap (how Gurukul matches sessions), not this row.
+  // A feedback round can span batches with different parents, so a single
+  // parent group attach may be partial or unresolvable — never fail on it.
+  if (params.parentBatchId) {
+    try {
+      const groupId = await getBatchGroupId(params.parentBatchId);
+      const groupSessionResp = await fetch(`${base}/group-session`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ session_id: written.id, group_id: groupId }),
+      });
+      if (!groupSessionResp.ok) {
+        console.warn(
+          "db-service group-session attach failed (non-fatal):",
+          groupSessionResp.status
+        );
+      }
+    } catch (e) {
+      console.warn("group-session attach skipped (non-fatal):", e instanceof Error ? e.message : e);
+    }
   }
 
   const occurrenceResp = await fetch(`${base}/session-occurrence`, {

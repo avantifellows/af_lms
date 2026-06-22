@@ -85,27 +85,24 @@ export async function POST(request: NextRequest) {
   }
 
   const schoolCode = body.schoolCode?.trim();
-  const parentBatchId = body.parentBatchId?.trim();
+  const parentBatchId = body.parentBatchId?.trim() ?? "";
   const classBatchIds = Array.isArray(body.classBatchIds)
     ? body.classBatchIds.map((b) => String(b).trim()).filter(Boolean)
     : [];
-  const grade = Number(body.grade);
+  // A feedback round can span grades (a teacher often teaches both 11 and 12),
+  // so grade is not collected; it's only informational form metadata. Default to
+  // 11 when the client doesn't send a valid grade. Analysis is batch-wise.
+  const grade = body.grade === 11 || body.grade === 12 ? body.grade : 11;
   const teachers = Array.isArray(body.teachers) ? body.teachers : [];
 
   if (!schoolCode) {
     return NextResponse.json({ error: "schoolCode is required" }, { status: 400 });
-  }
-  if (!parentBatchId) {
-    return NextResponse.json({ error: "parentBatchId is required" }, { status: 400 });
   }
   if (classBatchIds.length === 0) {
     return NextResponse.json(
       { error: "At least one class batch is required" },
       { status: 400 }
     );
-  }
-  if (!Number.isInteger(grade) || (grade !== 11 && grade !== 12)) {
-    return NextResponse.json({ error: "grade must be 11 or 12" }, { status: 400 });
   }
   const cleanTeachers = teachers
     .map((t) => ({
@@ -122,12 +119,12 @@ export async function POST(request: NextRequest) {
   }
 
   // Access: the PM must be able to reach the chosen batches' school(s).
-  const allBatchIds = [parentBatchId, ...classBatchIds];
-  if (!(await canAccessQuizSessionBatches(access.permission, allBatchIds))) {
+  if (!(await canAccessQuizSessionBatches(access.permission, classBatchIds))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Confirm the parent batch actually belongs to this school (don't trust the client).
+  // Confirm the selected class batches belong to this school (don't trust the
+  // client). parentBatchId is best-effort (used only for the group attach).
   const ownership = await query<{ ok: boolean }>(
     `
     SELECT EXISTS (
@@ -135,14 +132,14 @@ export async function POST(request: NextRequest) {
       FROM batch b
       JOIN school_batch sb ON sb.batch_id = b.id
       JOIN school s ON s.id = sb.school_id
-      WHERE b.batch_id = $1 AND s.code = $2
+      WHERE b.batch_id = ANY($1::text[]) AND s.code = $2
     ) AS ok
     `,
-    [parentBatchId, schoolCode]
+    [classBatchIds, schoolCode]
   );
   if (!ownership[0]?.ok) {
     return NextResponse.json(
-      { error: "Selected batch does not belong to this school" },
+      { error: "Selected batches do not belong to this school" },
       { status: 400 }
     );
   }

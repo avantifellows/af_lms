@@ -134,11 +134,13 @@ describe("createFeedbackSession", () => {
     await expect(createFeedbackSession(baseParams)).rejects.toThrow(/create session/);
   });
 
-  it("throws if the parent batch can't be resolved to a group", async () => {
+  it("still succeeds when the group attach can't be resolved (best-effort)", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ id: 17221 })); // session ok
-    mockFetch.mockResolvedValueOnce(jsonResponse([])); // batch lookup empty
+    mockFetch.mockResolvedValueOnce(jsonResponse([])); // batch lookup empty -> group attach skipped
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 2 })); // session-occurrence ok
     const { createFeedbackSession } = await import("./teacher-feedback-session");
-    await expect(createFeedbackSession(baseParams)).rejects.toThrow(/Batch .* not found/);
+    const result = await createFeedbackSession(baseParams);
+    expect(result.sessionPk).toBe(17221);
   });
 
   it("throws when DB service is not configured", async () => {

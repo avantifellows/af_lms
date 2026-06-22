@@ -91,7 +91,6 @@ describe("POST /api/teacher-feedback/setup", () => {
   it("400 on missing/invalid fields", async () => {
     expect((await POST(req(validBody({ schoolCode: "" })))).status).toBe(400);
     expect((await POST(req(validBody({ classBatchIds: [] })))).status).toBe(400);
-    expect((await POST(req(validBody({ grade: 9 })))).status).toBe(400);
     expect((await POST(req(validBody({ teachers: [] })))).status).toBe(400);
   });
 
@@ -106,7 +105,7 @@ describe("POST /api/teacher-feedback/setup", () => {
     const res = await POST(req(validBody()));
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/does not belong/);
+    expect(json.error).toMatch(/do not belong/);
   });
 
   it("creates a quiz + session per teacher and returns 201 with per-teacher results", async () => {

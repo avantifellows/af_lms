@@ -44,12 +44,6 @@ type TimingMode = "start_now" | "schedule";
 
 const DEFAULT_DURATION_HOURS = 24;
 
-function getCompactBatchLabel(values: string[]): string {
-  if (values.length === 0) return "-";
-  if (values.length === 1) return values[0];
-  return `${values[0]} +${values.length - 1}`;
-}
-
 export default function TeacherFeedbackTab({
   schoolId,
   schoolCode,
@@ -61,7 +55,6 @@ export default function TeacherFeedbackTab({
 }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [teachers, setTeachers] = useState<FeedbackTeacher[]>([]);
-  const [teacherSource, setTeacherSource] = useState<string>("");
   const [loadingBatches, setLoadingBatches] = useState(true);
   const [loadingTeachers, setLoadingTeachers] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -87,7 +80,6 @@ export default function TeacherFeedbackTab({
       const res = await fetch(`/api/teacher-feedback/teachers?school_code=${encodeURIComponent(schoolCode)}`);
       const body = await res.json();
       setTeachers(Array.isArray(body.teachers) ? body.teachers : []);
-      setTeacherSource(body.source ?? "");
     } catch {
       setToast({ variant: "error", message: "Failed to load teachers" });
     } finally {
@@ -172,7 +164,6 @@ export default function TeacherFeedbackTab({
           schoolCode={schoolCode}
           batches={batches}
           teachers={teachers}
-          teacherSource={teacherSource}
           loading={loadingBatches || loadingTeachers}
           onClose={() => setIsCreateOpen(false)}
           onDone={(result) => {
@@ -216,7 +207,6 @@ function SetupModal({
   schoolCode,
   batches,
   teachers,
-  teacherSource,
   loading,
   onClose,
   onDone,
@@ -224,7 +214,6 @@ function SetupModal({
   schoolCode: string;
   batches: BatchOption[];
   teachers: FeedbackTeacher[];
-  teacherSource: string;
   loading: boolean;
   onClose: () => void;
   onDone: (result: SetupResponse) => void;
@@ -256,27 +245,16 @@ function SetupModal({
     [batches, parentIdSet]
   );
 
-  // Derive the parent batch + grade from the selected class batches (like quiz sessions).
-  const derivation = useMemo(() => {
+  // A feedback round can span batches and grades (a JNV teacher often teaches
+  // both 11 and 12), so we don't require one parent or a derived grade. Students
+  // see the form via meta_data.batch_id overlap, not the group attach. We pass
+  // the first selected batch's parent for the (best-effort) group attach.
+  const parentBatchId = useMemo(() => {
     const rows = classBatchIds
       .map((id) => batches.find((b) => b.batch_id === id))
       .filter(Boolean) as BatchOption[];
-    if (rows.length === 0) return { error: null as string | null, parentBatchId: "", grade: null as number | null };
-
-    const parentIds = new Set(rows.map((r) => r.parent_id).filter((v): v is number => v !== null));
-    if (parentIds.size !== 1) {
-      return { error: "Selected class batches must belong to the same batch.", parentBatchId: "", grade: null };
-    }
-    const parent = batches.find((b) => b.id === Array.from(parentIds)[0]);
-    if (!parent) return { error: "Could not find the parent batch.", parentBatchId: "", grade: null };
-
-    // Grade from the parent batch_id (e.g. EnableStudents_11_...).
-    const m = parent.batch_id.match(/_(\d{1,2})(?:_|$)/);
-    const grade = m ? Number(m[1]) : null;
-    if (grade !== 11 && grade !== 12) {
-      return { error: "Could not derive grade (11/12) from the batch.", parentBatchId: "", grade: null };
-    }
-    return { error: null, parentBatchId: parent.batch_id, grade };
+    const parentId = rows.find((r) => r.parent_id !== null)?.parent_id ?? null;
+    return parentId !== null ? batches.find((b) => b.id === parentId)?.batch_id ?? "" : "";
   }, [classBatchIds, batches]);
 
   const toggleBatch = (batchId: string) =>
@@ -293,11 +271,7 @@ function SetupModal({
     });
 
   const canSubmit =
-    classBatchIds.length > 0 &&
-    !derivation.error &&
-    derivation.parentBatchId !== "" &&
-    selectedTeachers.length > 0 &&
-    !saving;
+    classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -318,9 +292,8 @@ function SetupModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           schoolCode,
-          parentBatchId: derivation.parentBatchId,
+          parentBatchId,
           classBatchIds,
-          grade: derivation.grade,
           startTime: start.toISOString(),
           endTime: end.toISOString(),
           teachers: selectedTeachers.map((t, i) => ({ id: t.id, name: t.name, order: i + 1 })),
@@ -389,21 +362,9 @@ function SetupModal({
                   })
                 )}
               </div>
-              {derivation.error && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {derivation.error}
-                </div>
-              )}
             </SectionCard>
 
-            <SectionCard
-              title="2. Select Teachers"
-              subtitle={
-                teacherSource === "user_permission"
-                  ? "No centre roster for this school — showing the permission-based list."
-                  : "Teachers placed at this school's centre."
-              }
-            >
+            <SectionCard title="2. Select Teachers">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
                 {loading ? (
                   <div className="px-3 py-4 text-sm text-text-secondary">Loading teachers…</div>
@@ -504,13 +465,7 @@ function SetupModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
-          <div className="text-xs text-text-secondary">
-            {selectedTeachers.length} teacher(s) ·{" "}
-            {getCompactBatchLabel(
-              classBatchIds.map((id) => batches.find((b) => b.batch_id === id)?.name || id)
-            )}
-          </div>
+        <div className="flex items-center justify-end gap-3 border-t border-border px-5 py-4">
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
