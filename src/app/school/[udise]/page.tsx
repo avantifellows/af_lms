@@ -213,6 +213,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
+  const teacherFeedbackAccess = getFeatureAccess(permission, "teacher_feedback", opts);
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
@@ -323,7 +324,7 @@ export default async function SchoolPage({ params }: PageProps) {
     <TeacherFeedbackTab
       schoolId={school.id}
       schoolCode={school.code}
-      canEdit={quizSessionsAccess.canEdit}
+      canEdit={teacherFeedbackAccess.canEdit}
     />
   );
 
@@ -341,7 +342,7 @@ export default async function SchoolPage({ params }: PageProps) {
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
     ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(quizSessionsAccess.canView ? [{ id: "teacher_feedback", label: "Teacher Feedback", content: teacherFeedbackContent }] : []),
+    ...(teacherFeedbackAccess.canView ? [{ id: "teacher_feedback", label: "Teacher Feedback", content: teacherFeedbackContent }] : []),
     ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];

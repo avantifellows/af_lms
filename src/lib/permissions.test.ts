@@ -152,6 +152,17 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(true);
     });
 
+    it("gives PMs edit on teacher feedback but teachers none", () => {
+      const pm = makePermission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] });
+      expect(getFeatureAccess(pm, "teacher_feedback").canEdit).toBe(true);
+
+      const teacher = makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.COE] });
+      expect(getFeatureAccess(teacher, "teacher_feedback").access).toBe("none");
+
+      const admin = makePermission({ role: "admin", program_ids: [PROGRAM_IDS.COE] });
+      expect(getFeatureAccess(admin, "teacher_feedback").canEdit).toBe(true);
+    });
+
     it("gives PMs view on quiz sessions", () => {
       const perm = makePermission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "quiz_sessions");

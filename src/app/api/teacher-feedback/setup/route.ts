@@ -4,10 +4,8 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import {
-  canAccessQuizSessionBatches,
-  requireQuizSessionAccess,
-} from "@/lib/quiz-session-access";
+import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
+import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
 import {
   FEEDBACK_FORM_VERSION,
   buildFeedbackQuizBody,
@@ -74,7 +72,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const access = await requireQuizSessionAccess(email, "edit");
+  const access = await requireTeacherFeedbackAccess(email, "edit");
   if (!access.ok) {
     return access.response;
   }

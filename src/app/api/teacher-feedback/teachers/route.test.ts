@@ -3,23 +3,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/quiz-session-access", () => ({
-  requireQuizSessionAccess: vi.fn(),
   canAccessQuizSessionSchool: vi.fn(),
+}));
+vi.mock("@/lib/teacher-feedback-access", () => ({
+  requireTeacherFeedbackAccess: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
-import {
-  requireQuizSessionAccess,
-  canAccessQuizSessionSchool,
-} from "@/lib/quiz-session-access";
+import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
+import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
 import { query } from "@/lib/db";
 import { GET } from "./route";
 import { PM_SESSION, NO_SESSION } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockRequire = vi.mocked(requireQuizSessionAccess);
+const mockRequire = vi.mocked(requireTeacherFeedbackAccess);
 const mockSchool = vi.mocked(canAccessQuizSessionSchool);
 const mockQuery = vi.mocked(query);
 

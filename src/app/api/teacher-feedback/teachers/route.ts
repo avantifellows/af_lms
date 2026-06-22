@@ -3,10 +3,8 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import {
-  canAccessQuizSessionSchool,
-  requireQuizSessionAccess,
-} from "@/lib/quiz-session-access";
+import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
+import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
 
 export interface FeedbackTeacher {
   /** Stable id for the teacher (employee_code / teacher_id when available). */
@@ -127,7 +125,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const access = await requireQuizSessionAccess(email, "edit");
+  const access = await requireTeacherFeedbackAccess(email, "edit");
   if (!access.ok) {
     return access.response;
   }

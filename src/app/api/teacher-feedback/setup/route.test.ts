@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/quiz-session-access", () => ({
-  requireQuizSessionAccess: vi.fn(),
   canAccessQuizSessionBatches: vi.fn(),
+}));
+vi.mock("@/lib/teacher-feedback-access", () => ({
+  requireTeacherFeedbackAccess: vi.fn(),
 }));
 vi.mock("@/lib/quiz-backend", () => ({ createFormQuiz: vi.fn() }));
 vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
@@ -17,10 +19,8 @@ vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import {
-  requireQuizSessionAccess,
-  canAccessQuizSessionBatches,
-} from "@/lib/quiz-session-access";
+import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
+import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
 import { createFormQuiz } from "@/lib/quiz-backend";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
 import { query } from "@/lib/db";
@@ -28,7 +28,7 @@ import { POST } from "./route";
 import { jsonRequest, PM_SESSION, NO_SESSION } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockRequire = vi.mocked(requireQuizSessionAccess);
+const mockRequire = vi.mocked(requireTeacherFeedbackAccess);
 const mockBatches = vi.mocked(canAccessQuizSessionBatches);
 const mockCreateQuiz = vi.mocked(createFormQuiz);
 const mockCreateSession = vi.mocked(createFeedbackSession);
