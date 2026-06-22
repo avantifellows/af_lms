@@ -14,7 +14,17 @@ import { createFormQuiz } from "@/lib/quiz-backend";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
 
 const PORTAL_URL = process.env.PORTAL_URL ?? "https://auth.avantifellows.org/";
+const QUIZ_FRONTEND_URL = process.env.QUIZ_FRONTEND_URL ?? "";
+const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY ?? "";
 const DEFAULT_WINDOW_HOURS = 24;
+
+/** Admin testing link for a form quiz (mirrors the prototype). "" if unconfigured. */
+function buildAdminTestingLink(quizId: string): string {
+  if (!QUIZ_FRONTEND_URL) return "";
+  const base = QUIZ_FRONTEND_URL.replace(/\/$/, "");
+  const key = QUIZ_AF_API_KEY ? `&apiKey=${QUIZ_AF_API_KEY}` : "";
+  return `${base}/form/${quizId}?userId=test_admin${key}&singlePageMode=true&autoStart=true`;
+}
 
 interface TeacherInput {
   id?: string | null;
@@ -58,10 +68,16 @@ function cycleKeyFor(date: Date): string {
   return `${date.getUTCFullYear()}-${m}`;
 }
 
-/** group = the batch_id prefix before the first underscore (e.g. "EnableStudents"). */
-function deriveGroup(parentBatchId: string): string {
-  const idx = parentBatchId.indexOf("_");
-  return idx === -1 ? parentBatchId : parentBatchId.slice(0, idx);
+/**
+ * group = the program tag = the CLASS batch_id prefix before the first
+ * underscore (e.g. "EnableStudents_TP_2027_engg_C024" -> "EnableStudents").
+ * Gurukul filters sessions on meta_data->>'group', so this MUST come from a
+ * class batch_id, NOT the parent batch (whose id may be unrelated, e.g.
+ * "EN-TP-2027-engg-C01").
+ */
+function deriveGroup(classBatchId: string): string {
+  const idx = classBatchId.indexOf("_");
+  return idx === -1 ? classBatchId : classBatchId.slice(0, idx);
 }
 
 // POST /api/teacher-feedback/setup
@@ -163,7 +179,7 @@ export async function POST(request: NextRequest) {
   const startIso = startTime.toISOString();
   const endIso = endTime.toISOString();
 
-  const group = deriveGroup(parentBatchId);
+  const group = deriveGroup(classBatchIds[0]);
   const cycleLabel = cycleLabelFor(startTime);
   const sourceId = `teacher-feedback:${FEEDBACK_FORM_VERSION}:${schoolCode}:${cycleKeyFor(startTime)}`;
   const setupRunId = randomUUID();
@@ -205,6 +221,7 @@ export async function POST(request: NextRequest) {
         startTimeUtc: startIso,
         endTimeUtc: endIso,
         portalBaseUrl: PORTAL_URL,
+        adminTestingLink: buildAdminTestingLink(quiz.id),
         name: title,
         createdBy: email,
         nextStepUrl,

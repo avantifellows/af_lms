@@ -58,6 +58,8 @@ export interface FeedbackSessionParams {
   endTimeUtc: string;
   /** Portal base URL, e.g. "https://auth.avantifellows.org/". */
   portalBaseUrl: string;
+  /** Admin testing link ({QUIZ_FRONTEND_URL}/form/{quizId}?apiKey=...), or "". */
+  adminTestingLink?: string;
   /** Human-readable session name (e.g. "Student Feedback - Jun 2026 - JNV Palghar - Manjit Kumar"). */
   name: string;
   /** Email of the PM/admin creating this. */
@@ -118,7 +120,7 @@ export function buildFeedbackSessionPayload(
     report_link: "",
     shortened_link: portalLink,
     shortened_omr_link: "",
-    admin_testing_link: "",
+    admin_testing_link: params.adminTestingLink ?? "",
     number_of_fields_in_popup_form: "",
     show_answers: true,
     show_scores: false,
