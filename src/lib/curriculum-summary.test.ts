@@ -955,7 +955,7 @@ describe("buildCommonQueryParams (seat-aware scope)", () => {
         level: 1,
         role: "teacher",
         school_codes: ["70705"],
-        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]) },
+        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
       },
       emptyFilters
     );
@@ -980,7 +980,7 @@ describe("buildCommonQueryParams (seat-aware scope)", () => {
         role: "admin",
         school_codes: null,
         regions: ["West"],
-        scope: { schools: new Set(["55555"]), centres: new Set([9]) },
+        scope: { schools: new Set(["55555"]), centres: new Set([9]), programs: new Set([1]) },
       },
       emptyFilters
     );

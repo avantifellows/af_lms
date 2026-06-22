@@ -239,11 +239,14 @@ export default async function SchoolPage({ params }: PageProps) {
 
   // Programs the user is allowed to see for the enrollment cards.
   // Admins + passcode users see every program present at the school; everyone
-  // else sees the intersection of their assigned program_ids with what's here.
+  // else sees the intersection of their effective programs with what's here.
+  // Effective = explicit program_ids ∪ seat-derived (programContext.programIds),
+  // so a teacher seated at a centre sees that centre's program even when their
+  // explicit program_ids is empty.
   const isAdmin = permission?.role === "admin";
   const visibleProgramIds = (isPasscodeUser || isAdmin
     ? PROGRAM_IDS_ORDERED
-    : permission?.program_ids ?? []
+    : programContext.programIds
   ).filter((id) => programsWithStudents.has(id));
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
@@ -290,7 +293,7 @@ export default async function SchoolPage({ params }: PageProps) {
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
-        userProgramIds={permission?.program_ids ?? null}
+        userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}
         isAdmin={isAdmin}
         grades={grades}

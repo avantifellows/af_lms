@@ -101,6 +101,60 @@ describe("getProgramContextSync", () => {
     );
     expect(ctx.hasAccess).toBe(false);
   });
+
+  it("grants access via seat-derived programs when program_ids is empty", () => {
+    // The pritamps@ case: a teacher whose explicit program_ids was cleared/empty
+    // but who holds a centre seat. The seat's program (Nodal) must grant access.
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [],
+        scope: { schools: new Set(), centres: new Set([5]), programs: new Set([PROGRAM_IDS.NODAL]) },
+      })
+    );
+    expect(ctx.hasAccess).toBe(true);
+    expect(ctx.programIds).toEqual([PROGRAM_IDS.NODAL]);
+    expect(ctx.hasCoEOrNodal).toBe(true);
+    expect(ctx.isNVSOnly).toBe(false);
+  });
+
+  it("unions explicit program_ids with seat-derived programs", () => {
+    // Explicit NVS + a seat at a CoE centre → reaches both, no longer NVS-only.
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [PROGRAM_IDS.NVS],
+        scope: { schools: new Set(), centres: new Set([5]), programs: new Set([PROGRAM_IDS.COE]) },
+      })
+    );
+    expect(ctx.hasAccess).toBe(true);
+    expect(new Set(ctx.programIds)).toEqual(new Set([PROGRAM_IDS.NVS, PROGRAM_IDS.COE]));
+    expect(ctx.isNVSOnly).toBe(false);
+    expect(ctx.hasCoEOrNodal).toBe(true);
+  });
+
+  it("scope.programs 'all' grants full program access", () => {
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [],
+        scope: { schools: "all", centres: "all", programs: "all" },
+      })
+    );
+    expect(ctx.hasAccess).toBe(true);
+    expect(ctx.hasCoEOrNodal).toBe(true);
+  });
+
+  it("still denies when both explicit and seat-derived programs are empty", () => {
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [],
+        scope: { schools: new Set(["70705"]), centres: new Set(), programs: new Set() },
+      })
+    );
+    expect(ctx.hasAccess).toBe(false);
+  });
 });
 
 describe("getFeatureAccess", () => {
@@ -397,18 +451,21 @@ describe("resolveScope", () => {
     const scope = await resolveScope(makePermission({ level: 3, role: "admin" }));
     expect(scope.schools).toBe("all");
     expect(scope.centres).toBe("all");
+    expect(scope.programs).toBe("all");
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it("seeds level-1 school_codes and unions seat-derived schools", async () => {
+  it("seeds level-1 school_codes and unions seat-derived schools + programs", async () => {
     mockQuery
       .mockResolvedValueOnce([{ centre_id: 5 }, { centre_id: 6 }]) // centresForUser
-      .mockResolvedValueOnce([{ code: "99999" }]); // schoolCodesForCentres
+      .mockResolvedValueOnce([{ code: "99999" }]) // schoolCodesForCentres
+      .mockResolvedValueOnce([{ program_id: 2 }]); // programsForCentres
     const scope = await resolveScope(
       makePermission({ level: 1, school_codes: ["70705"], user_id: 42 })
     );
     expect(scope.schools).toEqual(new Set(["70705", "99999"]));
     expect(scope.centres).toEqual(new Set([5, 6]));
+    expect(scope.programs).toEqual(new Set([2]));
   });
 
   it("skips the seat lookup entirely when user_id is null", async () => {
@@ -474,10 +531,12 @@ describe("getResolvedPermission", () => {
         },
       ]) // getUserPermission
       .mockResolvedValueOnce([{ centre_id: 5 }]) // centresForUser
-      .mockResolvedValueOnce([{ code: "99999" }]); // schoolCodesForCentres
+      .mockResolvedValueOnce([{ code: "99999" }]) // schoolCodesForCentres
+      .mockResolvedValueOnce([{ program_id: 1 }]); // programsForCentres
     const p = await getResolvedPermission("t@x.com");
     expect(p?.scope?.schools).toEqual(new Set(["70705", "99999"]));
     expect(p?.scope?.centres).toEqual(new Set([5]));
+    expect(p?.scope?.programs).toEqual(new Set([1]));
   });
 });
 
@@ -486,7 +545,7 @@ describe("canAccessSchoolSync (seat-derived scope)", () => {
     const p = makePermission({
       level: 1,
       school_codes: ["70705"],
-      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]) },
+      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
     });
     expect(canAccessSchoolSync(p, "99999")).toBe(true); // seat school
     expect(canAccessSchoolSync(p, "70705")).toBe(true); // explicit
@@ -504,7 +563,7 @@ describe("canAccessSchoolSync (seat-derived scope)", () => {
       level: 2,
       school_codes: null,
       regions: ["West"],
-      scope: { schools: new Set(), centres: new Set() },
+      scope: { schools: new Set(), centres: new Set(), programs: new Set() },
     });
     expect(canAccessSchoolSync(p, "70705", "West")).toBe(true);
     expect(canAccessSchoolSync(p, "70705", "East")).toBe(false);
@@ -514,7 +573,7 @@ describe("canAccessSchoolSync (seat-derived scope)", () => {
 describe("canAccessCentreSync", () => {
   it("grants held centres, denies others, and short-circuits level-3", () => {
     const seated = makePermission({
-      scope: { schools: new Set(), centres: new Set([5, 6]) },
+      scope: { schools: new Set(), centres: new Set([5, 6]), programs: new Set() },
     });
     expect(canAccessCentreSync(seated, 5)).toBe(true);
     expect(canAccessCentreSync(seated, 7)).toBe(false);
@@ -522,7 +581,7 @@ describe("canAccessCentreSync", () => {
     const admin = makePermission({
       level: 3,
       role: "admin",
-      scope: { schools: "all", centres: "all" },
+      scope: { schools: "all", centres: "all", programs: "all" },
     });
     expect(canAccessCentreSync(admin, 999)).toBe(true);
 
@@ -536,7 +595,7 @@ describe("seat-derived scope in getAccessibleSchoolCodes / hasMultipleSchools", 
     const perm = makePermission({
       level: 1,
       school_codes: ["70705"],
-      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]) },
+      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
     });
     const result = await getAccessibleSchoolCodes("t@af.org", perm);
     expect(new Set(result as string[])).toEqual(new Set(["70705", "99999"]));
@@ -547,14 +606,14 @@ describe("seat-derived scope in getAccessibleSchoolCodes / hasMultipleSchools", 
     const single = makePermission({
       level: 1,
       school_codes: ["70705"],
-      scope: { schools: new Set(["70705"]), centres: new Set() },
+      scope: { schools: new Set(["70705"]), centres: new Set(), programs: new Set() },
     });
     expect(hasMultipleSchools(single)).toBe(false);
 
     const seatedElsewhere = makePermission({
       level: 1,
       school_codes: ["70705"],
-      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]) },
+      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
     });
     expect(hasMultipleSchools(seatedElsewhere)).toBe(true);
   });

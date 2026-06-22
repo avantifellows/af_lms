@@ -150,6 +150,11 @@ export interface UserPermission {
 export interface ResolvedScope {
   schools: Set<string> | "all";
   centres: Set<number> | "all";
+  // Programs reachable via the person's centre seats (each centre belongs to
+  // exactly one program). Unioned with explicit program_ids by
+  // getProgramContextSync, so a seated user is never locked out of the program
+  // their seat implies even when program_ids is empty. "all" for level-3 admins.
+  programs: Set<number> | "all";
 }
 
 // Program permission context
@@ -236,6 +241,20 @@ async function schoolCodesForCentres(centreIds: number[]): Promise<string[]> {
   return rows.map((r) => r.code);
 }
 
+// Program ids for a set of centres (centres.program_id). Each centre belongs to
+// exactly one program, so this is the seat-derived program scope. Returns [] for
+// empty input rather than issuing a `= ANY('{}')` query.
+async function programsForCentres(centreIds: number[]): Promise<number[]> {
+  if (centreIds.length === 0) return [];
+  const rows = await query<{ program_id: number | string }>(
+    `SELECT DISTINCT program_id
+     FROM centres
+     WHERE id = ANY($1) AND program_id IS NOT NULL`,
+    [centreIds]
+  );
+  return rows.map((r) => Number(r.program_id));
+}
+
 // True only for Postgres "undefined_table" / "undefined_column" errors — the
 // signal that the centre-seat schema hasn't been migrated on this environment
 // yet. Used to scope resolveScope's degrade-to-explicit fallback to that case
@@ -252,7 +271,7 @@ function isMissingSchemaError(err: unknown): boolean {
 // derived from school_codes (seat schools ⊆ school_codes); strict per-user
 // exclusivity (B2) makes seats the sole source for seated staff.
 export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
-  if (p.level === 3) return { schools: "all", centres: "all" };
+  if (p.level === 3) return { schools: "all", centres: "all", programs: "all" };
 
   // school_codes is the level-1 scope mechanism; level-2's explicit scope is
   // regions (kept lazy in canAccessSchoolSync's switch), so only seed school_codes
@@ -260,6 +279,9 @@ export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
   // diverge from the level switch.
   const schools = new Set<string>(p.level === 1 ? p.school_codes ?? [] : []);
   const centres = new Set<number>();
+  // Seat-derived programs only — explicit program_ids are unioned in by
+  // getProgramContextSync, which is where program access is actually decided.
+  const programs = new Set<number>();
 
   if (p.user_id != null) {
     try {
@@ -267,6 +289,9 @@ export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
       centreIds.forEach((id) => centres.add(id));
       for (const code of await schoolCodesForCentres(centreIds)) {
         schools.add(code);
+      }
+      for (const programId of await programsForCentres(centreIds)) {
+        programs.add(programId);
       }
     } catch (err) {
       // The centre tables/columns may not exist yet on an environment that
@@ -279,7 +304,7 @@ export async function resolveScope(p: UserPermission): Promise<ResolvedScope> {
     }
   }
 
-  return { schools, centres };
+  return { schools, centres, programs };
 }
 
 // getUserPermission + resolved scope. Use this (not getUserPermission) anywhere
@@ -513,8 +538,31 @@ export function getProgramContextSync(
     };
   }
 
-  // For non-admins, require program_ids
-  if (!permission.program_ids || permission.program_ids.length === 0) {
+  // Effective programs = explicit program_ids ∪ seat-derived programs. Each
+  // centre seat implies exactly one program, so this mirrors resolveScope's
+  // additive school union: a seated user reaches the program their seat implies
+  // even when program_ids is empty. scope.programs is populated only via
+  // getResolvedPermission; a bare getUserPermission falls back to explicit ids.
+  const seatPrograms = permission.scope?.programs;
+  if (seatPrograms === "all") {
+    return {
+      hasAccess: true,
+      programIds: permission.program_ids?.length
+        ? permission.program_ids
+        : [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    };
+  }
+  const programIds = Array.from(
+    new Set<number>([
+      ...(permission.program_ids ?? []),
+      ...(seatPrograms ?? []),
+    ])
+  );
+
+  // For non-admins, require at least one program (explicit or seat-derived)
+  if (programIds.length === 0) {
     return {
       hasAccess: false,
       programIds: [],
@@ -523,7 +571,6 @@ export function getProgramContextSync(
     };
   }
 
-  const programIds = permission.program_ids;
   const hasNVS = programIds.includes(PROGRAM_IDS.NVS);
   const hasCoE = programIds.includes(PROGRAM_IDS.COE);
   const hasNodal = programIds.includes(PROGRAM_IDS.NODAL);

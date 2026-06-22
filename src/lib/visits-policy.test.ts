@@ -121,7 +121,7 @@ describe("buildVisitScopePredicate (seat-aware list filter)", () => {
       makePermission({
         level: 1,
         school_codes: ["70705"],
-        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]) },
+        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
       })
     );
     const scope = buildVisitScopePredicate(actor, { startIndex: 1, schoolCodeColumn: "v.school_code" });
@@ -150,7 +150,7 @@ describe("buildVisitScopePredicate (seat-aware list filter)", () => {
         level: 2,
         regions: ["North"],
         school_codes: null,
-        scope: { schools: new Set(["55555"]), centres: new Set([9]) },
+        scope: { schools: new Set(["55555"]), centres: new Set([9]), programs: new Set([1]) },
       })
     );
     const scope = buildVisitScopePredicate(actor, {
@@ -167,7 +167,7 @@ describe("buildVisitScopePredicate (seat-aware list filter)", () => {
   it("returns an always-false clause when a scoped role has no scope at all", () => {
     const actor = buildVisitsActor(
       "t@x.org",
-      makePermission({ level: 1, school_codes: [], scope: { schools: new Set(), centres: new Set() } })
+      makePermission({ level: 1, school_codes: [], scope: { schools: new Set(), centres: new Set(), programs: new Set() } })
     );
     expect(buildVisitScopePredicate(actor)).toEqual({ clause: "1 = 0", params: [] });
   });
