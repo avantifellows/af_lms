@@ -22,6 +22,7 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
+import TeacherFeedbackTab from "@/components/teacher-feedback/TeacherFeedbackTab";
 import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 
@@ -318,6 +319,14 @@ export default async function SchoolPage({ params }: PageProps) {
     <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />
   );
 
+  const teacherFeedbackContent = (
+    <TeacherFeedbackTab
+      schoolId={school.id}
+      schoolCode={school.code}
+      canEdit={quizSessionsAccess.canEdit}
+    />
+  );
+
   const curriculumContent = (
     <CurriculumTab
       schoolCode={school.code}
@@ -332,6 +341,7 @@ export default async function SchoolPage({ params }: PageProps) {
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
     ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
+    ...(quizSessionsAccess.canView ? [{ id: "teacher_feedback", label: "Teacher Feedback", content: teacherFeedbackContent }] : []),
     ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
