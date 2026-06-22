@@ -25,14 +25,18 @@ vi.mock("./permissions", () => ({
 import {
   STAFF_REQUIRED_COLUMNS,
   createPosition,
+  createSeatedUser,
   createStaffMember,
+  createTeacher,
   deletePosition,
+  getSubjectOptions,
   getStaffRoster,
   isSeatRole,
   normalizeEmployeeCode,
   normalizeStaffRosterParams,
   requireStaffAdmin,
   resetStaffSchemaCheckForTests,
+  setUserRole,
   updatePosition,
   updateStaffMember,
   updateTeacherRecord,
@@ -607,6 +611,262 @@ describe("positions", () => {
     const clearCall = mockClientQuery.mock.calls[1];
     expect(clearCall[0]).toContain("SET school_codes = NULL, regions = NULL");
     expect(clearCall[1]).toEqual([70]);
+  });
+
+  it("setUserRole updates every active seat for the person", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44 }, { id: 51 }]); // 2 seats updated
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "spm" } })
+    ).toEqual({ ok: true });
+    const updateCall = mockQuery.mock.calls.at(-1)!;
+    expect(updateCall[0]).toContain("UPDATE centre_positions SET role = $1");
+    expect(updateCall[0]).toContain("WHERE user_id = $2 AND deleted_at IS NULL");
+    expect(updateCall[1]).toEqual(["spm", 70]);
+  });
+
+  it("setUserRole validates user_id and role", async () => {
+    mockSchemaReady();
+    expect(
+      await setUserRole({ body: { user_id: 0, role: "spm" } })
+    ).toMatchObject({ ok: false, status: 422, fields: { user_id: expect.any(String) } });
+    resetStaffSchemaCheckForTests();
+    mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "principal" } })
+    ).toMatchObject({ ok: false, status: 422, fields: { role: expect.any(String) } });
+  });
+
+  it("setUserRole 404s when the person holds no active seats", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([]); // no seats updated
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "spm" } })
+    ).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it("createTeacher creates the user, teacher record, and seat", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 88, email: "t@x.org", full_name: "Pending Teacher", role: "teacher", level: 1, user_id: null },
+    ]); // permission
+    mockQuery.mockResolvedValueOnce([{ id: 4 }]); // subject exists
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre exists
+    mockQuery.mockResolvedValueOnce([]); // teacher_id clash (none)
+    mockQuery.mockResolvedValueOnce([]); // reuse-by-email (no existing user)
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 500 }] }); // INSERT user
+    expect(
+      await createTeacher({
+        body: { user_permission_id: 88, subject_id: 4, centre_id: 8, teacher_id: "af777" },
+      })
+    ).toEqual({ ok: true });
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([500, 4, "AF777"]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(String(seatInsert![0])).toContain("'subject_tbd'");
+    expect(seatInsert![1]).toEqual([8, 500]);
+    // seat-as-source-of-truth: explicit scope cleared on seat creation
+    expect(
+      mockClientQuery.mock.calls.some((c) =>
+        String(c[0]).includes("school_codes = NULL")
+      )
+    ).toBe(true);
+  });
+
+  it("createTeacher allows a blank AF id (not-yet-hired) and reuses an existing user", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 88, email: "t@x.org", full_name: "T", role: "teacher", level: 1, user_id: 70 },
+    ]); // permission (already linked to a user)
+    mockQuery.mockResolvedValueOnce([{ id: 4 }]); // subject
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // teacher clash (none)
+    expect(
+      await createTeacher({ body: { user_permission_id: 88, subject_id: 4, centre_id: 8 } })
+    ).toEqual({ ok: true });
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([70, 4, null]); // teacher_id null
+  });
+
+  it("createTeacher requires subject and centre", async () => {
+    mockSchemaReady();
+    expect(
+      await createTeacher({ body: { user_permission_id: 88 } })
+    ).toMatchObject({
+      ok: false,
+      status: 422,
+      fields: { subject_id: expect.any(String), centre_id: expect.any(String) },
+    });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createTeacher rejects region-level users", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 88, email: "t@x.org", full_name: "T", role: "teacher", level: 2, user_id: 70 },
+    ]);
+    expect(
+      await createTeacher({ body: { user_permission_id: 88, subject_id: 4, centre_id: 8 } })
+    ).toMatchObject({ ok: false, status: 422 });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createTeacher 409s when the person already has a teacher record", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 88, email: "t@x.org", full_name: "T", role: "teacher", level: 1, user_id: 70 },
+    ]);
+    mockQuery.mockResolvedValueOnce([{ id: 4 }]); // subject
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 999 }]); // teacher clash → exists
+    expect(
+      await createTeacher({ body: { user_permission_id: 88, subject_id: 4, centre_id: 8 } })
+    ).toMatchObject({ ok: false, status: 409 });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser creates a teacher + permission + seat atomically", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre + program
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockQuery.mockResolvedValueOnce([]); // AF clash (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 600 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 700 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: {
+          email: "new@x.org",
+          full_name: "New Teach",
+          kind: "teacher",
+          centre_id: 8,
+          subject_id: 4,
+          af_id: "af9",
+        },
+      })
+    ).toEqual({ ok: true });
+    const permInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO user_permission")
+    );
+    expect(permInsert![1]).toEqual(["new@x.org", "teacher", [2], "New Teach"]);
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([700, 4, "AF9"]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "subject_tbd", 700]);
+  });
+
+  it("createSeatedUser creates a PM/staff member + tier seat (AF optional)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 601 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 701 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: { email: "pm@x.org", kind: "staff", role: "spm", centre_id: 8 },
+      })
+    ).toEqual({ ok: true });
+    const permInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO user_permission")
+    );
+    expect(permInsert![1]).toEqual(["pm@x.org", "program_manager", [2], null]);
+    const staffInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO staff")
+    );
+    expect(staffInsert![1]).toEqual([701, null]); // employee_code null (no AF)
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "spm", 701]);
+  });
+
+  it("createSeatedUser refuses an email that already exists", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 593 }]); // existing permission → conflict
+    expect(
+      await createSeatedUser({
+        body: { email: "dup@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
+      })
+    ).toMatchObject({ ok: false, status: 409 });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser reactivates a dormant teacher record instead of duplicating (re-add after delete)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none — was deleted)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 602 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [{ id: 246195 }] }) // SELECT user (exists by email)
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE user_permission user_id
+      .mockResolvedValueOnce({ rows: [{ id: 3098 }] }); // dormant teacher row exists
+    expect(
+      await createSeatedUser({
+        body: { email: "orphan@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
+      })
+    ).toEqual({ ok: true });
+    // Reuses the dormant row — no duplicate teacher inserted.
+    expect(
+      mockClientQuery.mock.calls.some((c) =>
+        String(c[0]).includes("UPDATE teacher SET")
+      )
+    ).toBe(true);
+    expect(
+      mockClientQuery.mock.calls.some((c) =>
+        String(c[0]).includes("INSERT INTO teacher")
+      )
+    ).toBe(false);
+  });
+
+  it("createSeatedUser blocks a centre with no program", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: null }]); // no program
+    expect(
+      await createSeatedUser({
+        body: { email: "x@x.org", kind: "teacher", centre_id: 8, subject_id: 4 },
+      })
+    ).toMatchObject({ ok: false, status: 422, fields: { centre_id: expect.any(String) } });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("createSeatedUser requires a subject for teachers and a valid tier for staff", async () => {
+    mockSchemaReady();
+    expect(
+      await createSeatedUser({ body: { email: "x@x.org", kind: "teacher", centre_id: 8 } })
+    ).toMatchObject({ ok: false, status: 422, fields: { subject_id: expect.any(String) } });
+    resetStaffSchemaCheckForTests();
+    mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
+    expect(
+      await createSeatedUser({
+        body: { email: "x@x.org", kind: "staff", role: "principal", centre_id: 8 },
+      })
+    ).toMatchObject({ ok: false, status: 422, fields: { role: expect.any(String) } });
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it("getSubjectOptions returns id + English label", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { id: 4, name: "Physics" },
+      { id: 2, name: "Chemistry" },
+    ]);
+    expect(await getSubjectOptions()).toEqual([
+      { id: 4, name: "Physics" },
+      { id: 2, name: "Chemistry" },
+    ]);
   });
 
   it("deletePosition soft-deletes a vacant seat", async () => {

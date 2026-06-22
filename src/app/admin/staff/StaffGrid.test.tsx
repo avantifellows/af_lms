@@ -86,6 +86,17 @@ function stubFetch(
         { status: 200 }
       );
     }
+    if (url.startsWith("/api/admin/subjects")) {
+      return new Response(
+        JSON.stringify({
+          subjects: [
+            { id: 4, name: "Physics" },
+            { id: 2, name: "Chemistry" },
+          ],
+        }),
+        { status: 200 }
+      );
+    }
     if (url.startsWith("/api/admin/staff?")) {
       return new Response(JSON.stringify({ rows: ROWS, summary: SUMMARY }), {
         status: 200,
@@ -131,6 +142,38 @@ describe("StaffGrid", () => {
     expect(screen.getAllByText("Role").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Centre").length).toBeGreaterThan(0);
     expect(screen.getByText("Physics")).toBeTruthy();
+  });
+
+  it("shows the staff seat tier at a centre, not the generic PM", () => {
+    const phRows: StaffRosterRow[] = [
+      {
+        kind: "staff",
+        recordId: 20,
+        userId: 80,
+        name: "Subramanya A",
+        email: "subramanya@avantifellows.org",
+        employeeCode: "AF183",
+        subjectName: null,
+        staffType: "program_manager",
+        designation: "Director, Operations",
+        exitDate: null,
+        seats: [
+          { id: 99, centreId: 8, centreName: "JNV Adilabad - CoE", role: "ph" },
+        ],
+      },
+    ];
+    stubFetch();
+    render(
+      <StaffGrid
+        initialRows={phRows}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    expect(screen.getByText("Subramanya A")).toBeTruthy();
+    // Role column reflects the seat tier (PH), not the kind-derived "PM".
+    expect(screen.getByText("PH")).toBeTruthy();
+    expect(screen.queryByText("PM")).toBeNull();
   });
 
   it("offers a Centre filter fed by the centres API", async () => {
@@ -249,6 +292,56 @@ describe("StaffGrid", () => {
     });
   });
 
+  it("changes a person's org tier across all seats via PATCH /positions", async () => {
+    const pmRow: StaffRosterRow[] = [
+      {
+        kind: "staff",
+        recordId: 20,
+        userId: 80,
+        name: "Rupesh PM",
+        email: "rupesh@avantifellows.org",
+        employeeCode: "AF462",
+        subjectName: null,
+        staffType: "program_manager",
+        designation: null,
+        exitDate: null,
+        seats: [
+          { id: 99, centreId: 8, centreName: "JNV Adilabad - CoE", role: "pm" },
+          { id: 100, centreId: 9, centreName: "JNV Nirmal - CoE", role: "pm" },
+        ],
+      },
+    ];
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/positions" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    render(
+      <StaffGrid
+        initialRows={pmRow}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    // The person appears under each of their centres; open from the first card.
+    fireEvent.click(screen.getAllByLabelText("Edit Rupesh PM")[0]);
+    const roleSelect = screen.getByLabelText("Edit role") as HTMLSelectElement;
+    expect(roleSelect.value).toBe("pm");
+    fireEvent.change(roleSelect, { target: { value: "spm" } });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/positions",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ user_id: 80, role: "spm" }),
+        })
+      );
+    });
+  });
+
   it("requires arming before marking exited", async () => {
     const mockFetch = stubFetch((url, init) => {
       if (url.startsWith("/api/admin/staff/teachers/") && init?.method === "PATCH") {
@@ -272,14 +365,65 @@ describe("StaffGrid", () => {
     });
   });
 
-  it("hides the Edit button for not-backfilled teachers", () => {
-    stubFetch();
+  it("adds a new teacher from scratch via POST /api/admin/staff", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Add user")); // header button opens modal
+
+    // Subject + centre dropdowns are fed by the mount fetches.
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Subject") as HTMLSelectElement).querySelectorAll(
+          "option"
+        ).length
+      ).toBe(3); // placeholder + 2 subjects
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "new@avantifellows.org" },
+    });
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Centre"), { target: { value: "8" } });
+    // The modal's submit button (distinct from the header's "Add user").
+    fireEvent.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            email: "new@avantifellows.org",
+            kind: "teacher",
+            centre_id: 8,
+            subject_id: 4,
+          }),
+        })
+      );
+    });
+  });
+
+  it("completes a pending_teacher via POST /staff/teachers (subject + centre + optional AF)", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/teachers" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      return undefined;
+    });
+
     render(
       <StaffGrid
         initialRows={[
           {
             ...ROWS[1],
             kind: "pending_teacher",
+            recordId: 88, // user_permission id for pending rows
+            userId: null,
             name: "Pending Teacher",
           },
         ]}
@@ -287,6 +431,46 @@ describe("StaffGrid", () => {
         initialFilters={FILTERS}
       />
     );
-    expect(screen.queryByLabelText("Edit Pending Teacher")).toBeNull();
+
+    // pending_teacher is now editable — open the create-teacher modal.
+    fireEvent.click(screen.getByLabelText("Edit Pending Teacher"));
+
+    // "Create teacher" stays disabled until subject + centre are chosen.
+    const createBtn = screen.getByText("Create teacher");
+    expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+
+    // Subject dropdown is fed by /api/admin/subjects (fetched on mount).
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Subject") as HTMLSelectElement).querySelectorAll(
+          "option"
+        ).length
+      ).toBe(3); // placeholder + 2 subjects
+    });
+    fireEvent.change(screen.getByLabelText("Subject"), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByLabelText("Centre"), {
+      target: { value: "8" },
+    });
+    fireEvent.change(screen.getByLabelText("Employee code"), {
+      target: { value: "af777" },
+    });
+    fireEvent.click(screen.getByText("Create teacher"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/teachers",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            user_permission_id: 88,
+            subject_id: 4,
+            centre_id: 8,
+            teacher_id: "AF777",
+          }),
+        })
+      );
+    });
   });
 });

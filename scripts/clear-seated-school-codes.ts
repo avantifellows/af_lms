@@ -52,6 +52,20 @@ function printReport(report: ClearSeatedScopeReport): void {
     `${report.mode === "apply" ? "Cleared" : "Would clear"}: ${report.usersCleared}`
   );
 
+  if (report.skippedWouldBeEmpty.length > 0) {
+    console.log(
+      `\n⏭️  SKIPPED (${report.skippedWouldBeEmpty.length}) — seated at school-less (unlinked) centres only.`
+    );
+    console.log(
+      `   Clearing would empty their scope (lockout), so they keep their school_codes. Ops: link the centre, then re-run.`
+    );
+    for (const u of report.skippedWouldBeEmpty) {
+      console.log(
+        `   - ${u.email} (user_id=${u.userId}) keeps: ${u.schoolCodes.join(", ") || u.regions.join(", ")}`
+      );
+    }
+  }
+
   if (report.strandedUsers.length > 0) {
     console.log(
       `\n⚠️  STRANDED (${report.strandedUsers.length}) — seated people whose school_codes are NOT all seat-covered.`

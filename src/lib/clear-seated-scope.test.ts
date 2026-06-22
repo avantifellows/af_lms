@@ -78,6 +78,29 @@ describe("runClearSeatedScope", () => {
     expect(report.strandedUsers).toHaveLength(0);
   });
 
+  it("skips seated users whose seats cover no school (would-be-empty), issuing NO update", async () => {
+    mockQuery.mockResolvedValueOnce([
+      // seated only at an unlinked (school-less) centre → seat covers nothing
+      {
+        user_id: "40",
+        email: "unlinked@af.org",
+        school_codes: ["84082"],
+        regions: null,
+        seat_school_codes: null,
+      },
+    ]);
+
+    const report = await runClearSeatedScope({ mode: "apply" });
+
+    expect(mockQuery).toHaveBeenCalledTimes(1); // read only — nothing clearable
+    expect(report.usersWithExplicitScope).toBe(1);
+    expect(report.usersCleared).toBe(0);
+    expect(report.skippedWouldBeEmpty.map((u) => u.email)).toEqual([
+      "unlinked@af.org",
+    ]);
+    expect(report.strandedUsers).toHaveLength(0); // not cleared → not stranded
+  });
+
   it("treats regions-only seated users as needing a clear", async () => {
     mockQuery
       .mockResolvedValueOnce([

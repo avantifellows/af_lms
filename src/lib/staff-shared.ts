@@ -11,7 +11,16 @@ export const SEAT_ROLES = [
   "biology",
   "apc",
   "pm",
+  "apm",
+  "spm",
+  "ph",
+  // Placeholder for a teacher seated at a centre before their subject is known
+  // (auto-assigned from school+program). Ops edits it to the real subject.
+  "subject_tbd",
 ] as const;
+
+/** Program-management seat tiers (vs subject-teaching seats). */
+export const PM_SEAT_ROLES = ["apm", "pm", "spm", "ph"] as const;
 
 export type SeatRole = (typeof SEAT_ROLES)[number];
 

@@ -7,6 +7,7 @@ import StatCard from "@/components/StatCard";
 import { Badge, Button, Card, Input, Modal, Select } from "@/components/ui";
 import { DetailField } from "@/components/ui/DetailField";
 import {
+  PM_SEAT_ROLES,
   SEAT_ROLES,
   type RosterCodeFilter,
   type RosterKindFilter,
@@ -23,6 +24,11 @@ interface StaffGridProps {
 }
 
 interface CentreOptionItem {
+  id: number;
+  name: string;
+}
+
+interface SubjectOptionItem {
   id: number;
   name: string;
 }
@@ -48,10 +54,45 @@ const SEAT_ROLE_LABELS: Record<SeatRole, string> = {
   biology: "Biology",
   apc: "APC",
   pm: "PM",
+  apm: "APM",
+  spm: "SPM",
+  ph: "PH",
+  subject_tbd: "Subject TBD",
 };
+
+// Subject-teaching seat roles (everything that isn't a PM/management tier).
+const TEACHER_SEAT_ROLES = SEAT_ROLES.filter(
+  (role) => !(PM_SEAT_ROLES as readonly SeatRole[]).includes(role)
+);
+
+// The roles offered when editing a seat: PM tiers for staff/PM rows, subject
+// roles for teachers. Keeps a PM from being re-tagged "Physics" and vice versa.
+function seatRoleOptionsFor(
+  kind: StaffRosterRow["kind"]
+): readonly SeatRole[] {
+  return kind === "teacher" || kind === "pending_teacher"
+    ? TEACHER_SEAT_ROLES
+    : PM_SEAT_ROLES;
+}
 
 function rowKey(row: StaffRosterRow): string {
   return `${row.kind}:${row.recordId}`;
+}
+
+// In the centre-grouped view a staff member's role is the tier of the seat they
+// hold AT THAT centre (PH/SPM/APM/PM) — not the coarse roster kind, which
+// collapses every staff tier to "PM". Teachers keep "Teacher" (their subject is
+// shown in its own column, so the seat role would just duplicate it). Falls back
+// to the kind label when there's no seat for the centre (e.g. "No Centre").
+function roleLabelForCentre(
+  row: StaffRosterRow,
+  centreId: number | null
+): string {
+  if (row.kind === "staff" && centreId !== null) {
+    const seat = row.seats.find((s) => s.centreId === centreId);
+    if (seat) return SEAT_ROLE_LABELS[seat.role];
+  }
+  return ROLE_LABELS[row.kind];
 }
 
 interface CentreGroup {
@@ -112,6 +153,10 @@ export default function StaffGrid({
   const [exitArmed, setExitArmed] = useState(false);
   const [seatCentreDraft, setSeatCentreDraft] = useState("");
   const [seatRoleDraft, setSeatRoleDraft] = useState<SeatRole>("physics");
+  // Create-teacher form (completing a pending_teacher): chosen subject + centre.
+  const [subjects, setSubjects] = useState<SubjectOptionItem[]>([]);
+  const [subjectDraft, setSubjectDraft] = useState("");
+  const [createCentreDraft, setCreateCentreDraft] = useState("");
   const [actionError, setActionError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   // Seat id awaiting a "remove anyway" confirmation (the server flagged it as
@@ -119,6 +164,18 @@ export default function StaffGrid({
   const [confirmVacateSeatId, setConfirmVacateSeatId] = useState<number | null>(
     null
   );
+
+  // Add-User (from-scratch) modal state.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addKind, setAddKind] = useState<"teacher" | "staff">("teacher");
+  const [addSubject, setAddSubject] = useState("");
+  const [addSeatRole, setAddSeatRole] = useState<SeatRole>("pm");
+  const [addCentre, setAddCentre] = useState("");
+  const [addCode, setAddCode] = useState("");
 
   const modalRow = useMemo(
     () => (modalKey === null ? null : (rows.find((row) => rowKey(row) === modalKey) ?? null)),
@@ -179,6 +236,21 @@ export default function StaffGrid({
     })();
   }, []);
 
+  // Subject list for the create-teacher dropdown.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/admin/subjects");
+        const data = await response.json();
+        if (response.ok && Array.isArray(data.subjects)) {
+          setSubjects(data.subjects);
+        }
+      } catch {
+        // Create-teacher subject dropdown will be empty; form stays blocked.
+      }
+    })();
+  }, []);
+
   const groups = useMemo(() => {
     const grouped = groupByCentre(rows);
     return filters.centreId === null
@@ -193,6 +265,8 @@ export default function StaffGrid({
     setExitArmed(false);
     setSeatCentreDraft("");
     setSeatRoleDraft(row.kind === "teacher" ? "physics" : "pm");
+    setSubjectDraft("");
+    setCreateCentreDraft("");
     setActionError("");
   };
 
@@ -272,6 +346,85 @@ export default function StaffGrid({
     );
   };
 
+  // Complete a pending_teacher: create the teacher record + seat at the chosen
+  // centre. Subject + centre are required; AF id is optional (a not-yet-hired
+  // teacher gets it later via the normal edit flow). row.recordId is the
+  // user_permission id for pending rows.
+  const createTeacher = (row: StaffRosterRow) => {
+    const code = codeDraft.trim().toUpperCase();
+    return runAction(
+      () =>
+        fetch(`/api/admin/staff/teachers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_permission_id: row.recordId,
+            subject_id: Number(subjectDraft),
+            centre_id: Number(createCentreDraft),
+            teacher_id: code || undefined,
+          }),
+        }),
+      { closeOnSuccess: true }
+    );
+  };
+
+  const openAddModal = () => {
+    setAddName("");
+    setAddEmail("");
+    setAddKind("teacher");
+    setAddSubject("");
+    setAddSeatRole("pm");
+    setAddCentre("");
+    setAddCode("");
+    setAddError("");
+    setAddOpen(true);
+  };
+  const closeAddModal = () => {
+    setAddOpen(false);
+    setAddError("");
+  };
+
+  // Create a new centre-staff person + seat in one atomic call (server does the
+  // permission + user + teacher/staff + seat together).
+  const submitAddUser = async () => {
+    setAddBusy(true);
+    setAddError("");
+    try {
+      const response = await fetch(`/api/admin/staff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: addEmail.trim(),
+          full_name: addName.trim() || undefined,
+          kind: addKind,
+          centre_id: Number(addCentre),
+          subject_id: addKind === "teacher" ? Number(addSubject) : undefined,
+          role: addKind === "staff" ? addSeatRole : undefined,
+          af_id: addCode.trim() || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const fieldError =
+          data.fields && typeof data.fields === "object"
+            ? Object.values(data.fields as Record<string, string>)[0]
+            : undefined;
+        throw new Error(fieldError || data.error || "Failed to add user");
+      }
+      await fetchRoster(filters);
+      closeAddModal();
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : "Failed to add user");
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const addValid =
+    addEmail.trim().includes("@") &&
+    !!addCentre &&
+    (addKind === "teacher" ? !!addSubject : true);
+
   const saveExit = (row: StaffRosterRow) => {
     const url =
       row.kind === "teacher"
@@ -301,6 +454,18 @@ export default function StaffGrid({
       })
     );
   };
+
+  // Change a person's org tier (role). It's a person-level attribute, so this
+  // updates every active seat they hold at once; refreshing reflects the new
+  // tier in each centre's Role column.
+  const changeRole = (row: StaffRosterRow, role: SeatRole) =>
+    runAction(() =>
+      fetch(`/api/admin/staff/positions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: row.userId, role }),
+      })
+    );
 
   // Vacate a seat. The server blocks removing a person's *last* seat (409 with
   // code "last_seat") unless force=true; on that block we surface an inline
@@ -334,10 +499,19 @@ export default function StaffGrid({
     }
   };
 
-  const canEdit = (row: StaffRosterRow) => row.kind !== "pending_teacher";
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-text-muted">
+          Add centre staff (teachers &amp; PMs) and seat them here — no separate
+          permissions step.
+        </p>
+        <Button onClick={openAddModal} aria-label="Add user" className="shrink-0">
+          <Plus className="mr-1 h-4 w-4" /> Add User
+        </Button>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard label="People" value={summary.total} size="sm" />
         <StatCard label="Teachers" value={summary.teachers} size="sm" />
@@ -510,7 +684,10 @@ export default function StaffGrid({
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 md:grid-cols-4">
                       <DetailField label="Email" value={row.email ?? "—"} />
-                      <DetailField label="Role" value={ROLE_LABELS[row.kind]} />
+                      <DetailField
+                        label="Role"
+                        value={roleLabelForCentre(row, group.centreId)}
+                      />
                       <DetailField
                         label="Subject"
                         value={row.subjectName ?? "—"}
@@ -527,16 +704,16 @@ export default function StaffGrid({
                       />
                     </div>
                   </div>
-                  {canEdit(row) && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => openModal(row)}
-                      aria-label={`Edit ${row.name || row.email}`}
-                    >
-                      <Edit2 className="mr-1 h-4 w-4" /> Edit
-                    </Button>
-                  )}
+                  {/* Every row is editable — pending_teacher opens the
+                      create-teacher flow; others open the edit/seat modal. */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openModal(row)}
+                    aria-label={`Edit ${row.name || row.email}`}
+                  >
+                    <Edit2 className="mr-1 h-4 w-4" /> Edit
+                  </Button>
                 </div>
               </Card>
             ))}
@@ -570,7 +747,9 @@ export default function StaffGrid({
               <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
                 {modalRow.kind === "pending_pm"
                   ? "AF code (creates the staff record)"
-                  : "AF code"}
+                  : modalRow.kind === "pending_teacher"
+                    ? "AF id (optional)"
+                    : "AF code"}
               </label>
               <Input
                 value={codeDraft}
@@ -579,7 +758,91 @@ export default function StaffGrid({
                 aria-label="Employee code"
                 className="w-40"
               />
+              {modalRow.kind === "pending_teacher" && (
+                <p className="mt-1 text-xs text-text-muted">
+                  Leave blank for a not-yet-hired teacher — set it later via Edit.
+                </p>
+              )}
             </div>
+
+            {modalRow.kind === "pending_teacher" && (
+              <div className="mt-5">
+                <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                  Create teacher record
+                </h4>
+                <p className="mb-3 text-sm text-text-muted">
+                  Creates the teacher and seats them at a centre.
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <label className="flex-1">
+                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                      Subject
+                    </span>
+                    <Select
+                      value={subjectDraft}
+                      onChange={(event) => setSubjectDraft(event.target.value)}
+                      aria-label="Subject"
+                      className="w-full"
+                    >
+                      <option value="">Select Subject…</option>
+                      {subjects.map((subject) => (
+                        <option key={subject.id} value={subject.id}>
+                          {subject.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="flex-1">
+                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                      Centre
+                    </span>
+                    <Select
+                      value={createCentreDraft}
+                      onChange={(event) =>
+                        setCreateCentreDraft(event.target.value)
+                      }
+                      aria-label="Centre"
+                      className="w-full"
+                    >
+                      <option value="">Select Centre…</option>
+                      {centres.map((centre) => (
+                        <option key={centre.id} value={centre.id}>
+                          {centre.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {modalRow.userId !== null &&
+              (modalRow.kind === "staff" || modalRow.kind === "pending_pm") &&
+              modalRow.seats.length > 0 && (
+                <div className="mt-5">
+                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-text-muted">
+                    Role
+                  </h4>
+                  <Select
+                    value={modalRow.seats[0].role}
+                    onChange={(event) =>
+                      void changeRole(modalRow, event.target.value as SeatRole)
+                    }
+                    disabled={actionBusy}
+                    aria-label="Edit role"
+                    className="w-40"
+                  >
+                    {seatRoleOptionsFor(modalRow.kind).map((role) => (
+                      <option key={role} value={role}>
+                        {SEAT_ROLE_LABELS[role]}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Applies to all of this person&apos;s centres.
+                  </p>
+                </div>
+              )}
 
             {modalRow.userId !== null && (
               <div className="mt-5">
@@ -742,15 +1005,174 @@ export default function StaffGrid({
               <Button variant="secondary" onClick={closeModal}>
                 Cancel
               </Button>
-              <Button
-                onClick={() => void saveCode(modalRow)}
-                disabled={actionBusy}
-              >
-                Save
-              </Button>
+              {modalRow.kind === "pending_teacher" ? (
+                <Button
+                  onClick={() => void createTeacher(modalRow)}
+                  disabled={actionBusy || !subjectDraft || !createCentreDraft}
+                >
+                  Create teacher
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => void saveCode(modalRow)}
+                  disabled={actionBusy}
+                >
+                  Save
+                </Button>
+              )}
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal open={addOpen} onClose={closeAddModal} className="max-w-xl">
+        <div className="p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-text-primary">Add User</h3>
+              <p className="text-sm text-text-muted">
+                Creates the person and seats them at a centre in one step.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeAddModal}
+              className="text-text-muted hover:text-text-primary"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                Full name
+              </span>
+              <Input
+                value={addName}
+                onChange={(event) => setAddName(event.target.value)}
+                placeholder="Jane Doe"
+                aria-label="Full name"
+              />
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                Email
+              </span>
+              <Input
+                value={addEmail}
+                onChange={(event) => setAddEmail(event.target.value)}
+                placeholder="jane@avantifellows.org"
+                aria-label="Email"
+              />
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                Type
+              </span>
+              <Select
+                value={addKind}
+                onChange={(event) =>
+                  setAddKind(event.target.value as "teacher" | "staff")
+                }
+                aria-label="Type"
+              >
+                <option value="teacher">Teacher</option>
+                <option value="staff">PM / Staff</option>
+              </Select>
+            </label>
+            {addKind === "teacher" ? (
+              <label>
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                  Subject
+                </span>
+                <Select
+                  value={addSubject}
+                  onChange={(event) => setAddSubject(event.target.value)}
+                  aria-label="Subject"
+                >
+                  <option value="">Select Subject…</option>
+                  {subjects.map((subject) => (
+                    <option key={subject.id} value={subject.id}>
+                      {subject.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : (
+              <label>
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                  Role
+                </span>
+                <Select
+                  value={addSeatRole}
+                  onChange={(event) =>
+                    setAddSeatRole(event.target.value as SeatRole)
+                  }
+                  aria-label="Role"
+                >
+                  {PM_SEAT_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {SEAT_ROLE_LABELS[role]}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            )}
+            <label>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                Centre
+              </span>
+              <Select
+                value={addCentre}
+                onChange={(event) => setAddCentre(event.target.value)}
+                aria-label="Centre"
+              >
+                <option value="">Select Centre…</option>
+                {centres.map((centre) => (
+                  <option key={centre.id} value={centre.id}>
+                    {centre.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                AF id (optional)
+              </span>
+              <Input
+                value={addCode}
+                onChange={(event) => setAddCode(event.target.value)}
+                placeholder="AF123"
+                aria-label="AF id"
+              />
+            </label>
+          </div>
+
+          <p className="mt-3 text-xs text-text-muted">
+            Centre staff are seat-scoped: program is taken from the centre and
+            access follows the seat. AF id can be added later.
+          </p>
+
+          {addError && (
+            <p className="mt-4 text-sm text-danger" role="alert">
+              {addError}
+            </p>
+          )}
+
+          <div className="mt-6 flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeAddModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void submitAddUser()}
+              disabled={addBusy || !addValid}
+            >
+              Add User
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
