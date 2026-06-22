@@ -129,11 +129,6 @@ export default function TeacherFeedbackTab({
             </button>
           ) : null}
         </div>
-        <div className="px-4 py-3 text-sm text-text-secondary">
-          Select the class batches and the teachers to be rated. One feedback form per
-          teacher is created and surfaces on those students&apos; Gurukul. Once students
-          respond, the analysis appears in the report below.
-        </div>
       </div>
 
       {/* Result of the most recent setup (the "list" until the report lands). */}
