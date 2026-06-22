@@ -8,7 +8,7 @@ import {
   unmarkChapterComplete,
   validateChapterCompletionDeltas,
 } from "@/lib/curriculum-chapter-completion";
-import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
+import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 
 type CurriculumSession = {
   user?: { email?: string | null } | null;
@@ -29,7 +29,7 @@ async function requireCurriculumEditAccess(session: CurriculumSession) {
     };
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   const access = getFeatureAccess(permission, "curriculum");
   if (!permission || !access.canEdit) {
     return {

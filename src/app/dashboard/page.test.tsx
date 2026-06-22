@@ -28,6 +28,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
+  getResolvedPermission: mockGetUserPermission,
   getProgramContextSync: mockGetProgramContextSync,
   getFeatureAccess: mockGetFeatureAccess,
   getAccessibleSchoolCodes: mockGetAccessibleSchoolCodes,

@@ -78,6 +78,15 @@ export default async function AdminPage() {
             </Card>
           </Link>
 
+          <Link href="/admin/staff">
+            <Card className="block p-6">
+              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Staff Management</h3>
+              <p className="mt-2 text-sm text-text-muted">
+                Manage AF teachers, PMs, employee codes, and Centre seats.
+              </p>
+            </Card>
+          </Link>
+
           <Link href="/admin/centres/config">
             <Card className="block p-6">
               <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Centre Option Configuration</h3>

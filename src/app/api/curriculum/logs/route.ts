@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { checkCurriculumSchema } from "@/lib/curriculum-schema";
 import { createCurriculumLog, getCurriculumLogs } from "@/lib/curriculum-logs";
-import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
+import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 
 type CurriculumSession = {
   user?: { email?: string | null } | null;
@@ -27,7 +27,7 @@ async function requireCurriculumAccess(
     };
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   const access = getFeatureAccess(permission, "curriculum");
   const allowed = mode === "view" ? access.canView : access.canEdit;
   if (!permission || !allowed) {
