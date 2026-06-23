@@ -174,6 +174,37 @@ describe("PerformanceTab", () => {
     expect(calls.some((url) => url.includes("grade=12"))).toBe(true);
   });
 
+  it("re-picks a valid grade when the program scope narrows available grades", async () => {
+    // Nellore case: the all-programs grade list (CoE gr11 + NVS gr12) makes the
+    // default prefer grade 12, but the PM is scoped to CoE only, which has just
+    // grade 11. The program-scoped re-fetch returns [11]; the stale grade=12
+    // must be reconciled to 11 so data renders instead of a blank tab.
+    lastBatchOverviewProps = null;
+    const fetchByProgram = vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("program=")
+              ? { grades: [11], programs: ["JNV CoE"] }
+              : { grades: [11, 12], programs: ["JNV CoE"] }
+          ),
+      })
+    ) as any;
+    vi.stubGlobal("fetch", fetchByProgram);
+
+    render(<PerformanceTab schoolUdise="28191100306" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    // Lands on grade 11 (CoE's only grade), not the stale default of 12.
+    await waitFor(() => {
+      expect(lastBatchOverviewProps?.grade).toBe(11);
+      expect(lastBatchOverviewProps?.program).toBe("JNV CoE");
+    });
+  });
+
   it("shows program tabs when multiple programs exist", async () => {
     vi.stubGlobal("fetch", mockGradesResponse([10], ["JNV CoE", "JNV Nodal", "JNV NVS"]));
 
