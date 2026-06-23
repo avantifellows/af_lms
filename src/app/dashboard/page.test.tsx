@@ -949,6 +949,12 @@ describe("DashboardPage (server component)", () => {
     expect(sql).toContain("er.academic_year = $2");
     expect(params[0]).toEqual(["s99"]);
     expect(params[1]).toBe("2026-2027");
+    // Cohort rule: JNV schools count all members, but non-JNV centre-linked
+    // schools count only students in a batch of one of the school's active-centre
+    // programs — so the card reflects the cohort, not the whole host school.
+    expect(sql).toContain("s.af_school_category = 'JNV'");
+    expect(sql).toContain("JOIN centres c ON c.school_id = s.id AND c.is_active");
+    expect(sql).toContain("c.program_id = b.program_id");
   });
 
   it("skips grade count query when no schools found", async () => {
