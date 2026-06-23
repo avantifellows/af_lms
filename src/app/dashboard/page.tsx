@@ -60,15 +60,24 @@ async function getSchools(
       )
     )`;
 
+  // School visibility scope: the historical JNV set PLUS any school linked to an
+  // active centre. Centre-linked covers the non-JNV centre rollout (Punjab CoE
+  // meritorious / EMRS) without disturbing JNV. Centre-driven, not a category
+  // allowlist — new centre types light up by linking a centre, no code change.
+  const schoolScope = `(
+    s.af_school_category = 'JNV'
+    OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+  )`;
+
   const baseQuery = `
     SELECT s.id, s.code, s.name, s.district, s.state, s.region
     FROM school s
-    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
+    WHERE ${schoolScope}${excludeDupPlaceholders}`;
 
   const countBaseQuery = `
     SELECT COUNT(DISTINCT s.id) as total
     FROM school s
-    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
+    WHERE ${schoolScope}${excludeDupPlaceholders}`;
 
   if (codes === "all") {
     if (searchPattern) {

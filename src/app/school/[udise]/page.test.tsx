@@ -1162,7 +1162,10 @@ describe("SchoolPage (server component)", () => {
 
     // First query is getSchoolByCode
     const firstCall = mockQuery.mock.calls[0];
-    expect(firstCall[0]).toContain("udise_code = $1 OR code = $1");
+    expect(firstCall[0]).toContain("s.udise_code = $1 OR s.code = $1");
+    // Visible schools = JNV OR linked to an active centre (centre rollout).
+    expect(firstCall[0]).toContain("af_school_category = 'JNV'");
+    expect(firstCall[0]).toContain("FROM centres c WHERE c.school_id = s.id AND c.is_active");
     expect(firstCall[1]).toEqual(["12345678901"]);
   });
 
