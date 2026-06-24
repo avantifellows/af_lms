@@ -328,11 +328,23 @@ function CycleCard({
                   <span className="text-sm font-medium text-text-primary">{t.teacherName}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
-                  <CopyLink label="Session link" href={t.portalLink} onCopy={onCopy} />
-                  <CopyLink label="Admin test" href={t.adminTestingLink} onCopy={onCopy} />
+                  {t.status === "failed" ? (
+                    <span className="text-xs font-medium text-danger">Setup failed</span>
+                  ) : t.portalLink ? (
+                    <>
+                      <CopyLink label="Session link" href={t.portalLink} onCopy={onCopy} />
+                      <CopyLink label="Admin test" href={t.adminTestingLink} onCopy={onCopy} />
+                    </>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-warning-text">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning-text" />
+                      Generating links…
+                    </span>
+                  )}
                   <button
                     type="button"
                     disabled={!t.quizId}
+                    title={t.quizId ? undefined : "Available once the form is generated"}
                     onClick={() => t.quizId && onAnalyze(t.quizId, t.teacherName)}
                     className="rounded-md border border-border px-3 py-1 text-xs font-medium text-text-secondary hover:bg-hover-bg disabled:opacity-40"
                   >
