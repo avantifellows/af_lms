@@ -40,6 +40,16 @@ export async function GET(request: NextRequest) {
 
   const searchPattern = `%${searchQuery}%`;
 
+  // School visibility scope: the historical JNV set PLUS any school linked to an
+  // active centre. Mirrors the dashboard `schoolScope` / school-page predicate so
+  // the non-JNV centre schools (Punjab CoE / EMRS) those pages now surface are
+  // also searchable here — otherwise their students are silently filtered out.
+  // (One shared const across all call sites is the better home — deferred.)
+  const schoolScope = `(
+        sch.af_school_category = 'JNV'
+        OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = sch.id AND c.is_active)
+      )`;
+
   let results: StudentSearchResult[];
 
   if (schoolCodes === "all") {
@@ -69,7 +79,7 @@ export async function GET(request: NextRequest) {
         AND er.is_current = true
         AND er.academic_year = $2
       LEFT JOIN grade gr ON er.group_id = gr.id
-      WHERE sch.af_school_category = 'JNV'
+      WHERE ${schoolScope}
         AND (
           u.first_name ILIKE $1
           OR u.last_name ILIKE $1
@@ -106,7 +116,7 @@ export async function GET(request: NextRequest) {
         AND er.academic_year = $3
       LEFT JOIN grade gr ON er.group_id = gr.id
       WHERE sch.code = ANY($1)
-        AND sch.af_school_category = 'JNV'
+        AND ${schoolScope}
         AND (
           u.first_name ILIKE $2
           OR u.last_name ILIKE $2

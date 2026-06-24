@@ -7,12 +7,16 @@ vi.mock("@/lib/db", () => ({
   query: vi.fn(),
   withTransaction: vi.fn(),
 }));
-vi.mock("@/lib/permissions", () => ({
-  PROGRAM_IDS: { COE: 1, NODAL: 2, NVS: 64 },
-  getFeatureAccess: vi.fn(),
-  getUserPermission: vi.fn(),
-  canAccessSchoolSync: vi.fn(),
-}));
+vi.mock("@/lib/permissions", () => {
+  const getUserPermission = vi.fn();
+  return {
+    PROGRAM_IDS: { COE: 1, NODAL: 2, NVS: 64 },
+    getFeatureAccess: vi.fn(),
+    getUserPermission,
+    getResolvedPermission: getUserPermission,
+    canAccessSchoolSync: vi.fn(),
+  };
+});
 
 import { getServerSession } from "next-auth";
 import { query, withTransaction } from "@/lib/db";

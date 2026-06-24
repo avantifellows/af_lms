@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
-import { query } from "@/lib/db";
+import { query, withTransaction } from "@/lib/db";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -23,8 +23,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   }
 
   // Prevent deleting yourself
-  const userToDelete = await query<{ email: string }>(
-    `SELECT email FROM user_permission WHERE id = $1`,
+  const userToDelete = await query<{ email: string; user_id: number | null }>(
+    `SELECT email, user_id FROM user_permission WHERE id = $1`,
     [id]
   );
 
@@ -35,7 +35,23 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  await query(`DELETE FROM user_permission WHERE id = $1`, [id]);
+  // Removing a user also frees their centre seats: soft-delete the person's
+  // active centre_positions so they vacate the centre (and stop appearing in
+  // Staff Management). We deliberately do NOT delete the teacher/staff/user
+  // rows — those live in the shared db-service DB and may be referenced by
+  // other systems; the roster already hides them once no live permission
+  // exists, and a later re-add reactivates the dormant record.
+  const targetUserId = userToDelete[0]?.user_id ?? null;
+  await withTransaction(async (client) => {
+    if (targetUserId != null) {
+      await client.query(
+        `UPDATE centre_positions SET deleted_at = now(), updated_at = now()
+         WHERE user_id = $1 AND deleted_at IS NULL`,
+        [targetUserId]
+      );
+    }
+    await client.query(`DELETE FROM user_permission WHERE id = $1`, [id]);
+  });
 
   return NextResponse.json({ success: true });
 }
@@ -78,6 +94,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
     const userRole = role && validRoles.includes(role) ? role : undefined;
 
+    // Centre seats are the source of truth for a seated user's school scope
+    // (staff-admin clears school_codes/regions on assignment; resolveScope derives
+    // schools from the seat). Editing explicit scope here would re-introduce the
+    // over-grant / move-doesn't-revoke staleness, so it's disabled for seated
+    // users: reject any attempt to set school_codes/regions, and keep both NULL.
+    const seated = await query<{ one: number }>(
+      `SELECT 1 AS one
+       FROM centre_positions cp
+       JOIN user_permission up ON up.user_id = cp.user_id
+       WHERE up.id = $1 AND cp.deleted_at IS NULL
+       LIMIT 1`,
+      [id]
+    );
+    const isSeated = seated.length > 0;
+    const wantsScopeEdit =
+      (Array.isArray(school_codes) && school_codes.length > 0) ||
+      (Array.isArray(regions) && regions.length > 0);
+    if (isSeated && wantsScopeEdit) {
+      return NextResponse.json(
+        {
+          error:
+            "This user is assigned to a centre, so their school scope is derived from that centre and can't be edited here. Change their centre assignment instead.",
+        },
+        { status: 409 }
+      );
+    }
+
     await query(
       `UPDATE user_permission
        SET level = COALESCE($1, level),
@@ -89,7 +132,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
            full_name = $7,
            updated_at = NOW()
        WHERE id = $8`,
-      [level, userRole, school_codes || null, regions || null, program_ids || null, read_only, full_name ?? null, id]
+      [level, userRole, isSeated ? null : school_codes || null, isSeated ? null : regions || null, program_ids || null, read_only, full_name ?? null, id]
     );
 
     return NextResponse.json({ success: true });

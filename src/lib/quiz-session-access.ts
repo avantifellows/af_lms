@@ -3,7 +3,7 @@ import { query } from "@/lib/db";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
-  getUserPermission,
+  getResolvedPermission,
   type UserPermission,
 } from "@/lib/permissions";
 
@@ -25,7 +25,7 @@ export async function requireQuizSessionAccess(
   email: string,
   mode: QuizSessionAccessMode
 ): Promise<QuizSessionAccessResult> {
-  const permission = await getUserPermission(email);
+  const permission = await getResolvedPermission(email);
   const access = getFeatureAccess(permission, "quiz_sessions");
 
   if ((mode === "view" && !access.canView) || (mode === "edit" && !access.canEdit)) {

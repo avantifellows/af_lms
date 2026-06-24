@@ -3,7 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import {
   getAccessibleSchoolCodes,
-  getUserPermission,
+  getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
 } from "@/lib/permissions";
@@ -60,15 +60,24 @@ async function getSchools(
       )
     )`;
 
+  // School visibility scope: the historical JNV set PLUS any school linked to an
+  // active centre. Centre-linked covers the non-JNV centre rollout (Punjab CoE
+  // meritorious / EMRS) without disturbing JNV. Centre-driven, not a category
+  // allowlist — new centre types light up by linking a centre, no code change.
+  const schoolScope = `(
+    s.af_school_category = 'JNV'
+    OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+  )`;
+
   const baseQuery = `
     SELECT s.id, s.code, s.name, s.district, s.state, s.region
     FROM school s
-    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
+    WHERE ${schoolScope}${excludeDupPlaceholders}`;
 
   const countBaseQuery = `
     SELECT COUNT(DISTINCT s.id) as total
     FROM school s
-    WHERE s.af_school_category = 'JNV'${excludeDupPlaceholders}`;
+    WHERE ${schoolScope}${excludeDupPlaceholders}`;
 
   if (codes === "all") {
     if (searchPattern) {
@@ -135,9 +144,19 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise student counts for loaded schools (all programs).
+// Get grade-wise student counts for the loaded school cards.
 // Scoped to the current academic year so the dashboard summary cards match
 // the school roster, which is also restricted to CURRENT_ACADEMIC_YEAR.
+//
+// Cohort rule (matches the school-page roster, which attributes each student a
+// program via their batch):
+//  - JNV schools: the school *is* the cohort — count every current-year member
+//    (historical behaviour, unchanged).
+//  - Non-JNV centre-linked schools sit inside a much larger host school (e.g.
+//    RSMS Bathinda has ~341 current-year members but only ~99 CoE+Nodal cohort),
+//    so count only students enrolled in a batch of one of the school's
+//    active-centre programs. Otherwise the card over-counts the whole host
+//    school (incl. unrelated programmes like the STP Test Series group).
 async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
   if (schoolIds.length === 0) return new Map();
 
@@ -154,6 +173,18 @@ async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, Gr
        AND er.academic_year = $2
      LEFT JOIN grade gr ON er.group_id = gr.id
      WHERE s.id = ANY($1) AND gr.number IS NOT NULL
+       AND (
+         s.af_school_category = 'JNV'
+         OR EXISTS (
+           SELECT 1
+           FROM group_user gu_batch
+           JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
+           JOIN batch b ON g_batch.child_id = b.id
+           JOIN centres c ON c.school_id = s.id AND c.is_active
+             AND c.program_id = b.program_id
+           WHERE gu_batch.user_id = gu_school.user_id
+         )
+       )
      GROUP BY s.id, gr.number
      ORDER BY gr.number`,
     [schoolIds, CURRENT_ACADEMIC_YEAR]
@@ -204,7 +235,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect(`/school/${session.schoolCode}`);
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
 
   if (!permission) {
     return (
