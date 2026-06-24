@@ -2,12 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/quiz-session-access", () => ({
-  canAccessQuizSessionSchool: vi.fn(),
-}));
-vi.mock("@/lib/teacher-feedback-access", () => ({
-  requireTeacherFeedbackAccess: vi.fn(),
-}));
+vi.mock("@/lib/quiz-session-access", () => ({ canAccessQuizSessionSchool: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-access", () => ({ requireTeacherFeedbackAccess: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { NextRequest } from "next/server";
@@ -25,9 +21,9 @@ const mockQuery = vi.mocked(query);
 
 const PERMISSION = { email: "pm@avantifellows.org", level: 3 } as never;
 
-function req(code?: string) {
-  const url = code
-    ? `http://localhost/api/teacher-feedback/teachers?school_code=${code}`
+function req(centreId?: string) {
+  const url = centreId
+    ? `http://localhost/api/teacher-feedback/teachers?centre_id=${centreId}`
     : "http://localhost/api/teacher-feedback/teachers";
   return new NextRequest(new URL(url));
 }
@@ -42,7 +38,7 @@ beforeEach(() => {
 describe("GET /api/teacher-feedback/teachers", () => {
   it("401 when unauthenticated", async () => {
     mockSession.mockResolvedValue(NO_SESSION);
-    expect((await GET(req("34054"))).status).toBe(401);
+    expect((await GET(req("40"))).status).toBe(401);
   });
 
   it("403 when lacking edit access", async () => {
@@ -50,33 +46,33 @@ describe("GET /api/teacher-feedback/teachers", () => {
       ok: false,
       response: Response.json({ error: "Forbidden" }, { status: 403 }) as never,
     });
-    expect((await GET(req("34054"))).status).toBe(403);
+    expect((await GET(req("40"))).status).toBe(403);
   });
 
-  it("400 when school_code missing", async () => {
+  it("400 when centre_id missing", async () => {
     expect((await GET(req())).status).toBe(400);
   });
 
-  it("404 when school not found", async () => {
-    mockQuery.mockResolvedValueOnce([] as never); // school lookup
-    expect((await GET(req("99999"))).status).toBe(404);
+  it("404 when centre not found / unlinked", async () => {
+    mockQuery.mockResolvedValueOnce([] as never); // centre lookup
+    expect((await GET(req("999"))).status).toBe(404);
   });
 
-  it("403 when the PM can't access the school", async () => {
-    mockQuery.mockResolvedValueOnce([{ id: 408, region: "MH" }] as never);
+  it("403 when the PM can't access the centre's school", async () => {
+    mockQuery.mockResolvedValueOnce([{ school_id: 408, code: "34054", region: "MH" }] as never);
     mockSchool.mockResolvedValue(false);
-    expect((await GET(req("34054"))).status).toBe(403);
+    expect((await GET(req("40"))).status).toBe(403);
   });
 
   it("returns centre-seat teachers when present", async () => {
     mockQuery
-      .mockResolvedValueOnce([{ id: 408, region: "MH" }] as never) // school
+      .mockResolvedValueOnce([{ school_id: 408, code: "34054", region: "MH" }] as never) // centre
       .mockResolvedValueOnce([
         { hr_code: "AF836", teacher_id: "AF836", first_name: "Manjit", last_name: "Kumar", role: "maths", subject: null },
         { hr_code: "AF400", teacher_id: "AF400", first_name: "Sanjeet", last_name: "Pal", role: "chemistry", subject: "Chemistry" },
-      ] as never); // centre seats
+      ] as never); // centre seats (subject roles)
 
-    const res = await GET(req("34054"));
+    const res = await GET(req("40"));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.source).toBe("centre_seat");
@@ -84,28 +80,24 @@ describe("GET /api/teacher-feedback/teachers", () => {
     expect(json.teachers[0]).toMatchObject({ id: "AF836", name: "Manjit Kumar", role: "maths" });
   });
 
-  it("falls back to user_permission when no centre seats", async () => {
+  it("falls back to user_permission when the centre has no seated teachers", async () => {
     mockQuery
-      .mockResolvedValueOnce([{ id: 408, region: "MH" }] as never) // school
-      .mockResolvedValueOnce([] as never) // centre seats empty
-      .mockResolvedValueOnce([
-        { email: "t1@avantifellows.org", full_name: "Teacher One" },
-      ] as never); // user_permission
+      .mockResolvedValueOnce([{ school_id: 408, code: "34054", region: "MH" }] as never) // centre
+      .mockResolvedValueOnce([] as never) // no centre seats
+      .mockResolvedValueOnce([{ email: "t1@avantifellows.org", full_name: "Teacher One" }] as never); // user_permission
 
-    const res = await GET(req("34054"));
-    const json = await res.json();
+    const json = await (await GET(req("40"))).json();
     expect(json.source).toBe("user_permission");
     expect(json.teachers[0]).toMatchObject({ id: "t1@avantifellows.org", name: "Teacher One" });
   });
 
   it("falls back when centre tables are absent (relation does not exist)", async () => {
     mockQuery
-      .mockResolvedValueOnce([{ id: 408, region: "MH" }] as never) // school
-      .mockRejectedValueOnce(new Error('relation "centre_positions" does not exist')) // centre query throws
+      .mockResolvedValueOnce([{ school_id: 408, code: "34054", region: "MH" }] as never) // centre
+      .mockRejectedValueOnce(new Error('relation "centre_positions" does not exist')) // seat query throws
       .mockResolvedValueOnce([{ email: "t1@avantifellows.org", full_name: "T1" }] as never); // fallback
 
-    const res = await GET(req("34054"));
-    const json = await res.json();
+    const json = await (await GET(req("40"))).json();
     expect(json.source).toBe("user_permission");
     expect(json.teachers).toHaveLength(1);
   });

@@ -25,6 +25,12 @@ interface FeedbackTeacher {
   subject: string | null;
 }
 
+interface FeedbackCentre {
+  id: number;
+  name: string;
+  typeCode: string | null;
+}
+
 interface CycleTeacher {
   teacherName: string;
   teacherOrder: number;
@@ -39,6 +45,7 @@ interface CycleTeacher {
 interface Cycle {
   setupRunId: string;
   cycleLabel: string;
+  centreName: string | null;
   batchClassIds: string[];
   grade: number;
   startTime: string | null;
@@ -69,10 +76,10 @@ export default function TeacherFeedbackTab({
   canEdit: boolean;
 }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
-  const [teachers, setTeachers] = useState<FeedbackTeacher[]>([]);
+  const [centres, setCentres] = useState<FeedbackCentre[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loadingBatches, setLoadingBatches] = useState(true);
-  const [loadingTeachers, setLoadingTeachers] = useState(true);
+  const [loadingCentres, setLoadingCentres] = useState(true);
   const [loadingCycles, setLoadingCycles] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [analysisQuiz, setAnalysisQuiz] = useState<{ quizId: string; teacherName: string } | null>(null);
@@ -91,16 +98,16 @@ export default function TeacherFeedbackTab({
     }
   }, [schoolId]);
 
-  const fetchTeachers = useCallback(async () => {
-    setLoadingTeachers(true);
+  const fetchCentres = useCallback(async () => {
+    setLoadingCentres(true);
     try {
-      const res = await fetch(`/api/teacher-feedback/teachers?school_code=${encodeURIComponent(schoolCode)}`);
+      const res = await fetch(`/api/teacher-feedback/centres?school_code=${encodeURIComponent(schoolCode)}`);
       const body = await res.json();
-      setTeachers(Array.isArray(body.teachers) ? body.teachers : []);
+      setCentres(Array.isArray(body.centres) ? body.centres : []);
     } catch {
-      setToast({ variant: "error", message: "Failed to load teachers" });
+      setToast({ variant: "error", message: "Failed to load centres" });
     } finally {
-      setLoadingTeachers(false);
+      setLoadingCentres(false);
     }
   }, [schoolCode]);
 
@@ -119,9 +126,9 @@ export default function TeacherFeedbackTab({
 
   useEffect(() => {
     fetchBatches();
-    fetchTeachers();
+    fetchCentres();
     fetchCycles();
-  }, [fetchBatches, fetchTeachers, fetchCycles]);
+  }, [fetchBatches, fetchCentres, fetchCycles]);
 
   return (
     <div className="space-y-4">
@@ -178,8 +185,8 @@ export default function TeacherFeedbackTab({
         <SetupModal
           schoolCode={schoolCode}
           batches={batches}
-          teachers={teachers}
-          loading={loadingBatches || loadingTeachers}
+          centres={centres}
+          loading={loadingBatches || loadingCentres}
           onClose={() => setIsCreateOpen(false)}
           onDone={(result) => {
             setIsCreateOpen(false);
@@ -276,6 +283,9 @@ function CycleCard({
         <div className="flex items-center gap-3">
           <span className="text-text-muted">{open ? "▾" : "▸"}</span>
           <span className="text-sm font-semibold text-text-primary">{cycle.cycleLabel}</span>
+          {cycle.centreName && (
+            <span className="text-xs text-text-secondary">{cycle.centreName}</span>
+          )}
           <span className="text-xs text-text-secondary">
             {cycle.teachers.length} teacher{cycle.teachers.length === 1 ? "" : "s"} ·{" "}
             {cycle.batchClassIds.length} batch{cycle.batchClassIds.length === 1 ? "" : "es"}
@@ -504,18 +514,23 @@ type TimingMode = "start_now" | "schedule";
 function SetupModal({
   schoolCode,
   batches,
-  teachers,
+  centres,
   loading,
   onClose,
   onDone,
 }: {
   schoolCode: string;
   batches: BatchOption[];
-  teachers: FeedbackTeacher[];
+  centres: FeedbackCentre[];
   loading: boolean;
   onClose: () => void;
   onDone: (result: SetupResponse) => void;
 }) {
+  // Centre is picked first (teachers map to a centre, not a school). Auto-select
+  // when there's only one.
+  const [centreId, setCentreId] = useState<number | null>(centres.length === 1 ? centres[0].id : null);
+  const [teachers, setTeachers] = useState<FeedbackTeacher[]>([]);
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
   const [selectedTeachers, setSelectedTeachers] = useState<FeedbackTeacher[]>([]);
   const [timingMode, setTimingMode] = useState<TimingMode>("start_now");
@@ -531,6 +546,31 @@ function SetupModal({
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
   }, [onClose]);
+
+  // Fetch teachers for the chosen centre; clear selection when centre changes.
+  useEffect(() => {
+    if (centreId === null) {
+      setTeachers([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingTeachers(true);
+    setSelectedTeachers([]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/teacher-feedback/teachers?centre_id=${centreId}`);
+        const body = await res.json();
+        if (!cancelled) setTeachers(Array.isArray(body.teachers) ? body.teachers : []);
+      } catch {
+        if (!cancelled) setTeachers([]);
+      } finally {
+        if (!cancelled) setLoadingTeachers(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [centreId]);
 
   const parentIdSet = useMemo(() => {
     const set = new Set<number>();
@@ -566,7 +606,8 @@ function SetupModal({
         : [...prev, t]
     );
 
-  const canSubmit = classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
+  const canSubmit =
+    centreId !== null && classBatchIds.length > 0 && selectedTeachers.length > 0 && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -587,6 +628,7 @@ function SetupModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           schoolCode,
+          centreId,
           parentBatchId,
           classBatchIds,
           startTime: start.toISOString(),
@@ -622,7 +664,30 @@ function SetupModal({
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
-            <SectionCard title="1. Select Class Batches">
+            <SectionCard title="1. Select Centre">
+              {loading ? (
+                <div className="text-sm text-text-secondary">Loading centres…</div>
+              ) : centres.length === 0 ? (
+                <div className="text-sm text-text-secondary">
+                  No active centre is linked to this school.
+                </div>
+              ) : (
+                <select
+                  value={centreId ?? ""}
+                  onChange={(e) => setCentreId(e.target.value ? Number(e.target.value) : null)}
+                  className="min-h-[44px] w-full max-w-md rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                >
+                  <option value="">Select a centre…</option>
+                  {centres.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </SectionCard>
+
+            <SectionCard title="2. Select Class Batches">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
                 {loading ? (
                   <div className="px-3 py-4 text-sm text-text-secondary">Loading batches…</div>
@@ -652,12 +717,14 @@ function SetupModal({
               </div>
             </SectionCard>
 
-            <SectionCard title="2. Select Teachers">
+            <SectionCard title="3. Select Teachers">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
-                {loading ? (
+                {centreId === null ? (
+                  <div className="px-3 py-4 text-sm text-text-secondary">Select a centre first.</div>
+                ) : loadingTeachers ? (
                   <div className="px-3 py-4 text-sm text-text-secondary">Loading teachers…</div>
                 ) : teachers.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-text-secondary">No teachers found for this school.</div>
+                  <div className="px-3 py-4 text-sm text-text-secondary">No teachers found for this centre.</div>
                 ) : (
                   teachers.map((t) => {
                     const checked = isTeacherSelected(t);
@@ -685,7 +752,7 @@ function SetupModal({
               </div>
             </SectionCard>
 
-            <SectionCard title="3. When">
+            <SectionCard title="4. When">
               <div className="grid gap-3 md:grid-cols-2">
                 <button
                   type="button"

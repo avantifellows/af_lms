@@ -21,6 +21,7 @@ function adminTestingLink(quizId: string | null): string {
 interface Row {
   setup_run_id: string;
   cycle_label: string;
+  centre_name: string | null;
   batch_parent_id: string;
   batch_class_ids: string[];
   grade: number;
@@ -50,6 +51,7 @@ interface TeacherEntry {
 interface Cycle {
   setupRunId: string;
   cycleLabel: string;
+  centreName: string | null;
   batchClassIds: string[];
   grade: number;
   startTime: string | null;
@@ -94,7 +96,7 @@ export async function GET(request: NextRequest) {
 
   const rows = await query<Row>(
     `
-    SELECT setup_run_id, cycle_label, batch_parent_id, batch_class_ids, grade,
+    SELECT setup_run_id, cycle_label, centre_name, batch_parent_id, batch_class_ids, grade,
            teacher_name, teacher_order, teacher_id, quiz_id, session_id, status,
            start_time::text AS start_time, end_time::text AS end_time,
            created_by, inserted_at::text AS inserted_at
@@ -113,6 +115,7 @@ export async function GET(request: NextRequest) {
       cycle = {
         setupRunId: r.setup_run_id,
         cycleLabel: r.cycle_label,
+        centreName: r.centre_name,
         batchClassIds: r.batch_class_ids ?? [],
         grade: r.grade,
         startTime: r.start_time,

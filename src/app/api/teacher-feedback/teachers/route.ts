@@ -16,6 +16,10 @@ export interface FeedbackTeacher {
   source: "centre_seat" | "user_permission";
 }
 
+// Subject-teaching seat roles only. Teacher Feedback rates classroom teachers,
+// NOT the PM-family seats (pm/apm/spm/ph) that also live in centre_positions.
+const SUBJECT_ROLES = ["physics", "chemistry", "maths", "biology", "apc", "subject_tbd"];
+
 interface SeatRow {
   hr_code: string | null;
   teacher_id: string | null;
@@ -36,11 +40,13 @@ function fullName(first: string | null, last: string | null, fallback: string): 
 }
 
 /**
- * Teachers placed at this school's centre(s) via the centre-seat model
- * (school -> centres -> centre_positions -> staff/teacher). Returns [] if the
- * centre tables aren't present (older schema) so the caller can fall back.
+ * Subject teachers seated at a CENTRE (centre_positions -> staff/teacher),
+ * filtered to subject roles. Teachers map to a centre, not a school, so a school
+ * with both a CoE and a Nodal centre keeps its two cohorts separate.
+ * Returns [] if the centre tables aren't present (older schema) so the caller
+ * can fall back.
  */
-async function getCentreSeatTeachers(schoolCode: string): Promise<FeedbackTeacher[]> {
+async function getCentreSeatTeachers(centreId: number): Promise<FeedbackTeacher[]> {
   try {
     const rows = await query<SeatRow>(
       `
@@ -56,16 +62,16 @@ async function getCentreSeatTeachers(schoolCode: string): Promise<FeedbackTeache
           WHERE e->>'lang_code' = 'en'
           LIMIT 1
         ) AS subject
-      FROM school s
-      JOIN centres c ON c.school_id = s.id
-      JOIN centre_positions cp ON cp.centre_id = c.id AND cp.deleted_at IS NULL
+      FROM centre_positions cp
       JOIN "user" u ON u.id = cp.user_id
       LEFT JOIN teacher t ON t.user_id = u.id
       LEFT JOIN subject sub ON sub.id = t.subject_id
-      WHERE s.code = $1
+      WHERE cp.centre_id = $1
+        AND cp.deleted_at IS NULL
+        AND cp.role = ANY($2::text[])
       ORDER BY cp.role, u.first_name NULLS LAST
       `,
-      [schoolCode]
+      [centreId, SUBJECT_ROLES]
     );
 
     return rows.map((r) => ({
@@ -76,7 +82,6 @@ async function getCentreSeatTeachers(schoolCode: string): Promise<FeedbackTeache
       source: "centre_seat" as const,
     }));
   } catch (error) {
-    // Centre tables absent on this DB → signal "no centre data" to fall back.
     const message = error instanceof Error ? error.message : "";
     if (/centre_positions|centres|relation .* does not exist/i.test(message)) {
       return [];
@@ -86,9 +91,8 @@ async function getCentreSeatTeachers(schoolCode: string): Promise<FeedbackTeache
 }
 
 /**
- * Fallback: teachers from user_permission scoped to this school (the legacy
- * source used by /api/pm/teachers). Used only when the centre-seat model yields
- * nothing for the school.
+ * Fallback: teachers from user_permission scoped to the centre's school. Used
+ * only when the centre has no seated subject teachers (thin roster).
  */
 async function getPermissionTeachers(
   schoolCode: string,
@@ -117,7 +121,7 @@ async function getPermissionTeachers(
   }));
 }
 
-// GET /api/teacher-feedback/teachers?school_code=XXXXX
+// GET /api/teacher-feedback/teachers?centre_id=NN
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   const email = session?.user?.email;
@@ -130,32 +134,36 @@ export async function GET(request: NextRequest) {
     return access.response;
   }
 
-  const schoolCode = request.nextUrl.searchParams.get("school_code")?.trim();
-  if (!schoolCode) {
+  const centreIdParam = request.nextUrl.searchParams.get("centre_id")?.trim();
+  const centreId = Number(centreIdParam);
+  if (!centreIdParam || !Number.isInteger(centreId)) {
     return NextResponse.json(
-      { error: "school_code query parameter is required" },
+      { error: "centre_id query parameter is required" },
       { status: 400 }
     );
   }
 
-  const schoolRows = await query<{ id: number; region: string | null }>(
-    `SELECT id, region FROM school WHERE code = $1 LIMIT 1`,
-    [schoolCode]
+  // Resolve the centre's school for the access check + fallback.
+  const centreRows = await query<{ school_id: number | null; code: string | null; region: string | null }>(
+    `SELECT c.school_id, s.code, s.region
+     FROM centres c
+     LEFT JOIN school s ON s.id = c.school_id
+     WHERE c.id = $1 LIMIT 1`,
+    [centreId]
   );
-  const school = schoolRows[0];
-  if (!school) {
-    return NextResponse.json({ error: "School not found" }, { status: 404 });
+  const centre = centreRows[0];
+  if (!centre || centre.school_id == null) {
+    return NextResponse.json({ error: "Centre not found" }, { status: 404 });
   }
-
-  if (!(await canAccessQuizSessionSchool(access.permission, school.id))) {
+  if (!(await canAccessQuizSessionSchool(access.permission, centre.school_id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Prefer the centre-seat roster; fall back to user_permission if it's empty.
-  let teachers = await getCentreSeatTeachers(schoolCode);
+  // Prefer the centre-seat subject teachers; fall back to user_permission.
+  let teachers = await getCentreSeatTeachers(centreId);
   let source: FeedbackTeacher["source"] = "centre_seat";
-  if (teachers.length === 0) {
-    teachers = await getPermissionTeachers(schoolCode, school.region);
+  if (teachers.length === 0 && centre.code) {
+    teachers = await getPermissionTeachers(centre.code, centre.region);
     source = "user_permission";
   }
 

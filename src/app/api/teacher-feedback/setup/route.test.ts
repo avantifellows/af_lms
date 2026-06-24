@@ -39,6 +39,7 @@ const PERMISSION = { email: "pm@avantifellows.org", level: 3 } as never;
 function validBody(overrides: Record<string, unknown> = {}) {
   return {
     schoolCode: "14030",
+    centreId: 40,
     parentBatchId: "EnableStudents_11_Photon_Eng_24_E001",
     classBatchIds: ["EnableStudents_11_Photon_Eng_24_E001_A"],
     grade: 11,
@@ -62,8 +63,13 @@ beforeEach(() => {
   mockSession.mockResolvedValue(PM_SESSION);
   mockRequire.mockResolvedValue({ ok: true, permission: PERMISSION });
   mockBatches.mockResolvedValue(true);
-  // ownership check (EXISTS) -> true; subsequent inserts -> []
-  mockQuery.mockResolvedValue([{ ok: true }] as never);
+  // Route runs: batch-ownership (EXISTS -> .ok), centre-ownership (-> .name),
+  // then INSERTs. Return the right shape per query; inserts get [].
+  mockQuery.mockImplementation(async (sql: string) => {
+    if (sql.includes("FROM centres c JOIN school")) return [{ name: "JNV Palghar - CoE" }] as never;
+    if (sql.includes("SELECT EXISTS")) return [{ ok: true }] as never;
+    return [] as never;
+  });
   mockCreateQuiz.mockImplementation(async () => ({ id: `quiz_${Math.random().toString(36).slice(2, 8)}` }));
   mockCreateSession.mockImplementation(async (p) => ({
     sessionPk: 100 + p.feedback.teacherOrder,
@@ -123,8 +129,8 @@ describe("POST /api/teacher-feedback/setup", () => {
 
     expect(mockCreateQuiz).toHaveBeenCalledTimes(2);
     expect(mockCreateSession).toHaveBeenCalledTimes(2);
-    // 1 ownership SELECT + 2 inserts
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    // batch-ownership + centre-ownership SELECTs + 2 inserts
+    expect(mockQuery).toHaveBeenCalledTimes(4);
   });
 
   it("chains last->first: the last teacher gets Finish, earlier teachers point at the next session", async () => {
@@ -156,8 +162,8 @@ describe("POST /api/teacher-feedback/setup", () => {
     const failed = json.teachers.find((t: { status: string }) => t.status === "failed");
     expect(failed.error).toMatch(/quiz-backend down/);
 
-    // ownership SELECT + 1 success insert + 1 failure insert
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    // batch-ownership + centre-ownership SELECTs + 1 success insert + 1 failure insert
+    expect(mockQuery).toHaveBeenCalledTimes(4);
     const insertedStatuses = mockQuery.mock.calls
       .map((c) => c[0] as string)
       .filter((sql) => sql.includes("INSERT INTO lms_teacher_feedback"));

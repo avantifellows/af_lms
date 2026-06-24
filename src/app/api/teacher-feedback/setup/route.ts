@@ -34,6 +34,7 @@ interface TeacherInput {
 
 interface SetupBody {
   schoolCode?: string;
+  centreId?: number;
   parentBatchId?: string;
   classBatchIds?: string[];
   grade?: number;
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
   }
 
   const schoolCode = body.schoolCode?.trim();
+  const centreId = Number.isInteger(body.centreId) ? (body.centreId as number) : null;
   const parentBatchId = body.parentBatchId?.trim() ?? "";
   const classBatchIds = Array.isArray(body.classBatchIds)
     ? body.classBatchIds.map((b) => String(b).trim()).filter(Boolean)
@@ -113,6 +115,9 @@ export async function POST(request: NextRequest) {
 
   if (!schoolCode) {
     return NextResponse.json({ error: "schoolCode is required" }, { status: 400 });
+  }
+  if (centreId === null) {
+    return NextResponse.json({ error: "centreId is required" }, { status: 400 });
   }
   if (classBatchIds.length === 0) {
     return NextResponse.json(
@@ -156,6 +161,20 @@ export async function POST(request: NextRequest) {
   if (!ownership[0]?.ok) {
     return NextResponse.json(
       { error: "Selected batches do not belong to this school" },
+      { status: 400 }
+    );
+  }
+
+  // Confirm the centre belongs to this school + grab its name for the record.
+  const centreRows = await query<{ name: string }>(
+    `SELECT c.name FROM centres c JOIN school s ON s.id = c.school_id
+     WHERE c.id = $1 AND s.code = $2 LIMIT 1`,
+    [centreId, schoolCode]
+  );
+  const centreName = centreRows[0]?.name ?? null;
+  if (!centreName) {
+    return NextResponse.json(
+      { error: "Selected centre does not belong to this school" },
       { status: 400 }
     );
   }
@@ -238,17 +257,19 @@ export async function POST(request: NextRequest) {
       await query(
         `
         INSERT INTO lms_teacher_feedback
-          (setup_run_id, cycle_label, source_id, school_code, batch_parent_id,
-           batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
+          (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
+           batch_parent_id, batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
            quiz_id, session_pk, session_id, status, start_time, end_time, created_by)
         VALUES
-          ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, $11, $12, $13, 'created', $14, $15, $16)
+          ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14, $15, 'created', $16, $17, $18)
         `,
         [
           setupRunId,
           cycleLabel,
           sourceId,
           schoolCode,
+          centreId,
+          centreName,
           parentBatchId,
           classBatchIds,
           grade,
@@ -287,17 +308,19 @@ export async function POST(request: NextRequest) {
         await query(
           `
           INSERT INTO lms_teacher_feedback
-            (setup_run_id, cycle_label, source_id, school_code, batch_parent_id,
-             batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
+            (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
+             batch_parent_id, batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
              status, start_time, end_time, created_by)
           VALUES
-            ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, 'failed', $11, $12, $13)
+            ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, 'failed', $13, $14, $15)
           `,
           [
             setupRunId,
             cycleLabel,
             sourceId,
             schoolCode,
+            centreId,
+            centreName,
             parentBatchId,
             classBatchIds,
             grade,
