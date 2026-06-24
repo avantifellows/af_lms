@@ -183,6 +183,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  // UTC ISO. createFeedbackSession converts to IST for the db-service session
+  // (its convention); we store UTC on lms_teacher_feedback (ours). The two tables
+  // therefore differ by the IST offset — intentional; see the migration comment.
   const startIso = startTime.toISOString();
   const endIso = endTime.toISOString();
 
