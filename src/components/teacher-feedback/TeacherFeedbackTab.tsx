@@ -47,6 +47,7 @@ interface Cycle {
   cycleLabel: string;
   centreName: string | null;
   batchClassIds: string[];
+  batchClassNames: string[];
   grade: number;
   startTime: string | null;
   endTime: string | null;
@@ -302,8 +303,16 @@ function CycleCard({
 
       {open && (
         <div className="border-t border-border">
-          <div className="px-4 py-2 text-xs text-text-secondary">
-            Window: {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)}
+          <div className="space-y-1 px-4 py-2 text-xs text-text-secondary">
+            {cycle.batchClassNames.length > 0 && (
+              <div>
+                Batches:{" "}
+                <span className="text-text-primary">{cycle.batchClassNames.join(", ")}</span>
+              </div>
+            )}
+            <div>
+              Window: {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)}
+            </div>
           </div>
           <ul className="divide-y divide-border">
             {cycle.teachers.map((t) => (
@@ -320,7 +329,7 @@ function CycleCard({
                   <span className="text-sm font-medium text-text-primary">{t.teacherName}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
-                  <CopyLink label="Student link" href={t.portalLink} onCopy={onCopy} />
+                  <CopyLink label="Session link" href={t.portalLink} onCopy={onCopy} />
                   <CopyLink label="Admin test" href={t.adminTestingLink} onCopy={onCopy} />
                   <button
                     type="button"

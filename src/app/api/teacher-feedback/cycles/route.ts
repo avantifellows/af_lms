@@ -53,6 +53,8 @@ interface Cycle {
   cycleLabel: string;
   centreName: string | null;
   batchClassIds: string[];
+  /** Human-readable batch names (falls back to the id when a name is unknown). */
+  batchClassNames: string[];
   grade: number;
   startTime: string | null;
   endTime: string | null;
@@ -107,16 +109,33 @@ export async function GET(request: NextRequest) {
     [schoolCode]
   );
 
+  // Resolve batch_id -> readable name for all class batches across these cycles.
+  const allBatchIds = Array.from(
+    new Set(rows.flatMap((r) => r.batch_class_ids ?? []))
+  );
+  const batchNameById = new Map<string, string>();
+  if (allBatchIds.length > 0) {
+    const batchRows = await query<{ batch_id: string; name: string | null }>(
+      `SELECT batch_id, name FROM batch WHERE batch_id = ANY($1::text[])`,
+      [allBatchIds]
+    );
+    for (const b of batchRows) {
+      if (b.name) batchNameById.set(b.batch_id, b.name);
+    }
+  }
+
   // Group rows into cycles by setup_run_id (preserving the DESC insertion order).
   const byRun = new Map<string, Cycle>();
   for (const r of rows) {
     let cycle = byRun.get(r.setup_run_id);
     if (!cycle) {
+      const classIds = r.batch_class_ids ?? [];
       cycle = {
         setupRunId: r.setup_run_id,
         cycleLabel: r.cycle_label,
         centreName: r.centre_name,
-        batchClassIds: r.batch_class_ids ?? [],
+        batchClassIds: classIds,
+        batchClassNames: classIds.map((id) => batchNameById.get(id) ?? id),
         grade: r.grade,
         startTime: r.start_time,
         endTime: r.end_time,

@@ -70,7 +70,10 @@ describe("GET /api/teacher-feedback/cycles", () => {
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
           created_by: "pm@avantifellows.org", inserted_at: "2026-06-22 10:00:00",
         },
-      ] as never);
+      ] as never)
+      .mockResolvedValueOnce([
+        { batch_id: "EnableStudents_TP_2027_engg_C024", name: "CoE JNV Palghar 2027 Engineering" },
+      ] as never); // batch name resolution
 
     const res = await GET(req("34054"));
     expect(res.status).toBe(200);
@@ -79,6 +82,7 @@ describe("GET /api/teacher-feedback/cycles", () => {
     const cycle = json.cycles[0];
     expect(cycle.setupRunId).toBe("run-1");
     expect(cycle.cycleLabel).toBe("Jun 2026");
+    expect(cycle.batchClassNames).toEqual(["CoE JNV Palghar 2027 Engineering"]);
     expect(cycle.teachers).toHaveLength(2);
     // sorted by teacher_order
     expect(cycle.teachers[0].teacherName).toBe("Sanjeet Pal");
