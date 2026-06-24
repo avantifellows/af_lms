@@ -303,7 +303,7 @@ function CycleCard({
       {open && (
         <div className="border-t border-border">
           <div className="px-4 py-2 text-xs text-text-secondary">
-            Window: {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)} · by {cycle.createdBy}
+            Window: {formatDateTime(cycle.startTime)} → {formatDateTime(cycle.endTime)}
           </div>
           <ul className="divide-y divide-border">
             {cycle.teachers.map((t) => (
