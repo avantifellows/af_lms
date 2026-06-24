@@ -526,9 +526,8 @@ function SetupModal({
   onClose: () => void;
   onDone: (result: SetupResponse) => void;
 }) {
-  // Centre is picked first (teachers map to a centre, not a school). Auto-select
-  // when there's only one.
-  const [centreId, setCentreId] = useState<number | null>(centres.length === 1 ? centres[0].id : null);
+  // Centre is picked first (teachers map to a centre, not a school).
+  const [centreId, setCentreId] = useState<number | null>(null);
   const [teachers, setTeachers] = useState<FeedbackTeacher[]>([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
@@ -546,6 +545,14 @@ function SetupModal({
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
   }, [onClose]);
+
+  // Auto-select when there's exactly one centre. Centres load asynchronously, so
+  // this must be an effect (a one-time state initializer would see []).
+  useEffect(() => {
+    if (centreId === null && centres.length === 1) {
+      setCentreId(centres[0].id);
+    }
+  }, [centres, centreId]);
 
   // Fetch teachers for the chosen centre; clear selection when centre changes.
   useEffect(() => {
