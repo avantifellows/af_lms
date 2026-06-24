@@ -12,7 +12,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const baseParams = {
-  quizId: "quiz_abc",
   group: "EnableStudents",
   parentBatchId: "EnableStudents_11",
   classBatchIds: ["EnableStudents_11_A", "EnableStudents_11_B"],
@@ -22,11 +21,8 @@ const baseParams = {
   sourceId: "teacher-feedback:v2:34054:2026-06",
   startTimeUtc: "2026-06-22T00:00:00Z",
   endTimeUtc: "2026-06-23T00:00:00Z",
-  portalBaseUrl: "https://auth.avantifellows.org/",
   name: "Student Feedback - Jun 2026 - JNV Palghar - Manjit Kumar",
   createdBy: "pm@avantifellows.org",
-  nextStepUrl: "https://auth.avantifellows.org/?sessionId=NEXT",
-  nextStepText: "Continue to next teacher feedback",
   feedback: {
     teacherId: "42",
     teacherName: "Manjit Kumar",
@@ -52,8 +48,7 @@ afterEach(() => {
 describe("buildFeedbackSessionPayload", () => {
   it("uses canonical quiz-creator meta_data values (no feedback purpose)", async () => {
     const { buildFeedbackSessionPayload } = await import("./teacher-feedback-session");
-    const payload = buildFeedbackSessionPayload(baseParams);
-    const meta = payload.meta_data as Record<string, unknown>;
+    const meta = buildFeedbackSessionPayload(baseParams).meta_data as Record<string, unknown>;
     expect(meta.test_type).toBe("form");
     expect(meta.test_format).toBe("questionnaire");
     expect(meta.test_purpose).toBe("one_time");
@@ -64,25 +59,26 @@ describe("buildFeedbackSessionPayload", () => {
     expect(meta.single_page_mode).toBe(true);
   });
 
-  it("pre-fills launch fields since the Lambda is not in the loop", async () => {
+  it("leaves launch fields blank — the Lambda fills them after building the quiz", async () => {
     const { buildFeedbackSessionPayload } = await import("./teacher-feedback-session");
     const payload = buildFeedbackSessionPayload(baseParams);
-    expect(payload.session_id).toBe("EnableStudents_quiz_abc");
-    expect(payload.platform_id).toBe("quiz_abc");
-    expect(payload.platform_link).toBe("quiz_abc");
-    expect(payload.portal_link).toBe(
-      "https://auth.avantifellows.org/?sessionId=EnableStudents_quiz_abc"
-    );
+    expect(payload.session_id).toBe("");
+    expect(payload.platform_id).toBe("");
+    expect(payload.platform_link).toBe("");
+    expect(payload.portal_link).toBe("");
+    const meta = payload.meta_data as Record<string, unknown>;
+    // No chaining.
+    expect(meta.next_step_url).toBe("");
+    expect(meta.admin_testing_link).toBe("");
   });
 
-  it("carries the feedback traceability namespace + chaining", async () => {
+  it("carries the feedback traceability namespace", async () => {
     const { buildFeedbackSessionPayload } = await import("./teacher-feedback-session");
-    const meta = (buildFeedbackSessionPayload(baseParams).meta_data) as Record<string, unknown>;
+    const meta = buildFeedbackSessionPayload(baseParams).meta_data as Record<string, unknown>;
     expect(meta.feedback_teacher_id).toBe("42");
     expect(meta.feedback_teacher_name).toBe("Manjit Kumar");
     expect(meta.feedback_cycle_label).toBe("Jun 2026");
     expect(meta.feedback_school_code).toBe("34054");
-    expect(meta.next_step_url).toBe("https://auth.avantifellows.org/?sessionId=NEXT");
   });
 
   it("truncates the session name to 255 chars", async () => {
@@ -93,39 +89,15 @@ describe("buildFeedbackSessionPayload", () => {
 });
 
 describe("createFeedbackSession", () => {
-  it("creates session, attaches to group, and creates an occurrence", async () => {
-    // 1) POST /session -> { id }
+  it("POSTs one /session and returns its pk (Lambda does the rest)", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ id: 17221 }));
-    // 2) GET /batch?batch_id= -> [{ id }]
-    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 555 }]));
-    // 3) GET /group/?child_id=&type=batch -> [{ id }]
-    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 999 }]));
-    // 4) POST /group-session -> ok
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 1 }));
-    // 5) POST /session-occurrence -> ok
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 2 }));
 
     const { createFeedbackSession } = await import("./teacher-feedback-session");
     const result = await createFeedbackSession(baseParams);
 
-    expect(result).toEqual({
-      sessionPk: 17221,
-      sessionId: "EnableStudents_quiz_abc",
-      portalLink: "https://auth.avantifellows.org/?sessionId=EnableStudents_quiz_abc",
-    });
-
-    const urls = mockFetch.mock.calls.map((c) => c[0] as string);
-    expect(urls[0]).toBe("https://db.test/api/session");
-    expect(urls[1]).toContain("/batch?batch_id=EnableStudents_11");
-    expect(urls[2]).toContain("/group/?child_id=555&type=batch");
-    expect(urls[3]).toBe("https://db.test/api/group-session");
-    expect(urls[4]).toBe("https://db.test/api/session-occurrence");
-
-    // group-session POST references the resolved group id + new session pk
-    expect(JSON.parse(mockFetch.mock.calls[3][1].body)).toEqual({
-      session_id: 17221,
-      group_id: 999,
-    });
+    expect(result).toEqual({ sessionPk: 17221 });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe("https://db.test/api/session");
   });
 
   it("throws if the session POST fails", async () => {
@@ -134,13 +106,10 @@ describe("createFeedbackSession", () => {
     await expect(createFeedbackSession(baseParams)).rejects.toThrow(/create session/);
   });
 
-  it("still succeeds when the group attach can't be resolved (best-effort)", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 17221 })); // session ok
-    mockFetch.mockResolvedValueOnce(jsonResponse([])); // batch lookup empty -> group attach skipped
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 2 })); // session-occurrence ok
+  it("throws when the session POST returns no id", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
     const { createFeedbackSession } = await import("./teacher-feedback-session");
-    const result = await createFeedbackSession(baseParams);
-    expect(result.sessionPk).toBe(17221);
+    await expect(createFeedbackSession(baseParams)).rejects.toThrow(/no id/);
   });
 
   it("throws when DB service is not configured", async () => {

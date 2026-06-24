@@ -8,7 +8,6 @@ vi.mock("@/lib/quiz-session-access", () => ({
 vi.mock("@/lib/teacher-feedback-access", () => ({
   requireTeacherFeedbackAccess: vi.fn(),
 }));
-vi.mock("@/lib/quiz-backend", () => ({ createFormQuiz: vi.fn() }));
 vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/teacher-feedback-session")>();
   return {
@@ -16,13 +15,14 @@ vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
     createFeedbackSession: vi.fn(),
   };
 });
+vi.mock("@/lib/sns", () => ({ publishMessage: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
 import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
-import { createFormQuiz } from "@/lib/quiz-backend";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
+import { publishMessage } from "@/lib/sns";
 import { query } from "@/lib/db";
 import { POST } from "./route";
 import { jsonRequest, PM_SESSION, NO_SESSION } from "../../__test-utils__/api-test-helpers";
@@ -30,8 +30,8 @@ import { jsonRequest, PM_SESSION, NO_SESSION } from "../../__test-utils__/api-te
 const mockSession = vi.mocked(getServerSession);
 const mockRequire = vi.mocked(requireTeacherFeedbackAccess);
 const mockBatches = vi.mocked(canAccessQuizSessionBatches);
-const mockCreateQuiz = vi.mocked(createFormQuiz);
 const mockCreateSession = vi.mocked(createFeedbackSession);
+const mockPublish = vi.mocked(publishMessage);
 const mockQuery = vi.mocked(query);
 
 const PERMISSION = { email: "pm@avantifellows.org", level: 3 } as never;
@@ -70,12 +70,10 @@ beforeEach(() => {
     if (sql.includes("SELECT EXISTS")) return [{ ok: true }] as never;
     return [] as never;
   });
-  mockCreateQuiz.mockImplementation(async () => ({ id: `quiz_${Math.random().toString(36).slice(2, 8)}` }));
   mockCreateSession.mockImplementation(async (p) => ({
     sessionPk: 100 + p.feedback.teacherOrder,
-    sessionId: `${p.group}_${p.quizId}`,
-    portalLink: `https://auth.avantifellows.org/?sessionId=${p.group}_${p.quizId}`,
   }));
+  mockPublish.mockResolvedValue(undefined);
 });
 
 describe("POST /api/teacher-feedback/setup", () => {
@@ -120,7 +118,7 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(json.error).toMatch(/do not belong/);
   });
 
-  it("creates a quiz + session per teacher and returns 201 with per-teacher results", async () => {
+  it("creates a session per teacher, publishes SNS db_id, returns 201", async () => {
     const res = await POST(req(validBody()));
     expect(res.status).toBe(201);
     const json = await res.json();
@@ -133,31 +131,29 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(json.teachers).toHaveLength(2);
     expect(json.teachers.every((t: { status: string }) => t.status === "created")).toBe(true);
 
-    expect(mockCreateQuiz).toHaveBeenCalledTimes(2);
+    // No quiz creation in the LMS anymore — the Lambda builds it. One session +
+    // one SNS db_id per teacher.
     expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    expect(mockPublish).toHaveBeenCalledTimes(2);
+    expect(mockPublish).toHaveBeenCalledWith({ action: "db_id", id: 101 });
     // batch-ownership + centre-ownership SELECTs + 2 inserts
     expect(mockQuery).toHaveBeenCalledTimes(4);
   });
 
-  it("chains last->first: the last teacher gets Finish, earlier teachers point at the next session", async () => {
+  it("does not chain — each session is created independently (no next_step_url)", async () => {
     await POST(req(validBody()));
-
-    // createFormQuiz is called last-teacher-first. First call = order 2 (last) => Finish + empty next.
-    const firstCallArg = mockCreateQuiz.mock.calls[0][0] as { metadata: Record<string, string> };
-    expect(firstCallArg.metadata.next_step_text).toBe("Finish");
-    expect(firstCallArg.metadata.next_step_url).toBe("");
-
-    // Second call = order 1, should chain into order 2's portal link.
-    const secondCallArg = mockCreateQuiz.mock.calls[1][0] as { metadata: Record<string, string> };
-    expect(secondCallArg.metadata.next_step_text).toBe("Continue to next teacher feedback");
-    expect(secondCallArg.metadata.next_step_url).toContain("?sessionId=EnableStudents_");
+    // Sessions are created in given order, none carrying a next_step_url.
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    for (const call of mockCreateSession.mock.calls) {
+      expect(call[0]).not.toHaveProperty("nextStepUrl");
+    }
   });
 
   it("partial failure: 207 with one failed teacher, still records a failed row", async () => {
-    // Last teacher (processed first) succeeds; first teacher (processed second) fails.
-    mockCreateQuiz
-      .mockResolvedValueOnce({ id: "quiz_ok" }) // order 2
-      .mockRejectedValueOnce(new Error("quiz-backend down")); // order 1
+    // First teacher (order 1) succeeds; second (order 2) fails on session create.
+    mockCreateSession
+      .mockResolvedValueOnce({ sessionPk: 101 })
+      .mockRejectedValueOnce(new Error("db-service down"));
 
     const res = await POST(req(validBody()));
     expect(res.status).toBe(207);
@@ -166,7 +162,7 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(json.failedCount).toBe(1);
 
     const failed = json.teachers.find((t: { status: string }) => t.status === "failed");
-    expect(failed.error).toMatch(/quiz-backend down/);
+    expect(failed.error).toMatch(/db-service down/);
 
     // batch-ownership + centre-ownership SELECTs + 1 success insert + 1 failure insert
     expect(mockQuery).toHaveBeenCalledTimes(4);
@@ -174,6 +170,8 @@ describe("POST /api/teacher-feedback/setup", () => {
       .map((c) => c[0] as string)
       .filter((sql) => sql.includes("INSERT INTO lms_teacher_feedback"));
     expect(insertedStatuses.length).toBe(2);
+    // SNS only published for the successful teacher.
+    expect(mockPublish).toHaveBeenCalledTimes(1);
   });
 
   it("defaults the window to +24h when endTime is omitted", async () => {

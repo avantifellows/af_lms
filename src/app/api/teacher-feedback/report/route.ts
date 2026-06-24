@@ -28,23 +28,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // The quiz must belong to a feedback row this PM can access (by school).
-  const rows = await query<{ school_code: string; teacher_name: string }>(
-    `SELECT school_code, teacher_name FROM lms_teacher_feedback
-     WHERE quiz_id = $1 AND deleted_at IS NULL LIMIT 1`,
+  // The quiz_id is the session's platform_id (filled by the sessionCreator
+  // Lambda). Resolve the feedback row + school via the session this quiz belongs
+  // to, so we can both check access and label the report with the teacher.
+  const rows = await query<{
+    school_code: string;
+    teacher_name: string;
+    school_id: number | null;
+  }>(
+    `
+    SELECT tf.school_code, tf.teacher_name, sch.id AS school_id
+    FROM session s
+    JOIN lms_teacher_feedback tf ON tf.session_pk = s.id AND tf.deleted_at IS NULL
+    LEFT JOIN school sch ON sch.code = tf.school_code
+    WHERE s.platform_id = $1
+    LIMIT 1
+    `,
     [quizId]
   );
   const row = rows[0];
   if (!row) {
     return NextResponse.json({ error: "Feedback quiz not found" }, { status: 404 });
   }
-
-  const schoolRows = await query<{ id: number }>(
-    `SELECT id FROM school WHERE code = $1 LIMIT 1`,
-    [row.school_code]
-  );
-  const school = schoolRows[0];
-  if (!school || !(await canAccessQuizSessionSchool(access.permission, school.id))) {
+  if (row.school_id == null || !(await canAccessQuizSessionSchool(access.permission, row.school_id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

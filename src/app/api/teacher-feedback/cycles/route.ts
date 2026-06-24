@@ -5,18 +5,6 @@ import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
 import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
-import { buildPortalLink } from "@/lib/teacher-feedback-session";
-
-const PORTAL_URL = process.env.PORTAL_URL ?? "https://auth.avantifellows.org/";
-const QUIZ_FRONTEND_URL = process.env.QUIZ_FRONTEND_URL ?? "";
-const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY ?? "";
-
-function adminTestingLink(quizId: string | null): string {
-  if (!QUIZ_FRONTEND_URL || !quizId) return "";
-  const base = QUIZ_FRONTEND_URL.replace(/\/$/, "");
-  const key = QUIZ_AF_API_KEY ? `&apiKey=${QUIZ_AF_API_KEY}` : "";
-  return `${base}/form/${quizId}?userId=test_admin${key}&singlePageMode=true&autoStart=true`;
-}
 
 interface Row {
   setup_run_id: string;
@@ -28,8 +16,7 @@ interface Row {
   teacher_name: string;
   teacher_order: number;
   teacher_id: string | null;
-  quiz_id: string | null;
-  session_id: string | null;
+  session_pk: number | null;
   status: string;
   start_time: string | null;
   end_time: string | null;
@@ -41,9 +28,10 @@ interface TeacherEntry {
   teacherName: string;
   teacherOrder: number;
   teacherId: string | null;
-  quizId: string | null;
-  sessionId: string | null;
   status: string;
+  /** quiz id (= session.platform_id), filled by the Lambda; null until then. */
+  quizId: string | null;
+  /** Filled by the sessionCreator Lambda; "" until it has run ("Generating…"). */
   portalLink: string;
   adminTestingLink: string;
 }
@@ -99,7 +87,7 @@ export async function GET(request: NextRequest) {
   const rows = await query<Row>(
     `
     SELECT setup_run_id, cycle_label, centre_name, batch_parent_id, batch_class_ids, grade,
-           teacher_name, teacher_order, teacher_id, quiz_id, session_id, status,
+           teacher_name, teacher_order, teacher_id, session_pk, status,
            start_time::text AS start_time, end_time::text AS end_time,
            created_by, inserted_at::text AS inserted_at
     FROM lms_teacher_feedback
@@ -124,6 +112,35 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Links are written onto the db-service session by the sessionCreator Lambda
+  // (async). Read them from the session rows by session_pk — absent until the
+  // Lambda has run, so the UI shows "Generating…".
+  const sessionPks = Array.from(
+    new Set(rows.map((r) => r.session_pk).filter((pk): pk is number => pk != null))
+  );
+  const linksByPk = new Map<
+    number,
+    { quizId: string | null; portalLink: string; adminTestingLink: string }
+  >();
+  if (sessionPks.length > 0) {
+    const sessionRows = await query<{
+      id: number;
+      platform_id: string | null;
+      portal_link: string | null;
+      meta_data: { admin_testing_link?: string } | null;
+    }>(
+      `SELECT id, platform_id, portal_link, meta_data FROM session WHERE id = ANY($1::int[])`,
+      [sessionPks]
+    );
+    for (const s of sessionRows) {
+      linksByPk.set(s.id, {
+        quizId: s.platform_id || null,
+        portalLink: s.portal_link ?? "",
+        adminTestingLink: s.meta_data?.admin_testing_link ?? "",
+      });
+    }
+  }
+
   // Group rows into cycles by setup_run_id (preserving the DESC insertion order).
   const byRun = new Map<string, Cycle>();
   for (const r of rows) {
@@ -145,15 +162,15 @@ export async function GET(request: NextRequest) {
       };
       byRun.set(r.setup_run_id, cycle);
     }
+    const links = r.session_pk != null ? linksByPk.get(r.session_pk) : undefined;
     cycle.teachers.push({
       teacherName: r.teacher_name,
       teacherOrder: r.teacher_order,
       teacherId: r.teacher_id,
-      quizId: r.quiz_id,
-      sessionId: r.session_id,
       status: r.status,
-      portalLink: r.session_id ? buildPortalLink(PORTAL_URL, r.session_id) : "",
-      adminTestingLink: adminTestingLink(r.quiz_id),
+      quizId: links?.quizId ?? null,
+      portalLink: links?.portalLink ?? "",
+      adminTestingLink: links?.adminTestingLink ?? "",
     });
   }
 

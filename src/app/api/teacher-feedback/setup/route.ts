@@ -6,25 +6,11 @@ import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
 import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
-import {
-  FEEDBACK_FORM_VERSION,
-  buildFeedbackQuizBody,
-} from "@/lib/teacher-feedback-form";
-import { createFormQuiz } from "@/lib/quiz-backend";
+import { FEEDBACK_FORM_VERSION } from "@/lib/teacher-feedback-form";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
+import { publishMessage } from "@/lib/sns";
 
-const PORTAL_URL = process.env.PORTAL_URL ?? "https://auth.avantifellows.org/";
-const QUIZ_FRONTEND_URL = process.env.QUIZ_FRONTEND_URL ?? "";
-const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY ?? "";
 const DEFAULT_WINDOW_HOURS = 24;
-
-/** Admin testing link for a form quiz (mirrors the prototype). "" if unconfigured. */
-function buildAdminTestingLink(quizId: string): string {
-  if (!QUIZ_FRONTEND_URL) return "";
-  const base = QUIZ_FRONTEND_URL.replace(/\/$/, "");
-  const key = QUIZ_AF_API_KEY ? `&apiKey=${QUIZ_AF_API_KEY}` : "";
-  return `${base}/form/${quizId}?userId=test_admin${key}&singlePageMode=true&autoStart=true`;
-}
 
 interface TeacherInput {
   id?: string | null;
@@ -47,9 +33,7 @@ interface TeacherResult {
   teacherName: string;
   teacherOrder: number;
   status: "created" | "failed";
-  quizId?: string;
-  sessionId?: string;
-  portalLink?: string;
+  sessionPk?: number;
   error?: string;
 }
 
@@ -207,33 +191,20 @@ export async function POST(request: NextRequest) {
   const sourceId = `teacher-feedback:${FEEDBACK_FORM_VERSION}:${schoolCode}:${cycleKeyFor(startTime)}`;
   const setupRunId = randomUUID();
 
-  // Sort teachers by order and process LAST -> FIRST so each session can carry a
-  // next_step_url pointing at the next teacher's session (chaining), exactly like
-  // the prototype. We collect created portal links to thread backward.
+  // No chaining — each feedback session stands alone (Gurukul has no chaining;
+  // students fill them in any order). Process in given order.
   const ordered = [...cleanTeachers].sort((a, b) => a.order - b.order);
 
   const resultsByOrder = new Map<number, TeacherResult>();
-  let nextStepUrl = "";
 
-  for (let i = ordered.length - 1; i >= 0; i--) {
-    const teacher = ordered[i];
-    const isLast = i === ordered.length - 1;
-    const nextStepText = isLast ? "Finish" : "Continue to next teacher feedback";
+  for (const teacher of ordered) {
     const title = `Student Feedback - ${cycleLabel} - ${schoolCode} - ${teacher.name}`;
 
     try {
-      const quiz = await createFormQuiz(
-        buildFeedbackQuizBody({
-          title,
-          grade: String(grade),
-          sourceId,
-          nextStepUrl,
-          nextStepText,
-        })
-      );
-
+      // Create the bare session row. The sessionCreator Lambda (triggered by the
+      // SNS db_id below) builds the quiz from its bundled Teacher Feedback form
+      // and fills in session_id / platform_id / portal_link / admin link.
       const created = await createFeedbackSession({
-        quizId: quiz.id,
         group,
         parentBatchId,
         classBatchIds,
@@ -243,12 +214,8 @@ export async function POST(request: NextRequest) {
         sourceId,
         startTimeUtc: startIso,
         endTimeUtc: endIso,
-        portalBaseUrl: PORTAL_URL,
-        adminTestingLink: buildAdminTestingLink(quiz.id),
         name: title,
         createdBy: email,
-        nextStepUrl,
-        nextStepText,
         feedback: {
           teacherId: teacher.id,
           teacherName: teacher.name,
@@ -258,14 +225,17 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // Trigger the Lambda to build the quiz + links for this session.
+      await publishMessage({ action: "db_id", id: created.sessionPk });
+
       await query(
         `
         INSERT INTO lms_teacher_feedback
           (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
            batch_parent_id, batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
-           quiz_id, session_pk, session_id, status, start_time, end_time, created_by)
+           session_pk, status, start_time, end_time, created_by)
         VALUES
-          ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14, $15, 'created', $16, $17, $18)
+          ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, $13, 'created', $14, $15, $16)
         `,
         [
           setupRunId,
@@ -280,9 +250,7 @@ export async function POST(request: NextRequest) {
           teacher.id,
           teacher.name,
           teacher.order,
-          quiz.id,
           created.sessionPk,
-          created.sessionId,
           startIso,
           endIso,
           email,
@@ -293,13 +261,8 @@ export async function POST(request: NextRequest) {
         teacherName: teacher.name,
         teacherOrder: teacher.order,
         status: "created",
-        quizId: quiz.id,
-        sessionId: created.sessionId,
-        portalLink: created.portalLink,
+        sessionPk: created.sessionPk,
       });
-
-      // The next (earlier) teacher's session should chain into this one.
-      nextStepUrl = created.portalLink;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       console.error(
@@ -346,8 +309,6 @@ export async function POST(request: NextRequest) {
         status: "failed",
         error: message,
       });
-      // A failed teacher must not chain — leave nextStepUrl unchanged so the
-      // earlier teacher points at the next *successful* session (or "" / Finish).
     }
   }
 

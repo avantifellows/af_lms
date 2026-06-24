@@ -36,7 +36,6 @@ interface CycleTeacher {
   teacherOrder: number;
   teacherId: string | null;
   quizId: string | null;
-  sessionId: string | null;
   status: string;
   portalLink: string;
   adminTestingLink: string;

@@ -1,19 +1,21 @@
 /**
  * Teacher Feedback — db-service session creation.
  *
- * Builds the `/session` payload for one teacher's feedback form and attaches it
- * to the parent batch's group + a session occurrence so it surfaces on Gurukul.
- *
- * IMPORTANT: the direct quiz-backend path does NOT trigger the sessionCreator
- * Lambda (we must NOT publish an SNS `db_id` for these — that would rebuild the
- * quiz from cms_test_id and clobber ours). So the LMS pre-fills the launch fields
- * (`session_id`, `platform_id`, `platform_link`, `portal_link`) itself, exactly
- * as scripts/create_teacher_feedback_pilot.py did.
+ * The LMS records the *intent* (a feedback session per teacher) and lets the
+ * sessionCreator Lambda do the rest. The LMS:
+ *   1. POSTs a db-service /session with meta_data (test_type 'form',
+ *      cms_test_id 'teacher-feedback:v2:...', batch/group/teacher), launch fields
+ *      left blank; and
+ *   2. publishes an SNS `db_id` message (done by the caller via @/lib/sns).
+ * The Lambda then builds the quiz in Mongo from its bundled Teacher Feedback form
+ * and fills in session_id / platform_id / portal_link / admin testing link /
+ * Firestore. So the LMS no longer needs quiz-backend or portal URLs, and there is
+ * no per-teacher chaining (each feedback session stands alone).
  *
  * meta_data uses CANONICAL quiz-creator values only (Options.ts): test_type
- * 'form', test_format 'questionnaire', test_purpose 'one_time'. There is no
- * feedback test_purpose, so feedback rows are identified by the quiz source_id
- * (= cms_test_id on every BigQuery row) plus the lms_teacher_feedback quiz_id list.
+ * 'form', test_format 'questionnaire', test_purpose 'one_time'. Feedback rows are
+ * identified by cms_test_id (= the source_id, lands on every BigQuery row) plus
+ * the lms_teacher_feedback quiz_id list.
  */
 
 import { utcToISTDate } from "./quiz-session-time";
@@ -37,36 +39,31 @@ function authHeaders(): Record<string, string> {
 }
 
 export interface FeedbackSessionParams {
-  /** quiz-backend quiz id this session points at (its platform_link/platform_id). */
-  quizId: string;
   /** Program tag, e.g. "EnableStudents" — becomes meta_data.group + BQ `group`. */
   group: string;
-  /** Parent (grade) batch id, e.g. "EnableStudents_11". */
+  /** Parent (grade) batch id; meta_data.parent_id (best-effort, group attach). */
   parentBatchId: string;
   /** Class (child) batch ids; comma-joined into meta_data.batch_id + BQ `batch`. */
   classBatchIds: string[];
-  /** Grade as integer (11 or 12). */
+  /** Grade as integer (informational form metadata only). */
   grade: number;
   /** Canonical stream matching the batch, or "" if unknown. */
   stream: string;
   /** Canonical course matching the batch, or "" if unknown. */
   course: string;
-  /** Stable source identifier (= quiz source_id), stamped as cms_test_id. */
+  /**
+   * Stable source identifier, "teacher-feedback:v2:<school>:<cycle>". Stamped as
+   * meta_data.cms_test_id — this is what the sessionCreator Lambda matches to
+   * build the bundled Teacher Feedback quiz, and what lands on every BigQuery row.
+   */
   sourceId: string;
   /** ISO UTC start/end of the response window. */
   startTimeUtc: string;
   endTimeUtc: string;
-  /** Portal base URL, e.g. "https://auth.avantifellows.org/". */
-  portalBaseUrl: string;
-  /** Admin testing link ({QUIZ_FRONTEND_URL}/form/{quizId}?apiKey=...), or "". */
-  adminTestingLink?: string;
   /** Human-readable session name (e.g. "Student Feedback - Jun 2026 - JNV Palghar - Manjit Kumar"). */
   name: string;
   /** Email of the PM/admin creating this. */
   createdBy: string;
-  /** Portal URL of the next teacher's session for chaining; "" for the last. */
-  nextStepUrl?: string;
-  nextStepText?: string;
   /** Our own traceability fields (not consumed by the ETL). */
   feedback: {
     teacherId: string | null;
@@ -77,29 +74,14 @@ export interface FeedbackSessionParams {
   };
 }
 
-/** Build the canonical `session_id` for a feedback session. */
-export function buildFeedbackSessionId(group: string, quizId: string): string {
-  return `${group}_${quizId}`;
-}
-
-/** Build the portal launch link for a session_id. */
-export function buildPortalLink(portalBaseUrl: string, sessionId: string): string {
-  const base = portalBaseUrl.endsWith("/") ? portalBaseUrl : `${portalBaseUrl}/`;
-  return `${base}?sessionId=${sessionId}`;
-}
-
 /**
  * Build the db-service `/session` POST payload. Pure — no I/O — so it is unit
- * testable. Launch fields are pre-filled because the Lambda is not in the loop.
+ * testable. Launch fields (session_id/platform_id/portal_link) are left blank;
+ * the sessionCreator Lambda fills them after building the quiz.
  */
 export function buildFeedbackSessionPayload(
   params: FeedbackSessionParams
 ): Record<string, unknown> {
-  const sessionId = buildFeedbackSessionId(params.group, params.quizId);
-  const portalLink = buildPortalLink(params.portalBaseUrl, sessionId);
-  const nextStepUrl = params.nextStepUrl ?? "";
-  const nextStepText = params.nextStepText ?? "";
-
   const metaData = {
     group: params.group,
     parent_id: params.parentBatchId,
@@ -113,25 +95,26 @@ export function buildFeedbackSessionPayload(
     test_purpose: "one_time",
     gurukul_format_type: "qa",
     marking_scheme: "0,0",
+    // The Lambda matches this prefix to build the bundled Teacher Feedback quiz.
     cms_test_id: params.sourceId,
     optional_limits: "N/A",
     has_synced_to_bq: false,
     infinite_session: false,
     report_link: "",
-    shortened_link: portalLink,
+    shortened_link: "",
     shortened_omr_link: "",
-    admin_testing_link: params.adminTestingLink ?? "",
+    admin_testing_link: "",
     number_of_fields_in_popup_form: "",
     show_answers: true,
     show_scores: false,
     shuffle: false,
     single_page_mode: true,
     single_page_header_text: "Please fill the answers carefully.",
-    next_step_url: nextStepUrl,
-    next_step_text: nextStepText,
+    next_step_url: "",
+    next_step_text: "",
     next_step_autostart: false,
     test_takers_count: 100,
-    status: "success",
+    status: "pending",
     date_created: utcToISTDate(new Date().toISOString()),
     created_by: params.createdBy,
     created_from: "lms",
@@ -154,11 +137,11 @@ export function buildFeedbackSessionPayload(
     popup_form: false,
     signup_form_id: null,
     popup_form_id: null,
-    // Pre-filled launch fields (Lambda not in the loop).
-    session_id: sessionId,
-    platform_id: params.quizId,
-    platform_link: params.quizId,
-    portal_link: portalLink,
+    // Launch fields filled by the Lambda after it builds the quiz.
+    session_id: "",
+    platform_id: "",
+    platform_link: "",
+    portal_link: "",
     start_time: utcToISTDate(params.startTimeUtc),
     end_time: utcToISTDate(params.endTimeUtc),
     repeat_schedule: { type: "continuous", params: [1, 2, 3, 4, 5, 6, 7] },
@@ -171,58 +154,18 @@ export function buildFeedbackSessionPayload(
 export interface CreatedFeedbackSession {
   /** db-service session primary key. */
   sessionPk: number;
-  /** The session_id string (group_quizId). */
-  sessionId: string;
-  /** The student launch URL. */
-  portalLink: string;
 }
 
 /**
- * Resolve the group id for a batch (POST target for group-session). Mirrors the
- * prototype get_group_id: GET /batch?batch_id=, then GET /group/?child_id=&type=batch.
- */
-async function getBatchGroupId(batchId: string): Promise<number> {
-  const base = dbBaseUrl();
-
-  const batchResp = await fetch(
-    `${base}/batch?batch_id=${encodeURIComponent(batchId)}`,
-    { headers: authHeaders(), cache: "no-store" }
-  );
-  if (!batchResp.ok) {
-    throw new Error(`Failed to look up batch ${batchId} (status ${batchResp.status})`);
-  }
-  const batches = (await batchResp.json()) as Array<{ id: number }>;
-  const batch = batches?.[0];
-  if (!batch?.id) {
-    throw new Error(`Batch ${batchId} not found`);
-  }
-
-  const groupResp = await fetch(
-    `${base}/group/?child_id=${batch.id}&type=batch`,
-    { headers: authHeaders(), cache: "no-store" }
-  );
-  if (!groupResp.ok) {
-    throw new Error(`Failed to look up group for batch ${batchId} (status ${groupResp.status})`);
-  }
-  const groups = (await groupResp.json()) as Array<{ id: number }>;
-  const group = groups?.[0];
-  if (!group?.id) {
-    throw new Error(`Group for batch ${batchId} not found`);
-  }
-  return group.id;
-}
-
-/**
- * Create one feedback session end-to-end: POST /session, attach to the parent
- * batch's group, and create a session occurrence for the window.
+ * Create one feedback session row in db-service. Returns its primary key. The
+ * quiz, links, and Firestore are built asynchronously by the sessionCreator
+ * Lambda once the caller publishes an SNS `db_id` for this session pk.
  */
 export async function createFeedbackSession(
   params: FeedbackSessionParams
 ): Promise<CreatedFeedbackSession> {
   const base = dbBaseUrl();
   const payload = buildFeedbackSessionPayload(params);
-  const sessionId = payload.session_id as string;
-  const portalLink = payload.portal_link as string;
 
   const sessionResp = await fetch(`${base}/session`, {
     method: "POST",
@@ -239,44 +182,5 @@ export async function createFeedbackSession(
     throw new Error("db-service session create returned no id");
   }
 
-  // Group attach is BEST-EFFORT: student visibility comes from the
-  // meta_data.batch_id overlap (how Gurukul matches sessions), not this row.
-  // A feedback round can span batches with different parents, so a single
-  // parent group attach may be partial or unresolvable — never fail on it.
-  if (params.parentBatchId) {
-    try {
-      const groupId = await getBatchGroupId(params.parentBatchId);
-      const groupSessionResp = await fetch(`${base}/group-session`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ session_id: written.id, group_id: groupId }),
-      });
-      if (!groupSessionResp.ok) {
-        console.warn(
-          "db-service group-session attach failed (non-fatal):",
-          groupSessionResp.status
-        );
-      }
-    } catch (e) {
-      console.warn("group-session attach skipped (non-fatal):", e instanceof Error ? e.message : e);
-    }
-  }
-
-  const occurrenceResp = await fetch(`${base}/session-occurrence`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify({
-      start_time: utcToISTDate(params.startTimeUtc),
-      end_time: utcToISTDate(params.endTimeUtc),
-      session_fk: written.id,
-      session_id: sessionId,
-    }),
-  });
-  if (!occurrenceResp.ok) {
-    const errorText = await occurrenceResp.text();
-    console.error("db-service session-occurrence error:", occurrenceResp.status, errorText);
-    throw new Error(`Failed to create session occurrence (status ${occurrenceResp.status})`);
-  }
-
-  return { sessionPk: written.id, sessionId, portalLink };
+  return { sessionPk: written.id };
 }

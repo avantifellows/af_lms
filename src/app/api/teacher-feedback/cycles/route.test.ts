@@ -55,25 +55,32 @@ describe("GET /api/teacher-feedback/cycles", () => {
       .mockResolvedValueOnce([{ id: 408 }] as never) // school
       .mockResolvedValueOnce([
         {
-          setup_run_id: "run-1", cycle_label: "Jun 2026", batch_parent_id: "EN-TP-2027-engg-C01",
+          setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",
+          batch_parent_id: "EN-TP-2027-engg-C01",
           batch_class_ids: ["EnableStudents_TP_2027_engg_C024"], grade: 11,
           teacher_name: "Manjit Kumar", teacher_order: 2, teacher_id: "AF836",
-          quiz_id: "quiz_m", session_id: "EnableStudents_quiz_m", status: "created",
+          session_pk: 6, status: "created",
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
           created_by: "pm@avantifellows.org", inserted_at: "2026-06-22 10:00:00",
         },
         {
-          setup_run_id: "run-1", cycle_label: "Jun 2026", batch_parent_id: "EN-TP-2027-engg-C01",
+          setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",
+          batch_parent_id: "EN-TP-2027-engg-C01",
           batch_class_ids: ["EnableStudents_TP_2027_engg_C024"], grade: 11,
           teacher_name: "Sanjeet Pal", teacher_order: 1, teacher_id: "AF400",
-          quiz_id: "quiz_s", session_id: "EnableStudents_quiz_s", status: "created",
+          session_pk: 5, status: "created",
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
           created_by: "pm@avantifellows.org", inserted_at: "2026-06-22 10:00:00",
         },
       ] as never)
       .mockResolvedValueOnce([
         { batch_id: "EnableStudents_TP_2027_engg_C024", name: "CoE JNV Palghar 2027 Engineering" },
-      ] as never); // batch name resolution
+      ] as never) // batch name resolution
+      .mockResolvedValueOnce([
+        // session rows (links filled by the Lambda)
+        { id: 5, platform_id: "quiz_s", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_s", meta_data: { admin_testing_link: "https://staging-quiz/form/quiz_s" } },
+        { id: 6, platform_id: "quiz_m", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_m", meta_data: {} },
+      ] as never);
 
     const res = await GET(req("34054"));
     expect(res.status).toBe(200);
@@ -84,9 +91,11 @@ describe("GET /api/teacher-feedback/cycles", () => {
     expect(cycle.cycleLabel).toBe("Jun 2026");
     expect(cycle.batchClassNames).toEqual(["CoE JNV Palghar 2027 Engineering"]);
     expect(cycle.teachers).toHaveLength(2);
-    // sorted by teacher_order
+    // sorted by teacher_order; links resolved from the session row by session_pk
     expect(cycle.teachers[0].teacherName).toBe("Sanjeet Pal");
+    expect(cycle.teachers[0].quizId).toBe("quiz_s");
     expect(cycle.teachers[0].portalLink).toContain("?sessionId=EnableStudents_quiz_s");
+    expect(cycle.teachers[0].adminTestingLink).toContain("/form/quiz_s");
   });
 
   it("returns empty cycles when none exist", async () => {
