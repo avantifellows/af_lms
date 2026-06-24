@@ -34,7 +34,7 @@ interface TeacherInput {
 
 interface SetupBody {
   schoolCode?: string;
-  centreId?: number;
+  centreId?: number | string;
   parentBatchId?: string;
   classBatchIds?: string[];
   grade?: number;
@@ -102,7 +102,11 @@ export async function POST(request: NextRequest) {
   }
 
   const schoolCode = body.schoolCode?.trim();
-  const centreId = Number.isInteger(body.centreId) ? (body.centreId as number) : null;
+  // Accept a number or a numeric string (pg returns bigint ids as strings, so a
+  // client may echo "40" back).
+  const centreIdNum = Number(body.centreId);
+  const centreId =
+    body.centreId != null && Number.isInteger(centreIdNum) ? centreIdNum : null;
   const parentBatchId = body.parentBatchId?.trim() ?? "";
   const classBatchIds = Array.isArray(body.classBatchIds)
     ? body.classBatchIds.map((b) => String(b).trim()).filter(Boolean)

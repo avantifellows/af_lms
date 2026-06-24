@@ -13,7 +13,8 @@ export interface FeedbackCentre {
 }
 
 interface CentreRow {
-  id: number;
+  // centres.id is a bigint — node-pg returns it as a string, so coerce on read.
+  id: number | string;
   name: string;
   type_code: string | null;
 }
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
   );
 
   const centres: FeedbackCentre[] = rows.map((r) => ({
-    id: r.id,
+    id: Number(r.id),
     name: r.name,
     typeCode: r.type_code,
   }));

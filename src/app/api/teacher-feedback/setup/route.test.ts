@@ -106,6 +106,12 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(res.status).toBe(403);
   });
 
+  it("accepts a stringy centreId (pg returns bigint ids as strings)", async () => {
+    // The client may echo back "40" (string) from the centres API.
+    const res = await POST(req(validBody({ centreId: "40" })));
+    expect(res.status).toBe(201);
+  });
+
   it("400 when the batch doesn't belong to the school", async () => {
     mockQuery.mockResolvedValueOnce([{ ok: false }] as never); // ownership EXISTS -> false
     const res = await POST(req(validBody()));
