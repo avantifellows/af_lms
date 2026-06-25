@@ -1,4 +1,4 @@
-import { StrictMode, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,12 +12,73 @@ const MOCK_TEACHERS = [
   { id: 3, email: "noname@school.com", full_name: null },
 ];
 
-function mockFetchTeachers(teachers = MOCK_TEACHERS) {
+const MOCK_CURRICULUM_OPTIONS = {
+  curricula: [
+    { id: 1, name: "JEE Mains", code: "JMNS" },
+    { id: 2, name: "NEET", code: "NEET" },
+    { id: 9, name: "JEE Advanced", code: "JADV" },
+  ],
+  chapters: [
+    {
+      id: 44,
+      code: "11P1",
+      name: "Units and Measurement",
+      grade: 11,
+      subjectId: 4,
+      subjectName: "Physics",
+      curriculumId: 1,
+      topicCount: 2,
+    },
+    {
+      id: 45,
+      code: "11C1",
+      name: "Some Basic Concepts of Chemistry",
+      grade: 11,
+      subjectId: 2,
+      subjectName: "Chemistry",
+      curriculumId: 2,
+      topicCount: 0,
+    },
+  ],
+  topics: [
+    {
+      id: 101,
+      code: "11P1.1",
+      name: "Physical Quantities",
+      chapterId: 44,
+      curriculumId: 1,
+    },
+    {
+      id: 102,
+      code: "11P1.2",
+      name: "Errors",
+      chapterId: 44,
+      curriculumId: 1,
+    },
+  ],
+};
+
+function mockFetchTeachers(teachers = MOCK_TEACHERS, curriculumOptions = MOCK_CURRICULUM_OPTIONS) {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ teachers }),
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/pm/teachers")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ teachers }),
+        });
+      }
+      if (url.startsWith("/api/pm/classroom-observation-options")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(curriculumOptions),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        json: () => Promise.resolve({ error: "Unexpected URL" }),
+      });
     })
   );
 }
@@ -36,10 +97,20 @@ interface HarnessProps {
   disabled?: boolean;
   initialData?: Record<string, unknown>;
   schoolCode?: string;
+  onDataChange?: (data: Record<string, unknown>) => void;
 }
 
-function Harness({ disabled = false, initialData = {}, schoolCode = "SCH001" }: HarnessProps) {
+function Harness({
+  disabled = false,
+  initialData = {},
+  schoolCode = "SCH001",
+  onDataChange,
+}: HarnessProps) {
   const [data, setData] = useState<Record<string, unknown>>(initialData);
+
+  useEffect(() => {
+    onDataChange?.(data);
+  }, [data, onDataChange]);
 
   return (
     <ClassroomObservationForm
@@ -60,6 +131,17 @@ function withTeacherAndGrade(extra: Record<string, unknown> = {}): Record<string
     grade: "10",
     ...extra,
   };
+}
+
+async function waitForCurriculumSelectOptions() {
+  await waitFor(() => {
+    expect(screen.getByTestId("curriculum-select")).toBeInTheDocument();
+  });
+
+  await waitFor(() => {
+    const select = screen.getByTestId("curriculum-select") as HTMLSelectElement;
+    expect(select.options).toHaveLength(4);
+  });
 }
 
 describe("ClassroomObservationForm", () => {
@@ -353,6 +435,104 @@ describe("ClassroomObservationForm", () => {
       await user.selectOptions(screen.getByTestId("grade-select"), "10");
       expect(screen.getByTestId("rubric-score-summary")).toBeInTheDocument();
       expect(screen.getAllByTestId(/rubric-param-/)).toHaveLength(19);
+    });
+  });
+
+  describe("curriculum, chapter, and topic dropdowns", () => {
+    it("loads CMS options after grade selection and stores selected context", async () => {
+      const user = userEvent.setup();
+      let latestData: Record<string, unknown> = {};
+
+      render(
+        <Harness
+          initialData={withTeacherAndGrade({ grade: "11" })}
+          onDataChange={(nextData) => {
+            latestData = nextData;
+          }}
+        />
+      );
+
+      await waitForCurriculumSelectOptions();
+
+      await user.selectOptions(screen.getByTestId("curriculum-select"), "1");
+      expect(latestData).toMatchObject({
+        curriculum_id: 1,
+        curriculum_name: "JEE Mains",
+        curriculum_code: "JMNS",
+      });
+
+      const chapterSelect = await screen.findByTestId("chapter-select");
+      expect(chapterSelect).toHaveTextContent("Physics - Units and Measurement (11P1)");
+
+      await user.selectOptions(chapterSelect, "44");
+      expect(latestData).toMatchObject({
+        chapter_id: 44,
+        chapter_name: "Units and Measurement",
+        chapter_code: "11P1",
+        chapter_topic_count: 2,
+        subject_id: 4,
+        subject_name: "Physics",
+      });
+
+      const topicSelect = await screen.findByTestId("topic-select");
+      expect(topicSelect).toHaveTextContent("Physical Quantities (11P1.1)");
+
+      await user.selectOptions(topicSelect, "101");
+      expect(latestData).toMatchObject({
+        topic_id: 101,
+        topic_name: "Physical Quantities",
+        topic_code: "11P1.1",
+      });
+    });
+
+    it("clears curriculum context when grade changes", async () => {
+      const user = userEvent.setup();
+      let latestData: Record<string, unknown> = {};
+
+      render(
+        <Harness
+          initialData={withTeacherAndGrade({
+            grade: "11",
+            curriculum_id: 1,
+            curriculum_name: "JEE Mains",
+            chapter_id: 44,
+            chapter_name: "Units and Measurement",
+            subject_id: 4,
+            subject_name: "Physics",
+            topic_id: 101,
+            topic_name: "Physical Quantities",
+          })}
+          onDataChange={(nextData) => {
+            latestData = nextData;
+          }}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("grade-select")).toBeInTheDocument();
+      });
+
+      await user.selectOptions(screen.getByTestId("grade-select"), "12");
+
+      expect(latestData).toMatchObject({ grade: "12" });
+      expect(latestData).not.toHaveProperty("curriculum_id");
+      expect(latestData).not.toHaveProperty("chapter_id");
+      expect(latestData).not.toHaveProperty("topic_id");
+    });
+
+    it("shows an empty topic dropdown when the selected chapter has no active topics", async () => {
+      const user = userEvent.setup();
+
+      render(<Harness initialData={withTeacherAndGrade({ grade: "11" })} />);
+
+      await waitForCurriculumSelectOptions();
+
+      await user.selectOptions(screen.getByTestId("curriculum-select"), "2");
+      await user.selectOptions(screen.getByTestId("chapter-select"), "45");
+
+      const topicSelect = await screen.findByTestId("topic-select");
+      expect(topicSelect).toBeDisabled();
+      expect(topicSelect).toHaveTextContent("No topics found");
     });
   });
 

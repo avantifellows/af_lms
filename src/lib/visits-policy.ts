@@ -32,6 +32,11 @@ export interface ScopeResolution {
   schoolRegion?: string;
 }
 
+interface SchoolRegionLookup {
+  exists: boolean;
+  schoolRegion: string | null;
+}
+
 export interface VisitScopePredicate {
   clause: string;
   params: unknown[];
@@ -45,6 +50,10 @@ type VisitsAccessResult =
 
 type JsonBodyResult =
   | { ok: true; body: Record<string, unknown> }
+  | { ok: false; response: NextResponse<ApiErrorBody> };
+
+type SchoolRegionAccessResult =
+  | { ok: true; schoolRegion: string | null }
   | { ok: false; response: NextResponse<ApiErrorBody> };
 
 function normalizeEmail(email: string): string {
@@ -85,6 +94,19 @@ export function buildVisitsActor(email: string, permission: UserPermission): Vis
   };
 }
 
+async function findSchoolRegion(schoolCode: string): Promise<SchoolRegionLookup> {
+  const schools = await query<{ region: string | null }>(
+    `SELECT region FROM school WHERE code = $1`,
+    [schoolCode]
+  );
+
+  if (schools.length === 0) {
+    return { exists: false, schoolRegion: null };
+  }
+
+  return { exists: true, schoolRegion: schools[0].region ?? null };
+}
+
 export async function requireVisitsAccess(
   session: Session | null,
   mode: AccessMode
@@ -123,19 +145,27 @@ export async function resolveSchoolRegionForScope(
     return { exists: true };
   }
 
-  const schools = await query<{ region: string | null }>(
-    `SELECT region FROM school WHERE code = $1`,
-    [schoolCode]
-  );
-
-  if (schools.length === 0) {
+  const school = await findSchoolRegion(schoolCode);
+  if (!school.exists) {
     return { exists: false };
   }
 
   return {
     exists: true,
-    schoolRegion: schools[0].region ?? undefined,
+    schoolRegion: school.schoolRegion ?? undefined,
   };
+}
+
+export async function resolveAccessibleVisitSchoolRegion(
+  actor: VisitsActor,
+  schoolCode: string
+): Promise<SchoolRegionAccessResult> {
+  const school = await findSchoolRegion(schoolCode);
+  if (!canAccessVisitSchoolScope(actor, schoolCode, school.schoolRegion)) {
+    return { ok: false, response: apiError(403, "Forbidden") };
+  }
+
+  return { ok: true, schoolRegion: school.schoolRegion };
 }
 
 export function buildVisitScopePredicate(

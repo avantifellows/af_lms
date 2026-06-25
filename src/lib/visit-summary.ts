@@ -1,4 +1,13 @@
-import { ACTION_TYPE_VALUES, isActionType, type ActionType } from "./visit-actions";
+import {
+  ACTION_TYPE_VALUES,
+  REQUIRED_ACTION_TYPE_VALUES,
+  isActionType,
+  type ActionType,
+} from "./visit-actions";
+import {
+  ACTION_ADDITIONAL_NOTES_LABEL,
+  readActionAdditionalNotes,
+} from "./visit-form-utils";
 import {
   computeInlineStats as computeAFTeamInlineStats,
   extractRemarks as extractAFTeamRemarks,
@@ -76,20 +85,20 @@ export function rollupActionTypes(
 export function classifyActionCompletion(
   rollup: Record<ActionType, ActionTypeRollupStatus>
 ): ActionCompletionBucket {
-  const touchedCount = ACTION_TYPE_VALUES.filter(
+  const touchedCount = REQUIRED_ACTION_TYPE_VALUES.filter(
     (actionType) => rollup[actionType] !== "not_started"
   ).length;
-  const completedCount = ACTION_TYPE_VALUES.filter(
+  const completedCount = REQUIRED_ACTION_TYPE_VALUES.filter(
     (actionType) => rollup[actionType] === "completed"
   ).length;
 
-  if (completedCount === ACTION_TYPE_VALUES.length) {
+  if (completedCount === REQUIRED_ACTION_TYPE_VALUES.length) {
     return "all_complete";
   }
   if (touchedCount === 0) {
     return "none";
   }
-  if (touchedCount === ACTION_TYPE_VALUES.length) {
+  if (touchedCount === REQUIRED_ACTION_TYPE_VALUES.length) {
     return "all_present";
   }
   return "partial";
@@ -98,7 +107,7 @@ export function classifyActionCompletion(
 export function computeAverageCompletion(
   completedTypeCountSum: number,
   visitCount: number,
-  knownTypeCount = ACTION_TYPE_VALUES.length
+  knownTypeCount = REQUIRED_ACTION_TYPE_VALUES.length
 ): number | null {
   if (visitCount === 0) {
     return null;
@@ -121,23 +130,28 @@ export function resolvePresetDateRange(
 }
 
 export function dispatchExtractRemarks(actionType: string, data: unknown): RemarkEntry[] {
+  const additionalNotes = readActionAdditionalNotes(data).trim();
+  const actionNotes = additionalNotes
+    ? [{ label: ACTION_ADDITIONAL_NOTES_LABEL, text: additionalNotes }]
+    : [];
+
   switch (actionType) {
     case "classroom_observation":
-      return extractClassroomRemarks(data);
+      return [...extractClassroomRemarks(data), ...actionNotes];
     case "af_team_interaction":
-      return extractAFTeamRemarks(data);
+      return [...extractAFTeamRemarks(data), ...actionNotes];
     case "individual_af_teacher_interaction":
-      return extractIndividualTeacherRemarks(data);
+      return [...extractIndividualTeacherRemarks(data), ...actionNotes];
     case "principal_interaction":
-      return extractPrincipalRemarks(data);
+      return [...extractPrincipalRemarks(data), ...actionNotes];
     case "group_student_discussion":
-      return extractGroupStudentRemarks(data);
+      return [...extractGroupStudentRemarks(data), ...actionNotes];
     case "individual_student_discussion":
-      return extractIndividualStudentRemarks(data);
+      return [...extractIndividualStudentRemarks(data), ...actionNotes];
     case "school_staff_interaction":
-      return extractSchoolStaffRemarks(data);
+      return [...extractSchoolStaffRemarks(data), ...actionNotes];
     default:
-      return [];
+      return actionNotes;
   }
 }
 
