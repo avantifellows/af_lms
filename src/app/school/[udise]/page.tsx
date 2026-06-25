@@ -4,7 +4,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
-  getUserPermission,
+  getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
   canAccessSchoolSync,
@@ -36,11 +36,17 @@ interface School {
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
+  // Visible schools = the historical JNV set PLUS any school linked to an active
+  // centre (the non-JNV centre rollout: Punjab CoE meritorious / EMRS). Mirrors
+  // the dashboard `schoolScope` predicate so a school listed there also opens.
   const schools = await query<School>(
     `SELECT id, name, code, udise_code, district, state, region
-     FROM school
-     WHERE af_school_category = 'JNV'
-       AND (udise_code = $1 OR code = $1)`,
+     FROM school s
+     WHERE (
+         s.af_school_category = 'JNV'
+         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+       )
+       AND (s.udise_code = $1 OR s.code = $1)`,
     [code],
   );
   return schools[0] || null;
@@ -132,7 +138,7 @@ export default async function SchoolPage({ params }: PageProps) {
 
   // Single DB call for permission — reuse everywhere
   const permission = !isPasscodeUser && session.user?.email
-    ? await getUserPermission(session.user.email)
+    ? await getResolvedPermission(session.user.email)
     : null;
 
   // For Google users, check school access
@@ -239,11 +245,14 @@ export default async function SchoolPage({ params }: PageProps) {
 
   // Programs the user is allowed to see for the enrollment cards.
   // Admins + passcode users see every program present at the school; everyone
-  // else sees the intersection of their assigned program_ids with what's here.
+  // else sees the intersection of their effective programs with what's here.
+  // Effective = explicit program_ids ∪ seat-derived (programContext.programIds),
+  // so a teacher seated at a centre sees that centre's program even when their
+  // explicit program_ids is empty.
   const isAdmin = permission?.role === "admin";
   const visibleProgramIds = (isPasscodeUser || isAdmin
     ? PROGRAM_IDS_ORDERED
-    : permission?.program_ids ?? []
+    : programContext.programIds
   ).filter((id) => programsWithStudents.has(id));
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
@@ -290,7 +299,7 @@ export default async function SchoolPage({ params }: PageProps) {
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
-        userProgramIds={permission?.program_ids ?? null}
+        userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}
         isAdmin={isAdmin}
         grades={grades}

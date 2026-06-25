@@ -38,6 +38,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   return {
     ...actual,
     getUserPermission: mockGetUserPermission,
+    getResolvedPermission: mockGetUserPermission,
     getProgramContextSync: mockGetProgramContextSync,
     getFeatureAccess: mockGetFeatureAccess,
   };
@@ -920,17 +921,45 @@ describe("SchoolPage (server component)", () => {
     expect(props.isPasscodeUser).toBe(false);
   });
 
-  it("passes userProgramIds from permission to StudentTable", async () => {
+  it("passes effective program-context ids as userProgramIds to StudentTable", async () => {
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
       makePermission({ program_ids: [1, 2, 64] })
     );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [1, 2, 64],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
 
     await renderPage();
 
     const table = screen.getByTestId("student-table");
     const props = JSON.parse(table.getAttribute("data-props") || "{}");
     expect(props.userProgramIds).toEqual([1, 2, 64]);
+  });
+
+  it("passes seat-derived programs as userProgramIds when explicit program_ids is empty", async () => {
+    // The seated-teacher case (pritamps@): explicit program_ids empty, but the
+    // resolved program context includes the seat's program — that effective set
+    // must reach StudentTable so the seated user can see/edit those students.
+    setupAdminDefaults();
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "teacher", program_ids: [] })
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [2], // derived purely from the centre seat
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    await renderPage();
+
+    const table = screen.getByTestId("student-table");
+    const props = JSON.parse(table.getAttribute("data-props") || "{}");
+    expect(props.userProgramIds).toEqual([2]);
   });
 
   it("passes null userProgramIds for passcode user", async () => {
@@ -1133,7 +1162,10 @@ describe("SchoolPage (server component)", () => {
 
     // First query is getSchoolByCode
     const firstCall = mockQuery.mock.calls[0];
-    expect(firstCall[0]).toContain("udise_code = $1 OR code = $1");
+    expect(firstCall[0]).toContain("s.udise_code = $1 OR s.code = $1");
+    // Visible schools = JNV OR linked to an active centre (centre rollout).
+    expect(firstCall[0]).toContain("af_school_category = 'JNV'");
+    expect(firstCall[0]).toContain("FROM centres c WHERE c.school_id = s.id AND c.is_active");
     expect(firstCall[1]).toEqual(["12345678901"]);
   });
 

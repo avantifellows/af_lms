@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
+import { getResolvedPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
 import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
@@ -112,7 +112,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   if (!getFeatureAccess(permission, "visits").canView) {
     redirect("/dashboard");
   }

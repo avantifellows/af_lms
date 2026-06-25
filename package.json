@@ -13,6 +13,8 @@
     "fallow:health": "fallow health --score --hotspots --targets",
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "centres:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-centres.ts",
+    "staff:backfill": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/backfill-staff.ts",
+    "staff:clear-seated-scope": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/clear-seated-school-codes.ts",
     "centres:seed-options": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-centre-options.ts",
     "curriculum:seed-dummy": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-curriculum-dummy-data.ts",
     "deploy:staging": "./scripts/deploy.sh staging",
@@ -23,7 +25,11 @@
     "test:unit:coverage": "vitest run --coverage",
     "test:e2e": "NODE_V8_COVERAGE=.v8-coverage playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "pm:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-pm-centres.ts",
+    "pm:check": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-teacher-centre-vs-prod.ts",
+    "pm:promodiff": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/check-promotion-school-diff.ts",
+    "pm:mirror": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/mirror-seats-staging-to-prod.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1025.0",

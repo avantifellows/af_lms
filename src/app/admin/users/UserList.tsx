@@ -4,6 +4,11 @@ import { useState } from "react";
 import AddUserModal from "./AddUserModal";
 import { Button } from "@/components/ui";
 
+interface CentreAssignment {
+  centreName: string;
+  role: string;
+}
+
 interface UserPermission {
   id: number;
   email: string;
@@ -14,6 +19,7 @@ interface UserPermission {
   program_ids: number[] | null;
   read_only: boolean;
   full_name: string | null;
+  centres?: CentreAssignment[];
 }
 
 interface UserListProps {
@@ -198,37 +204,73 @@ export default function UserList({ initialUsers, regions, schoolCodeToName, curr
                   )}
                 </td>
                 <td className="px-3 py-4 text-sm text-gray-500">
-                  {user.level === 3 ? (
-                    <span className="text-gray-400">All JNV schools</span>
-                  ) : user.level === 2 ? (
-                    <span>{user.regions?.join(", ") || "No regions assigned"}</span>
-                  ) : user.school_codes && user.school_codes.length > 0 ? (
-                    <div className="flex flex-col gap-0.5">
-                      {user.school_codes.map((code) => (
-                        <span key={code}>{labelForSchool(code)}</span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span>No schools assigned</span>
-                  )}
+                  <div className="flex flex-col gap-1">
+                    {user.centres && user.centres.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {user.centres.map((centre, i) => (
+                          <span
+                            key={`${centre.centreName}-${centre.role}-${i}`}
+                            className="inline-flex px-2 py-0.5 text-xs rounded-full bg-hover-bg text-accent-hover"
+                            title="Centre assignment — manage in Staff"
+                          >
+                            {centre.centreName} &middot; {centre.role}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {user.level === 3 ? (
+                      <span className="text-gray-400">All JNV schools</span>
+                    ) : user.level === 2 && user.regions && user.regions.length > 0 ? (
+                      <span>{user.regions.join(", ")}</span>
+                    ) : user.level === 1 && user.school_codes && user.school_codes.length > 0 ? (
+                      <div className="flex flex-col gap-0.5">
+                        {user.school_codes.map((code) => (
+                          <span key={code}>{labelForSchool(code)}</span>
+                        ))}
+                      </div>
+                    ) : user.centres && user.centres.length > 0 ? null : (
+                      <span>{user.level === 2 ? "No regions assigned" : "No schools assigned"}</span>
+                    )}
+                  </div>
                 </td>
-                <td className="whitespace-nowrap px-3 py-4 text-sm">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setEditingUser(user)}
-                    className="mr-2"
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="danger-ghost"
-                    size="sm"
-                    onClick={() => handleDelete(user.id, user.email)}
-                    disabled={deleting === user.id || user.email.toLowerCase() === currentUserEmail.toLowerCase()}
-                  >
-                    {deleting === user.id ? "Deleting..." : "Delete"}
-                  </Button>
+                <td className="px-3 py-4 text-sm">
+                  <div className="flex items-center whitespace-nowrap">
+                    {(user.centres?.length ?? 0) > 0 ? (
+                      // Seated users' scope is derived from their centre, so it
+                      // can't be edited here (the API rejects it too) — point ops
+                      // at Staff Management instead.
+                      <span
+                        className="mr-2"
+                        title="This user is assigned to a centre. Edit their access in Staff Management."
+                      >
+                        <Button variant="ghost" size="sm" disabled>
+                          Edit
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingUser(user)}
+                        className="mr-2"
+                      >
+                        Edit
+                      </Button>
+                    )}
+                    <Button
+                      variant="danger-ghost"
+                      size="sm"
+                      onClick={() => handleDelete(user.id, user.email)}
+                      disabled={deleting === user.id || user.email.toLowerCase() === currentUserEmail.toLowerCase()}
+                    >
+                      {deleting === user.id ? "Deleting..." : "Delete"}
+                    </Button>
+                  </div>
+                  {(user.centres?.length ?? 0) > 0 && (
+                    <p className="mt-1 text-xs text-gray-400">
+                      Edit in Staff Management only
+                    </p>
+                  )}
                 </td>
               </tr>
             ))}

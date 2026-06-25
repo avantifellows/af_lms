@@ -135,6 +135,32 @@ describe("UserList", () => {
       expect(within(cell).getByText("(you)")).toBeInTheDocument();
     });
 
+    it("disables Edit and shows a Staff Management note for seated users", () => {
+      renderList({
+        initialUsers: [
+          {
+            ...users[2],
+            id: 99,
+            email: "seated@example.com",
+            centres: [{ centreName: "EMRS Bhopal", role: "subject_tbd" }],
+          },
+        ] as unknown as typeof users,
+      });
+      const row = screen.getByText("seated@example.com").closest("tr")!;
+      expect(within(row).getByRole("button", { name: "Edit" })).toBeDisabled();
+      expect(
+        within(row).getByText("Edit in Staff Management only")
+      ).toBeInTheDocument();
+    });
+
+    it("keeps Edit enabled for users with no centre seat", () => {
+      renderList();
+      const row = screen.getByText("teacher@example.com").closest("tr")!;
+      expect(
+        within(row).getByRole("button", { name: "Edit" })
+      ).toBeEnabled();
+    });
+
     it("does not show (you) for other users", () => {
       renderList();
       const cell = screen.getByText("pm@avantifellows.org").closest("td")!;
@@ -228,6 +254,34 @@ describe("UserList", () => {
         ],
       });
       expect(screen.getByText("No schools assigned")).toBeInTheDocument();
+    });
+
+    it("renders centre-assignment chips alongside explicit scope", () => {
+      renderList({
+        initialUsers: [
+          {
+            ...users[2],
+            school_codes: ["SCH001"],
+            centres: [{ centreName: "JNV Udupi", role: "chemistry" }],
+          },
+        ],
+      });
+      expect(screen.getByText("JNV Udupi · chemistry")).toBeInTheDocument();
+      expect(screen.getByText("JNV Bhavnagar (SCH001)")).toBeInTheDocument();
+    });
+
+    it("shows centre chips (not 'No schools assigned') for a seated teacher whose school_codes were cleared", () => {
+      renderList({
+        initialUsers: [
+          {
+            ...users[2],
+            school_codes: null,
+            centres: [{ centreName: "JNV Udupi", role: "chemistry" }],
+          },
+        ],
+      });
+      expect(screen.getByText("JNV Udupi · chemistry")).toBeInTheDocument();
+      expect(screen.queryByText("No schools assigned")).not.toBeInTheDocument();
     });
 
     it("renders fallback for unknown role", () => {

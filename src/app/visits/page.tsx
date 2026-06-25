@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { getUserPermission, getFeatureAccess } from "@/lib/permissions";
+import { getUserPermission, getResolvedPermission, getFeatureAccess } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import {
   buildVisitScopePredicate,
@@ -130,7 +130,7 @@ export default async function VisitsListPage({ searchParams }: PageProps) {
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   if (!permission) {
     redirect("/dashboard");
   }

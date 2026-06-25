@@ -29,6 +29,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
+  getResolvedPermission: mockGetUserPermission,
   getFeatureAccess: mockGetFeatureAccess,
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));

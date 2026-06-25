@@ -6,7 +6,7 @@ import GpsMapLink from "@/components/visits/GpsMapLink";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
+import { getFeatureAccess, getUserPermission, getResolvedPermission } from "@/lib/permissions";
 import {
   ACTION_TYPE_VALUES,
   ACTION_TYPES,
@@ -520,7 +520,7 @@ export default async function SchoolVisitSummaryDetailPage({ params }: PageProps
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   if (!permission) {
     redirect("/dashboard");
   }

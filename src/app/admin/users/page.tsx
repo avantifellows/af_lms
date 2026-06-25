@@ -2,9 +2,15 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { isAdmin } from "@/lib/permissions";
+import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import Link from "next/link";
 import UserList from "./UserList";
+
+interface CentreAssignment {
+  centreName: string;
+  role: string;
+}
 
 interface UserPermission {
   id: number;
@@ -16,6 +22,7 @@ interface UserPermission {
   program_ids: number[] | null;
   read_only: boolean;
   full_name: string | null;
+  centres: CentreAssignment[];
 }
 
 interface Region {
@@ -30,7 +37,8 @@ interface SchoolNameRow {
 
 async function getUsers(): Promise<UserPermission[]> {
   return query<UserPermission>(
-    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name
+    `SELECT id, email, level, role, school_codes, regions, program_ids, read_only, full_name,
+            ${CENTRE_ASSIGNMENTS_SUBQUERY}
      FROM user_permission
      ORDER BY level DESC, role, email`
   );

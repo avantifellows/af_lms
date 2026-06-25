@@ -132,13 +132,29 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           setSelectedProgram(data.programs[0]);
         }
 
-        // Auto-select grade on first load (no URL param). Prefer 12 when
-        // available; otherwise fall back to the only grade if there's just one.
-        if (selectedGrade == null) {
-          const preferred = data.grades.includes(12) ? 12 : (data.grades.length === 1 ? data.grades[0] : null);
+        // Reconcile the selected grade with the grades available for the
+        // current program scope. A grade chosen against the all-programs list
+        // (or a prior program) can fall out of the available set once the
+        // program narrows — e.g. a PM scoped to JNV CoE at a school where CoE
+        // only has grade 11, while the default "prefer 12" came from another
+        // program the PM can't see. Treat a now-invalid selection like no
+        // selection, then auto-pick: prefer 12, else the only grade.
+        const gradeValid =
+          selectedGrade != null && data.grades.includes(selectedGrade);
+        if (!gradeValid) {
+          const preferred = data.grades.includes(12)
+            ? 12
+            : data.grades.length === 1
+              ? data.grades[0]
+              : null;
           if (preferred != null) {
             setSelectedGrade(preferred);
             updateUrl({ grade: preferred });
+          } else if (selectedGrade != null) {
+            // Stale selection with no auto-pickable replacement (multiple
+            // grades, none is 12) — clear it so the user re-picks.
+            setSelectedGrade(null);
+            updateUrl({ grade: null });
           }
         }
       })
