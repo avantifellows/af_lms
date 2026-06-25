@@ -521,12 +521,51 @@ describe("positions", () => {
     expect(
       await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
     ).toEqual({ ok: true });
-    const insertCall = mockClientQuery.mock.calls[0];
-    expect(insertCall[0]).toContain("INSERT INTO centre_positions");
+    const insertCall = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO centre_positions")
+    )!;
     expect(insertCall[1]).toEqual([8, "physics", 70]);
-    const clearCall = mockClientQuery.mock.calls[1];
-    expect(clearCall[0]).toContain("SET school_codes = NULL, regions = NULL");
+    const clearCall = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("SET school_codes = NULL, regions = NULL")
+    )!;
     expect(clearCall[1]).toEqual([70]);
+  });
+
+  it("createPosition syncs teacher.subject_id when seated with a subject role", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    mockClientQuery.mockResolvedValueOnce({ rows: [] }); // INSERT centre_positions
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 2 }] }); // subject lookup → Chemistry
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "chemistry", user_id: 70 } })
+    ).toEqual({ ok: true });
+    const subjectLookup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM subject WHERE LOWER(name")
+    )!;
+    expect(subjectLookup[1]).toEqual(["chemistry"]);
+    const teacherUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE teacher SET subject_id")
+    )!;
+    expect(teacherUpdate[1]).toEqual([2, 70]);
+  });
+
+  it("createPosition does NOT touch teacher.subject_id for a PM-tier seat", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "pm", user_id: 70 } })
+    ).toEqual({ ok: true });
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("UPDATE teacher SET subject_id")
+      )
+    ).toBe(false);
   });
 
   it("createPosition rejects duplicate occupied seats", async () => {
@@ -615,14 +654,34 @@ describe("positions", () => {
 
   it("setUserRole updates every active seat for the person", async () => {
     mockSchemaReady();
-    mockQuery.mockResolvedValueOnce([{ id: 44 }, { id: 51 }]); // 2 seats updated
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 44 }, { id: 51 }] }); // 2 seats updated
     expect(
       await setUserRole({ body: { user_id: 70, role: "spm" } })
     ).toEqual({ ok: true });
-    const updateCall = mockQuery.mock.calls.at(-1)!;
-    expect(updateCall[0]).toContain("UPDATE centre_positions SET role = $1");
+    const updateCall = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE centre_positions SET role = $1")
+    )!;
     expect(updateCall[0]).toContain("WHERE user_id = $2 AND deleted_at IS NULL");
     expect(updateCall[1]).toEqual(["spm", 70]);
+    // spm is a PM tier, not a subject — no teacher.subject_id write.
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("UPDATE teacher SET subject_id")
+      )
+    ).toBe(false);
+  });
+
+  it("setUserRole syncs teacher.subject_id when set to a subject role", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 44 }] }); // seat updated
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 1 }] }); // subject lookup → Maths
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "maths" } })
+    ).toEqual({ ok: true });
+    const teacherUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE teacher SET subject_id")
+    )!;
+    expect(teacherUpdate[1]).toEqual([1, 70]);
   });
 
   it("setUserRole validates user_id and role", async () => {
