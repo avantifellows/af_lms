@@ -16,7 +16,6 @@ vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
 
-import { AF_TEAM_INTERACTION_CONFIG } from "@/lib/af-team-interaction";
 import {
   CLASSROOM_OBSERVATION_RUBRIC,
   CURRENT_RUBRIC_VERSION,
@@ -88,17 +87,6 @@ const COMPLETED_VISIT_ROW = {
   status: "completed",
   completed_at: "2026-02-19T12:00:00.000Z",
 };
-
-function buildValidAFTeamData() {
-  const questions = Object.fromEntries(
-    AF_TEAM_INTERACTION_CONFIG.allQuestionKeys.map((key) => [key, { answer: true }])
-  );
-  return {
-    teachers: [{ id: 1, name: "Teacher A" }],
-    questions,
-  };
-}
-
 
 function buildValidClassroomData() {
   const params = Object.fromEntries(
@@ -292,7 +280,6 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
       .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
       .mockResolvedValueOnce([{ id: 801 }]) // completed individual_student_discussion
-      .mockResolvedValueOnce([{ id: 901 }]) // completed school_staff_interaction
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -320,7 +307,7 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(visitQueryText).toContain("v.deleted_at IS NULL");
     expect(visitParams).toEqual(["10"]);
 
-    const [completionQueryText, completionParams] = mockQuery.mock.calls[9] as [string, unknown[]];
+    const [completionQueryText, completionParams] = mockQuery.mock.calls[8] as [string, unknown[]];
     expect(completionQueryText).toContain("UPDATE lms_pm_school_visits v");
     expect(completionQueryText).toContain("status = 'completed'");
     expect(completionQueryText).toContain("completed_at = (NOW() AT TIME ZONE 'UTC')");
@@ -370,7 +357,6 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       .mockResolvedValueOnce([{ id: 602 }]) // completed principal_interaction
       .mockResolvedValueOnce([{ id: 702 }]) // completed group_student_discussion
       .mockResolvedValueOnce([{ id: 802 }]) // completed individual_student_discussion
-      .mockResolvedValueOnce([{ id: 902 }]) // completed school_staff_interaction
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -511,7 +497,7 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     });
   });
 
-  it("returns 422 when school_staff_interaction is missing", async () => {
+  it("completes visit when school_staff_interaction is missing", async () => {
     setupPmEdit();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
@@ -527,18 +513,28 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
       .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
       .mockResolvedValueOnce([{ id: 801 }]) // completed individual_student_discussion
-      .mockResolvedValueOnce([]); // no completed school_staff_interaction
+      .mockResolvedValueOnce([
+        {
+          id: 10,
+          status: "completed",
+          completed_at: "2026-02-19T12:25:00.000Z",
+        },
+      ]);
 
     const res = await POST(completionRequest() as never, params);
 
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed School Staff Interaction is required to complete visit",
-      details: ["No completed school_staff_interaction action found for this visit"],
+      visit: {
+        id: 10,
+        status: "completed",
+        completed_at: "2026-02-19T12:25:00.000Z",
+      },
     });
+    expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("school_staff_interaction"))).toBe(false);
   });
 
-  it("completes visit when all 7 action types have completed actions", async () => {
+  it("completes visit when all required action types have completed actions", async () => {
     setupPmEdit();
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
@@ -554,7 +550,6 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
       .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
       .mockResolvedValueOnce([{ id: 801 }]) // completed individual_student_discussion
-      .mockResolvedValueOnce([{ id: 901 }]) // completed school_staff_interaction
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -591,7 +586,6 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
       .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
       .mockResolvedValueOnce([{ id: 801, data: { entries: [{ invalid: true }] } }]) // status-only check
-      .mockResolvedValueOnce([{ id: 901 }]) // completed school_staff_interaction
       .mockResolvedValueOnce([
         {
           id: 10,

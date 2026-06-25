@@ -11,6 +11,10 @@ export const ACTION_TYPES = {
 export type ActionType = keyof typeof ACTION_TYPES;
 
 export const ACTION_TYPE_VALUES = Object.keys(ACTION_TYPES) as ActionType[];
+export const OPTIONAL_ACTION_TYPE_VALUES: ActionType[] = ["school_staff_interaction"];
+export const REQUIRED_ACTION_TYPE_VALUES = ACTION_TYPE_VALUES.filter(
+  (actionType) => !OPTIONAL_ACTION_TYPE_VALUES.includes(actionType)
+);
 
 export const ACTION_STATUS_VALUES = ["pending", "in_progress", "completed"] as const;
 export type ActionStatus = (typeof ACTION_STATUS_VALUES)[number];
@@ -21,6 +25,10 @@ export function isActionType(value: string): value is ActionType {
 
 export function getActionTypeLabel(actionType: ActionType): string {
   return ACTION_TYPES[actionType];
+}
+
+export function isOptionalActionType(actionType: ActionType): boolean {
+  return OPTIONAL_ACTION_TYPE_VALUES.includes(actionType);
 }
 
 export function statusBadgeClass(status: string): string {

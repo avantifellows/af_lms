@@ -1,4 +1,8 @@
 import type { RemarkEntry } from "./visit-summary";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  validateActionAdditionalNotes,
+} from "./visit-form-utils";
 
 export interface ValidationResult {
   valid: boolean;
@@ -23,6 +27,7 @@ export interface GroupStudentDiscussionConfig {
 export interface GroupStudentDiscussionData {
   grade: number;
   questions: Record<string, { answer: boolean | null; remark?: string }>;
+  additional_notes?: string;
 }
 
 export const VALID_GRADES = [11, 12] as const;
@@ -60,7 +65,11 @@ export const GROUP_STUDENT_DISCUSSION_CONFIG: GroupStudentDiscussionConfig = {
   allQuestionKeys: sections.flatMap((s) => s.questions.map((q) => q.key)),
 };
 
-const ALLOWED_TOP_LEVEL_KEYS = new Set(["grade", "questions"]);
+const ALLOWED_TOP_LEVEL_KEYS = new Set([
+  "grade",
+  "questions",
+  ACTION_ADDITIONAL_NOTES_KEY,
+]);
 
 const questionKeyToLabel = new Map<string, string>(
   GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => {
@@ -149,6 +158,7 @@ export function validateGroupStudentDiscussionSave(data: unknown): ValidationRes
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   if ("grade" in payload && payload.grade !== undefined) {
     if (!isValidGrade(payload.grade)) {
@@ -177,6 +187,7 @@ export function validateGroupStudentDiscussionComplete(data: unknown): Validatio
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   if (!isValidGrade(payload.grade)) {
     errors.push("grade is required and must be 11 or 12");

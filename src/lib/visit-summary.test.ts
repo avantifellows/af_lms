@@ -64,7 +64,6 @@ describe("classifyActionCompletion", () => {
       individual_af_teacher_interaction: "completed",
       principal_interaction: "completed",
       group_student_discussion: "completed",
-      individual_student_discussion: "completed",
     }))).toBe("partial");
 
     expect(classifyActionCompletion(makeRollup({
@@ -73,7 +72,7 @@ describe("classifyActionCompletion", () => {
       individual_af_teacher_interaction: "completed",
       principal_interaction: "completed",
       group_student_discussion: "completed",
-      individual_student_discussion: "completed",
+      individual_student_discussion: "pending",
       school_staff_interaction: "pending",
     }))).toBe("all_present");
 
@@ -84,7 +83,6 @@ describe("classifyActionCompletion", () => {
       principal_interaction: "completed",
       group_student_discussion: "completed",
       individual_student_discussion: "completed",
-      school_staff_interaction: "completed",
     }))).toBe("all_complete");
   });
 });
@@ -93,8 +91,8 @@ describe("computeAverageCompletion", () => {
   it("returns null for zero visits, zero for no completions, and percentages otherwise", () => {
     expect(computeAverageCompletion(0, 0)).toBeNull();
     expect(computeAverageCompletion(0, 3)).toBe(0);
-    expect(computeAverageCompletion(7, 1)).toBe(100);
-    expect(computeAverageCompletion(7, 2)).toBe(50);
+    expect(computeAverageCompletion(6, 1)).toBe(100);
+    expect(computeAverageCompletion(6, 2)).toBe(50);
   });
 });
 
@@ -143,6 +141,7 @@ describe("summary action dispatch", () => {
   it("delegates known action types and handles unknown types gracefully", () => {
     expect(
       dispatchExtractRemarks("principal_interaction", {
+        additional_notes: "Bring district schedule next visit",
         questions: {
           oh_program_feedback: { answer: true, remark: "Principal wants monthly updates" },
         },
@@ -151,6 +150,10 @@ describe("summary action dispatch", () => {
       {
         label: "Does the Principal have any feedback or concerns on the program implementation?",
         text: "Principal wants monthly updates",
+      },
+      {
+        label: "Additional Notes or Concerns",
+        text: "Bring district schedule next visit",
       },
     ]);
 
@@ -164,6 +167,14 @@ describe("summary action dispatch", () => {
     ).toEqual({ answeredCount: 1, totalQuestions: 7 });
 
     expect(dispatchExtractRemarks("unknown_action", {})).toEqual([]);
+    expect(dispatchExtractRemarks("unknown_action", {
+      additional_notes: "Unclassified follow-up",
+    })).toEqual([
+      {
+        label: "Additional Notes or Concerns",
+        text: "Unclassified follow-up",
+      },
+    ]);
     expect(dispatchComputeInlineStats("unknown_action", {})).toBeNull();
   });
 
