@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
@@ -302,6 +302,15 @@ describe("SchoolPage (server component)", () => {
     mockNotFound.mockImplementation(() => {
       throw new Error("NOT_FOUND");
     });
+    // EnrollmentTabContent fetches grade-11 consent status on mount; stub it so
+    // the post-render state update doesn't trigger act() warnings here.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ consent: {} }),
+      }),
+    );
   });
 
   // --- Auth redirects ---
@@ -817,9 +826,11 @@ describe("SchoolPage (server component)", () => {
     // Only NVS has students; its card is selected by default.
     expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("3");
-    // Grade pills
-    expect(screen.getByText("Grade 11")).toBeInTheDocument();
-    expect(screen.getByText("Grade 12")).toBeInTheDocument();
+    // Grade pills (scoped to the stats card — the admission card also lists grades)
+    const statsCard = screen.getByTestId("enrollment-stats-header")
+      .parentElement as HTMLElement;
+    expect(within(statsCard).getByText("Grade 11")).toBeInTheDocument();
+    expect(within(statsCard).getByText("Grade 12")).toBeInTheDocument();
   });
 
   it("excludes dropout students from program counts", async () => {
@@ -879,8 +890,10 @@ describe("SchoolPage (server component)", () => {
     // Total counts both NVS students; grade pill only appears for grade 11.
     expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("2");
-    expect(screen.getByText("Grade 11")).toBeInTheDocument();
-    expect(screen.queryByText("Grade null")).not.toBeInTheDocument();
+    const statsCard = screen.getByTestId("enrollment-stats-header")
+      .parentElement as HTMLElement;
+    expect(within(statsCard).getByText("Grade 11")).toBeInTheDocument();
+    expect(within(statsCard).queryByText("Grade null")).not.toBeInTheDocument();
   });
 
   // --- StudentTable props ---

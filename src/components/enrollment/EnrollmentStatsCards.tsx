@@ -2,6 +2,7 @@
 
 import { Card } from "@/components/ui/Card";
 import type { ProgramStats } from "@/lib/enrollment-stats";
+import type { AdmissionSummary } from "@/lib/enrollment-readiness";
 
 export type { ProgramStats };
 
@@ -9,6 +10,13 @@ interface Props {
   programs: ProgramStats[];
   selectedId: number;
   onSelect: (programId: number) => void;
+  /**
+   * Grade 11/12 admission figures, already scoped to the active grade filter.
+   * null when a non-admission grade is selected (the row is hidden then).
+   */
+  admission?: AdmissionSummary | null;
+  consentLoading?: boolean;
+  consentError?: boolean;
 }
 
 function Pill({ label, count }: { label: string; count: number }) {
@@ -16,6 +24,16 @@ function Pill({ label, count }: { label: string; count: number }) {
     <span className="inline-flex items-baseline gap-1.5 rounded-full border border-border bg-bg-card-alt px-2.5 py-0.5 text-xs">
       <span className="text-text-muted">{label}</span>
       <span className="font-mono font-bold text-text-primary">{count}</span>
+    </span>
+  );
+}
+
+// Like Pill, but the value is a preformatted string (e.g. "75%", "…", "—").
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5 rounded-full border border-border bg-bg-card-alt px-2.5 py-0.5 text-xs">
+      <span className="text-text-muted">{label}</span>
+      <span className="font-mono font-bold text-text-primary">{value}</span>
     </span>
   );
 }
@@ -61,6 +79,9 @@ export default function EnrollmentStatsCards({
   programs,
   selectedId,
   onSelect,
+  admission,
+  consentLoading = false,
+  consentError = false,
 }: Props) {
   if (programs.length === 0) return null;
 
@@ -118,6 +139,34 @@ export default function EnrollmentStatsCards({
           />
           <StatRow label="Gender" items={selected.byGender} />
           <StatRow label="Category" items={selected.byCategory} />
+
+          {/* Grade 11/12 admission tracking — compact, scoped to the grade
+              filter. Hidden when a non-admission grade is selected. */}
+          {admission && (
+            <div
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-t border-border pt-2"
+              data-testid="admission-stats-row"
+            >
+              <span
+                className="text-xs font-bold uppercase tracking-wide text-text-muted min-w-[5rem]"
+                title="Grades 11 & 12 — info completeness & consent docs uploaded"
+              >
+                Admission
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                <MetricPill
+                  label="% Info"
+                  value={`${admission.infoAvailablePct}%`}
+                />
+                <MetricPill
+                  label="% Docs"
+                  value={
+                    consentLoading ? "…" : consentError ? "—" : `${admission.docsAvailablePct}%`
+                  }
+                />
+              </div>
+            </div>
+          )}
         </div>
       </Card>
     </div>

@@ -76,6 +76,10 @@ interface StudentTableProps {
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
   hideGradeFilterUI?: boolean;
+  // Called after a save/upload (in addition to the internal router.refresh) so
+  // the parent can refetch data it owns — e.g. the consent map behind the
+  // admission summary.
+  onDataChanged?: () => void;
 }
 
 function formatDate(dateString: string | null): string {
@@ -137,6 +141,24 @@ function parseStudentPkId(raw: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// A compact labeled field for the collapsed card summary grid.
+function KeyField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-gray-400">{label}</div>
+      <div className="truncate text-sm font-medium text-gray-700">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function StudentCard({
   student,
   canEdit,
@@ -152,61 +174,55 @@ function StudentCard({
     <Card elevation="md" className="overflow-hidden">
       {/* Main card content - always visible */}
       <div className="p-3 sm:p-4">
-        {/* Top row: name + expand button */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-base font-semibold text-gray-900">
-                {[student.first_name, student.last_name].filter(Boolean).join(" ") || "—"}
-              </h3>
-              {student.grade && (
-                <Badge variant="info">
-                  Grade {student.grade}
-                </Badge>
-              )}
-              {isDropout && (
-                <Badge variant="danger">
-                  Dropout
-                </Badge>
-              )}
-            </div>
+        {/* Top row: name + badges (left), expand (right) */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold text-gray-900">
+              {[student.first_name, student.last_name].filter(Boolean).join(" ") || "—"}
+            </h3>
+            {student.grade && (
+              <Badge variant="info">Grade {student.grade}</Badge>
+            )}
+            {isDropout && <Badge variant="danger">Dropout</Badge>}
           </div>
-          <Button
-            variant="icon"
-            onClick={() => setExpanded(!expanded)}
-            aria-label={expanded ? "Collapse" : "Expand"}
-            className="shrink-0"
-          >
-            <svg
-              className={`w-5 h-5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="icon"
+              onClick={() => setExpanded(!expanded)}
+              aria-label={expanded ? "Collapse" : "Expand"}
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </Button>
+              <svg
+                className={`w-5 h-5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </Button>
+          </div>
         </div>
 
-        {/* Key info row */}
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
-          <div>
-            <span className="text-gray-400 text-xs">ID: </span>
-            <span className="font-medium text-gray-700">{student.student_id || "—"}</span>
-          </div>
-          <div>
-            <span className="text-gray-400 text-xs">APAAR: </span>
-            <span className="font-medium text-gray-700">{student.apaar_id || "—"}</span>
-          </div>
-          <div>
-            <span className="text-gray-400 text-xs">DOB: </span>
-            <span className="text-gray-700">{formatDate(student.date_of_birth)}</span>
-          </div>
+        {/* Key fields — spread across the card width so it isn't mostly empty */}
+        <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-3 lg:grid-cols-4">
+          <KeyField label="Student ID">{student.student_id || "—"}</KeyField>
+          <KeyField label="APAAR ID">{student.apaar_id || "—"}</KeyField>
+          <KeyField label="Phone">{student.phone || "—"}</KeyField>
+          <KeyField label="Gender">{student.gender || "—"}</KeyField>
+          <KeyField label="Category">
+            <span
+              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}
+            >
+              {student.category || "—"}
+            </span>
+          </KeyField>
+          <KeyField label="Program">{student.program_name || "—"}</KeyField>
+          <KeyField label="DOB">{formatDate(student.date_of_birth)}</KeyField>
         </div>
 
         {/* Action buttons */}
         {canEdit && !isDropout && (
-          <div className="flex items-center gap-2 mt-3">
+          <div className="mt-3 flex items-center justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={onEdit}>
               Edit
             </Button>
@@ -220,16 +236,10 @@ function StudentCard({
       {/* Expanded content */}
       {expanded && (
         <div className="space-y-3 border-t border-border bg-bg-card-alt px-4 pb-4 pt-4">
+          {/* Phone / Gender / Category / Program now live in the always-visible
+              card summary above, so the expanded view covers the rest. */}
           <DetailGroup title="Personal">
-            <DetailField label="Phone" value={student.phone} className="font-medium" />
-            <DetailField label="Gender" value={student.gender} />
-            <DetailField label="Category">
-              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}>
-                {student.category || "—"}
-              </span>
-            </DetailField>
             <DetailField label="Stream" value={student.stream} className="capitalize" />
-            <DetailField label="Program" value={student.program_name} />
             <DetailField label="Email" value={student.email} className="truncate" />
           </DetailGroup>
 
@@ -414,6 +424,7 @@ export default function StudentTable({
   selectedGrade: controlledGrade,
   onGradeChange,
   hideGradeFilterUI = false,
+  onDataChanged,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
@@ -476,6 +487,10 @@ export default function StudentTable({
   const handleSave = () => {
     router.refresh();
     setDocumentsRefresh((n) => n + 1);
+    // Lets the parent refetch data it owns (e.g. the consent map behind the
+    // admission summary) so an uploaded consent doc reflects without a full
+    // page reload.
+    onDataChanged?.();
   };
 
   const showTabs = dropoutStudents.length > 0;
@@ -484,7 +499,7 @@ export default function StudentTable({
     <>
       {/* Tabs - only show if there are dropout students */}
       {showTabs && (
-        <div className="max-w-3xl mx-auto mb-4">
+        <div className="mb-4">
           <div className="flex border-b border-gray-200">
             <button
               onClick={() => handleTabChange("active")}
@@ -513,7 +528,7 @@ export default function StudentTable({
       {/* Grade filter - centered. Hidden when the parent renders its own
           filter control above (controlled mode). */}
       {!hideGradeFilterUI && (
-        <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+        <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
           <label
             htmlFor="gradeFilter"
             className="text-sm font-medium text-gray-700"
@@ -541,8 +556,9 @@ export default function StudentTable({
         </div>
       )}
 
-      {/* Student cards */}
-      <div className="max-w-3xl mx-auto space-y-3">
+      {/* Student cards — one per row, full width. The card's own field grid
+          fills the width, so a single column reads cleanly. */}
+      <div className="space-y-3">
         {filteredStudents.length === 0 ? (
           <Card elevation="sm" className="p-8 text-center text-sm text-gray-500">
             {currentStudents.length === 0

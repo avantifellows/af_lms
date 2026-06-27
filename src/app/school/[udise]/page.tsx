@@ -272,7 +272,7 @@ export default async function SchoolPage({ params }: PageProps) {
     <div>
       {/* Data Issues Banner */}
       {dataIssues.length > 0 && (
-        <div className="max-w-3xl mx-auto mb-4">
+        <div className="mb-4">
           <details className="bg-amber-50 border border-amber-200 rounded-lg">
             <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
               {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
@@ -305,6 +305,7 @@ export default async function SchoolPage({ params }: PageProps) {
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
+        schoolCode={school.code}
       />
     </div>
   );
