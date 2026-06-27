@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/Select";
 import BatchOverview from "./performance/BatchOverview";
 import TestDeepDive from "./performance/TestDeepDive";
 import CumulativeALTable from "./performance/CumulativeALTable";
+import CombinedReportPanel from "./performance/CombinedReportPanel";
 
 interface Props {
   schoolUdise: string;
@@ -413,16 +414,26 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           <p className="text-sm text-text-muted">Select a grade to view performance data.</p>
         </div>
       ) : deepDiveSession ? (
-        <TestDeepDive
-          schoolUdise={schoolUdise}
-          grade={selectedGrade}
-          sessionId={deepDiveSession.sessionId}
-          testName={deepDiveSession.testName}
-          program={selectedProgram || undefined}
-          stream={selectedStream || undefined}
-          onBack={handleBack}
-          onDataLoaded={handleDeepDiveData}
-        />
+        <div className="space-y-6">
+          <CombinedReportPanel
+            schoolUdise={schoolUdise}
+            sessionId={deepDiveSession.sessionId}
+            testName={deepDiveSession.testName}
+            grade={selectedGrade}
+            program={selectedProgram || undefined}
+            stream={selectedStream || undefined}
+          />
+          <TestDeepDive
+            schoolUdise={schoolUdise}
+            grade={selectedGrade}
+            sessionId={deepDiveSession.sessionId}
+            testName={deepDiveSession.testName}
+            program={selectedProgram || undefined}
+            stream={selectedStream || undefined}
+            onBack={handleBack}
+            onDataLoaded={handleDeepDiveData}
+          />
+        </div>
       ) : testCategory === "full" && fullTestView === "cumulative" ? (
         <CumulativeALTable
           schoolUdise={schoolUdise}
