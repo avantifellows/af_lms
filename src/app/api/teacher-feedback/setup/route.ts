@@ -210,7 +210,10 @@ export async function POST(request: NextRequest) {
   const resultsByOrder = new Map<number, TeacherResult>();
 
   for (const teacher of ordered) {
-    const title = `Student Feedback - ${cycleLabel} - ${schoolCode} - ${teacher.name}`;
+    // Teacher name first: sessionCreator truncates the quiz title to 30 chars
+    // (session_data["name"][:30]), so the most useful part must lead. School code
+    // dropped (not useful in the title). e.g. "Bonthu Tavitinaidu - Feedback Jun 2026".
+    const title = `${teacher.name} - Feedback ${cycleLabel}`;
 
     try {
       // Create the bare session row. The sessionCreator Lambda (triggered by the
