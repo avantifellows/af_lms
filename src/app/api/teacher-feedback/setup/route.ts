@@ -235,10 +235,10 @@ export async function POST(request: NextRequest) {
         `
         INSERT INTO lms_teacher_feedback
           (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
-           batch_parent_id, batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
+           batch_class_ids, teacher_id, teacher_name, teacher_order,
            session_pk, status, start_time, end_time, created_by)
         VALUES
-          ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, $13, 'created', $14, $15, $16)
+          ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, $11, 'created', $12, $13, $14)
         `,
         [
           setupRunId,
@@ -247,9 +247,7 @@ export async function POST(request: NextRequest) {
           schoolCode,
           centreId,
           centreName,
-          parentBatchId,
           classBatchIds,
-          grade,
           teacher.id,
           teacher.name,
           teacher.order,
@@ -279,10 +277,10 @@ export async function POST(request: NextRequest) {
           `
           INSERT INTO lms_teacher_feedback
             (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
-             batch_parent_id, batch_class_ids, grade, teacher_id, teacher_name, teacher_order,
+             batch_class_ids, teacher_id, teacher_name, teacher_order,
              status, start_time, end_time, created_by)
           VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, 'failed', $13, $14, $15)
+            ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, 'failed', $11, $12, $13)
           `,
           [
             setupRunId,
@@ -291,9 +289,7 @@ export async function POST(request: NextRequest) {
             schoolCode,
             centreId,
             centreName,
-            parentBatchId,
             classBatchIds,
-            grade,
             teacher.id,
             teacher.name,
             teacher.order,

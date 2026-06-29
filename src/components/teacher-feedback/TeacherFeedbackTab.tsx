@@ -47,7 +47,6 @@ interface Cycle {
   centreName: string | null;
   batchClassIds: string[];
   batchClassNames: string[];
-  grade: number;
   startTime: string | null;
   endTime: string | null;
   createdBy: string;

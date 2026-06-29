@@ -55,18 +55,14 @@ describe("GET /api/teacher-feedback/cycles", () => {
       .mockResolvedValueOnce([{ id: 408 }] as never) // school
       .mockResolvedValueOnce([
         {
-          setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",
-          batch_parent_id: "EN-TP-2027-engg-C01",
-          batch_class_ids: ["EnableStudents_TP_2027_engg_C024"], grade: 11,
+          setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",          batch_class_ids: ["EnableStudents_TP_2027_engg_C024"],
           teacher_name: "Manjit Kumar", teacher_order: 2, teacher_id: "AF836",
           session_pk: 6, status: "created",
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
           created_by: "pm@avantifellows.org", inserted_at: "2026-06-22 10:00:00",
         },
         {
-          setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",
-          batch_parent_id: "EN-TP-2027-engg-C01",
-          batch_class_ids: ["EnableStudents_TP_2027_engg_C024"], grade: 11,
+          setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",          batch_class_ids: ["EnableStudents_TP_2027_engg_C024"],
           teacher_name: "Sanjeet Pal", teacher_order: 1, teacher_id: "AF400",
           session_pk: 5, status: "created",
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
