@@ -114,6 +114,7 @@ import {
   PM_SEAT_ROLES,
   SEAT_ROLES,
   isSeatRole,
+  isSubjectSeatRole,
   normalizeEmployeeCode,
   type RosterKind,
   type RosterSeat,
@@ -1270,6 +1271,28 @@ export interface CreatePositionBody {
   user_id?: unknown;
 }
 
+// Keep `teacher.subject_id` — the source the roster Subject column reads — in
+// sync when a teacher is seated with a subject role (chemistry, physics, ...).
+// The seat-role names map case-insensitively onto `subject.name`. No-op for PM
+// tiers / `subject_tbd` / `apc` and for users without an AF teacher record.
+async function syncTeacherSubjectFromRole(
+  client: PoolClient,
+  userId: number,
+  role: SeatRole
+): Promise<void> {
+  if (!isSubjectSeatRole(role)) return;
+  const subjects = await client.query<{ id: number }>(
+    `SELECT id FROM subject WHERE LOWER(name->0->>'subject') = $1 LIMIT 1`,
+    [role]
+  );
+  if (subjects.rows.length === 0) return;
+  await client.query(
+    `UPDATE teacher SET subject_id = $1, updated_at = now()
+     WHERE user_id = $2 AND is_af_teacher = true`,
+    [subjects.rows[0].id, userId]
+  );
+}
+
 export async function createPosition(params: {
   body: CreatePositionBody;
 }): Promise<StaffMutationResult> {
@@ -1335,6 +1358,7 @@ export async function createPosition(params: {
       [centreId, role, userId]
     );
     if (userId !== null) {
+      await syncTeacherSubjectFromRole(client, userId, role);
       await clearExplicitSchoolScope(client, userId);
     }
   });
@@ -1464,13 +1488,19 @@ export async function setUserRole(params: {
   }
   const role = params.body.role as SeatRole;
 
-  const updated = await query<{ id: number }>(
-    `UPDATE centre_positions SET role = $1, updated_at = now()
-     WHERE user_id = $2 AND deleted_at IS NULL
-     RETURNING id`,
-    [role, userId]
-  );
-  if (updated.length === 0) {
+  let updatedCount = 0;
+  await withTransaction(async (client) => {
+    const updated = await client.query<{ id: number }>(
+      `UPDATE centre_positions SET role = $1, updated_at = now()
+       WHERE user_id = $2 AND deleted_at IS NULL
+       RETURNING id`,
+      [role, userId]
+    );
+    updatedCount = updated.rows.length;
+    if (updatedCount === 0) return;
+    await syncTeacherSubjectFromRole(client, userId, role);
+  });
+  if (updatedCount === 0) {
     return {
       ok: false,
       status: 404,

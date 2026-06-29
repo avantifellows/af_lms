@@ -127,10 +127,50 @@ function formatTimestamp(value: string | null): string {
 interface ClassroomObservationStats {
   teacherName: string | null;
   grade: string | null;
+  curriculumName: string | null;
+  chapterName: string | null;
+  subjectName: string | null;
+  topicName: string | null;
   answeredCount: number;
   totalParams: number;
   score: number;
   maxScore: number;
+}
+
+function readStatsString(data: Record<string, unknown>, key: string): string | null {
+  const value = data[key];
+  return typeof value === "string" ? value : null;
+}
+
+function readClassroomObservationParams(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  return data.params && typeof data.params === "object" && !Array.isArray(data.params)
+    ? (data.params as Record<string, unknown>)
+    : {};
+}
+
+function summarizeClassroomObservationScores(params: Record<string, unknown>): {
+  answeredCount: number;
+  score: number;
+} {
+  let answeredCount = 0;
+  let score = 0;
+
+  for (const parameter of CLASSROOM_OBSERVATION_RUBRIC.parameters) {
+    const paramValue = params[parameter.key];
+    if (!paramValue || typeof paramValue !== "object" || !("score" in paramValue)) {
+      continue;
+    }
+
+    const paramScore = (paramValue as { score: unknown }).score;
+    if (typeof paramScore === "number" && parameter.options.some((o) => o.score === paramScore)) {
+      answeredCount += 1;
+      score += paramScore;
+    }
+  }
+
+  return { answeredCount, score };
 }
 
 function getClassroomObservationStats(data: Record<string, unknown> | undefined): ClassroomObservationStats | null {
@@ -138,29 +178,17 @@ function getClassroomObservationStats(data: Record<string, unknown> | undefined)
     return null;
   }
 
-  const teacherName = typeof data.teacher_name === "string" ? data.teacher_name : null;
-  const grade = typeof data.grade === "string" ? data.grade : null;
-  const params = data.params && typeof data.params === "object" && !Array.isArray(data.params)
-    ? (data.params as Record<string, unknown>)
-    : {};
-
-  let answeredCount = 0;
-  let score = 0;
-
-  for (const parameter of CLASSROOM_OBSERVATION_RUBRIC.parameters) {
-    const paramValue = params[parameter.key];
-    if (paramValue && typeof paramValue === "object" && "score" in paramValue) {
-      const paramScore = (paramValue as { score: unknown }).score;
-      if (typeof paramScore === "number" && parameter.options.some((o) => o.score === paramScore)) {
-        answeredCount += 1;
-        score += paramScore;
-      }
-    }
-  }
+  const { answeredCount, score } = summarizeClassroomObservationScores(
+    readClassroomObservationParams(data)
+  );
 
   return {
-    teacherName,
-    grade,
+    teacherName: readStatsString(data, "teacher_name"),
+    grade: readStatsString(data, "grade"),
+    curriculumName: readStatsString(data, "curriculum_name"),
+    chapterName: readStatsString(data, "chapter_name"),
+    subjectName: readStatsString(data, "subject_name"),
+    topicName: readStatsString(data, "topic_name"),
     answeredCount,
     totalParams: CLASSROOM_OBSERVATION_RUBRIC.parameters.length,
     score,
@@ -714,6 +742,23 @@ export default function ActionPointList({
                     {stats.grade && (
                       <span className="text-text-secondary">
                         <span className="text-text-muted">Grade:</span> {stats.grade}
+                      </span>
+                    )}
+                    {stats.curriculumName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Curriculum:</span> {stats.curriculumName}
+                      </span>
+                    )}
+                    {stats.chapterName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Chapter:</span>{" "}
+                        {stats.subjectName ? `${stats.subjectName} - ` : ""}
+                        {stats.chapterName}
+                      </span>
+                    )}
+                    {stats.topicName && (
+                      <span className="text-text-secondary">
+                        <span className="text-text-muted">Topic:</span> {stats.topicName}
                       </span>
                     )}
                     <span className="font-mono text-accent font-bold">

@@ -2,7 +2,12 @@
 
 import { useMemo, useState } from "react";
 
-import { ACTION_TYPE_VALUES, getActionTypeLabel, type ActionType } from "@/lib/visit-actions";
+import {
+  ACTION_TYPE_VALUES,
+  getActionTypeLabel,
+  isOptionalActionType,
+  type ActionType,
+} from "@/lib/visit-actions";
 import { Modal } from "@/components/ui";
 
 interface ActionTypePickerModalProps {
@@ -59,14 +64,20 @@ export default function ActionTypePickerModal({
                   type="radio"
                   name="action-type"
                   value={actionType}
+                  aria-label={getActionTypeLabel(actionType)}
                   checked={selectedType === actionType}
                   onChange={() => {
                     setSelectedType(actionType);
                   }}
                   className="h-5 w-5 accent-accent"
                 />
-                <span className="text-base font-medium text-text-primary">
-                  {getActionTypeLabel(actionType)}
+                <span className="flex min-w-0 flex-1 items-center justify-between gap-3 text-base font-medium text-text-primary">
+                  <span>{getActionTypeLabel(actionType)}</span>
+                  {isOptionalActionType(actionType) && (
+                    <span className="shrink-0 rounded-full border border-border-accent bg-bg-card-alt px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-text-muted">
+                      Optional
+                    </span>
+                  )}
                 </span>
               </label>
             ))}

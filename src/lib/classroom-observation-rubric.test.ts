@@ -19,6 +19,23 @@ function buildCompleteParams(): Record<string, { score: number }> {
   return params;
 }
 
+function buildCurriculumContext() {
+  return {
+    curriculum_id: 1,
+    curriculum_name: "JEE Mains",
+    curriculum_code: "JMNS",
+    chapter_id: 44,
+    chapter_name: "Units and Measurement",
+    chapter_code: "11P1",
+    chapter_topic_count: 2,
+    subject_id: 4,
+    subject_name: "Physics",
+    topic_id: 101,
+    topic_name: "Physical Quantities",
+    topic_code: "11P1.1",
+  };
+}
+
 describe("classroom-observation-rubric config", () => {
   it("defines rubric v1 with 19 parameters and max score 45", () => {
     expect(CURRENT_RUBRIC_VERSION).toBe("1.0");
@@ -66,12 +83,16 @@ describe("classroom observation summary extractors", () => {
         text: "Needs tighter closure",
       },
     ]);
-    expect(computeInlineStats(data)).toEqual({
-      totalScore: 6,
-      maxScore: 45,
-      remarkCount: 1,
-    });
-  });
+	    expect(computeInlineStats(data)).toEqual({
+	      totalScore: 6,
+	      maxScore: 45,
+	      remarkCount: 1,
+	      curriculumName: null,
+	      chapterName: null,
+	      subjectName: null,
+	      topicName: null,
+	    });
+	  });
 
   it("handles missing params and null data gracefully", () => {
     expect(extractRemarks({
@@ -110,16 +131,18 @@ describe("computeTotalScore", () => {
 describe("validateClassroomObservationSave", () => {
   it("accepts empty payload and partial payloads", () => {
     expect(validateClassroomObservationSave({})).toEqual({ valid: true, errors: [] });
-    expect(
-      validateClassroomObservationSave({
-        params: {
-          teacher_on_time: { score: 1 },
-          recall_test: { score: 2, remarks: "interactive" },
-        },
-        observer_summary_strengths: "strong structure",
-      })
-    ).toEqual({ valid: true, errors: [] });
-  });
+	    expect(
+	      validateClassroomObservationSave({
+	        params: {
+	          teacher_on_time: { score: 1 },
+	          recall_test: { score: 2, remarks: "interactive" },
+	        },
+	        observer_summary_strengths: "strong structure",
+	        ...buildCurriculumContext(),
+	        additional_notes: "Teacher requested chapter-level support",
+	      })
+	    ).toEqual({ valid: true, errors: [] });
+	  });
 
   it("rejects invalid score values", () => {
     const outOfRange = validateClassroomObservationSave({
@@ -144,6 +167,38 @@ describe("validateClassroomObservationSave", () => {
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("Unknown top-level field: legacy_key");
+  });
+
+  it("rejects non-string action-level additional notes", () => {
+    const result = validateClassroomObservationSave({
+      additional_notes: 42,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("additional_notes must be a string");
+  });
+
+  it("rejects invalid curriculum context field types", () => {
+    const result = validateClassroomObservationSave({
+      curriculum_id: "1",
+      curriculum_name: 123,
+      chapter_id: 0,
+      chapter_topic_count: -1,
+      subject_id: 4.5,
+      topic_id: false,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        "curriculum_id must be a positive integer",
+        "curriculum_name must be a string",
+        "chapter_id must be a positive integer",
+        "chapter_topic_count must be a non-negative integer",
+        "subject_id must be a positive integer",
+        "topic_id must be a positive integer",
+      ])
+    );
   });
 
   it("rejects unknown rubric versions when provided", () => {
@@ -191,6 +246,7 @@ describe("validateClassroomObservationComplete", () => {
       teacher_id: 42,
       teacher_name: "Jane Doe",
       grade: "11",
+      ...buildCurriculumContext(),
     });
     expect(result).toEqual({ valid: true, errors: [] });
   });
@@ -200,10 +256,82 @@ describe("validateClassroomObservationComplete", () => {
       rubric_version: CURRENT_RUBRIC_VERSION,
       params: buildCompleteParams(),
     });
+
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("teacher_id is required");
     expect(result.errors).toContain("teacher_name is required");
     expect(result.errors).toContain("grade is required");
+  });
+
+  it("requires curriculum and chapter context for grades 11 and 12", () => {
+    const result = validateClassroomObservationComplete({
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: buildCompleteParams(),
+      teacher_id: 1,
+      teacher_name: "Teacher",
+      grade: "12",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        "curriculum_id is required",
+        "curriculum_name is required",
+        "chapter_id is required",
+        "chapter_name is required",
+        "chapter_topic_count is required",
+        "subject_id is required",
+        "subject_name is required",
+      ])
+    );
+  });
+
+  it("requires topic context when the selected chapter has active topics", () => {
+    const result = validateClassroomObservationComplete({
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: buildCompleteParams(),
+      teacher_id: 1,
+      teacher_name: "Teacher",
+      grade: "11",
+      ...buildCurriculumContext(),
+      topic_id: undefined,
+      topic_name: undefined,
+      topic_code: undefined,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining(["topic_id is required", "topic_name is required"])
+    );
+  });
+
+  it("allows topic context to be empty when the selected chapter has no active topics", () => {
+    const result = validateClassroomObservationComplete({
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: buildCompleteParams(),
+      teacher_id: 1,
+      teacher_name: "Teacher",
+      grade: "11",
+      ...buildCurriculumContext(),
+      chapter_topic_count: 0,
+      topic_id: undefined,
+      topic_name: undefined,
+      topic_code: undefined,
+    });
+
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it("does not require curriculum context for grade 10", () => {
+    const result = validateClassroomObservationComplete({
+      rubric_version: CURRENT_RUBRIC_VERSION,
+      params: buildCompleteParams(),
+      teacher_id: 1,
+      teacher_name: "Teacher",
+      grade: "10",
+    });
+
+    expect(result).toEqual({ valid: true, errors: [] });
   });
 
   it("rejects empty teacher_name", () => {
@@ -213,6 +341,7 @@ describe("validateClassroomObservationComplete", () => {
       teacher_id: 1,
       teacher_name: "",
       grade: "10",
+      ...buildCurriculumContext(),
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("teacher_name is required");

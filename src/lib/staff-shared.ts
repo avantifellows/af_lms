@@ -22,10 +22,31 @@ export const SEAT_ROLES = [
 /** Program-management seat tiers (vs subject-teaching seats). */
 export const PM_SEAT_ROLES = ["apm", "pm", "spm", "ph"] as const;
 
+/**
+ * Seat roles that name a teaching subject. These line up name-for-name
+ * (case-insensitively) with rows in the `subject` table, so seating a teacher
+ * with one of these is how Ops sets their subject — the value is mirrored onto
+ * `teacher.subject_id`, which is what the roster Subject column reads.
+ * `subject_tbd`, `apc`, and the PM tiers are NOT subjects.
+ */
+export const SUBJECT_SEAT_ROLES = [
+  "physics",
+  "chemistry",
+  "maths",
+  "biology",
+] as const;
+
 export type SeatRole = (typeof SEAT_ROLES)[number];
 
 export function isSeatRole(value: unknown): value is SeatRole {
   return typeof value === "string" && SEAT_ROLES.includes(value as SeatRole);
+}
+
+export function isSubjectSeatRole(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (SUBJECT_SEAT_ROLES as readonly string[]).includes(value)
+  );
 }
 
 export const EMPLOYEE_CODE_PATTERN = /^AF\d+$/;

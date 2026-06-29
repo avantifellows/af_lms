@@ -1,4 +1,8 @@
 import type { RemarkEntry } from "./visit-summary";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  validateActionAdditionalNotes,
+} from "./visit-form-utils";
 
 export interface ValidationResult {
   valid: boolean;
@@ -32,6 +36,7 @@ export interface IndividualTeacherEntry {
 
 export interface IndividualAFTeacherInteractionData {
   teachers: IndividualTeacherEntry[];
+  additional_notes?: string;
 }
 
 const sections: SectionConfig[] = [
@@ -80,7 +85,10 @@ export const INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG: IndividualAFTeacherIntera
   allQuestionKeys: sections.flatMap((s) => s.questions.map((q) => q.key)),
 };
 
-const ALLOWED_TOP_LEVEL_KEYS = new Set(["teachers"]);
+const ALLOWED_TOP_LEVEL_KEYS = new Set([
+  "teachers",
+  ACTION_ADDITIONAL_NOTES_KEY,
+]);
 
 const questionKeyToLabel = new Map<string, string>(
   INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys.map((key) => {
@@ -231,6 +239,7 @@ export function validateIndividualTeacherSave(data: unknown): ValidationResult {
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   if ("teachers" in payload) {
     errors.push(...validateTeacherEntries(payload.teachers, false));
@@ -253,6 +262,7 @@ export function validateIndividualTeacherComplete(data: unknown): ValidationResu
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   if (!("teachers" in payload) || !Array.isArray(payload.teachers) || payload.teachers.length === 0) {
     errors.push("At least one teacher must be recorded");
