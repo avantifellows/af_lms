@@ -121,7 +121,9 @@ export async function GET(request: NextRequest) {
   >();
   if (sessionPks.length > 0) {
     const sessionRows = await query<{
-      id: number;
+      // session.id is a bigint — node-pg returns it as a string, so coerce to a
+      // number key to match session_pk (an integer) when looking up below.
+      id: number | string;
       platform_id: string | null;
       portal_link: string | null;
       meta_data: { admin_testing_link?: string } | null;
@@ -130,7 +132,7 @@ export async function GET(request: NextRequest) {
       [sessionPks]
     );
     for (const s of sessionRows) {
-      linksByPk.set(s.id, {
+      linksByPk.set(Number(s.id), {
         quizId: s.platform_id || null,
         portalLink: s.portal_link ?? "",
         adminTestingLink: s.meta_data?.admin_testing_link ?? "",

@@ -73,9 +73,12 @@ describe("GET /api/teacher-feedback/cycles", () => {
         { batch_id: "EnableStudents_TP_2027_engg_C024", name: "CoE JNV Palghar 2027 Engineering" },
       ] as never) // batch name resolution
       .mockResolvedValueOnce([
-        // session rows (links filled by the Lambda)
-        { id: 5, platform_id: "quiz_s", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_s", meta_data: { admin_testing_link: "https://staging-quiz/form/quiz_s" } },
-        { id: 6, platform_id: "quiz_m", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_m", meta_data: {} },
+        // session rows (links filled by the Lambda). id is a STRING here on
+        // purpose: session.id is a bigint, which node-pg returns as a string,
+        // while lms_teacher_feedback.session_pk is an integer (number). The route
+        // must coerce to match — this guards that key-type regression.
+        { id: "5", platform_id: "quiz_s", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_s", meta_data: { admin_testing_link: "https://staging-quiz/form/quiz_s" } },
+        { id: "6", platform_id: "quiz_m", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_m", meta_data: {} },
       ] as never);
 
     const res = await GET(req("34054"));

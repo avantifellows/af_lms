@@ -100,7 +100,10 @@ export default function TeacherFeedbackTab({
   const fetchCentres = useCallback(async () => {
     setLoadingCentres(true);
     try {
-      const res = await fetch(`/api/teacher-feedback/centres?school_code=${encodeURIComponent(schoolCode)}`);
+      const res = await fetch(
+        `/api/teacher-feedback/centres?school_code=${encodeURIComponent(schoolCode)}`,
+        { cache: "no-store" }
+      );
       const body = await res.json();
       setCentres(Array.isArray(body.centres) ? body.centres : []);
     } catch {
@@ -113,7 +116,12 @@ export default function TeacherFeedbackTab({
   const fetchCycles = useCallback(async () => {
     setLoadingCycles(true);
     try {
-      const res = await fetch(`/api/teacher-feedback/cycles?school_code=${encodeURIComponent(schoolCode)}`);
+      // no-store: links are filled asynchronously by the Lambda, so a cached
+      // response would keep showing "Generating…" after they're ready.
+      const res = await fetch(
+        `/api/teacher-feedback/cycles?school_code=${encodeURIComponent(schoolCode)}`,
+        { cache: "no-store" }
+      );
       const body = await res.json();
       setCycles(Array.isArray(body.cycles) ? body.cycles : []);
     } catch {
@@ -584,7 +592,9 @@ function SetupModal({
     setSelectedTeachers([]);
     (async () => {
       try {
-        const res = await fetch(`/api/teacher-feedback/teachers?centre_id=${centreId}`);
+        const res = await fetch(`/api/teacher-feedback/teachers?centre_id=${centreId}`, {
+          cache: "no-store",
+        });
         const body = await res.json();
         if (!cancelled) setTeachers(Array.isArray(body.teachers) ? body.teachers : []);
       } catch {
