@@ -13,6 +13,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const baseParams = {
   group: "EnableStudents",
+  authType: "ID,DOB",
   parentBatchId: "EnableStudents_11",
   classBatchIds: ["EnableStudents_11_A", "EnableStudents_11_B"],
   grade: 11,
@@ -62,6 +63,7 @@ describe("buildFeedbackSessionPayload", () => {
   it("leaves launch fields blank — the Lambda fills them after building the quiz", async () => {
     const { buildFeedbackSessionPayload } = await import("./teacher-feedback-session");
     const payload = buildFeedbackSessionPayload(baseParams);
+    expect(payload.auth_type).toBe("ID,DOB"); // from the group, not hardcoded
     expect(payload.session_id).toBe("");
     expect(payload.platform_id).toBe("");
     expect(payload.platform_link).toBe("");

@@ -41,6 +41,12 @@ function authHeaders(): Record<string, string> {
 export interface FeedbackSessionParams {
   /** Program tag, e.g. "EnableStudents" — becomes meta_data.group + BQ `group`. */
   group: string;
+  /**
+   * Student login auth type for this group, from auth_group.input_schema.auth_type
+   * (e.g. "ID,DOB" for EnableStudents, "ID" for PunjabStudents). portal-frontend
+   * uses the session's auth_type over the auth_group's, so this must be correct.
+   */
+  authType: string;
   /** Parent (grade) batch id; meta_data.parent_id (best-effort, group attach). */
   parentBatchId: string;
   /** Class (child) batch ids; comma-joined into meta_data.batch_id + BQ `batch`. */
@@ -130,7 +136,7 @@ export function buildFeedbackSessionPayload(
     name: params.name.slice(0, 255),
     platform: "quiz",
     type: "sign-in",
-    auth_type: "ID",
+    auth_type: params.authType,
     redirection: true,
     id_generation: false,
     signup_form: false,

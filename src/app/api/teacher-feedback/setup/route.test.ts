@@ -64,9 +64,11 @@ beforeEach(() => {
   mockRequire.mockResolvedValue({ ok: true, permission: PERMISSION });
   mockBatches.mockResolvedValue(true);
   // Route runs: batch-ownership (EXISTS -> .ok), centre-ownership (-> .name),
-  // then INSERTs. Return the right shape per query; inserts get [].
+  // auth_group lookup (-> .auth_type), then INSERTs. Return the right shape per
+  // query; inserts get [].
   mockQuery.mockImplementation(async (sql: string) => {
     if (sql.includes("FROM centres c JOIN school")) return [{ name: "JNV Palghar - CoE" }] as never;
+    if (sql.includes("FROM auth_group")) return [{ auth_type: "ID,DOB" }] as never;
     if (sql.includes("SELECT EXISTS")) return [{ ok: true }] as never;
     return [] as never;
   });
@@ -136,8 +138,10 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(mockCreateSession).toHaveBeenCalledTimes(2);
     expect(mockPublish).toHaveBeenCalledTimes(2);
     expect(mockPublish).toHaveBeenCalledWith({ action: "db_id", id: 101 });
-    // batch-ownership + centre-ownership SELECTs + 2 inserts
-    expect(mockQuery).toHaveBeenCalledTimes(4);
+    // auth_type derived from the group and passed to the session
+    expect(mockCreateSession.mock.calls[0][0].authType).toBe("ID,DOB");
+    // batch-ownership + centre-ownership + auth_group SELECTs + 2 inserts
+    expect(mockQuery).toHaveBeenCalledTimes(5);
   });
 
   it("does not chain — each session is created independently (no next_step_url)", async () => {
@@ -164,8 +168,8 @@ describe("POST /api/teacher-feedback/setup", () => {
     const failed = json.teachers.find((t: { status: string }) => t.status === "failed");
     expect(failed.error).toMatch(/db-service down/);
 
-    // batch-ownership + centre-ownership SELECTs + 1 success insert + 1 failure insert
-    expect(mockQuery).toHaveBeenCalledTimes(4);
+    // batch-ownership + centre-ownership + auth_group SELECTs + 1 success + 1 failure insert
+    expect(mockQuery).toHaveBeenCalledTimes(5);
     const insertedStatuses = mockQuery.mock.calls
       .map((c) => c[0] as string)
       .filter((sql) => sql.includes("INSERT INTO lms_teacher_feedback"));

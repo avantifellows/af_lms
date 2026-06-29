@@ -194,6 +194,15 @@ export async function POST(request: NextRequest) {
   const sourceId = `teacher-feedback:${FEEDBACK_FORM_VERSION}:${schoolCode}:${cycleKeyFor(startTime)}`;
   const setupRunId = randomUUID();
 
+  // Student login auth type depends on the group (auth_group.input_schema.auth_type):
+  // EnableStudents/EMRS use "ID,DOB", Punjab/Gujarat use "ID", etc. portal-frontend
+  // honours the session's auth_type over the auth_group's, so it must match here.
+  const authRows = await query<{ auth_type: string | null }>(
+    `SELECT input_schema->>'auth_type' AS auth_type FROM auth_group WHERE name = $1 LIMIT 1`,
+    [group]
+  );
+  const authType = authRows[0]?.auth_type || "ID";
+
   // No chaining — each feedback session stands alone (Gurukul has no chaining;
   // students fill them in any order). Process in given order.
   const ordered = [...cleanTeachers].sort((a, b) => a.order - b.order);
@@ -209,6 +218,7 @@ export async function POST(request: NextRequest) {
       // and fills in session_id / platform_id / portal_link / admin link.
       const created = await createFeedbackSession({
         group,
+        authType,
         parentBatchId,
         classBatchIds,
         grade,
