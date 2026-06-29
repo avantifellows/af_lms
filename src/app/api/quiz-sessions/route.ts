@@ -193,6 +193,8 @@ export async function GET(request: NextRequest) {
     WHERE s.platform = 'quiz'
       AND s.meta_data->>'group' = 'EnableStudents'
       AND string_to_array(s.meta_data->>'batch_id', ',') && $1::text[]
+      -- Teacher Feedback forms are managed in their own tab, not here.
+      AND COALESCE(s.meta_data->>'cms_test_id', '') NOT LIKE 'teacher-feedback:%'
     ORDER BY s.id DESC
     LIMIT $2 OFFSET $3
     `,
