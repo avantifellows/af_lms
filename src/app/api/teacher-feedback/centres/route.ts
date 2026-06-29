@@ -6,7 +6,7 @@ import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
 import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
 
-export interface FeedbackCentre {
+interface FeedbackCentre {
   id: number;
   name: string;
   typeCode: string | null;

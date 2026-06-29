@@ -48,6 +48,58 @@ interface Cycle {
   teachers: TeacherEntry[];
 }
 
+/** Resolve class batch_id -> readable name for the given ids (id used as fallback). */
+async function resolveBatchNames(
+  batchIds: string[]
+): Promise<Map<string, string>> {
+  const byId = new Map<string, string>();
+  if (batchIds.length === 0) return byId;
+  const batchRows = await query<{ batch_id: string; name: string | null }>(
+    `SELECT batch_id, name FROM batch WHERE batch_id = ANY($1::text[])`,
+    [batchIds]
+  );
+  for (const b of batchRows) {
+    if (b.name) byId.set(b.batch_id, b.name);
+  }
+  return byId;
+}
+
+interface SessionLinks {
+  quizId: string | null;
+  portalLink: string;
+  adminTestingLink: string;
+}
+
+/**
+ * Read the launch links the sessionCreator Lambda writes onto each session,
+ * keyed by session pk. Absent until the Lambda has run (UI shows "Generating…").
+ * session.id is a bigint (node-pg returns a string), so coerce to a number key
+ * to match session_pk (an integer).
+ */
+async function resolveSessionLinks(
+  sessionPks: number[]
+): Promise<Map<number, SessionLinks>> {
+  const byPk = new Map<number, SessionLinks>();
+  if (sessionPks.length === 0) return byPk;
+  const sessionRows = await query<{
+    id: number | string;
+    platform_id: string | null;
+    portal_link: string | null;
+    meta_data: { admin_testing_link?: string } | null;
+  }>(
+    `SELECT id, platform_id, portal_link, meta_data FROM session WHERE id = ANY($1::int[])`,
+    [sessionPks]
+  );
+  for (const s of sessionRows) {
+    byPk.set(Number(s.id), {
+      quizId: s.platform_id || null,
+      portalLink: s.portal_link ?? "",
+      adminTestingLink: s.meta_data?.admin_testing_link ?? "",
+    });
+  }
+  return byPk;
+}
+
 // GET /api/teacher-feedback/cycles?school_code=XXXXX
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -95,50 +147,17 @@ export async function GET(request: NextRequest) {
   );
 
   // Resolve batch_id -> readable name for all class batches across these cycles.
-  const allBatchIds = Array.from(
-    new Set(rows.flatMap((r) => r.batch_class_ids ?? []))
+  const batchNameById = await resolveBatchNames(
+    Array.from(new Set(rows.flatMap((r) => r.batch_class_ids ?? [])))
   );
-  const batchNameById = new Map<string, string>();
-  if (allBatchIds.length > 0) {
-    const batchRows = await query<{ batch_id: string; name: string | null }>(
-      `SELECT batch_id, name FROM batch WHERE batch_id = ANY($1::text[])`,
-      [allBatchIds]
-    );
-    for (const b of batchRows) {
-      if (b.name) batchNameById.set(b.batch_id, b.name);
-    }
-  }
 
   // Links are written onto the db-service session by the sessionCreator Lambda
-  // (async). Read them from the session rows by session_pk — absent until the
-  // Lambda has run, so the UI shows "Generating…".
-  const sessionPks = Array.from(
-    new Set(rows.map((r) => r.session_pk).filter((pk): pk is number => pk != null))
+  // (async); absent until it has run, so the UI shows "Generating…".
+  const linksByPk = await resolveSessionLinks(
+    Array.from(
+      new Set(rows.map((r) => r.session_pk).filter((pk): pk is number => pk != null))
+    )
   );
-  const linksByPk = new Map<
-    number,
-    { quizId: string | null; portalLink: string; adminTestingLink: string }
-  >();
-  if (sessionPks.length > 0) {
-    const sessionRows = await query<{
-      // session.id is a bigint — node-pg returns it as a string, so coerce to a
-      // number key to match session_pk (an integer) when looking up below.
-      id: number | string;
-      platform_id: string | null;
-      portal_link: string | null;
-      meta_data: { admin_testing_link?: string } | null;
-    }>(
-      `SELECT id, platform_id, portal_link, meta_data FROM session WHERE id = ANY($1::int[])`,
-      [sessionPks]
-    );
-    for (const s of sessionRows) {
-      linksByPk.set(Number(s.id), {
-        quizId: s.platform_id || null,
-        portalLink: s.portal_link ?? "",
-        adminTestingLink: s.meta_data?.admin_testing_link ?? "",
-      });
-    }
-  }
 
   // Group rows into cycles by setup_run_id (preserving the DESC insertion order).
   const byRun = new Map<string, Cycle>();
