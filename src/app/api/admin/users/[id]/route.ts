@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query, withTransaction } from "@/lib/db";
+import { blockIfAcademicMentorshipHistory } from "@/lib/staff-admin";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -42,6 +43,16 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   // other systems; the roster already hides them once no live permission
   // exists, and a later re-add reactivates the dormant record.
   const targetUserId = userToDelete[0]?.user_id ?? null;
+  if (targetUserId != null) {
+    const blocker = await blockIfAcademicMentorshipHistory(Number(targetUserId));
+    if (blocker) {
+      return NextResponse.json(
+        { error: blocker.error, code: blocker.code },
+        { status: blocker.status }
+      );
+    }
+  }
+
   await withTransaction(async (client) => {
     if (targetUserId != null) {
       await client.query(

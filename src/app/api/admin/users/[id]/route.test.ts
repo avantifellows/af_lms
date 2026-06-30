@@ -50,6 +50,7 @@ describe("DELETE /api/admin/users/[id]", () => {
     const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
     const res = await DELETE(req as never, params);
     expect(res.status).toBe(401);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 403 when not admin", async () => {
@@ -58,6 +59,7 @@ describe("DELETE /api/admin/users/[id]", () => {
     const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
     const res = await DELETE(req as never, params);
     expect(res.status).toBe(403);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("prevents deleting yourself", async () => {
@@ -72,11 +74,38 @@ describe("DELETE /api/admin/users/[id]", () => {
     expect(json.error).toContain("Cannot delete your own");
   });
 
+  it("blocks deleting a user with Academic Mentor-Mentee Mapping history", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
+      .mockResolvedValueOnce([
+        {
+          school_code: "54019",
+          academic_year: "2026-2027",
+        },
+      ]);
+
+    const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("Academic Mentor-Mentee Mapping history");
+    expect(json.error).toContain(
+      "/admin/academic-mentorship?school_code=54019&academic_year=2026-2027"
+    );
+    expect(String(mockQuery.mock.calls[1][0])).toContain("m.mentor_user_id = $1");
+    expect(mockQuery.mock.calls[1][1]).toEqual([70]);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("deletes another user and vacates their centre seats", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
     mockQuery
       .mockResolvedValueOnce([{ email: "other@test.com", user_id: 70 }]) // lookup
+      .mockResolvedValueOnce([]) // mapping history blocker
       .mockResolvedValueOnce([]) // vacate seats (soft-delete)
       .mockResolvedValueOnce([]); // delete permission
 

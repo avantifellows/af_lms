@@ -43,6 +43,7 @@ A `read_only` flag downgrades any `edit` to `view`.
 - Looks up `FEATURE_PERMISSIONS[feature][role]` (`none`/`view`/`edit`).
 - **NVS gating:** features in `NVS_GATED_FEATURES` (`visits`, `curriculum`, `pm_dashboard`, `summary_stats`, `quiz_sessions`) become `none` unless the user `hasCoEOrNodal`.
 - **Academic Mentorship:** uses the `academic_mentorship` feature key and its own Program allowlist (`ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`, v1 wildcard `*`), so NVS-only users are not blocked by the NVS-gated feature set.
+- **Staff Management Academic Mentor safeguards:** deleting a Teacher-linked permission blocks on any Academic Mentor-Mentee Mapping history; Teacher exit/revoke blocks only on active Mentees. These checks use `academic_mentorship_mentor_mentee_mappings.mentor_user_id` (`user.id`), not `user_permission.id`, and blocker messages link back to `/admin/academic-mentorship` when School/year context is available.
 - **`read_only` downgrade:** `edit` → `view`.
 - **Passcode users** (`opts.isPasscodeUser`): `students` → `edit`, everything else → `none`.
 

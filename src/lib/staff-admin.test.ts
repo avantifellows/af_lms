@@ -298,14 +298,16 @@ describe("updateTeacherRecord", () => {
     ).toMatchObject({ ok: false, status: 409 });
   });
 
-  it("PATCHes db-service and vacates seats on exit", async () => {
+  it("PATCHes db-service and vacates seats on exit when there are no active Academic Mentees", async () => {
     const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", mockFetch);
     vi.stubEnv("DB_SERVICE_URL", "https://db.example/api");
     vi.stubEnv("DB_SERVICE_TOKEN", "token");
 
     mockSchemaReady();
-    mockQuery.mockResolvedValueOnce([{ id: 1, user_id: 70 }]);
+    mockQuery
+      .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
+      .mockResolvedValueOnce([]);
 
     const result = await updateTeacherRecord({
       id: 1,
@@ -316,9 +318,45 @@ describe("updateTeacherRecord", () => {
       "https://db.example/api/teacher/1",
       expect.objectContaining({ method: "PATCH" })
     );
+    const blockerCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("academic_mentorship_mentor_mentee_mappings")
+    );
+    expect(String(blockerCall?.[0])).toContain("m.mentor_user_id = $1");
+    expect(String(blockerCall?.[0])).toContain("m.ended_at IS NULL");
+    expect(blockerCall?.[1]).toEqual([70]);
     const clientSql = mockClientQuery.mock.calls.map((call) => call[0]).join("\n");
     expect(clientSql).toContain("UPDATE centre_positions SET user_id = NULL");
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
+  });
+
+  it("blocks teacher exit when the teacher has active Academic Mentees", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+    vi.stubEnv("DB_SERVICE_URL", "https://db.example/api");
+    vi.stubEnv("DB_SERVICE_TOKEN", "token");
+
+    mockSchemaReady();
+    mockQuery
+      .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
+      .mockResolvedValueOnce([
+        {
+          school_code: "54019",
+          academic_year: "2026-2027",
+          mentee_count: "2",
+        },
+      ]);
+
+    const result = await updateTeacherRecord({
+      id: 1,
+      body: { exit_date: "2026-06-12" },
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 409 });
+    expect(result.error).toContain("2 active Mentees");
+    expect(result.error).toContain(
+      "/admin/academic-mentorship?school_code=54019&academic_year=2026-2027"
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("maps db-service failures to 422/502", async () => {
