@@ -12,6 +12,7 @@ import {
   seedStudentsForTest,
   seedTestVisit,
   seedVisitAction,
+  seedVisitTeacherTestTeachers,
   type SeededIndividualStudent,
 } from "../helpers/db";
 import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
@@ -316,18 +317,10 @@ test.beforeAll(async () => {
   }
 
   // Seed teachers for AF team interaction tests
-  await pool.query(
-    `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
-     VALUES ('e2e-af-teacher-1@test.local', 1, 'teacher', ARRAY[$1::TEXT], 'AF Test Teacher One', false)
-     ON CONFLICT (email) DO UPDATE SET school_codes = ARRAY[$1::TEXT], full_name = 'AF Test Teacher One'`,
-    [schoolCode]
-  );
-  await pool.query(
-    `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
-     VALUES ('e2e-af-teacher-2@test.local', 1, 'teacher', ARRAY[$1::TEXT], 'AF Test Teacher Two', false)
-     ON CONFLICT (email) DO UPDATE SET school_codes = ARRAY[$1::TEXT], full_name = 'AF Test Teacher Two'`,
-    [schoolCode]
-  );
+  await seedVisitTeacherTestTeachers(pool, schoolCode, [
+    { email: "e2e-af-teacher-1@test.local", name: "AF Test Teacher One" },
+    { email: "e2e-af-teacher-2@test.local", name: "AF Test Teacher Two" },
+  ]);
 
   // Seed individual teacher test teachers (3 deterministic teachers)
   seededTeachers = await seedIndividualTeacherTestTeachers(pool, schoolCode);

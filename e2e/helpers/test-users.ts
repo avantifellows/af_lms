@@ -59,16 +59,36 @@ export async function insertTestUsers(pool: Pool): Promise<void> {
   const client = await pool.connect();
   try {
     for (const user of Object.values(TEST_USERS)) {
+      const userResult = await client.query<{ id: number }>(
+        `WITH existing AS (
+           SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+         ),
+         inserted AS (
+           INSERT INTO "user" (email, role, inserted_at, updated_at)
+           SELECT $1, $2, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+           WHERE NOT EXISTS (SELECT 1 FROM existing)
+           RETURNING id
+         )
+         SELECT id FROM inserted
+         UNION ALL
+         SELECT id FROM existing
+         LIMIT 1`,
+        [user.email, user.role]
+      );
+      const userId = userResult.rows[0].id;
+
       await client.query(
-        `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO user_permission (email, level, role, program_ids, school_codes, regions, read_only, user_id, revoked_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
          ON CONFLICT (email) DO UPDATE SET
            level = EXCLUDED.level,
            role = EXCLUDED.role,
            program_ids = EXCLUDED.program_ids,
            school_codes = EXCLUDED.school_codes,
            regions = EXCLUDED.regions,
-           read_only = EXCLUDED.read_only`,
+           read_only = EXCLUDED.read_only,
+           user_id = EXCLUDED.user_id,
+           revoked_at = NULL`,
         [
           user.email,
           user.level,
@@ -77,6 +97,7 @@ export async function insertTestUsers(pool: Pool): Promise<void> {
           user.school_codes,
           user.regions,
           user.read_only,
+          userId,
         ]
       );
     }
