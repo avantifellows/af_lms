@@ -12,6 +12,7 @@ import {
   requireAcademicMentorshipAccess,
 } from "@/lib/academic-mentorship";
 import { Card } from "@/components/ui";
+import AcademicMentorshipManager from "@/components/academic-mentorship/AcademicMentorshipManager";
 
 interface PageProps {
   searchParams?:
@@ -176,42 +177,17 @@ export default async function AcademicMentorshipPage({ searchParams }: PageProps
           )}
         </div>
 
-        <section className="mt-4 space-y-4">
-          {!selectedSchool ? (
-            <Card className="p-6 text-sm text-text-muted">Select a School to view mappings.</Card>
-          ) : groups.length === 0 ? (
-            <Card className="p-6 text-sm text-text-muted">
-              No Academic Mentor-Mentee Mappings found.
-            </Card>
-          ) : (
-            groups.map((group) => (
-              <Card key={group.mentor.userId} className="p-0">
-                <div className="border-b border-border px-4 py-3">
-                  <h2 className="font-bold text-text-primary">{group.mentor.name}</h2>
-                  <p className="text-sm text-text-muted">{group.menteeCount} mentee{group.menteeCount === 1 ? "" : "s"}</p>
-                </div>
-                <div className="divide-y divide-border">
-                  {group.mappings.map((mapping) => (
-                    <div key={String(mapping.id)} className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_120px_140px_120px]">
-                      <div>
-                        <div className="font-semibold text-text-primary">{mapping.mentee.name}</div>
-                        <div className="text-sm text-text-muted">{mapping.mentee.studentId}</div>
-                      </div>
-                      <div className="text-sm text-text-muted">Grade {mapping.mentee.grade ?? "-"}</div>
-                      <div className="text-sm text-text-muted">{mapping.assignedDate}</div>
-                      <div className="text-sm font-semibold text-text-primary">
-                        {mapping.status === "active" ? "Active" : "Historical"}
-                        {includeHistory && mapping.endedDate ? (
-                          <span className="block font-normal text-text-muted">Ended {mapping.endedDate}</span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            ))
-          )}
-        </section>
+        {!selectedSchool ? (
+          <Card className="mt-4 p-6 text-sm text-text-muted">Select a School to view mappings.</Card>
+        ) : (
+          <AcademicMentorshipManager
+            schoolCode={selectedSchool.code}
+            academicYear={selectedAcademicYear}
+            includeHistory={includeHistory}
+            canEdit={canEdit}
+            initialGroups={groups}
+          />
+        )}
       </main>
     </div>
   );

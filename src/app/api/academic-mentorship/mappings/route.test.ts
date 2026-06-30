@@ -12,7 +12,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { query } from "@/lib/db";
-import { GET } from "./route";
+import { DELETE, GET, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
 
 const mockQuery = vi.mocked(query);
@@ -202,5 +202,193 @@ describe("GET /api/academic-mentorship/mappings", () => {
     expect(response.status).toBe(200);
     expect(body.canEdit).toBe(false);
     expect(body.academicYear).toBe("2023-2024");
+  });
+});
+
+describe("POST /api/academic-mentorship/mappings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQuery.mockReset();
+  });
+
+  it("creates a Mapping for editable users", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 101 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ student_pk_id: 201, program_id: null }])
+      .mockResolvedValueOnce([{ id: 7 }]);
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mentor_user_id: 101,
+          student_id: 201,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body).toEqual({ success: true, mappingId: 7 });
+    const insertCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO academic_mentorship_mentor_mentee_mappings")
+    );
+    expect(insertCall?.[1]).toEqual([
+      20,
+      "2026-2027",
+      101,
+      201,
+      null,
+      501,
+    ]);
+  });
+
+  it("denies read-only users before write queries", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "readonly@avantifellows.org" },
+    });
+    mockQuery.mockResolvedValueOnce([
+      {
+        email: "readonly@avantifellows.org",
+        level: 3,
+        role: "program_admin",
+        school_codes: null,
+        regions: null,
+        program_ids: [PROGRAM_IDS.NVS],
+        read_only: true,
+        user_id: 501,
+      },
+    ]);
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mentor_user_id: 101,
+          student_id: 201,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe("Forbidden");
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps active uniqueness races to the expected conflict message", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    const duplicateError = new Error("duplicate key value violates unique constraint");
+    Object.assign(duplicateError, { code: "23505" });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 101 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ student_pk_id: 201, program_id: 64 }])
+      .mockRejectedValueOnce(duplicateError);
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mentor_user_id: 101,
+          student_id: 201,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe("Student already has a mentor mapped");
+  });
+});
+
+describe("DELETE /api/academic-mentorship/mappings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQuery.mockReset();
+  });
+
+  it("ends an active Mapping for editable users", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ id: 7 }]);
+
+    const response = await DELETE(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "DELETE",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true, mappingId: 7 });
+    const updateCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE academic_mentorship_mentor_mentee_mappings")
+    );
+    expect(updateCall?.[1]).toEqual([7, 20, "2026-2027", 501]);
   });
 });

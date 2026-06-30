@@ -83,6 +83,38 @@ export interface AcademicMentorshipMappingGroup {
   }>;
 }
 
+export interface AcademicMentorshipMentorOption {
+  userId: number;
+  name: string;
+  email: string;
+}
+
+interface AcademicMentorshipMentorOptionRow {
+  user_id: number | string;
+  name: string | null;
+  email: string;
+}
+
+export interface AcademicMentorshipMenteeOption {
+  studentPkId: number;
+  name: string;
+  studentId: string | null;
+  grade: number | null;
+  programId: number | null;
+}
+
+interface AcademicMentorshipMenteeOptionRow {
+  student_pk_id: number | string;
+  name: string | null;
+  student_id: string | null;
+  grade: number | string | null;
+  program_id: number | string | null;
+}
+
+export type AcademicMentorshipMutationResult =
+  | { ok: true; mappingId: number }
+  | { ok: false; status: 404 | 409 | 422; error: string };
+
 function hasAcademicMentorshipProgramAccess(permission: UserPermission): boolean {
   if (ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST.includes("*")) return true;
   const allowed = new Set<number>(
@@ -202,6 +234,293 @@ export async function listAcademicMentorshipMappings(params: {
   }
 
   return [...groups.values()];
+}
+
+export async function listAcademicMentorshipMentorOptions(params: {
+  schoolId: number;
+  schoolCode: string;
+  schoolRegion: string | null;
+  search?: string;
+}): Promise<AcademicMentorshipMentorOption[]> {
+  const search = `%${(params.search ?? "").trim()}%`;
+  const rows = await query<AcademicMentorshipMentorOptionRow>(
+    `SELECT
+       u.id AS user_id,
+       NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
+       u.email
+     FROM teacher t
+     JOIN "user" u ON u.id = t.user_id
+     JOIN user_permission up
+       ON (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
+      AND up.role = 'teacher'
+      AND up.revoked_at IS NULL
+     LEFT JOIN centre_positions cp
+       ON cp.user_id = u.id
+      AND cp.deleted_at IS NULL
+     LEFT JOIN centres c
+       ON c.id = cp.centre_id
+     WHERE t.is_af_teacher = true
+       AND t.exit_date IS NULL
+       AND (
+         up.level = 3
+         OR up.school_codes @> ARRAY[$1]::text[]
+         OR ($2::text IS NOT NULL AND up.regions @> ARRAY[$2]::text[])
+         OR c.school_id = $3
+       )
+       AND (
+         $4 = '%%'
+         OR u.email ILIKE $4
+         OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $4
+       )
+     GROUP BY u.id, u.first_name, u.last_name, u.email
+     ORDER BY name ASC NULLS LAST, u.email ASC
+     LIMIT 50`,
+    [params.schoolCode, params.schoolRegion, params.schoolId, search]
+  );
+
+  return rows.map((row) => ({
+    userId: Number(row.user_id),
+    name: row.name || row.email,
+    email: row.email,
+  }));
+}
+
+export async function listAcademicMentorshipMenteeOptions(params: {
+  schoolId: number;
+  academicYear: string;
+  search?: string;
+}): Promise<AcademicMentorshipMenteeOption[]> {
+  const search = `%${(params.search ?? "").trim()}%`;
+  const rows = await query<AcademicMentorshipMenteeOptionRow>(
+    `SELECT
+       st.id AS student_pk_id,
+       NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
+       st.student_id,
+       gr.number AS grade,
+       roster_program.program_id
+     FROM group_user gu
+     JOIN "group" g ON g.id = gu.group_id
+     JOIN "user" u ON u.id = gu.user_id
+     JOIN student st ON st.user_id = u.id
+     JOIN enrollment_record er_grade
+       ON er_grade.user_id = u.id
+      AND er_grade.group_type = 'grade'
+      AND er_grade.is_current = true
+      AND er_grade.academic_year = $2
+     LEFT JOIN grade gr ON gr.id = er_grade.group_id
+     LEFT JOIN LATERAL (
+       SELECT b.program_id
+       FROM group_user gu_batch
+       JOIN "group" g_batch ON g_batch.id = gu_batch.group_id AND g_batch.type = 'batch'
+       JOIN batch b ON b.id = g_batch.child_id
+       WHERE gu_batch.user_id = u.id
+       ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
+       LIMIT 1
+     ) roster_program ON true
+     LEFT JOIN academic_mentorship_mentor_mentee_mappings active_mapping
+       ON active_mapping.school_id = $1
+      AND active_mapping.academic_year = $2
+      AND active_mapping.student_id = st.id
+      AND active_mapping.ended_at IS NULL
+     WHERE g.type = 'school'
+       AND g.child_id = $1
+       AND st.status IS DISTINCT FROM 'dropout'
+       AND active_mapping.id IS NULL
+       AND (
+         $3 = '%%'
+         OR st.student_id ILIKE $3
+         OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $3
+       )
+     ORDER BY gr.number ASC NULLS LAST, name ASC NULLS LAST, st.student_id ASC
+     LIMIT 50`,
+    [params.schoolId, params.academicYear, search]
+  );
+
+  return rows.map((row) => ({
+    studentPkId: Number(row.student_pk_id),
+    name: row.name || row.student_id || "Unknown student",
+    studentId: row.student_id,
+    grade: row.grade === null ? null : Number(row.grade),
+    programId: row.program_id === null ? null : Number(row.program_id),
+  }));
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "23505";
+}
+
+async function hasEligibleAcademicMentor(params: {
+  schoolId: number;
+  schoolCode: string;
+  schoolRegion: string | null;
+  mentorUserId: number;
+}): Promise<boolean> {
+  const rows = await query<{ user_id: number | string }>(
+    `SELECT u.id AS user_id
+     FROM teacher t
+     JOIN "user" u ON u.id = t.user_id
+     JOIN user_permission up
+       ON (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
+      AND up.role = 'teacher'
+      AND up.revoked_at IS NULL
+     LEFT JOIN centre_positions cp
+       ON cp.user_id = u.id
+      AND cp.deleted_at IS NULL
+     LEFT JOIN centres c
+       ON c.id = cp.centre_id
+     WHERE t.is_af_teacher = true
+       AND t.exit_date IS NULL
+       AND u.id = $4
+       AND (
+         up.level = 3
+         OR up.school_codes @> ARRAY[$1]::text[]
+         OR ($2::text IS NOT NULL AND up.regions @> ARRAY[$2]::text[])
+         OR c.school_id = $3
+       )
+     LIMIT 1`,
+    [params.schoolCode, params.schoolRegion, params.schoolId, params.mentorUserId]
+  );
+  return rows.length > 0;
+}
+
+async function getEligibleMenteeProgram(params: {
+  schoolId: number;
+  academicYear: string;
+  studentPkId: number;
+}): Promise<number | null | undefined> {
+  const rows = await query<{ student_pk_id: number | string; program_id: number | string | null }>(
+    `SELECT st.id AS student_pk_id, roster_program.program_id
+     FROM group_user gu
+     JOIN "group" g ON g.id = gu.group_id
+     JOIN "user" u ON u.id = gu.user_id
+     JOIN student st ON st.user_id = u.id
+     JOIN enrollment_record er_grade
+       ON er_grade.user_id = u.id
+      AND er_grade.group_type = 'grade'
+      AND er_grade.is_current = true
+      AND er_grade.academic_year = $2
+     LEFT JOIN LATERAL (
+       SELECT b.program_id
+       FROM group_user gu_batch
+       JOIN "group" g_batch ON g_batch.id = gu_batch.group_id AND g_batch.type = 'batch'
+       JOIN batch b ON b.id = g_batch.child_id
+       WHERE gu_batch.user_id = u.id
+       ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
+       LIMIT 1
+     ) roster_program ON true
+     WHERE g.type = 'school'
+       AND g.child_id = $1
+       AND st.id = $3
+       AND st.status IS DISTINCT FROM 'dropout'
+     LIMIT 1`,
+    [params.schoolId, params.academicYear, params.studentPkId]
+  );
+  if (rows.length === 0) return undefined;
+  return rows[0].program_id === null ? null : Number(rows[0].program_id);
+}
+
+export async function createAcademicMentorshipMapping(params: {
+  schoolId: number;
+  schoolCode: string;
+  schoolRegion: string | null;
+  academicYear: string;
+  mentorUserId: number;
+  studentPkId: number;
+  assignedByUserId: number;
+}): Promise<AcademicMentorshipMutationResult> {
+  const mentorOk = await hasEligibleAcademicMentor(params);
+  if (!mentorOk) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Academic Mentor is not eligible for this School",
+    };
+  }
+
+  const activeRows = await query<{ id: number | string }>(
+    `SELECT id
+     FROM academic_mentorship_mentor_mentee_mappings
+     WHERE school_id = $1
+       AND academic_year = $2
+       AND student_id = $3
+       AND ended_at IS NULL
+     LIMIT 1`,
+    [params.schoolId, params.academicYear, params.studentPkId]
+  );
+  if (activeRows.length > 0) {
+    return { ok: false, status: 409, error: "Student already has a mentor mapped" };
+  }
+
+  const programId = await getEligibleMenteeProgram(params);
+  if (programId === undefined) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Mentee is not eligible for this School and academic year",
+    };
+  }
+
+  try {
+    const inserted = await query<{ id: number | string }>(
+      `INSERT INTO academic_mentorship_mentor_mentee_mappings
+         (school_id, academic_year, mentor_user_id, student_id, program_id, assigned_by_user_id, assigned_at, inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now(), now(), now())
+       RETURNING id`,
+      [
+        params.schoolId,
+        params.academicYear,
+        params.mentorUserId,
+        params.studentPkId,
+        programId,
+        params.assignedByUserId,
+      ]
+    );
+    return { ok: true, mappingId: Number(inserted[0].id) };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return { ok: false, status: 409, error: "Student already has a mentor mapped" };
+    }
+    throw error;
+  }
+}
+
+export async function getAcademicMentorshipActorUserId(
+  email: string,
+  permission: UserPermission
+): Promise<number | null> {
+  if (permission.user_id != null) return Number(permission.user_id);
+
+  const rows = await query<{ id: number | string }>(
+    `SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) ORDER BY id LIMIT 1`,
+    [email]
+  );
+  return rows.length > 0 ? Number(rows[0].id) : null;
+}
+
+export async function endAcademicMentorshipMapping(params: {
+  schoolId: number;
+  academicYear: string;
+  mappingId: number;
+  endedByUserId: number;
+}): Promise<AcademicMentorshipMutationResult> {
+  const updated = await query<{ id: number | string }>(
+    `UPDATE academic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(),
+         ended_by_user_id = $4,
+         updated_at = now()
+     WHERE id = $1
+       AND school_id = $2
+       AND academic_year = $3
+       AND ended_at IS NULL
+     RETURNING id`,
+    [params.mappingId, params.schoolId, params.academicYear, params.endedByUserId]
+  );
+
+  if (updated.length === 0) {
+    return { ok: false, status: 404, error: "Active Mapping not found" };
+  }
+
+  return { ok: true, mappingId: Number(updated[0].id) };
 }
 
 export async function listAccessibleAcademicMentorshipSchools(

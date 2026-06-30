@@ -6,6 +6,10 @@ vi.mock("./db", () => ({
 
 import { query } from "./db";
 import {
+  createAcademicMentorshipMapping,
+  endAcademicMentorshipMapping,
+  listAcademicMentorshipMenteeOptions,
+  listAcademicMentorshipMentorOptions,
   listAcademicMentorshipMappings,
   requireAcademicMentorshipAccess,
 } from "./academic-mentorship";
@@ -185,5 +189,152 @@ describe("listAcademicMentorshipMappings", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("listAcademicMentorshipMentorOptions", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("returns searchable completed Staff Management Teachers with effective access to the selected School", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        user_id: 101,
+        name: "Anita Mentor",
+        email: "anita@avantifellows.org",
+      },
+    ]);
+
+    const mentors = await listAcademicMentorshipMentorOptions({
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      search: "anita",
+    });
+
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("up.role = 'teacher'");
+    expect(sql).toContain("up.revoked_at IS NULL");
+    expect(sql).toContain("t.is_af_teacher = true");
+    expect(sql).toContain("t.exit_date IS NULL");
+    expect(sql).toContain("cp.deleted_at IS NULL");
+    expect(sql).toContain("ILIKE $4");
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      "SCH001",
+      "North",
+      20,
+      "%anita%",
+    ]);
+    expect(mentors).toEqual([
+      {
+        userId: 101,
+        name: "Anita Mentor",
+        email: "anita@avantifellows.org",
+      },
+    ]);
+  });
+});
+
+describe("listAcademicMentorshipMenteeOptions", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("returns searchable active unassigned Students from the selected School roster", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        student_pk_id: 201,
+        name: "Meena Student",
+        student_id: "STU001",
+        grade: 11,
+        program_id: 64,
+      },
+    ]);
+
+    const mentees = await listAcademicMentorshipMenteeOptions({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      search: "mee",
+    });
+
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("g.type = 'school'");
+    expect(sql).toContain("er_grade.academic_year = $2");
+    expect(sql).toContain("status IS DISTINCT FROM 'dropout'");
+    expect(sql).toContain("active_mapping.id IS NULL");
+    expect(sql).toContain("st.student_id ILIKE $3");
+    expect(mockQuery.mock.calls[0][1]).toEqual([20, "2026-2027", "%mee%"]);
+    expect(mentees).toEqual([
+      {
+        studentPkId: 201,
+        name: "Meena Student",
+        studentId: "STU001",
+        grade: 11,
+        programId: 64,
+      },
+    ]);
+  });
+});
+
+describe("createAcademicMentorshipMapping", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("creates an active Mapping with actor audit and the Mentee roster Program", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ user_id: 101 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ student_pk_id: 201, program_id: 64 }])
+      .mockResolvedValueOnce([{ id: 7 }]);
+
+    const result = await createAcademicMentorshipMapping({
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      mentorUserId: 101,
+      studentPkId: 201,
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({ ok: true, mappingId: 7 });
+    const insertCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO academic_mentorship_mentor_mentee_mappings")
+    );
+    expect(String(insertCall?.[0])).toContain("assigned_at");
+    expect(String(insertCall?.[0])).toContain("assigned_by_user_id");
+    expect(insertCall?.[1]).toEqual([
+      20,
+      "2026-2027",
+      101,
+      201,
+      64,
+      501,
+    ]);
+  });
+});
+
+describe("endAcademicMentorshipMapping", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("ends only an active Mapping and records the actor", async () => {
+    mockQuery.mockResolvedValueOnce([{ id: 7 }]);
+
+    const result = await endAcademicMentorshipMapping({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      mappingId: 7,
+      endedByUserId: 501,
+    });
+
+    expect(result).toEqual({ ok: true, mappingId: 7 });
+    expect(String(mockQuery.mock.calls[0][0])).toContain("ended_at = now()");
+    expect(String(mockQuery.mock.calls[0][0])).toContain("ended_by_user_id = $4");
+    expect(String(mockQuery.mock.calls[0][0])).toContain("ended_at IS NULL");
+    expect(mockQuery.mock.calls[0][1]).toEqual([7, 20, "2026-2027", 501]);
   });
 });
