@@ -1,0 +1,133 @@
+---
+name: student-addition
+description: Context for the Lakshya/JNV self-service student addition feature: one-by-one lateral entry, bulk upload, DB Service writes, validation, and permissions.
+triggers:
+  - "student addition"
+  - "bulk upload"
+  - "lateral entry"
+  - "create-with-enrollments"
+  - "G10 board"
+edges:
+  - target: context/architecture.md
+    condition: when seeing how the school page, LMS API route, and DB Service connect
+  - target: context/data-access.md
+    condition: before writing create/update/dropout/document mutations
+  - target: context/permissions.md
+    condition: before gating create/bulk/edit/delete routes
+  - target: patterns/add-api-route.md
+    condition: when adding LMS API routes for create or bulk upload
+  - target: patterns/db-service-write.md
+    condition: when proxying student writes to the DB Service
+last_updated: 2026-06-30
+---
+
+# Student Addition
+
+Source context: `lms-user-addition-discord-thread/` in the repo root. The PRD in that folder is now the default working artifact. Treat the Discord transcript, template CSV exports, and `Board_Values.numbers` preview as source evidence only when auditing whether the PRD is missing context.
+
+## Settled Product Shape
+- v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
+- Rollout plan is staff/PMs first, then schools after real upload feedback.
+- Both one-by-one add and bulk upload live inside `/school/[udise]`; there is no school selector.
+- School is resolved from the page route context server-side. Never read school from the form or uploaded file. Ignore any school column if present.
+- Bulk v1 uses synchronous `.xlsx` upload -> results table -> downloadable rejected-rows CSV -> user fixes offline and re-uploads that CSV directly. No editable in-browser preview and no drafts table for v1.
+- Deferred v2 idea: LLM/fuzzy cleanup pre-pass that suggests fixes only. Never auto-commit generated corrections.
+
+## Template Fields
+Canonical v1 fields live in PRD §6.2. Use that table as the field/API/DB contract; the spreadsheet exports are supporting evidence only.
+
+Current v1 fields:
+- Grade -> `g12_graduating_year` context and grade enrollment
+- Student Name -> `user.first_name` contains the full name in v1
+- Date of Birth -> `user.date_of_birth`
+- Gender -> `user.gender` (`Female`, `Male`, `Others`)
+- Category -> `student.category`
+- Physical Handicapped / Vikalang -> `student.physically_handicapped`
+- APAAR ID -> `student.apaar_id`
+- G10 board -> new DB Service field needed
+- Grade 10 Roll no -> new DB Service field `student.g10_roll_no`; also used to compose `student.student_id` when present
+- Board Stream -> `student.board_stream`
+- Primary Exam preparing for -> `student.stream`
+- Father Name -> `student.father_name`
+- Parents Phone Number -> `user.phone`
+- Yearly / Annual Family Income -> `student.annual_family_income`
+
+Father Name and Annual Family Income are optional in v1. Store them when present, validate Annual Family Income against the dropdown if present, and do not block creation when either is blank.
+
+Dropdowns come from the template exports. CBSE is the only board with an enforced G10 roll format: exactly 8 digits. Other boards are free-form after normalisation.
+
+No open implementation decisions remain in the PRD. School-login support/recovery is an ops runbook detail and intentionally out of scope for this implementation artifact.
+
+Audit minimums are decided in the PRD: capture actor, school/program scope, action, timestamp, upload id/filename/row counts for bulk, affected student identifiers, and important old/new values for edits/deletes.
+
+For school-change boundary, v1 behavior is decided: same-school duplicate says the student is already part of this school and shows the Student ID; another-school duplicate shows existing-match details on UI and errors out. V1 does not transfer students between schools.
+
+School-login ops details such as credential delivery, teacher/principal change, password loss, and school email access loss are out of scope for this PRD.
+
+Edit/dropout scope is decided: schools can edit normal profile/detail fields, grade, and stream; grade/stream changes must re-derive batch using the PRD rule and commit atomically with the student update. Schools cannot edit APAAR ID or G10 roll after creation in v1. The school-facing destructive action is Dropout, not Delete; it marks `student.status = "dropout"` through DB Service and hides the student from the active roster.
+
+Enrollment date handling is decided: LMS supplies DB Service `start_date` and `academic_year`; schools do not enter them. For creates, `start_date` is the successful creation date in Asia/Kolkata as `YYYY-MM-DD`. `academic_year` is derived from that date using an April-March year: April 1 or later -> `YYYY-YYYY+1`, January-March -> `YYYY-1-YYYY`. Keep this in one shared LMS backend helper for one-by-one and bulk create, with tests around March 31 / April 1. Do not use the hardcoded `CURRENT_ACADEMIC_YEAR` constant or the client-only `StudentTable.tsx` dropout helper for create flows.
+
+## Validation And Normalisation
+- APAAR ID or G10 Roll Number: at least one is required; both are allowed.
+- Duplicate APAAR and duplicate generated Student ID are blocked. Policy is first-registrant-wins.
+- Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. APAAR-only rows store `student.apaar_id` and leave `student.student_id` null.
+- G12 passing year: Grade 11 -> 2028 for AY26-27; Grade 12 -> 2027.
+- G10 roll normalisation: remove spaces, uppercase letters, then validate alphanumeric. Do not left-pad short rolls. Store the normalised Grade 10 Roll no separately from generated Student ID because Student ID is not equivalent to Grade 10 Roll no across programs.
+- Name normalisation: collapse spaces, remove full stops, proper-case words. Show the normalised value back before commit.
+- The file grade must match the upload context grade.
+- Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
+- Auth group is the constant `EnableStudents`.
+
+## LMS Code Context
+- School page gate and enrollment tab live in `src/app/school/[udise]/page.tsx`.
+- The page already resolves school by UDISE/code and checks passcode user scope or `canAccessSchoolSync`.
+- `students` feature access currently grants edit to all roles, passcode users get students edit, and `read_only` downgrades edit to view in `getFeatureAccess`.
+- Existing `NVS_GATED_FEATURES` does not include `students`, so Student Addition needs its own explicit `PROGRAM_IDS.NVS` allowlist check.
+- `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for existing-student writes. It checks school scope, read-only, and per-program ownership.
+- For create/bulk there is no existing student to resolve, so gate by resolved school: session -> route `[udise]` -> school code -> `canAccessSchool`/passcode match -> `students` `canEdit` -> NVS/JNV program gate.
+- Existing LMS write proxies are not safe enough for school rollout yet: `src/app/api/student/[id]/route.ts`, `src/app/api/student/route.ts`, and `src/app/api/student/dropout/route.ts` only check `session` before proxying. Retrofit the document route's permission pattern before schools get write access.
+- Existing dropout API path: LMS `POST /api/student/dropout` proxies to DB Service `PATCH /dropout`, which uses `DropoutService.process_dropout` to mark current enrollments non-current and update `student.status` to `dropout`. Keep this behavior, but harden permissions with `canAccessStudent(..., { requireEdit: true })` before school rollout.
+- `csv-parse` is installed in af_lms; no XLSX parser dependency is currently present. PRD now requires primary `.xlsx` upload support, so implementation needs an XLSX parser. Rejected-row retry is CSV.
+
+## DB Service Context
+Repo: `/Users/deepanshmathur/Documents/AF/db-service`.
+
+Existing endpoint: `POST /api/student/create-with-enrollments` in `lib/dbservice_web/controllers/student_controller.ex`.
+- Validates `academic_year` and `start_date`.
+- In practice, `start_date` is Ecto `:date` and must be ISO-castable; `academic_year` is required for non-auth-group enrollments but is only a string, so LMS must enforce `YYYY-YYYY` itself.
+- Requires at least one of `auth_group`, `school_code`, `batch_id`, or `grade`.
+- Enriches `grade` into `grade_id`.
+- Creates/updates user + student through `Users.create_or_update_student`.
+- Creates auth_group, school, batch, and grade enrollments through `Dbservice.DataImport.StudentEnrollment.create_enrollments`.
+
+Important caveat: the endpoint documentation/error branch says "Student already exists", but the current code path calls `Users.create_or_update_student`, which can update an existing student instead of returning `:student_exists`. Do not use it as-is for this feature.
+
+Final PRD decision:
+- Add a dedicated create-only bulk endpoint: `POST /api/student/bulk-create-with-enrollments`.
+- The one-by-one form sends a single-row payload to the same endpoint.
+- Final row statuses are `created`, `duplicate_in_file`, `already_exists`, and `rejected`.
+- Existing matches never update records. APAAR match or generated Student ID match returns `already_exists`; if those identifiers point to different students, return `rejected`.
+- Each created row is transactional across user, student, auth-group enrolment, school enrolment, batch enrolment, and grade enrolment.
+- Re-upload is idempotent: already-created rows return `already_exists`, with no duplicate and no overwrite.
+
+DB Service work still needed:
+- Add `g10_board` and `g10_roll_no` columns to `student`, cast them in `Dbservice.Users.Student`, and include them in JSON/swagger if the API returns them.
+- Add the dedicated create-only bulk endpoint above. Desired v1 behavior from the PRD: LMS validates first, DB Service enforces uniqueness/no-overwrite/ownership, commits good rows, and reports duplicate/existing/rejected rows.
+
+## Batch Mapping
+Initial prod check showed `batch.metadata.grade + batch.metadata.stream` was ambiguous for NVS because both old `EnableStudents_11_25` / `EnableStudents_12_25` batches and new Lakshya `2027` / `2028` batches carried the same metadata. The team cleared conflicting metadata on the old batches; prod recheck on 2026-06-30 showed exactly one matching NVS batch for each v1 Grade x Primary Stream pair.
+
+Final PRD rule: derive by `program_id = 64`, metadata grade, and metadata stream. Do not use `end_date` or `inserted_at` as a tie-breaker in v1. If zero or multiple batches match, reject as a system configuration error.
+
+Expected AY26-27 derived values from current DB data:
+- Grade 12 Engineering -> stream `engineering` -> `EnableStudents_TP_2027_engg_A001`
+- Grade 11 Engineering -> stream `engineering` -> `EnableStudents_TP_2028_engg_A001`
+- Grade 12 Medical -> stream `medical` -> `EnableStudents_TP_2027_med_A001`
+- Grade 11 Medical -> stream `medical` -> `EnableStudents_TP_2028_med_A001`
+- Grade 12 CA -> stream `ca` -> `EnableStudents_TP_2027_ca_A001`
+- Grade 11 CA -> stream `ca` -> `EnableStudents_TP_2028_ca_A001`
+- Grade 12 CLAT -> stream `clat` -> `EnableStudents_TP_2027_clat_A001`
+- Grade 11 CLAT -> stream `clat` -> `EnableStudents_TP_2028_clat_A001`
+
+Assume the team will correct the old batch-id spelling typo before implementation. `No stream` is out of v1.

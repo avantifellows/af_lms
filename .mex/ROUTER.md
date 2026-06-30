@@ -18,9 +18,11 @@ edges:
     condition: when reading or writing data and unsure which backend to use
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
+  - target: context/student-addition.md
+    condition: when working on self-service student addition, bulk upload, lateral entry, or school-facing edit/delete rollout
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-06-25
+last_updated: 2026-06-29
 ---
 
 # Session Bootstrap
@@ -61,6 +63,7 @@ Load the relevant file based on the current task. Always load `context/architect
 | Gating a route / access control / 403s | `context/permissions.md` |
 | Reading or writing data (Postgres / DB Service / BigQuery / DynamoDB / S3) | `context/data-access.md` |
 | PM school visits or visit action types | `context/visits.md` |
+| Student addition / bulk upload / lateral entry | `context/student-addition.md` |
 | Any specific task | Check `patterns/INDEX.md` for a matching pattern |
 
 ## Behavioural Contract
