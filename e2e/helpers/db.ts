@@ -13,6 +13,7 @@ import { PRINCIPAL_INTERACTION_CONFIG } from "../../src/lib/principal-interactio
 import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-discussion";
 import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
 import { SCHOOL_STAFF_INTERACTION_CONFIG } from "../../src/lib/school-staff-interaction";
+import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -481,10 +482,10 @@ export async function seedStudentsForTest(
          user_id, group_id, group_type, academic_year, is_current,
          inserted_at, updated_at
        )
-       SELECT $1, $2, 'grade', '2026-27', true,
+       SELECT $1, $2, 'grade', $3, true,
               (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
        WHERE NOT EXISTS (SELECT 1 FROM updated)`,
-      [userId, gradeId]
+      [userId, gradeId, CURRENT_ACADEMIC_YEAR]
     );
 
     seeded.push({

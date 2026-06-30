@@ -152,6 +152,23 @@ ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   updated_at = NOW();
 
+INSERT INTO public.topic_curriculum
+  (topic_id, curriculum_id, priority, priority_text, inserted_at, updated_at)
+SELECT topic_id, curriculum_id, priority, priority_text, NOW(), NOW()
+FROM (
+  VALUES
+    (900075011::bigint, 1::bigint, 1::integer, 'e2e'),
+    (900075021::bigint, 1::bigint, 1::integer, 'e2e'),
+    (900075031::bigint, 9::bigint, 1::integer, 'e2e'),
+    (900075041::bigint, 2::bigint, 1::integer, 'e2e')
+) AS fixture_topics(topic_id, curriculum_id, priority, priority_text)
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM public.topic_curriculum existing
+  WHERE existing.topic_id = fixture_topics.topic_id
+    AND existing.curriculum_id = fixture_topics.curriculum_id
+);
+
 INSERT INTO public.lms_chapter_exam_configs
   (chapter_id, exam_track, is_in_syllabus, prescribed_minutes, coverage_sequence, inserted_by_email, updated_by_email)
 VALUES

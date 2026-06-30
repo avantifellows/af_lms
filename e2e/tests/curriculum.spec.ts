@@ -151,13 +151,14 @@ test.describe("Curriculum read path", () => {
     await expect(
       adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
     ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
 
     await adminPage.getByRole("button", { name: "+ Add Log" }).click();
     await expect(adminPage.getByText("Log Teaching Session")).toBeVisible();
-    const alphaRow = adminPage
+    const betaCompletionRow = adminPage
       .locator("[data-chapter-row]")
-      .filter({ hasText: "Fixture Alpha Physics" });
-    await alphaRow.getByRole("checkbox", { name: "Complete" }).check();
+      .filter({ hasText: "Fixture Beta Physics" });
+    await betaCompletionRow.getByRole("checkbox", { name: "Complete" }).check();
     await adminPage.getByRole("button", { name: "Save Log" }).click();
 
     await expect(adminPage.getByText("Log Teaching Session")).toBeHidden();
@@ -197,6 +198,7 @@ test.describe("Curriculum read path", () => {
     await expect(
       adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
     ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
     await adminPage.getByRole("button", { name: "Chapters" }).click();
     await alphaEditRow.getByText("Fixture Alpha Physics").click();
     await expect(alphaEditRow.getByText("1/1")).toBeVisible();
@@ -210,6 +212,7 @@ test.describe("Curriculum read path", () => {
     await expect(
       adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
     ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
 
     await adminPage.getByRole("button", { name: "+ Add Log" }).click();
     const betaRow = adminPage
