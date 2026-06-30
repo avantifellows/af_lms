@@ -497,6 +497,43 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(result!.chapters[0].avg_score).toBe(50);
     });
 
+    it("surfaces the stream-keyed chapter priority on the chapter analysis row (#128 item 2)", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            chapter_performance: [
+              { chapter_name: "Optics", chapter_id: "c-opt", subject: "Physics", marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 1, priority: "High" },
+              { chapter_name: "Heat", chapter_id: "c-heat", subject: "Physics", marks_scored: 2, max_marks_possible: 4, accuracy: 50, total_questions: 1, priority: "None" },
+            ],
+            subject_performance: [{ subject: "Physics", percentage: 75, accuracy: 75, total_questions: 2, num_skipped: 0 }],
+          }),
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            chapter_performance: [
+              // Same chapters, priority omitted on this doc — the populated
+              // value from the other doc must still win.
+              { chapter_name: "Optics", chapter_id: "c-opt", subject: "Physics", marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 1 },
+              { chapter_name: "Heat", chapter_id: "c-heat", subject: "Physics", marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 1 },
+            ],
+            subject_performance: [{ subject: "Physics", percentage: 0, accuracy: 0, total_questions: 2, num_skipped: 0 }],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      const optics = result!.chapters.find((c) => c.chapter_id === "c-opt")!;
+      const heat = result!.chapters.find((c) => c.chapter_id === "c-heat")!;
+      expect(optics.priority).toBe("High");
+      // "None" is treated as untagged -> null so the UI renders an em-dash.
+      expect(heat.priority).toBeNull();
+    });
+
     it("computes chapter attempt_rate from chapter-level num_skipped (not subject's)", async () => {
       // Subject-level: 10 questions, 0 skipped → 100% attempt rate.
       // Chapter Mechanics: 5 questions, 4 skipped → 20% attempt rate.

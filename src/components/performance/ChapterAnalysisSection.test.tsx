@@ -8,6 +8,7 @@ const CHAPTERS: ChapterAnalysisRow[] = [
     subject: "Physics",
     chapter_name: "Kinematics",
     chapter_id: "chap-kin",
+    priority: "High",
     avg_score: 65,
     accuracy: 70,
     attempt_rate: 80,
@@ -18,6 +19,7 @@ const CHAPTERS: ChapterAnalysisRow[] = [
     subject: "Physics",
     chapter_name: "Dynamics",
     chapter_id: "chap-dyn",
+    priority: null,
     avg_score: 50,
     accuracy: 60,
     attempt_rate: 75,
@@ -99,6 +101,13 @@ describe("ChapterAnalysisSection", () => {
   it("does not fetch question data before any chapter is expanded", () => {
     render(<ChapterAnalysisSection {...defaultProps} />);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("renders the chapter priority tag, with an em-dash for untagged chapters", () => {
+    render(<ChapterAnalysisSection {...defaultProps} />);
+    // Kinematics is High; Dynamics has no tag (null) -> em-dash.
+    expect(screen.getByText("High")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 
   it("fetches question data on first chapter expand and renders only that chapter's questions", async () => {
@@ -197,6 +206,7 @@ describe("ChapterAnalysisSection", () => {
         subject: "Chemistry",
         chapter_name: "11C3 - Periodic Table",
         chapter_id: "chap-periodic",
+        priority: "Medium",
         avg_score: 0,
         accuracy: 4,
         attempt_rate: 37,

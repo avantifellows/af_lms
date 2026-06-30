@@ -103,6 +103,10 @@ interface V2ChapterPerformance {
   chapter_name?: string;
   chapter_id?: string | null;
   subject?: string;
+  // Stream-keyed chapter priority (High/Medium/Low/None/null), written by
+  // etl-next's student_reports_v2_flow from chapter_tagging — already resolved
+  // to the student's stream, so af_lms just surfaces it.
+  priority?: string | null;
   marks_scored?: number | null;
   max_marks_possible?: number | null;
   percentage?: number | null;
@@ -276,6 +280,7 @@ export async function getTestDeepDiveFromDynamo(
       subject: string;
       chapter_name: string;
       chapter_id: string | null;
+      priority: string | null;
       totalScore: number;
       totalAcc: number;
       totalAttempt: number;
@@ -349,12 +354,18 @@ export async function getTestDeepDiveFromDynamo(
           subject: sectionDisplay,
           chapter_name: c.chapter_name || "",
           chapter_id: c.chapter_id || null,
+          priority: null,
           totalScore: 0,
           totalAcc: 0,
           totalAttempt: 0,
           totalQ: 0,
           count: 0,
         };
+        // Priority is constant per chapter across students; keep the first
+        // meaningful (non-empty, non-"None") value we see.
+        if (!chEx.priority && c.priority && c.priority !== "None") {
+          chEx.priority = c.priority;
+        }
         chEx.totalScore += chPct;
         chEx.totalAcc += toNum(c.accuracy);
         chEx.totalAttempt += chAttemptRate;
@@ -440,6 +451,7 @@ export async function getTestDeepDiveFromDynamo(
       subject: agg.subject,
       chapter_name: agg.chapter_name,
       chapter_id: agg.chapter_id,
+      priority: agg.priority,
       avg_score: Math.round((agg.totalScore / agg.count) * 10) / 10,
       accuracy: Math.round((agg.totalAcc / agg.count) * 10) / 10,
       attempt_rate: Math.round((agg.totalAttempt / agg.count) * 10) / 10,
