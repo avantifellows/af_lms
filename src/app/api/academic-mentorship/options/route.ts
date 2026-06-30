@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const access = await requireAcademicMentorshipAccess(session, "view", {
+  const access = await requireAcademicMentorshipAccess(session, "edit", {
     schoolCode,
   });
   if (!access.ok) {

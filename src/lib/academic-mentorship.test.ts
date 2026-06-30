@@ -216,19 +216,16 @@ describe("listAcademicMentorshipTeacherMentees", () => {
     const mentees = await listAcademicMentorshipTeacherMentees({
       schoolId: 20,
       academicYear: "2026-2027",
-      mentorEmail: "teacher@avantifellows.org",
+      mentorUserId: 101,
     });
 
     const sql = String(mockQuery.mock.calls[0][0]);
     expect(sql).toContain("m.academic_year = $2");
-    expect(sql).toContain("LOWER(mentor.email) = LOWER($3)");
+    expect(sql).toContain("m.mentor_user_id = $3");
+    expect(sql).not.toContain("LOWER(mentor.email)");
     expect(sql).toContain("m.ended_at IS NULL");
     expect(sql).toContain("ORDER BY gr.number ASC");
-    expect(mockQuery.mock.calls[0][1]).toEqual([
-      20,
-      "2026-2027",
-      "teacher@avantifellows.org",
-    ]);
+    expect(mockQuery.mock.calls[0][1]).toEqual([20, "2026-2027", 101]);
     expect(mentees).toEqual([
       {
         studentPkId: 202,
@@ -309,7 +306,8 @@ describe("listAcademicMentorshipMenteeOptions", () => {
 
     const sql = String(mockQuery.mock.calls[0][0]);
     expect(sql).toContain("g.type = 'school'");
-    expect(sql).toContain("er_grade.academic_year = $2");
+    expect(sql).toContain("er.academic_year = $2");
+    expect(sql).not.toContain("er_grade.is_current = true");
     expect(sql).toContain("status IS DISTINCT FROM 'dropout'");
     expect(sql).toContain("active_mapping.id IS NULL");
     expect(sql).toContain("st.student_id ILIKE $3");

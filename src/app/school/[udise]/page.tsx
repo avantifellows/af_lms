@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
+  getAcademicMentorshipActorUserId,
   listAcademicMentorshipMappings,
   listAcademicMentorshipTeacherMentees,
   type AcademicMentorshipMappingGroup,
@@ -457,12 +458,16 @@ export default async function SchoolPage({ params }: PageProps) {
         academic_year: CURRENT_ACADEMIC_YEAR,
       }).toString()}`
     : undefined;
-  const teacherMentees =
+  const teacherMentorUserId =
     mentorshipAccess.canView && permission?.role === "teacher"
+      ? await getAcademicMentorshipActorUserId(permission.email, permission)
+      : null;
+  const teacherMentees =
+    teacherMentorUserId !== null
       ? await listAcademicMentorshipTeacherMentees({
           schoolId,
           academicYear: CURRENT_ACADEMIC_YEAR,
-          mentorEmail: permission.email,
+          mentorUserId: teacherMentorUserId,
         })
       : null;
   const mentorshipGroups =

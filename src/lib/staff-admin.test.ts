@@ -329,6 +329,32 @@ describe("updateTeacherRecord", () => {
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
   });
 
+  it("does not break teacher exits before the Academic Mentorship table is deployed", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+    vi.stubEnv("DB_SERVICE_URL", "https://db.example/api");
+    vi.stubEnv("DB_SERVICE_TOKEN", "token");
+    const missingTable = Object.assign(new Error("relation does not exist"), {
+      code: "42P01",
+    });
+
+    mockSchemaReady();
+    mockQuery
+      .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
+      .mockRejectedValueOnce(missingTable);
+
+    const result = await updateTeacherRecord({
+      id: 1,
+      body: { exit_date: "2026-06-12" },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://db.example/api/teacher/1",
+      expect.objectContaining({ method: "PATCH" })
+    );
+  });
+
   it("blocks teacher exit when the teacher has active Academic Mentees", async () => {
     const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", mockFetch);

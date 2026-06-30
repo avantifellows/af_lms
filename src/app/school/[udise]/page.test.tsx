@@ -12,6 +12,7 @@ const {
   mockRedirect,
   mockNotFound,
   mockProcessStudents,
+  mockGetAcademicMentorshipActorUserId,
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
 } = vi.hoisted(() => ({
@@ -27,6 +28,7 @@ const {
     throw new Error("NOT_FOUND");
   }),
   mockProcessStudents: vi.fn(),
+  mockGetAcademicMentorshipActorUserId: vi.fn(),
   mockListAcademicMentorshipMappings: vi.fn(),
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
 }));
@@ -52,6 +54,7 @@ vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
 }));
 vi.mock("@/lib/academic-mentorship", () => ({
+  getAcademicMentorshipActorUserId: mockGetAcademicMentorshipActorUserId,
   listAcademicMentorshipMappings: mockListAcademicMentorshipMappings,
   listAcademicMentorshipTeacherMentees: mockListAcademicMentorshipTeacherMentees,
 }));
@@ -312,6 +315,7 @@ describe("SchoolPage (server component)", () => {
     });
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
     mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
   });
 
   // --- Auth redirects ---
@@ -1247,7 +1251,7 @@ describe("SchoolPage (server component)", () => {
     expect(mockListAcademicMentorshipTeacherMentees).toHaveBeenCalledWith({
       schoolId: 20,
       academicYear: "2026-2027",
-      mentorEmail: "teacher@avantifellows.org",
+      mentorUserId: 101,
     });
     expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
   });

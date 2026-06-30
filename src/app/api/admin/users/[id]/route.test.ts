@@ -100,6 +100,25 @@ describe("DELETE /api/admin/users/[id]", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("resolves legacy null permission user_id by email before mapping-history checks", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
+      .mockResolvedValueOnce([{ school_code: "54019", academic_year: "2026-2027" }]);
+
+    const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(409);
+    expect(String(mockQuery.mock.calls[0][0])).toContain(
+      "COALESCE(up.user_id, u.id) AS user_id"
+    );
+    expect(String(mockQuery.mock.calls[0][0])).toContain("LOWER(u.email) = LOWER(up.email)");
+    expect(mockQuery.mock.calls[1][1]).toEqual([70]);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("deletes another user and vacates their centre seats", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);

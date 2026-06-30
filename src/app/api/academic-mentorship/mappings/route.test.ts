@@ -56,6 +56,43 @@ describe("GET /api/academic-mentorship/mappings", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("rejects Teachers from the full-school mapping API", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "teacher@avantifellows.org" },
+    });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "teacher@avantifellows.org",
+          level: 1,
+          role: "teacher",
+          school_codes: ["SCH001"],
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ]);
+
+    const response = await GET(
+      request(
+        "/api/academic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&include_history=true"
+      )
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe("Forbidden");
+    expect(
+      mockQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("academic_mentorship_mentor_mentee_mappings")
+      )
+    ).toBe(false);
+  });
+
   it("returns active grouped mappings by default", async () => {
     mockGetServerSession.mockResolvedValue({
       user: { email: "admin@avantifellows.org" },

@@ -172,6 +172,12 @@ function hasAcademicMentorshipProgramAccess(permission: UserPermission): boolean
   return context.programIds.some((id) => allowed.has(id));
 }
 
+export function isAcademicMentorshipManagementRole(
+  permission: UserPermission
+): boolean {
+  return permission.role === "admin" || permission.role === "program_admin";
+}
+
 export async function requireAcademicMentorshipAccess(
   session: AcademicMentorshipSession,
   _action: AcademicMentorshipAction,
@@ -237,11 +243,15 @@ export async function listAcademicMentorshipMappings(params: {
      JOIN "user" mentor ON mentor.id = m.mentor_user_id
      JOIN student st ON st.id = m.student_id
      JOIN "user" mentee ON mentee.id = st.user_id
-     LEFT JOIN enrollment_record er_grade
-       ON er_grade.user_id = mentee.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = m.academic_year
+     LEFT JOIN LATERAL (
+       SELECT er.group_id
+       FROM enrollment_record er
+       WHERE er.user_id = mentee.id
+         AND er.group_type = 'grade'
+         AND er.academic_year = m.academic_year
+       ORDER BY er.is_current DESC, er.updated_at DESC NULLS LAST, er.id DESC
+       LIMIT 1
+     ) er_grade ON true
      LEFT JOIN grade gr ON gr.id = er_grade.group_id
      WHERE m.school_id = $1
        AND m.academic_year = $2
@@ -287,7 +297,7 @@ export async function listAcademicMentorshipMappings(params: {
 export async function listAcademicMentorshipTeacherMentees(params: {
   schoolId: number;
   academicYear: string;
-  mentorEmail: string;
+  mentorUserId: number;
 }): Promise<AcademicMentorshipTeacherMentee[]> {
   const rows = await query<AcademicMentorshipTeacherMenteeRow>(
     `SELECT
@@ -297,21 +307,24 @@ export async function listAcademicMentorshipTeacherMentees(params: {
        gr.number AS mentee_grade,
        m.assigned_at::date::text AS assigned_date
      FROM academic_mentorship_mentor_mentee_mappings m
-     JOIN "user" mentor ON mentor.id = m.mentor_user_id
      JOIN student st ON st.id = m.student_id
      JOIN "user" mentee ON mentee.id = st.user_id
-     LEFT JOIN enrollment_record er_grade
-       ON er_grade.user_id = mentee.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = m.academic_year
+     LEFT JOIN LATERAL (
+       SELECT er.group_id
+       FROM enrollment_record er
+       WHERE er.user_id = mentee.id
+         AND er.group_type = 'grade'
+         AND er.academic_year = m.academic_year
+       ORDER BY er.is_current DESC, er.updated_at DESC NULLS LAST, er.id DESC
+       LIMIT 1
+     ) er_grade ON true
      LEFT JOIN grade gr ON gr.id = er_grade.group_id
      WHERE m.school_id = $1
        AND m.academic_year = $2
-       AND LOWER(mentor.email) = LOWER($3)
+       AND m.mentor_user_id = $3
        AND m.ended_at IS NULL
      ORDER BY gr.number ASC NULLS LAST, mentee_name ASC NULLS LAST, st.student_id ASC`,
-    [params.schoolId, params.academicYear, params.mentorEmail]
+    [params.schoolId, params.academicYear, params.mentorUserId]
   );
 
   return rows.map((row) => ({
@@ -389,11 +402,15 @@ export async function listAcademicMentorshipMenteeOptions(params: {
      JOIN "group" g ON g.id = gu.group_id
      JOIN "user" u ON u.id = gu.user_id
      JOIN student st ON st.user_id = u.id
-     JOIN enrollment_record er_grade
-       ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = $2
+     JOIN LATERAL (
+       SELECT er.group_id
+       FROM enrollment_record er
+       WHERE er.user_id = u.id
+         AND er.group_type = 'grade'
+         AND er.academic_year = $2
+       ORDER BY er.is_current DESC, er.updated_at DESC NULLS LAST, er.id DESC
+       LIMIT 1
+     ) er_grade ON true
      LEFT JOIN grade gr ON gr.id = er_grade.group_id
      LEFT JOIN LATERAL (
        SELECT b.program_id
@@ -487,11 +504,15 @@ async function getEligibleMenteeProgramWithQuery(
      JOIN "group" g ON g.id = gu.group_id
      JOIN "user" u ON u.id = gu.user_id
      JOIN student st ON st.user_id = u.id
-     JOIN enrollment_record er_grade
-       ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = $2
+     JOIN LATERAL (
+       SELECT er.group_id
+       FROM enrollment_record er
+       WHERE er.user_id = u.id
+         AND er.group_type = 'grade'
+         AND er.academic_year = $2
+       ORDER BY er.is_current DESC, er.updated_at DESC NULLS LAST, er.id DESC
+       LIMIT 1
+     ) er_grade ON true
      LEFT JOIN LATERAL (
        SELECT b.program_id
        FROM group_user gu_batch
@@ -716,11 +737,15 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
      JOIN "group" g ON g.id = gu.group_id
      JOIN "user" u ON u.id = gu.user_id
      JOIN student st ON st.user_id = u.id
-     JOIN enrollment_record er_grade
-       ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = $2
+     JOIN LATERAL (
+       SELECT er.group_id
+       FROM enrollment_record er
+       WHERE er.user_id = u.id
+         AND er.group_type = 'grade'
+         AND er.academic_year = $2
+       ORDER BY er.is_current DESC, er.updated_at DESC NULLS LAST, er.id DESC
+       LIMIT 1
+     ) er_grade ON true
      LEFT JOIN LATERAL (
        SELECT b.program_id
        FROM group_user gu_batch

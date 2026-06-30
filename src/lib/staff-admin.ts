@@ -169,21 +169,32 @@ function academicMentorshipManagementLink(
   )}&academic_year=${encodeURIComponent(row.academic_year)}`;
 }
 
+function isMissingAcademicMentorshipMappingSchema(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "42P01" || code === "42703";
+}
+
 async function blockIfActiveAcademicMentees(
   mentorUserId: number
 ): Promise<StaffValidationFailure | null> {
-  const rows = await query<AcademicMentorshipBlockerRow>(
-    `SELECT s.code AS school_code,
-            m.academic_year,
-            COUNT(*) AS mentee_count
-     FROM academic_mentorship_mentor_mentee_mappings m
-     JOIN school s ON s.id = m.school_id
-     WHERE m.mentor_user_id = $1
-       AND m.ended_at IS NULL
-     GROUP BY s.code, m.academic_year
-     ORDER BY m.academic_year DESC, s.code ASC`,
-    [mentorUserId]
-  );
+  let rows: AcademicMentorshipBlockerRow[];
+  try {
+    rows = await query<AcademicMentorshipBlockerRow>(
+      `SELECT s.code AS school_code,
+              m.academic_year,
+              COUNT(*) AS mentee_count
+       FROM academic_mentorship_mentor_mentee_mappings m
+       JOIN school s ON s.id = m.school_id
+       WHERE m.mentor_user_id = $1
+         AND m.ended_at IS NULL
+       GROUP BY s.code, m.academic_year
+       ORDER BY m.academic_year DESC, s.code ASC`,
+      [mentorUserId]
+    );
+  } catch (error) {
+    if (isMissingAcademicMentorshipMappingSchema(error)) return null;
+    throw error;
+  }
   if (rows.length === 0) return null;
 
   const count = rows.reduce((total, row) => total + Number(row.mentee_count), 0);
@@ -198,16 +209,22 @@ async function blockIfActiveAcademicMentees(
 export async function blockIfAcademicMentorshipHistory(
   mentorUserId: number
 ): Promise<StaffValidationFailure | null> {
-  const rows = await query<AcademicMentorshipBlockerTarget>(
-    `SELECT s.code AS school_code,
-            m.academic_year
-     FROM academic_mentorship_mentor_mentee_mappings m
-     JOIN school s ON s.id = m.school_id
-     WHERE m.mentor_user_id = $1
-     GROUP BY s.code, m.academic_year
-     ORDER BY m.academic_year DESC, s.code ASC`,
-    [mentorUserId]
-  );
+  let rows: AcademicMentorshipBlockerTarget[];
+  try {
+    rows = await query<AcademicMentorshipBlockerTarget>(
+      `SELECT s.code AS school_code,
+              m.academic_year
+       FROM academic_mentorship_mentor_mentee_mappings m
+       JOIN school s ON s.id = m.school_id
+       WHERE m.mentor_user_id = $1
+       GROUP BY s.code, m.academic_year
+       ORDER BY m.academic_year DESC, s.code ASC`,
+      [mentorUserId]
+    );
+  } catch (error) {
+    if (isMissingAcademicMentorshipMappingSchema(error)) return null;
+    throw error;
+  }
   if (rows.length === 0) return null;
 
   return {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import AcademicMentorshipManager from "./AcademicMentorshipManager";
@@ -44,6 +44,39 @@ describe("AcademicMentorshipManager", () => {
     expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
     expect(screen.getByText("Meena Student")).toBeInTheDocument();
     expect(screen.getByText("Ravi Student")).toBeInTheDocument();
+  });
+
+  it("syncs displayed mappings when server props change", async () => {
+    const nextGroup = {
+      mentor: { userId: 102, name: "New Mentor", email: "new@avantifellows.org" },
+      menteeCount: 1,
+      mappings: [
+        {
+          id: 9,
+          mentee: { studentPkId: 203, name: "Fresh Student", studentId: "STU003", grade: 11 },
+          assignedDate: "2026-07-02",
+          endedDate: null,
+          status: "active" as const,
+        },
+      ],
+    };
+    const { rerender } = render(
+      <AcademicMentorshipManager {...baseProps} canEdit={false} />
+    );
+
+    rerender(
+      <AcademicMentorshipManager
+        {...baseProps}
+        includeHistory={false}
+        initialGroups={[nextGroup]}
+        canEdit={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Fresh Student")).toBeInTheDocument();
+      expect(screen.queryByText("Ravi Student")).not.toBeInTheDocument();
+    });
   });
 
   it("adds a Mapping and refreshes the table", async () => {

@@ -27,7 +27,7 @@ describe("GET /api/academic-mentorship/options", () => {
     mockQuery.mockReset();
   });
 
-  it("returns searchable Academic Mentor options after view access is granted", async () => {
+  it("returns searchable Academic Mentor options after edit access is granted", async () => {
     mockGetServerSession.mockResolvedValue({
       user: { email: "admin@avantifellows.org" },
     });
@@ -138,5 +138,32 @@ describe("GET /api/academic-mentorship/options", () => {
     expect(response.status).toBe(401);
     expect(body.error).toBe("Unauthorized");
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("rejects read-only users before exposing selector options", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "readonly@avantifellows.org" },
+    });
+    mockQuery.mockResolvedValueOnce([
+      {
+        email: "readonly@avantifellows.org",
+        level: 3,
+        role: "program_admin",
+        school_codes: null,
+        regions: null,
+        program_ids: [PROGRAM_IDS.NVS],
+        read_only: true,
+        user_id: 501,
+      },
+    ]);
+
+    const response = await GET(
+      request("/api/academic-mentorship/options?type=mentors&school_code=SCH001")
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe("Forbidden");
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 });

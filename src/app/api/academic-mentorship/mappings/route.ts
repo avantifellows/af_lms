@@ -6,6 +6,7 @@ import {
   createAcademicMentorshipMapping,
   endAcademicMentorshipMapping,
   getAcademicMentorshipActorUserId,
+  isAcademicMentorshipManagementRole,
   isAcademicMentorshipEditableYear,
   isValidAcademicYear,
   listAcademicMentorshipMappings,
@@ -43,6 +44,9 @@ export async function GET(request: NextRequest) {
   });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  if (!isAcademicMentorshipManagementRole(access.permission)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const includeHistory = request.nextUrl.searchParams.get("include_history") === "true";
   const groups = await listAcademicMentorshipMappings({

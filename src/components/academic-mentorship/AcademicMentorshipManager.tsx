@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import Toast from "@/components/Toast";
 import { Button, Card, Input, Select } from "@/components/ui";
@@ -90,6 +90,10 @@ export default function AcademicMentorshipManager({
     academic_year: academicYear,
   });
   const templateHref = `/api/academic-mentorship/mappings/import?${templateParams.toString()}`;
+
+  useEffect(() => {
+    setGroups(initialGroups);
+  }, [schoolCode, academicYear, includeHistory, initialGroups]);
 
   async function refreshMappings() {
     const params = new URLSearchParams({

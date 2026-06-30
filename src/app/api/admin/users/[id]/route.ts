@@ -25,7 +25,15 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
   // Prevent deleting yourself
   const userToDelete = await query<{ email: string; user_id: number | null }>(
-    `SELECT email, user_id FROM user_permission WHERE id = $1`,
+    `SELECT up.email,
+            COALESCE(up.user_id, u.id) AS user_id
+     FROM user_permission up
+     LEFT JOIN "user" u
+       ON up.user_id IS NULL
+      AND LOWER(u.email) = LOWER(up.email)
+     WHERE up.id = $1
+     ORDER BY u.id
+     LIMIT 1`,
     [id]
   );
 
