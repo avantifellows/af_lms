@@ -313,8 +313,13 @@ export async function getTestDeepDiveFromDynamo(
       const sectionDisplay = si.subject || "";
       const sectionKey = sectionDisplay.toLowerCase();
 
-      const total = toNum(si.total_questions);
-      const skipped = toNum(si.num_skipped);
+      // subject_performance stamps TEST-WIDE totals onto every subject row
+      // (e.g. total_questions=75 and num_skipped=25 repeated across all three
+      // subjects of a 75-question JEE test), so the per-subject question count
+      // and attempt rate must be derived from this subject's chapters instead.
+      const subjectChapters = chaptersBySubject.get(sectionKey) || [];
+      const total = subjectChapters.reduce((sum, c) => sum + toNum(c.total_questions), 0);
+      const skipped = subjectChapters.reduce((sum, c) => sum + toNum(c.num_skipped), 0);
       const attemptRate = total > 0 ? ((total - skipped) / total) * 100 : 0;
 
       // Subject analysis aggregates across the class.
@@ -334,7 +339,6 @@ export async function getTestDeepDiveFromDynamo(
       subjectAggMap.set(sectionKey, existing);
 
       // Per-student chapter rows for this subject.
-      const subjectChapters = chaptersBySubject.get(sectionKey) || [];
       const chapters: StudentChapterScore[] = subjectChapters.map((c) => {
         const chTotal = toNum(c.total_questions);
         const chMax = toNum(c.max_marks_possible);

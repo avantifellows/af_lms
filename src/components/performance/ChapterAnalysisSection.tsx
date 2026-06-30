@@ -288,7 +288,7 @@ function QuestionBreakdown({
           {questions.map((q, idx) => (
             <tr key={q.question_id} className="border-b border-border/15">
               <td className="px-3 py-2 text-sm font-mono text-text-primary">
-                Q{q.position_index ?? idx + 1}
+                Q{q.position_index == null ? idx + 1 : q.position_index + 1}
               </td>
               <td className="px-3 py-2 text-sm font-mono text-text-primary">{q.attempt_rate}%</td>
               <td className="px-3 py-2 text-sm font-mono text-text-primary">{q.accuracy}%</td>
