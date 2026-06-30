@@ -20,7 +20,7 @@ edges:
     condition: when working on PM school visits or visit action types
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-06-25
+last_updated: 2026-07-01
 ---
 
 # Session Bootstrap
@@ -37,6 +37,7 @@ Then read this file fully before doing anything else in this session.
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
 - PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
+- Academic Mentorship foundation: `academic_mentorship` feature key, guarded `/admin/academic-mentorship` read-only grouped mapping overview, and `/api/academic-mentorship/mappings`.
 - Deploy via AWS Amplify; ~1341 unit tests (Vitest/RTL) + ~39 E2E (Playwright).
 
 **Not yet built / in progress:**

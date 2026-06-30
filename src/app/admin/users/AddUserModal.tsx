@@ -297,7 +297,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
               </div>
               {isNVSOnly && (
                 <p className="mt-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
-                  Note: NVS-only users have limited access (students and analytics only, no visits/curriculum/mentorship).
+                  Note: NVS-only users have limited access (students and analytics only, no visits/curriculum).
                 </p>
               )}
               {selectedPrograms.length === 0 && (

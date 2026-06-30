@@ -22,13 +22,14 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-06-25
+last_updated: 2026-07-01
 ---
 
 # Permissions
 
 Core file: `src/lib/permissions.ts`. Client-safe constants: `src/lib/constants.ts`
-(`PROGRAM_IDS`, `PROGRAM_ID_TO_LABEL`). Auth config: `src/lib/auth.ts`.
+(`PROGRAM_IDS`, `PROGRAM_ID_TO_LABEL`, `ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`).
+Auth config: `src/lib/auth.ts`.
 
 ## The model — three independent axes
 1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `admin`.
@@ -40,7 +41,8 @@ A `read_only` flag downgrades any `edit` to `view`.
 ## Feature access — the matrix
 `getFeatureAccess(permission, feature, opts?)` returns `{ access, canView, canEdit }`:
 - Looks up `FEATURE_PERMISSIONS[feature][role]` (`none`/`view`/`edit`).
-- **NVS gating:** features in `NVS_GATED_FEATURES` (`visits`, `curriculum`, `mentorship`, `pm_dashboard`, `summary_stats`, `quiz_sessions`) become `none` unless the user `hasCoEOrNodal`.
+- **NVS gating:** features in `NVS_GATED_FEATURES` (`visits`, `curriculum`, `pm_dashboard`, `summary_stats`, `quiz_sessions`) become `none` unless the user `hasCoEOrNodal`.
+- **Academic Mentorship:** uses the `academic_mentorship` feature key and its own Program allowlist (`ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`, v1 wildcard `*`), so NVS-only users are not blocked by the NVS-gated feature set.
 - **`read_only` downgrade:** `edit` → `view`.
 - **Passcode users** (`opts.isPasscodeUser`): `students` → `edit`, everything else → `none`.
 
@@ -53,6 +55,7 @@ Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, n
 
 ## The gate — what to call
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
+- **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Visit routes:** use `src/lib/visits-policy.ts` instead — `requireVisitsAccess(session, "view"|"edit")` then `enforceVisit*`. See `context/visits.md`.
 - **List queries:** scope at the SQL level with `getAccessibleSchoolCodes(email)` (returns `"all"` or `string[]`) or, for visits, `buildVisitScopePredicate(actor)`.
 

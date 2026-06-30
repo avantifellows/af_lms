@@ -215,7 +215,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const studentsAccess = getFeatureAccess(permission, "students", opts);
   const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
-  const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
+  const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
 
