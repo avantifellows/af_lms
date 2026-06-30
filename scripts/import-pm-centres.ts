@@ -91,7 +91,7 @@ async function run(client: PoolClient, cli: Cli) {
   for (const p of people) {
     const email = p.email.toLowerCase();
     // resolve / create user
-    let u = await client.query<{ id: number }>(`SELECT id FROM "user" WHERE lower(email)=$1`, [email]);
+    const u = await client.query<{ id: number }>(`SELECT id FROM "user" WHERE lower(email)=$1`, [email]);
     let userId: number;
     if (u.rows.length === 0) {
       const ins = await client.query<{ id: number }>(
