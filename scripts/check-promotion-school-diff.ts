@@ -226,6 +226,7 @@ async function main() {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const csv = [header.join(",")].concat(
       out.sort((a,b)=> order.indexOf(a.bucket)-order.indexOf(b.bucket) || a.email.localeCompare(b.email))
+        // fallow-ignore-next-line code-duplication -- one-off CSV output mirrors another audit script.
         .map((r)=>header.map((h)=>esc(String(r[h] ?? ""))).join(","))
     ).join("\n");
     const outPath = path.resolve(cli.out);
