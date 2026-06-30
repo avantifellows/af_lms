@@ -23,7 +23,7 @@ last_updated: 2026-06-30
 
 # Student Addition
 
-Source context: `lms-user-addition-discord-thread/` in the repo root. The PRD in that folder is now the default working artifact. Treat the Discord transcript, template CSV exports, and `Board_Values.numbers` preview as source evidence only when auditing whether the PRD is missing context.
+Source context: `lms-user-addition-discord-thread/` in the repo root. The PRD in that folder is now the default working artifact and is mirrored as GitHub issue https://github.com/avantifellows/af_lms/issues/144. Treat the Discord transcript, template CSV exports, and `Board_Values.numbers` preview as source evidence only when auditing whether the PRD is missing context.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
