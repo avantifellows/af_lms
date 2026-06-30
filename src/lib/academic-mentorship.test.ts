@@ -8,6 +8,7 @@ vi.mock("./db", () => ({
 import { query, withTransaction } from "./db";
 import {
   createAcademicMentorshipMapping,
+  importAcademicMentorshipMappingsFromCsv,
   endAcademicMentorshipMapping,
   listAcademicMentorshipMenteeOptions,
   listAcademicMentorshipMentorOptions,
@@ -423,5 +424,197 @@ describe("reassignAcademicMentorshipMapping", () => {
     expect(String(txQuery.mock.calls[3][0])).toContain(
       "INSERT INTO academic_mentorship_mentor_mentee_mappings"
     );
+  });
+});
+
+describe("importAcademicMentorshipMappingsFromCsv", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+    mockWithTransaction.mockReset();
+  });
+
+  it("returns a file-level error when required CSV headers are missing", async () => {
+    const result = await importAcademicMentorshipMappingsFromCsv({
+      csvText: "mentor_email,name\nanita@avantifellows.org,Meena\n",
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      type: "file",
+      error: "CSV must include mentor_email and student_id headers",
+    });
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns row-level errors with duplicate spreadsheet row numbers and preserves extra CSV columns", async () => {
+    const result = await importAcademicMentorshipMappingsFromCsv({
+      csvText: [
+        "mentor_email,student_id,notes",
+        "anita@avantifellows.org,,missing student",
+        "anita@avantifellows.org,STU001,first duplicate",
+        "meena@avantifellows.org, STU001 ,second duplicate",
+        ",STU002,missing mentor",
+      ].join("\n"),
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      assignedByUserId: 501,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({
+      type: "rows",
+      errors: [
+        { rowNumber: 2, error: "student_id is required" },
+        { rowNumber: 3, error: "Duplicate student_id STU001 in rows 3, 4" },
+        { rowNumber: 4, error: "Duplicate student_id STU001 in rows 3, 4" },
+        { rowNumber: 5, error: "mentor_email is required" },
+      ],
+    });
+    if (!result.ok && result.type === "rows") {
+      expect(result.errorCsv).toContain("mentor_email,student_id,notes,error_reason");
+      expect(result.errorCsv).toContain("anita@avantifellows.org,,missing student,student_id is required");
+      expect(result.errorCsv).toContain('meena@avantifellows.org, STU001 ,second duplicate,"Duplicate student_id STU001 in rows 3, 4"');
+    }
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("trims lookup values and inserts every valid row in one transaction", async () => {
+    const txQuery = vi.fn().mockResolvedValueOnce({ rows: [{ id: 31 }, { id: 32 }] });
+    mockQuery
+      .mockResolvedValueOnce([
+        { email: "anita@avantifellows.org", user_id: 101 },
+        { email: "meena@avantifellows.org", user_id: 102 },
+      ])
+      .mockResolvedValueOnce([
+        { student_id: "STU001", student_pk_id: 201, program_id: 64 },
+        { student_id: "STU002", student_pk_id: 202, program_id: null },
+      ]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const result = await importAcademicMentorshipMappingsFromCsv({
+      csvText: [
+        "mentor_email,student_id,notes",
+        " ANITA@AVANTIFELLOWS.ORG , STU001 ,kept",
+        ",,",
+        "meena@avantifellows.org,STU002,also kept",
+      ].join("\n"),
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({ ok: true, insertedCount: 2 });
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      "SCH001",
+      "North",
+      20,
+      ["anita@avantifellows.org", "meena@avantifellows.org"],
+    ]);
+    expect(mockQuery.mock.calls[1][1]).toEqual([
+      20,
+      "2026-2027",
+      ["STU001", "STU002"],
+    ]);
+    expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+    expect(String(txQuery.mock.calls[0][0])).toContain(
+      "INSERT INTO academic_mentorship_mentor_mentee_mappings"
+    );
+    expect(txQuery.mock.calls[0][1]).toEqual([
+      20,
+      "2026-2027",
+      101,
+      201,
+      64,
+      501,
+      20,
+      "2026-2027",
+      102,
+      202,
+      null,
+      501,
+    ]);
+  });
+
+  it("caps uploads at 2,000 data rows before database access", async () => {
+    const csvText = [
+      "mentor_email,student_id",
+      ...Array.from(
+        { length: 2001 },
+        (_, index) => `mentor${index}@avantifellows.org,STU${index}`
+      ),
+    ].join("\n");
+
+    const result = await importAcademicMentorshipMappingsFromCsv({
+      csvText,
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      type: "file",
+      error: "CSV upload is capped at 2,000 data rows",
+    });
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns row-level eligibility and active Mapping errors without writing", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ email: "anita@avantifellows.org", user_id: 101 }])
+      .mockResolvedValueOnce([
+        {
+          student_id: "STU001",
+          student_pk_id: 201,
+          program_id: 64,
+          active_mapping_id: 77,
+        },
+      ]);
+
+    const result = await importAcademicMentorshipMappingsFromCsv({
+      csvText: [
+        "mentor_email,student_id",
+        "unknown@avantifellows.org,STU001",
+        "anita@avantifellows.org,STU999",
+      ].join("\n"),
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      assignedByUserId: 501,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      type: "rows",
+      errors: [
+        {
+          rowNumber: 2,
+          error: "mentor_email is not an eligible Academic Mentor for this School",
+        },
+        { rowNumber: 2, error: "Student already has a mentor mapped" },
+        {
+          rowNumber: 3,
+          error: "student_id is not an eligible Mentee for this School and academic year",
+        },
+      ],
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 });

@@ -287,4 +287,93 @@ describe("AcademicMentorshipManager", () => {
       "/api/academic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&include_history=true"
     );
   });
+
+  it("shows a CSV template link and refreshes after a successful upload", async () => {
+    const user = userEvent.setup();
+    const refreshedGroup = {
+      mentor: { userId: 103, name: "CSV Mentor", email: "csv@avantifellows.org" },
+      menteeCount: 1,
+      mappings: [
+        {
+          id: 31,
+          mentee: { studentPkId: 301, name: "CSV Student", studentId: "CSV001", grade: 11 },
+          assignedDate: "2026-07-04",
+          endedDate: null,
+          status: "active" as const,
+        },
+      ],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === "/api/academic-mentorship/mappings/import") {
+        return Promise.resolve(
+          Response.json({ success: true, insertedCount: 2 }, { status: 201 })
+        );
+      }
+      return Promise.resolve(Response.json({ groups: [refreshedGroup] }));
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AcademicMentorshipManager {...baseProps} canEdit />);
+
+    expect(screen.getByRole("link", { name: "Download CSV template" })).toHaveAttribute(
+      "href",
+      "/api/academic-mentorship/mappings/import?school_code=SCH001&academic_year=2026-2027"
+    );
+    await user.upload(
+      screen.getByLabelText("CSV file"),
+      new File(["mentor_email,student_id\ncsv@x,CSV001\n"], "mappings.csv", {
+        type: "text/csv",
+      })
+    );
+    await user.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/academic-mentorship/mappings/import",
+      expect.objectContaining({ method: "POST" })
+    );
+    const uploadBody = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData;
+    expect(uploadBody.get("school_code")).toBe("SCH001");
+    expect(uploadBody.get("academic_year")).toBe("2026-2027");
+    expect(uploadBody.get("file")).toBeInstanceOf(File);
+    expect(await screen.findByText("Imported 2 mappings.")).toBeInTheDocument();
+    expect(await screen.findByText("CSV Student")).toBeInTheDocument();
+  });
+
+  it("shows upload row errors and exposes an error CSV download", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === "/api/academic-mentorship/mappings/import") {
+        return Promise.resolve(
+          Response.json(
+            {
+              error: "CSV upload has row errors",
+              errors: [{ rowNumber: 2, error: "student_id is required" }],
+              errorCsv: "mentor_email,student_id,error_reason\nanita@x,,student_id is required\n",
+            },
+            { status: 422 }
+          )
+        );
+      }
+      return Promise.resolve(Response.json({ groups: [activeGroup] }));
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AcademicMentorshipManager {...baseProps} canEdit />);
+
+    await user.upload(
+      screen.getByLabelText("CSV file"),
+      new File(["mentor_email,student_id\nanita@x,\n"], "mappings.csv", {
+        type: "text/csv",
+      })
+    );
+    await user.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    expect(await screen.findByText("CSV upload has row errors")).toBeInTheDocument();
+    const errorLink = await screen.findByRole("link", { name: "Download error CSV" });
+    expect(errorLink).toHaveAttribute(
+      "download",
+      "academic-mentorship-import-errors.csv"
+    );
+    expect(errorLink.getAttribute("href")).toContain("student_id%20is%20required");
+  });
 });

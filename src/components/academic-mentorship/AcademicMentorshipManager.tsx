@@ -81,8 +81,15 @@ export default function AcademicMentorshipManager({
   const [replacementMentorOptions, setReplacementMentorOptions] = useState<MentorOption[]>([]);
   const [replacementMentorSearch, setReplacementMentorSearch] = useState("");
   const [replacementMentorUserId, setReplacementMentorUserId] = useState("");
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [errorCsv, setErrorCsv] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ variant: "success" | "error"; message: string } | null>(null);
+  const templateParams = new URLSearchParams({
+    school_code: schoolCode,
+    academic_year: academicYear,
+  });
+  const templateHref = `/api/academic-mentorship/mappings/import?${templateParams.toString()}`;
 
   async function refreshMappings() {
     const params = new URLSearchParams({
@@ -164,6 +171,55 @@ export default function AcademicMentorshipManager({
       setToast({ variant: "success", message: "Mapping added." });
     } catch {
       setToast({ variant: "error", message: "Failed to add Mapping" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadCsv() {
+    if (!csvFile) {
+      setToast({ variant: "error", message: "Select a CSV file" });
+      return;
+    }
+
+    setBusy(true);
+    setErrorCsv(null);
+    try {
+      const formData = new FormData();
+      formData.set("school_code", schoolCode);
+      formData.set("academic_year", academicYear);
+      formData.set("file", csvFile);
+      const response = await fetch("/api/academic-mentorship/mappings/import", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        if (
+          payload &&
+          typeof payload === "object" &&
+          "errorCsv" in payload &&
+          typeof payload.errorCsv === "string"
+        ) {
+          setErrorCsv(payload.errorCsv);
+        }
+        setToast({ variant: "error", message: apiError(payload, "Failed to upload CSV") });
+        return;
+      }
+      await refreshMappings();
+      const insertedCount =
+        payload &&
+        typeof payload === "object" &&
+        "insertedCount" in payload &&
+        typeof payload.insertedCount === "number"
+          ? payload.insertedCount
+          : 0;
+      setToast({
+        variant: "success",
+        message: `Imported ${insertedCount} mapping${insertedCount === 1 ? "" : "s"}.`,
+      });
+    } catch {
+      setToast({ variant: "error", message: "Failed to upload CSV" });
     } finally {
       setBusy(false);
     }
@@ -307,6 +363,41 @@ export default function AcademicMentorshipManager({
             <Button type="button" onClick={() => void addMapping()} disabled={busy} className="self-end">
               Add Mapping
             </Button>
+          </div>
+          <div className="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-[auto_1fr_auto_auto]">
+            <a
+              href={templateHref}
+              download="academic-mentorship-template.csv"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-medium text-text-primary shadow-sm hover:bg-hover-bg"
+            >
+              Download CSV template
+            </a>
+            <label className="grid gap-1 text-sm font-semibold text-text-primary">
+              CSV file
+              <Input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(event) => setCsvFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void uploadCsv()}
+              disabled={busy}
+              className="self-end"
+            >
+              Upload CSV
+            </Button>
+            {errorCsv ? (
+              <a
+                href={`data:text/csv;charset=utf-8,${encodeURIComponent(errorCsv)}`}
+                download="academic-mentorship-import-errors.csv"
+                className="self-end text-sm font-bold text-accent hover:text-accent-hover"
+              >
+                Download error CSV
+              </a>
+            ) : null}
           </div>
         </Card>
       ) : null}
