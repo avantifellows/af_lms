@@ -56,6 +56,7 @@ Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, n
 ## The gate — what to call
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
+- **School page Mentorship tab:** visibility comes from `academic_mentorship` feature access. Teachers see only their own current-year active Mentees; PMs/Admins/Program Admins see a read-only School overview; only Admins and Program Admins get the management link.
 - **Visit routes:** use `src/lib/visits-policy.ts` instead — `requireVisitsAccess(session, "view"|"edit")` then `enforceVisit*`. See `context/visits.md`.
 - **List queries:** scope at the SQL level with `getAccessibleSchoolCodes(email)` (returns `"all"` or `string[]`) or, for visits, `buildVisitScopePredicate(actor)`.
 

@@ -13,6 +13,7 @@ import {
   listAcademicMentorshipMenteeOptions,
   listAcademicMentorshipMentorOptions,
   listAcademicMentorshipMappings,
+  listAcademicMentorshipTeacherMentees,
   reassignAcademicMentorshipMapping,
   requireAcademicMentorshipAccess,
 } from "./academic-mentorship";
@@ -191,6 +192,50 @@ describe("listAcademicMentorshipMappings", () => {
             status: "active",
           },
         ],
+      },
+    ]);
+  });
+});
+
+describe("listAcademicMentorshipTeacherMentees", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("returns only the signed-in Teacher's active current-year Mentees sorted for the School page", async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        student_pk_id: 202,
+        mentee_name: "Anaya Student",
+        mentee_student_id: "STU002",
+        mentee_grade: 10,
+        assigned_date: "2026-07-02",
+      },
+    ]);
+
+    const mentees = await listAcademicMentorshipTeacherMentees({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      mentorEmail: "teacher@avantifellows.org",
+    });
+
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("m.academic_year = $2");
+    expect(sql).toContain("LOWER(mentor.email) = LOWER($3)");
+    expect(sql).toContain("m.ended_at IS NULL");
+    expect(sql).toContain("ORDER BY gr.number ASC");
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      20,
+      "2026-2027",
+      "teacher@avantifellows.org",
+    ]);
+    expect(mentees).toEqual([
+      {
+        studentPkId: 202,
+        name: "Anaya Student",
+        studentId: "STU002",
+        grade: 10,
+        assignedDate: "2026-07-02",
       },
     ]);
   });

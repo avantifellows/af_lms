@@ -64,6 +64,14 @@ interface AcademicMentorshipMappingRow {
   ended_date: string | null;
 }
 
+interface AcademicMentorshipTeacherMenteeRow {
+  student_pk_id: number | string;
+  mentee_name: string | null;
+  mentee_student_id: string | null;
+  mentee_grade: number | null;
+  assigned_date: string;
+}
+
 export interface AcademicMentorshipMappingGroup {
   mentor: {
     userId: number;
@@ -83,6 +91,14 @@ export interface AcademicMentorshipMappingGroup {
     endedDate: string | null;
     status: "active" | "historical";
   }>;
+}
+
+export interface AcademicMentorshipTeacherMentee {
+  studentPkId: number;
+  name: string;
+  studentId: string | null;
+  grade: number | null;
+  assignedDate: string;
 }
 
 export interface AcademicMentorshipMentorOption {
@@ -266,6 +282,45 @@ export async function listAcademicMentorshipMappings(params: {
   }
 
   return [...groups.values()];
+}
+
+export async function listAcademicMentorshipTeacherMentees(params: {
+  schoolId: number;
+  academicYear: string;
+  mentorEmail: string;
+}): Promise<AcademicMentorshipTeacherMentee[]> {
+  const rows = await query<AcademicMentorshipTeacherMenteeRow>(
+    `SELECT
+       st.id AS student_pk_id,
+       NULLIF(TRIM(COALESCE(mentee.first_name, '') || ' ' || COALESCE(mentee.last_name, '')), '') AS mentee_name,
+       st.student_id AS mentee_student_id,
+       gr.number AS mentee_grade,
+       m.assigned_at::date::text AS assigned_date
+     FROM academic_mentorship_mentor_mentee_mappings m
+     JOIN "user" mentor ON mentor.id = m.mentor_user_id
+     JOIN student st ON st.id = m.student_id
+     JOIN "user" mentee ON mentee.id = st.user_id
+     LEFT JOIN enrollment_record er_grade
+       ON er_grade.user_id = mentee.id
+      AND er_grade.group_type = 'grade'
+      AND er_grade.is_current = true
+      AND er_grade.academic_year = m.academic_year
+     LEFT JOIN grade gr ON gr.id = er_grade.group_id
+     WHERE m.school_id = $1
+       AND m.academic_year = $2
+       AND LOWER(mentor.email) = LOWER($3)
+       AND m.ended_at IS NULL
+     ORDER BY gr.number ASC NULLS LAST, mentee_name ASC NULLS LAST, st.student_id ASC`,
+    [params.schoolId, params.academicYear, params.mentorEmail]
+  );
+
+  return rows.map((row) => ({
+    studentPkId: Number(row.student_pk_id),
+    name: row.mentee_name || row.mentee_student_id || "Unknown student",
+    studentId: row.mentee_student_id,
+    grade: row.mentee_grade === null ? null : Number(row.mentee_grade),
+    assignedDate: row.assigned_date,
+  }));
 }
 
 export async function listAcademicMentorshipMentorOptions(params: {

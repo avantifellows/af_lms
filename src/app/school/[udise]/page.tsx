@@ -4,6 +4,12 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
+  listAcademicMentorshipMappings,
+  listAcademicMentorshipTeacherMentees,
+  type AcademicMentorshipMappingGroup,
+  type AcademicMentorshipTeacherMentee,
+} from "@/lib/academic-mentorship";
+import {
   getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
@@ -12,6 +18,7 @@ import {
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { type Grade } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
@@ -95,6 +102,134 @@ function getDistinctNVSStreams(batches: Batch[]): string[] {
 
 interface PageProps {
   params: Promise<{ udise: string }>;
+}
+
+function menteeMeta(grade: number | null, studentId: string | null): string {
+  return [
+    grade === null ? null : `Grade ${grade}`,
+    studentId ? `ID ${studentId}` : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" | ");
+}
+
+function AcademicMentorshipFlatList({
+  mentees,
+}: {
+  mentees: AcademicMentorshipTeacherMentee[];
+}) {
+  if (mentees.length === 0) {
+    return (
+      <Card elevation="sm" className="p-6 text-sm text-text-muted">
+        No mentees assigned for this academic year.
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {mentees.map((mentee) => (
+        <Card key={mentee.studentPkId} elevation="sm" className="p-4">
+          <div className="font-semibold text-text-primary">{mentee.name}</div>
+          <div className="mt-1 text-sm text-text-muted">
+            {menteeMeta(mentee.grade, mentee.studentId) || "Student details unavailable"}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function AcademicMentorshipGroupedOverview({
+  groups,
+}: {
+  groups: AcademicMentorshipMappingGroup[];
+}) {
+  const activeGroups = groups
+    .map((group) => ({
+      ...group,
+      mappings: group.mappings.filter((mapping) => mapping.status === "active"),
+    }))
+    .filter((group) => group.mappings.length > 0);
+
+  if (activeGroups.length === 0) {
+    return (
+      <Card elevation="sm" className="p-6 text-sm text-text-muted">
+        No active Academic Mentor-Mentee Mappings for this academic year.
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {activeGroups.map((group) => (
+        <Card key={group.mentor.userId} elevation="sm" className="p-4">
+          <div className="flex flex-col gap-1 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-bold text-text-primary">{group.mentor.name}</h3>
+              {group.mentor.email && (
+                <p className="text-sm text-text-muted">{group.mentor.email}</p>
+              )}
+            </div>
+            <div className="text-sm font-semibold text-text-muted">
+              {group.mappings.length} {group.mappings.length === 1 ? "Mentee" : "Mentees"}
+            </div>
+          </div>
+          <div className="mt-3 divide-y divide-border">
+            {group.mappings.map((mapping) => (
+              <div key={mapping.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="font-medium text-text-primary">{mapping.mentee.name}</div>
+                <div className="mt-1 text-sm text-text-muted">
+                  {menteeMeta(mapping.mentee.grade, mapping.mentee.studentId) ||
+                    "Student details unavailable"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function AcademicMentorshipSchoolTab({
+  mode,
+  mentees,
+  groups,
+  manageHref,
+}: {
+  mode: "teacher" | "overview";
+  mentees?: AcademicMentorshipTeacherMentee[];
+  groups?: AcademicMentorshipMappingGroup[];
+  manageHref?: string;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
+            Academic Mentorship
+          </h2>
+          <p className="text-sm text-text-muted">
+            Current academic year: {CURRENT_ACADEMIC_YEAR}
+          </p>
+        </div>
+        {manageHref && (
+          <Link
+            href={manageHref}
+            className="inline-flex min-h-10 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover"
+          >
+            Manage mappings
+          </Link>
+        )}
+      </div>
+      {mode === "teacher" ? (
+        <AcademicMentorshipFlatList mentees={mentees ?? []} />
+      ) : (
+        <AcademicMentorshipGroupedOverview groups={groups ?? []} />
+      )}
+    </section>
+  );
 }
 
 export default async function SchoolPage({ params }: PageProps) {
@@ -313,10 +448,38 @@ export default async function SchoolPage({ params }: PageProps) {
     <PerformanceTab schoolUdise={school.udise_code || school.code} />
   );
 
+  const schoolId = Number(school.id);
+  const isAcademicMentorshipManager =
+    permission?.role === "admin" || permission?.role === "program_admin";
+  const mentorshipManageHref = isAcademicMentorshipManager
+    ? `/admin/academic-mentorship?${new URLSearchParams({
+        school_code: school.code,
+        academic_year: CURRENT_ACADEMIC_YEAR,
+      }).toString()}`
+    : undefined;
+  const teacherMentees =
+    mentorshipAccess.canView && permission?.role === "teacher"
+      ? await listAcademicMentorshipTeacherMentees({
+          schoolId,
+          academicYear: CURRENT_ACADEMIC_YEAR,
+          mentorEmail: permission.email,
+        })
+      : null;
+  const mentorshipGroups =
+    mentorshipAccess.canView && permission?.role !== "teacher"
+      ? await listAcademicMentorshipMappings({
+          schoolId,
+          academicYear: CURRENT_ACADEMIC_YEAR,
+          includeHistory: false,
+        })
+      : null;
   const mentorshipContent = (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-      <p className="text-gray-500">Mentorship data coming soon.</p>
-    </div>
+    <AcademicMentorshipSchoolTab
+      mode={permission?.role === "teacher" ? "teacher" : "overview"}
+      mentees={teacherMentees ?? undefined}
+      groups={mentorshipGroups ?? undefined}
+      manageHref={mentorshipManageHref}
+    />
   );
 
   const visitsContent = (
