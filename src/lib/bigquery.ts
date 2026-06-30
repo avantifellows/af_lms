@@ -6,6 +6,7 @@ import type {
   ProgressionTest,
   ProgressionEntry,
   TestQuestionLevelRow,
+  StudentQuestionRow,
 } from "@/types/quiz";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
@@ -517,6 +518,90 @@ export async function getTestQuestionLevelData(
       attempt_rate: total > 0 ? Math.round((attempted / total) * 100) : 0,
       accuracy:
         attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
+    };
+  });
+}
+
+/**
+ * Per-(student, question) results for a single test — the grain behind the
+ * Student Results → chapter → question drill-down. Returns ALL students in one
+ * query (the table is clustered by session_id/enrollment_user_id, but a
+ * single-student scan costs ~the same as the whole-session scan, so one
+ * all-students query is far cheaper than one query per drilled-in student).
+ * The caller fetches this once on first drill-in and filters client-side.
+ */
+export async function getStudentQuestionLevelData(
+  udise: string,
+  grade: number,
+  sessionId: string,
+  program?: string,
+  stream?: string
+): Promise<StudentQuestionRow[]> {
+  const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+
+  const params: Record<string, string | number> = { udise, grade, sessionId };
+  if (program) params.program = program;
+  if (stream) params.stream = stream;
+
+  const sql = `
+    SELECT
+      enrollment_user_id,
+      section AS subject,
+      chapter_name,
+      chapter_id,
+      question_id,
+      ANY_VALUE(question_position_index) AS position_index,
+      MAX(CAST(is_answered AS INT64)) AS is_answered,
+      MAX(is_correct) AS is_correct
+    FROM ${FACT_QUESTION_LEVEL_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND student_grade = @grade
+      AND session_id = @sessionId
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND question_id IS NOT NULL
+      AND enrollment_user_id IS NOT NULL
+      ${programFilter}
+      ${streamFilter}
+    GROUP BY enrollment_user_id, section, chapter_name, chapter_id, question_id
+    ORDER BY enrollment_user_id, section, chapter_name, position_index
+  `;
+
+  interface RawRow {
+    enrollment_user_id: number | string | null;
+    subject: string | null;
+    chapter_name: string | null;
+    chapter_id: string | null;
+    question_id: string;
+    position_index: number | string | null;
+    is_answered: number | string | null;
+    is_correct: number | string | null;
+  }
+
+  const toInt = (v: number | string | null | undefined): number => {
+    if (v == null) return 0;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const [rows] = await client.query({ query: sql, params });
+  return (rows as RawRow[]).map((r) => {
+    const answered = toInt(r.is_answered) > 0;
+    const correct = toInt(r.is_correct) === 1;
+    const status: StudentQuestionRow["status"] = !answered
+      ? "skipped"
+      : correct
+        ? "correct"
+        : "wrong";
+    return {
+      enrollment_user_id: String(r.enrollment_user_id ?? ""),
+      chapter_id: r.chapter_id || null,
+      chapter_name: r.chapter_name || "",
+      question_id: r.question_id,
+      position_index:
+        r.position_index == null ? null : toInt(r.position_index),
+      status,
     };
   });
 }

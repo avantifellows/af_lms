@@ -105,6 +105,10 @@ export interface ChapterAnalysisRow {
 export interface StudentChapterScore {
   subject: string;
   chapter_name: string;
+  // Stable join key to the per-student question rows (BQ chapter_id). Null when
+  // the v2 chapter row had no chapter_id; the question drill-down then falls
+  // back to matching on chapter_name.
+  chapter_id: string | null;
   marks_scored: number;
   max_marks: number;
   accuracy: number;
@@ -124,6 +128,11 @@ export interface StudentSubjectScore {
 
 export interface StudentDeepDiveRow {
   student_name: string;
+  // The v2 doc's user_id, which equals fact_student_test_results_question_level's
+  // enrollment_user_id — the join key for the per-student question drill-down.
+  // Null if the matched roster student had no usable id. Stringified for stable
+  // client-side matching against the (INT64) BQ value.
+  enrollment_user_id: string | null;
   gender: string | null;
   marks_scored: number;
   max_marks: number;
@@ -160,4 +169,20 @@ export interface TestQuestionLevelRow {
 
 export interface TestQuestionLevelData {
   questions: TestQuestionLevelRow[];
+}
+
+// One row per (student, question) for a given test — the grain behind the
+// Student Results → chapter → question drill-down. Sourced from BQ
+// fact_student_test_results_question_level grouped by enrollment_user_id.
+export interface StudentQuestionRow {
+  enrollment_user_id: string;
+  chapter_id: string | null;
+  chapter_name: string;
+  question_id: string;
+  position_index: number | null;
+  status: "correct" | "wrong" | "skipped";
+}
+
+export interface StudentQuestionLevelData {
+  questions: StudentQuestionRow[];
 }

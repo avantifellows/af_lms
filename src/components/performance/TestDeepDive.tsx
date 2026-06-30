@@ -112,7 +112,14 @@ export default function TestDeepDive({
             program={program}
             stream={stream}
           />
-          <StudentResultsTable students={data.students} />
+          <StudentResultsTable
+            students={data.students}
+            schoolUdise={schoolUdise}
+            grade={grade}
+            sessionId={sessionId}
+            program={program}
+            stream={stream}
+          />
         </>
       )}
     </div>

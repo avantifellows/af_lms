@@ -369,6 +369,7 @@ export async function getTestDeepDiveFromDynamo(
         return {
           subject: sectionDisplay,
           chapter_name: c.chapter_name || "",
+          chapter_id: c.chapter_id || null,
           marks_scored: chMarks,
           max_marks: chMax,
           accuracy: toNum(c.accuracy),
@@ -394,6 +395,8 @@ export async function getTestDeepDiveFromDynamo(
 
     studentRows.push({
       student_name: studentName,
+      // doc.user_id is the enrollment_user_id (the BQ question-level join key).
+      enrollment_user_id: doc.user_id != null ? String(doc.user_id) : null,
       gender: student.gender,
       marks_scored: toNum(overall.marks_scored),
       max_marks: toNum(overall.max_marks_possible),
