@@ -74,6 +74,13 @@ export default function AcademicMentorshipManager({
   const [menteeSearch, setMenteeSearch] = useState("");
   const [mentorUserId, setMentorUserId] = useState("");
   const [studentPkId, setStudentPkId] = useState("");
+  const [reassigning, setReassigning] = useState<{
+    mappingId: number | string;
+    currentMentorUserId: number;
+  } | null>(null);
+  const [replacementMentorOptions, setReplacementMentorOptions] = useState<MentorOption[]>([]);
+  const [replacementMentorSearch, setReplacementMentorSearch] = useState("");
+  const [replacementMentorUserId, setReplacementMentorUserId] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ variant: "success" | "error"; message: string } | null>(null);
 
@@ -90,7 +97,10 @@ export default function AcademicMentorshipManager({
     }
   }
 
-  async function loadMentors(search: string) {
+  async function loadMentorOptions(
+    search: string,
+    setOptions: (options: MentorOption[]) => void
+  ) {
     const params = new URLSearchParams({
       type: "mentors",
       school_code: schoolCode,
@@ -99,8 +109,16 @@ export default function AcademicMentorshipManager({
     const response = await fetch(`/api/academic-mentorship/options?${params.toString()}`);
     const payload = await readJson(response);
     if (response.ok && payload && typeof payload === "object" && "options" in payload) {
-      setMentorOptions((payload.options as MentorOption[]) ?? []);
+      setOptions((payload.options as MentorOption[]) ?? []);
     }
+  }
+
+  async function loadMentors(search: string) {
+    await loadMentorOptions(search, setMentorOptions);
+  }
+
+  async function loadReplacementMentors(search: string) {
+    await loadMentorOptions(search, setReplacementMentorOptions);
   }
 
   async function loadMentees(search: string) {
@@ -176,6 +194,50 @@ export default function AcademicMentorshipManager({
       setToast({ variant: "success", message: "Mapping removed." });
     } catch {
       setToast({ variant: "error", message: "Failed to remove Mapping" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startReassign(mappingId: number | string, currentMentorUserId: number) {
+    setReassigning({ mappingId, currentMentorUserId });
+    setReplacementMentorOptions([]);
+    setReplacementMentorSearch("");
+    setReplacementMentorUserId("");
+  }
+
+  async function reassignMapping() {
+    if (!reassigning || !replacementMentorUserId) {
+      setToast({ variant: "error", message: "Select a replacement Academic Mentor" });
+      return;
+    }
+    if (!window.confirm("This will end the old Mapping and create a new Mapping.")) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch("/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          academic_year: academicYear,
+          mapping_id: Number(reassigning.mappingId),
+          mentor_user_id: Number(replacementMentorUserId),
+        }),
+      });
+      const payload = await readJson(response);
+      await refreshMappings();
+      if (!response.ok) {
+        setToast({ variant: "error", message: apiError(payload, "Failed to reassign Mapping") });
+        return;
+      }
+      setReassigning(null);
+      setReplacementMentorUserId("");
+      setToast({ variant: "success", message: "Mapping reassigned." });
+    } catch {
+      setToast({ variant: "error", message: "Failed to reassign Mapping" });
     } finally {
       setBusy(false);
     }
@@ -267,7 +329,7 @@ export default function AcademicMentorshipManager({
                 {group.mappings.map((mapping) => (
                   <div
                     key={String(mapping.id)}
-                    className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_120px_140px_120px_90px]"
+                    className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_120px_140px_120px_160px]"
                   >
                     <div>
                       <div className="font-semibold text-text-primary">{mapping.mentee.name}</div>
@@ -285,17 +347,80 @@ export default function AcademicMentorshipManager({
                     </div>
                     <div>
                       {canEdit && mapping.status === "active" ? (
-                        <Button
-                          type="button"
-                          variant="danger-ghost"
-                          size="sm"
-                          onClick={() => void removeMapping(mapping.id)}
-                          disabled={busy}
-                        >
-                          Remove
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => startReassign(mapping.id, group.mentor.userId)}
+                            disabled={busy}
+                          >
+                            Reassign
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger-ghost"
+                            size="sm"
+                            onClick={() => void removeMapping(mapping.id)}
+                            disabled={busy}
+                          >
+                            Remove
+                          </Button>
+                        </div>
                       ) : null}
                     </div>
+                    {reassigning && String(reassigning.mappingId) === String(mapping.id) ? (
+                      <div className="grid gap-3 rounded-lg border border-border bg-bg-card-alt p-3 md:col-span-5 md:grid-cols-[1fr_1fr_auto_auto]">
+                        <label className="grid gap-1 text-sm font-semibold text-text-primary">
+                          Search replacement mentor
+                          <Input
+                            value={replacementMentorSearch}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setReplacementMentorSearch(value);
+                              void loadReplacementMentors(value);
+                            }}
+                          />
+                        </label>
+                        <label className="grid gap-1 text-sm font-semibold text-text-primary">
+                          Replacement Academic Mentor
+                          <Select
+                            value={replacementMentorUserId}
+                            onChange={(event) => setReplacementMentorUserId(event.target.value)}
+                          >
+                            <option value="">Select mentor</option>
+                            {replacementMentorOptions
+                              .filter(
+                                (mentor) => mentor.userId !== reassigning.currentMentorUserId
+                              )
+                              .map((mentor) => (
+                                <option key={mentor.userId} value={mentor.userId}>
+                                  {mentor.name} ({mentor.email})
+                                </option>
+                              ))}
+                          </Select>
+                        </label>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void reassignMapping()}
+                          disabled={busy}
+                          className="self-end"
+                        >
+                          Confirm Reassign
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setReassigning(null)}
+                          disabled={busy}
+                          className="self-end"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

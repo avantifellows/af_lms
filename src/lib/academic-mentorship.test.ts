@@ -2,20 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({
   query: vi.fn(),
+  withTransaction: vi.fn(),
 }));
 
-import { query } from "./db";
+import { query, withTransaction } from "./db";
 import {
   createAcademicMentorshipMapping,
   endAcademicMentorshipMapping,
   listAcademicMentorshipMenteeOptions,
   listAcademicMentorshipMentorOptions,
   listAcademicMentorshipMappings,
+  reassignAcademicMentorshipMapping,
   requireAcademicMentorshipAccess,
 } from "./academic-mentorship";
 import { PROGRAM_IDS } from "./constants";
 
 const mockQuery = vi.mocked(query);
+const mockWithTransaction = vi.mocked(withTransaction);
 
 describe("requireAcademicMentorshipAccess", () => {
   beforeEach(() => {
@@ -336,5 +339,89 @@ describe("endAcademicMentorshipMapping", () => {
     expect(String(mockQuery.mock.calls[0][0])).toContain("ended_by_user_id = $4");
     expect(String(mockQuery.mock.calls[0][0])).toContain("ended_at IS NULL");
     expect(mockQuery.mock.calls[0][1]).toEqual([7, 20, "2026-2027", 501]);
+  });
+});
+
+describe("reassignAcademicMentorshipMapping", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+    mockWithTransaction.mockReset();
+  });
+
+  it("ends the old active Mapping and inserts the replacement Mapping in one transaction", async () => {
+    const txQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ student_id: 201, mentor_user_id: 101 }] })
+      .mockResolvedValueOnce({ rows: [{ student_pk_id: 201, program_id: 64 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 9 }] });
+    mockQuery.mockResolvedValueOnce([{ user_id: 102 }]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const result = await reassignAcademicMentorshipMapping({
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      mappingId: 7,
+      replacementMentorUserId: 102,
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({ ok: true, mappingId: 9 });
+    expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+    expect(String(txQuery.mock.calls[0][0])).toContain("FOR UPDATE");
+    expect(txQuery.mock.calls[0][1]).toEqual([7, 20, "2026-2027"]);
+    expect(String(txQuery.mock.calls[2][0])).toContain("ended_at = now()");
+    expect(txQuery.mock.calls[2][1]).toEqual([7, 20, "2026-2027", 501]);
+    expect(String(txQuery.mock.calls[3][0])).toContain(
+      "INSERT INTO academic_mentorship_mentor_mentee_mappings"
+    );
+    expect(txQuery.mock.calls[3][1]).toEqual([
+      20,
+      "2026-2027",
+      102,
+      201,
+      64,
+      501,
+    ]);
+  });
+
+  it("maps replacement insert races to a conflict inside the transaction", async () => {
+    const duplicateError = new Error("duplicate key value violates unique constraint");
+    Object.assign(duplicateError, { code: "23505" });
+    const txQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ student_id: 201, mentor_user_id: 101 }] })
+      .mockResolvedValueOnce({ rows: [{ student_pk_id: 201, program_id: null }] })
+      .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+      .mockRejectedValueOnce(duplicateError);
+    mockQuery.mockResolvedValueOnce([{ user_id: 102 }]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const result = await reassignAcademicMentorshipMapping({
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2026-2027",
+      mappingId: 7,
+      replacementMentorUserId: 102,
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: "Student already has a mentor mapped",
+    });
+    expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+    expect(String(txQuery.mock.calls[2][0])).toContain("ended_at = now()");
+    expect(String(txQuery.mock.calls[3][0])).toContain(
+      "INSERT INTO academic_mentorship_mentor_mentee_mappings"
+    );
   });
 });

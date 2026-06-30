@@ -9,13 +9,15 @@ vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({
   query: vi.fn(),
+  withTransaction: vi.fn(),
 }));
 
-import { query } from "@/lib/db";
-import { DELETE, GET, POST } from "./route";
+import { query, withTransaction } from "@/lib/db";
+import { DELETE, GET, PATCH, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
 
 const mockQuery = vi.mocked(query);
+const mockWithTransaction = vi.mocked(withTransaction);
 
 function request(path: string) {
   return new NextRequest(`http://localhost${path}`);
@@ -25,6 +27,7 @@ describe("GET /api/academic-mentorship/mappings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.mockReset();
+    mockWithTransaction.mockReset();
   });
 
   it("returns 401 when unauthenticated before database access", async () => {
@@ -209,6 +212,7 @@ describe("POST /api/academic-mentorship/mappings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.mockReset();
+    mockWithTransaction.mockReset();
   });
 
   it("creates a Mapping for editable users", async () => {
@@ -348,6 +352,7 @@ describe("DELETE /api/academic-mentorship/mappings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.mockReset();
+    mockWithTransaction.mockReset();
   });
 
   it("ends an active Mapping for editable users", async () => {
@@ -390,5 +395,321 @@ describe("DELETE /api/academic-mentorship/mappings", () => {
       String(sql).includes("UPDATE academic_mentorship_mentor_mentee_mappings")
     );
     expect(updateCall?.[1]).toEqual([7, 20, "2026-2027", 501]);
+  });
+});
+
+describe("PATCH /api/academic-mentorship/mappings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQuery.mockReset();
+    mockWithTransaction.mockReset();
+  });
+
+  it("reassigns an active Mapping for editable users", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    const txQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ student_id: 201, mentor_user_id: 101 }] })
+      .mockResolvedValueOnce({ rows: [{ student_pk_id: 201, program_id: 64 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 9 }] });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 102 }]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true, mappingId: 9 });
+    expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 401 before database access", async () => {
+    mockGetServerSession.mockResolvedValue(null);
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Unauthorized");
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when replacement mentor is missing before database access", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("mentor_user_id is required");
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("denies read-only users before reassignment", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "readonly@avantifellows.org" },
+    });
+    mockQuery.mockResolvedValueOnce([
+      {
+        email: "readonly@avantifellows.org",
+        level: 3,
+        role: "program_admin",
+        school_codes: null,
+        regions: null,
+        program_ids: [PROGRAM_IDS.NVS],
+        read_only: true,
+        user_id: 501,
+      },
+    ]);
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe("Forbidden");
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects replacement mentors that are not eligible for the School", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toBe("Academic Mentor is not eligible for this School");
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects the current Academic Mentor as the replacement", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    const txQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ student_id: 201, mentor_user_id: 101 }] });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 101 }]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 101,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toBe("Replacement Academic Mentor must be different");
+  });
+
+  it("denies inactive or historical Mappings", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    const txQuery = vi.fn().mockResolvedValueOnce({ rows: [] });
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 102 }]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe("Active Mapping not found");
+  });
+
+  it("maps concurrent active Mapping races to the expected conflict message", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+    const duplicateError = new Error("duplicate key value violates unique constraint");
+    Object.assign(duplicateError, { code: "23505" });
+    const txQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ student_id: 201, mentor_user_id: 101 }] })
+      .mockResolvedValueOnce({ rows: [{ student_pk_id: 201, program_id: 64 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+      .mockRejectedValueOnce(duplicateError);
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: [PROGRAM_IDS.NVS],
+          read_only: false,
+          user_id: 501,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 102 }]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/academic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe("Student already has a mentor mapped");
   });
 });

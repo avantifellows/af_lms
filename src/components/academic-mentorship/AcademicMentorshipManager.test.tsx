@@ -40,6 +40,7 @@ describe("AcademicMentorshipManager", () => {
     render(<AcademicMentorshipManager {...baseProps} canEdit={false} />);
 
     expect(screen.queryByRole("button", { name: "Add Mapping" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reassign" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
     expect(screen.getByText("Meena Student")).toBeInTheDocument();
     expect(screen.getByText("Ravi Student")).toBeInTheDocument();
@@ -185,5 +186,105 @@ describe("AcademicMentorshipManager", () => {
     );
     expect(await screen.findByText("Mapping removed.")).toBeInTheDocument();
     expect(screen.getByText("No Academic Mentor-Mentee Mappings found.")).toBeInTheDocument();
+  });
+
+  it("reassigns active rows with confirmation and excludes the current Academic Mentor", async () => {
+    const user = userEvent.setup();
+    const confirmMock = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirmMock);
+    const reassignedGroup = {
+      mentor: { userId: 102, name: "New Mentor", email: "new@avantifellows.org" },
+      menteeCount: 1,
+      mappings: [
+        {
+          id: 9,
+          mentee: activeGroup.mappings[0].mentee,
+          assignedDate: "2026-07-03",
+          endedDate: null,
+          status: "active" as const,
+        },
+      ],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("type=mentors")) {
+        return Promise.resolve(
+          Response.json({
+            options: [
+              { userId: 101, name: "Anita Mentor", email: "anita@avantifellows.org" },
+              { userId: 102, name: "New Mentor", email: "new@avantifellows.org" },
+            ],
+          })
+        );
+      }
+      if (init?.method === "PATCH") {
+        return Promise.resolve(Response.json({ success: true, mappingId: 9 }));
+      }
+      return Promise.resolve(Response.json({ groups: [reassignedGroup] }));
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AcademicMentorshipManager {...baseProps} canEdit />);
+
+    expect(screen.getAllByRole("button", { name: "Reassign" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Reassign" }));
+    await user.type(screen.getByLabelText("Search replacement mentor"), "Mentor");
+    expect(await screen.findByRole("option", { name: "New Mentor (new@avantifellows.org)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Anita Mentor (anita@avantifellows.org)" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Replacement Academic Mentor"), "102");
+    await user.click(screen.getByRole("button", { name: "Confirm Reassign" }));
+
+    expect(confirmMock).toHaveBeenCalledWith(
+      "This will end the old Mapping and create a new Mapping."
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/academic-mentorship/mappings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          mapping_id: 7,
+          mentor_user_id: 102,
+        }),
+      })
+    );
+    expect(await screen.findByText("Mapping reassigned.")).toBeInTheDocument();
+    expect(await screen.findByText("New Mentor")).toBeInTheDocument();
+  });
+
+  it("shows reassignment conflicts and still refreshes the table", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("type=mentors")) {
+        return Promise.resolve(
+          Response.json({
+            options: [{ userId: 102, name: "New Mentor", email: "new@avantifellows.org" }],
+          })
+        );
+      }
+      if (init?.method === "PATCH") {
+        return Promise.resolve(
+          Response.json({ error: "Student already has a mentor mapped" }, { status: 409 })
+        );
+      }
+      return Promise.resolve(Response.json({ groups: [activeGroup] }));
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AcademicMentorshipManager {...baseProps} canEdit />);
+
+    await user.click(screen.getByRole("button", { name: "Reassign" }));
+    await user.type(screen.getByLabelText("Search replacement mentor"), "New");
+    await screen.findByRole("option", { name: "New Mentor (new@avantifellows.org)" });
+    await user.selectOptions(screen.getByLabelText("Replacement Academic Mentor"), "102");
+    await user.click(screen.getByRole("button", { name: "Confirm Reassign" }));
+
+    expect(await screen.findByText("Student already has a mentor mapped")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/academic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&include_history=true"
+    );
   });
 });

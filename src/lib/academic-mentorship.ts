@@ -2,7 +2,7 @@ import {
   ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST,
   CURRENT_ACADEMIC_YEAR,
 } from "./constants";
-import { query } from "./db";
+import { query, withTransaction } from "./db";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
@@ -13,6 +13,7 @@ import {
 } from "./permissions";
 
 export type AcademicMentorshipAction = "view" | "edit";
+type QueryRows = <T>(text: string, params?: unknown[]) => Promise<T[]>;
 
 export type AcademicMentorshipSession = {
   user?: { email?: string | null } | null;
@@ -383,12 +384,18 @@ async function hasEligibleAcademicMentor(params: {
   return rows.length > 0;
 }
 
-async function getEligibleMenteeProgram(params: {
-  schoolId: number;
-  academicYear: string;
-  studentPkId: number;
-}): Promise<number | null | undefined> {
-  const rows = await query<{ student_pk_id: number | string; program_id: number | string | null }>(
+async function getEligibleMenteeProgramWithQuery(
+  runQuery: QueryRows,
+  params: {
+    schoolId: number;
+    academicYear: string;
+    studentPkId: number;
+  }
+): Promise<number | null | undefined> {
+  const rows = await runQuery<{
+    student_pk_id: number | string;
+    program_id: number | string | null;
+  }>(
     `SELECT st.id AS student_pk_id, roster_program.program_id
      FROM group_user gu
      JOIN "group" g ON g.id = gu.group_id
@@ -417,6 +424,14 @@ async function getEligibleMenteeProgram(params: {
   );
   if (rows.length === 0) return undefined;
   return rows[0].program_id === null ? null : Number(rows[0].program_id);
+}
+
+async function getEligibleMenteeProgram(params: {
+  schoolId: number;
+  academicYear: string;
+  studentPkId: number;
+}): Promise<number | null | undefined> {
+  return getEligibleMenteeProgramWithQuery(query, params);
 }
 
 export async function createAcademicMentorshipMapping(params: {
@@ -521,6 +536,114 @@ export async function endAcademicMentorshipMapping(params: {
   }
 
   return { ok: true, mappingId: Number(updated[0].id) };
+}
+
+export async function reassignAcademicMentorshipMapping(params: {
+  schoolId: number;
+  schoolCode: string;
+  schoolRegion: string | null;
+  academicYear: string;
+  mappingId: number;
+  replacementMentorUserId: number;
+  assignedByUserId: number;
+}): Promise<AcademicMentorshipMutationResult> {
+  const mentorOk = await hasEligibleAcademicMentor({
+    schoolId: params.schoolId,
+    schoolCode: params.schoolCode,
+    schoolRegion: params.schoolRegion,
+    mentorUserId: params.replacementMentorUserId,
+  });
+  if (!mentorOk) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Academic Mentor is not eligible for this School",
+    };
+  }
+
+  try {
+    return await withTransaction(async (client) => {
+      const runQuery: QueryRows = async (text, values) => {
+        const result = await client.query(text, values);
+        return result.rows;
+      };
+      const activeRows = await runQuery<{
+        student_id: number | string;
+        mentor_user_id: number | string;
+      }>(
+        `SELECT student_id, mentor_user_id
+         FROM academic_mentorship_mentor_mentee_mappings
+         WHERE id = $1
+           AND school_id = $2
+           AND academic_year = $3
+           AND ended_at IS NULL
+         FOR UPDATE`,
+        [params.mappingId, params.schoolId, params.academicYear]
+      );
+      if (activeRows.length === 0) {
+        return { ok: false, status: 404, error: "Active Mapping not found" };
+      }
+      if (Number(activeRows[0].mentor_user_id) === params.replacementMentorUserId) {
+        return {
+          ok: false,
+          status: 422,
+          error: "Replacement Academic Mentor must be different",
+        };
+      }
+
+      const studentPkId = Number(activeRows[0].student_id);
+      const programId = await getEligibleMenteeProgramWithQuery(runQuery, {
+        schoolId: params.schoolId,
+        academicYear: params.academicYear,
+        studentPkId,
+      });
+      if (programId === undefined) {
+        return {
+          ok: false,
+          status: 422,
+          error: "Mentee is not eligible for this School and academic year",
+        };
+      }
+
+      const ended = await runQuery<{ id: number | string }>(
+        `UPDATE academic_mentorship_mentor_mentee_mappings
+         SET ended_at = now(),
+             ended_by_user_id = $4,
+             updated_at = now()
+         WHERE id = $1
+           AND school_id = $2
+           AND academic_year = $3
+           AND ended_at IS NULL
+         RETURNING id`,
+        [params.mappingId, params.schoolId, params.academicYear, params.assignedByUserId]
+      );
+      if (ended.length === 0) {
+        return { ok: false, status: 404, error: "Active Mapping not found" };
+      }
+
+      const inserted = await runQuery<{ id: number | string }>(
+        `INSERT INTO academic_mentorship_mentor_mentee_mappings
+           (school_id, academic_year, mentor_user_id, student_id, program_id, assigned_by_user_id, assigned_at, inserted_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now(), now(), now())
+         RETURNING id`,
+        [
+          params.schoolId,
+          params.academicYear,
+          params.replacementMentorUserId,
+          studentPkId,
+          programId,
+          params.assignedByUserId,
+        ]
+      );
+
+      return { ok: true, mappingId: Number(inserted[0].id) };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return { ok: false, status: 409, error: "Student already has a mentor mapped" };
+    }
+    throw error;
+  }
 }
 
 export async function listAccessibleAcademicMentorshipSchools(
