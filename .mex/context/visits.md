@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-06-25
+last_updated: 2026-06-30
 ---
 
 # PM School Visits
@@ -56,7 +56,7 @@ Each type is implemented across coordinated files:
 - **Shared helpers** — `src/lib/visit-form-utils.ts`: `isPlainObject` plus the `additional_notes` helpers (`readActionAdditionalNotes`, `appendActionAdditionalNotes`, `validateActionAdditionalNotes`). Validators read the JSONB `data` directly.
 - **Registration** — entry in `ACTION_TYPES` (`src/lib/visit-actions.ts`); the summary stats + label are wired in `ActionPointList.tsx`, which calls each type's `computeInlineStats`/`extractRemarks`.
 
-Most types follow the **binary-question checklist** shape (`RadioPair` yes/no + optional remark per question); classroom observation uses a versioned **rubric** (`getRubricConfig`, `CURRENT_RUBRIC_VERSION`, `computeTotalScore`). Teacher-fetching forms pull from `/api/pm/teachers`.
+Most types follow the **binary-question checklist** shape (`RadioPair` yes/no + optional remark per question); classroom observation uses a versioned **rubric** (`getRubricConfig`, `CURRENT_RUBRIC_VERSION`, `computeTotalScore`). Teacher-fetching forms pull from `/api/pm/teachers`, backed by `getVisitTeachersForSchool`: active real AF teachers with active LMS permissions and active teacher-type Centre seats at active Centres linked to the Visit's School. There is no fallback to broad `user_permission.role = 'teacher'` scope.
 
 **Naming exception:** validator names mirror the type key, *except* `individual_af_teacher_interaction`, whose validators are `validateIndividualTeacherSave`/`validateIndividualTeacherComplete` (no "AF").
 

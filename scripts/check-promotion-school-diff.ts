@@ -222,11 +222,12 @@ async function main() {
     }
 
     // CSV
-    const header = ["bucket","email","prod_role","staging_role","prod_access","staging_access","schools_added","schools_removed","note"];
+    const header = ["bucket","email","prod_role","staging_role","prod_access","staging_access","schools_added","schools_removed","note"] as const;
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const csv = [header.join(",")].concat(
       out.sort((a,b)=> order.indexOf(a.bucket)-order.indexOf(b.bucket) || a.email.localeCompare(b.email))
-        .map((r)=>header.map((h)=>esc(String((r as any)[h] ?? ""))).join(","))
+        // fallow-ignore-next-line code-duplication -- one-off CSV output mirrors another audit script.
+        .map((r)=>header.map((h)=>esc(String(r[h] ?? ""))).join(","))
     ).join("\n");
     const outPath = path.resolve(cli.out);
     mkdirSync(path.dirname(outPath), { recursive: true });

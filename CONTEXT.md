@@ -82,6 +82,10 @@ _Avoid_: Task, activity, checklist
 One of seven fixed types: `classroom_observation`, `af_team_interaction`, `individual_af_teacher_interaction`, `principal_interaction`, `group_student_discussion`, `individual_student_discussion`, `school_staff_interaction`.
 _Avoid_: Category, kind
 
+**Visit Teacher**:
+An active Staff Management teacher seated at a Centre linked to the Visit's School and eligible for teacher-related visit actions.
+_Avoid_: LMS teacher permission, pending teacher
+
 **Entry** (Individual Student Interaction):
 A single interaction record within an `individual_student_discussion` action. Contains one or more students (all same grade) and one shared set of questions. A solo interaction is an entry with one student; a grouped interaction is an entry with multiple students.
 _Avoid_: Group (overloaded — `group` is a DB table and `group_student_discussion` is a different action type)
@@ -191,6 +195,24 @@ _Avoid_: Access tier, role level
 - A **Visit** has many **Actions** (each with an **Action Type**)
 - A **Visit** can only be completed when all 7 **Action Types** have at least one completed **Action**
 - **Soft Delete** on a **Visit** cascades to its child **Actions**
+- A **Visit Teacher** is visible in School Visit teacher pickers because they are visible in Staff Management, not because they have broad LMS teacher permissions
+- A **Visit Teacher** uses the active LMS permission ID as its picker identity while Staff Management teacher seating determines list membership
+- A **Visit Teacher** picker label uses the Staff Management person name, then active LMS permission name, then email
+- A **Visit Teacher** must have an active LMS permission; removing that permission removes them from Staff Management and from School Visit teacher pickers
+- A **Visit Teacher** does not require `user_permission.role = "teacher"`; the real teacher profile and teacher-type Centre seat define teacher membership
+- A pending Staff Management teacher is not a **Visit Teacher** until they have a real teacher profile and active Centre seat
+- An exited Staff Management teacher is not a **Visit Teacher**
+- **Visit Teacher** semantics apply consistently to Classroom Observation, AF Team Interaction, and Individual AF Teacher Interaction
+- If a **School** has multiple active linked **Centres**, School Visit teacher pickers include **Visit Teachers** from all of those Centres
+- A **Visit Teacher** seated at multiple active Centres linked to the same **School** appears once in School Visit teacher pickers
+- Teachers seated at inactive **Centres** are not **Visit Teachers** for new School Visit actions
+- If Staff Management has no active **Visit Teachers** for a **School**, School Visit teacher pickers show an empty state rather than falling back to LMS teacher permissions
+- A **Visit Teacher** must hold a teacher-type Centre seat role, not a PM-type seat role
+- Individual AF Teacher Interaction completion validates "all teachers recorded" against the same **Visit Teacher** source used by School Visit teacher pickers
+- Existing School Visit action data is not migrated when **Visit Teacher** sourcing changes; saved teacher names remain historical data, while new picker and completion rules use the current **Visit Teacher** source
+- `/api/pm/teachers` is the shared School Visit **Visit Teacher** source; Classroom Observation does not get a separate teacher API
+- School Visit permissions gate access to **Visit Teacher** pickers; Staff Management admin permission is not required to select a teacher during a Visit
+- The **Visit Teacher** source change is limited to shared School Visit teacher lookup and Individual AF Teacher Interaction completion validation; it does not change Staff Management, Visit payload shape, picker UI, or completed Visit summaries
 
 ## Example dialogue
 
@@ -212,3 +234,4 @@ _Avoid_: Access tier, role level
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
+- "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.

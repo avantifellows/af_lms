@@ -191,7 +191,7 @@ function individualStudentDiscussionChips(stats: InlineStats): string[] {
   return chips;
 }
 
-const STATS_CHIP_BUILDERS: Record<string, StatsChipBuilder> = {
+const STATS_CHIP_BUILDERS: Partial<Record<string, StatsChipBuilder>> = {
   classroom_observation: classroomObservationChips,
   af_team_interaction: (stats) => [
     `Answered ${stats.answeredCount}/${stats.totalQuestions}`,

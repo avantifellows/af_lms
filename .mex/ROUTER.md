@@ -20,7 +20,7 @@ edges:
     condition: when working on PM school visits or visit action types
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-06-25
+last_updated: 2026-06-30
 ---
 
 # Session Bootstrap
@@ -35,9 +35,9 @@ Then read this file fully before doing anything else in this session.
 - Dual auth (Google OAuth + school passcode) with dev-login personas in non-prod.
 - Student enrollment CRUD (reads direct from Postgres; writes proxied to the DB Service) + school dashboard, search, grade filtering, document uploads (S3).
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
-- PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`.
+- PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; teacher pickers use the Staff Management Visit Teacher roster.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
-- Deploy via AWS Amplify; ~1341 unit tests (Vitest/RTL) + ~39 E2E (Playwright).
+- Deploy via AWS Amplify; ~2410 unit tests (Vitest/RTL) + 65 E2E (Playwright).
 
 **Not yet built / in progress:**
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
