@@ -19,6 +19,7 @@ import {
 } from "@/lib/academic-mentorship";
 import { Badge, Card } from "@/components/ui";
 import AcademicMentorshipManager from "@/components/academic-mentorship/AcademicMentorshipManager";
+import AcademicMentorshipSelectionForm from "@/components/academic-mentorship/AcademicMentorshipSelectionForm";
 
 interface PageProps {
   searchParams?:
@@ -55,15 +56,14 @@ function firstParam(value: string | string[] | undefined): string {
 }
 
 function selectionUrl(params: {
-  schoolCode: string;
+  schoolCode?: string;
   academicYear: string;
   programId?: number | null;
   includeHistory?: boolean;
 }) {
-  const searchParams = new URLSearchParams({
-    school_code: params.schoolCode,
-    academic_year: params.academicYear,
-  });
+  const searchParams = new URLSearchParams();
+  if (params.schoolCode) searchParams.set("school_code", params.schoolCode);
+  searchParams.set("academic_year", params.academicYear);
   if (params.programId) searchParams.set("program_id", String(params.programId));
   if (params.includeHistory) searchParams.set("include_history", "true");
   return `/admin/academic-mentorship?${searchParams.toString()}`;
@@ -124,6 +124,23 @@ function redirectToOnlySchool(params: {
   redirect(
     selectionUrl({
       schoolCode: params.schools[0].code,
+      academicYear: params.selectedAcademicYear,
+      programId: params.selectedProgramId,
+      includeHistory: params.includeHistory,
+    })
+  );
+}
+
+function redirectInvalidSchoolSelection(params: {
+  selectedSchoolCode: string;
+  selectedSchool: AcademicMentorshipSchool | undefined;
+  selectedAcademicYear: string;
+  selectedProgramId: number | null;
+  includeHistory: boolean;
+}) {
+  if (!params.selectedSchoolCode || params.selectedSchool) return;
+  redirect(
+    selectionUrl({
       academicYear: params.selectedAcademicYear,
       programId: params.selectedProgramId,
       includeHistory: params.includeHistory,
@@ -203,6 +220,13 @@ async function loadPageModel(
   });
 
   const selectedSchool = schools.find((school) => school.code === selectedSchoolCode);
+  redirectInvalidSchoolSelection({
+    selectedSchoolCode,
+    selectedSchool,
+    selectedAcademicYear,
+    selectedProgramId,
+    includeHistory,
+  });
   const selectedAccess = await resolveSelectedAccess(
     session,
     selectedSchool,
@@ -265,86 +289,6 @@ function PageHeader({ email }: { email: string }) {
         </Link>
       </div>
     </header>
-  );
-}
-
-function SelectionForm({
-  academicYears,
-  selectedAcademicYear,
-  selectedSchoolCode,
-  selectedProgramId,
-  includeHistory,
-  programs,
-  schools,
-}: Pick<
-  PageModel,
-  | "academicYears"
-  | "selectedAcademicYear"
-  | "selectedSchoolCode"
-  | "selectedProgramId"
-  | "includeHistory"
-  | "programs"
-  | "schools"
->) {
-  return (
-    <Card className="overflow-hidden p-4">
-      <form action="/admin/academic-mentorship" className="grid min-w-0 gap-3 lg:grid-cols-[220px_minmax(0,1fr)_220px_auto] lg:items-end">
-        <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="program_id">
-          Program
-          <select
-            id="program_id"
-            name="program_id"
-            defaultValue={selectedProgramId ?? ""}
-            className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          >
-            <option value="">All programs</option>
-            {programs.map((program) => (
-              <option key={program.id} value={program.id}>
-                {program.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="school_code">
-          School
-          <select
-            id="school_code"
-            name="school_code"
-            defaultValue={selectedSchoolCode}
-            className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          >
-            <option value="">Select a School</option>
-            {schools.map((school) => (
-              <option key={`${school.id}-${school.code}`} value={school.code}>
-                {school.name} ({school.code})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="academic_year">
-          Academic year
-          <select
-            id="academic_year"
-            name="academic_year"
-            defaultValue={selectedAcademicYear}
-            className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          >
-            {!academicYears.includes(selectedAcademicYear) && (
-              <option value={selectedAcademicYear}>{selectedAcademicYear}</option>
-            )}
-            {academicYears.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
-        </label>
-        {includeHistory && <input type="hidden" name="include_history" value="true" />}
-        <button className="min-h-[44px] rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover">
-          Apply
-        </button>
-      </form>
-    </Card>
   );
 }
 
@@ -433,7 +377,7 @@ export default async function AcademicMentorshipPage({ searchParams }: PageProps
       <PageHeader email={session.user.email} />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <SelectionForm {...model} />
+        <AcademicMentorshipSelectionForm {...model} />
         <SelectionSummary {...model} />
         <SelectedSchoolContent {...model} />
       </main>

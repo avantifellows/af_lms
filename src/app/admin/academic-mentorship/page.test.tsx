@@ -156,4 +156,26 @@ describe("AcademicMentorshipPage", () => {
       programId: null,
     });
   });
+
+  it("clears a School that is not available under the selected Program", async () => {
+    mockListAccessibleAcademicMentorshipSchools.mockResolvedValue([
+      { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      { id: 21, code: "SCH002", name: "Second School", region: "West" },
+    ]);
+    mockFilterAcademicMentorshipSchoolsByProgram.mockResolvedValue([
+      { id: 21, code: "SCH002", name: "Second School", region: "West" },
+    ]);
+
+    await expect(
+      AcademicMentorshipPage({
+        searchParams: Promise.resolve({
+          program_id: "64",
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+        }),
+      })
+    ).rejects.toThrow(
+      "REDIRECT:/admin/academic-mentorship?academic_year=2026-2027&program_id=64"
+    );
+  });
 });
