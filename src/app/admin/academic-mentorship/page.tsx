@@ -144,7 +144,7 @@ function schoolsForProgram(
       .filter((link) => link.programId === programId)
       .map((link) => link.schoolId)
   );
-  return schools.filter((school) => schoolIds.has(school.id));
+  return schools.filter((school) => schoolIds.has(Number(school.id)));
 }
 
 function redirectInvalidSchoolSelection(params: {

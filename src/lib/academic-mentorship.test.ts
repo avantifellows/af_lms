@@ -10,6 +10,7 @@ import {
   createAcademicMentorshipMapping,
   importAcademicMentorshipMappingsFromCsv,
   endAcademicMentorshipMapping,
+  listAccessibleAcademicMentorshipSchools,
   listAcademicMentorshipMenteeOptions,
   listAcademicMentorshipMentorOptions,
   listAcademicMentorshipMappings,
@@ -115,6 +116,60 @@ describe("requireAcademicMentorshipAccess", () => {
         ]),
       ])
     );
+  });
+
+  it("normalizes School IDs returned as strings by pg", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "admin@avantifellows.org",
+          level: 3,
+          role: "admin",
+          school_codes: null,
+          regions: null,
+          program_ids: null,
+          read_only: false,
+          user_id: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: "20", code: "SCH001", name: "Mapped School", region: "North" },
+      ]);
+
+    const result = await requireAcademicMentorshipAccess(
+      { user: { email: "admin@avantifellows.org" } },
+      "view",
+      { schoolCode: "SCH001" }
+    );
+
+    expect(result.ok && result.school?.id).toBe(20);
+  });
+});
+
+describe("listAccessibleAcademicMentorshipSchools", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("normalizes School IDs returned as strings by pg", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { id: "20", code: "SCH001", name: "Mapped School", region: "North" },
+    ]);
+
+    const schools = await listAccessibleAcademicMentorshipSchools({
+      email: "admin@avantifellows.org",
+      level: 3,
+      role: "admin",
+      school_codes: null,
+      regions: null,
+      program_ids: null,
+      read_only: false,
+      user_id: null,
+    });
+
+    expect(schools).toEqual([
+      { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+    ]);
   });
 });
 

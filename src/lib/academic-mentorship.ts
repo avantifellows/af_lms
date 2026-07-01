@@ -28,6 +28,10 @@ export interface AcademicMentorshipSchool {
   region: string | null;
 }
 
+interface AcademicMentorshipSchoolRow extends Omit<AcademicMentorshipSchool, "id"> {
+  id: number | string;
+}
+
 export interface AcademicMentorshipProgram {
   id: number;
   name: string;
@@ -206,14 +210,14 @@ export function isAcademicMentorshipManagementRole(
 async function findAcademicMentorshipSchool(
   schoolCode: string
 ): Promise<AcademicMentorshipSchool | null> {
-  const rows = await query<AcademicMentorshipSchool>(
+  const rows = await query<AcademicMentorshipSchoolRow>(
     `SELECT id, code, name, region
      FROM school
      WHERE code = $1
      LIMIT 1`,
     [schoolCode]
   );
-  return rows[0] ?? null;
+  return rows[0] ? { ...rows[0], id: Number(rows[0].id) } : null;
 }
 
 export async function requireAcademicMentorshipAccess(
@@ -1123,20 +1127,22 @@ export async function listAccessibleAcademicMentorshipSchools(
   if (schoolCodes !== "all" && schoolCodes.length === 0) return [];
 
   if (schoolCodes === "all") {
-    return query<AcademicMentorshipSchool>(
+    const rows = await query<AcademicMentorshipSchoolRow>(
       `SELECT id, code, name, region
        FROM school
        ORDER BY name ASC, code ASC`
     );
+    return rows.map((school) => ({ ...school, id: Number(school.id) }));
   }
 
-  return query<AcademicMentorshipSchool>(
+  const rows = await query<AcademicMentorshipSchoolRow>(
     `SELECT id, code, name, region
      FROM school
      WHERE code = ANY($1)
      ORDER BY name ASC, code ASC`,
     [schoolCodes]
   );
+  return rows.map((school) => ({ ...school, id: Number(school.id) }));
 }
 
 export async function listAcademicMentorshipProgramsForSchools(

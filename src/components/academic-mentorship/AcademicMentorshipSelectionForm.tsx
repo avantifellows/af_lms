@@ -42,7 +42,7 @@ export default function AcademicMentorshipSelectionForm({
         .filter((link) => link.programId === selectedProgramId)
         .map((link) => link.schoolId)
     );
-    return schools.filter((school) => schoolIds.has(school.id));
+    return schools.filter((school) => schoolIds.has(Number(school.id)));
   }, [programId, programSchoolLinks, schools]);
 
   function handleProgramChange(nextProgramId: string) {
