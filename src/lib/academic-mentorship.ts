@@ -191,6 +191,19 @@ export function isAcademicMentorshipManagementRole(
   return permission.role === "admin" || permission.role === "program_admin";
 }
 
+async function findAcademicMentorshipSchool(
+  schoolCode: string
+): Promise<AcademicMentorshipSchool | null> {
+  const rows = await query<AcademicMentorshipSchool>(
+    `SELECT id, code, name, region
+     FROM school
+     WHERE code = $1
+     LIMIT 1`,
+    [schoolCode]
+  );
+  return rows[0] ?? null;
+}
+
 export async function requireAcademicMentorshipAccess(
   session: AcademicMentorshipSession,
   _action: AcademicMentorshipAction,
@@ -215,14 +228,7 @@ export async function requireAcademicMentorshipAccess(
   }
 
   if (options.schoolCode) {
-    const schools = await query<AcademicMentorshipSchool>(
-      `SELECT id, code, name, region
-       FROM school
-       WHERE code = $1
-       LIMIT 1`,
-      [options.schoolCode]
-    );
-    const school = schools[0];
+    const school = await findAcademicMentorshipSchool(options.schoolCode);
     if (!school) {
       return { ok: false, status: 404, error: "School not found" };
     }

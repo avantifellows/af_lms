@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
 import { query, withTransaction } from "@/lib/db";
 import { blockIfAcademicMentorshipHistory } from "@/lib/staff-admin";
+import { requireAdminApiAccess } from "../../route-helpers";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -11,17 +9,9 @@ interface RouteParams {
 
 // DELETE /api/admin/users/[id] - Delete user
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  const session = await getServerSession(authOptions);
+  const access = await requireAdminApiAccess();
   const { id } = await params;
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!access.ok) return access.response;
 
   // Prevent deleting yourself
   const userToDelete = await query<{ email: string; user_id: number | null }>(
@@ -37,7 +27,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     [id]
   );
 
-  if (userToDelete.length > 0 && userToDelete[0].email.toLowerCase() === session.user.email.toLowerCase()) {
+  if (userToDelete.length > 0 && userToDelete[0].email.toLowerCase() === access.email.toLowerCase()) {
     return NextResponse.json(
       { error: "Cannot delete your own account" },
       { status: 400 }
@@ -77,17 +67,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
 // PATCH /api/admin/users/[id] - Update user
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  const session = await getServerSession(authOptions);
+  const access = await requireAdminApiAccess();
   const { id } = await params;
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!access.ok) return access.response;
 
   try {
     const body = await request.json();

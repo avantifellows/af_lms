@@ -65,6 +65,43 @@ type PersonAgg = {
   seated: boolean;
 };
 
+type Out = {
+  email: string; bucket: string;
+  prod_access: string; staging_access: string;
+  schools_added: string; schools_removed: string;
+  prod_role: string; staging_role: string; note: string;
+};
+
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function writePromotionCsv(rows: Out[], bucketOrder: string[], outFile: string) {
+  const columns: (keyof Out)[] = [
+    "bucket",
+    "email",
+    "prod_role",
+    "staging_role",
+    "prod_access",
+    "staging_access",
+    "schools_added",
+    "schools_removed",
+    "note",
+  ];
+  const sortedRows = rows.sort(
+    (a, b) =>
+      bucketOrder.indexOf(a.bucket) - bucketOrder.indexOf(b.bucket) ||
+      a.email.localeCompare(b.email)
+  );
+  const csvRows = sortedRows.map((row) =>
+    columns.map((column) => csvCell(String(row[column] ?? ""))).join(",")
+  );
+  const target = path.resolve(outFile);
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, [columns.join(","), ...csvRows].join("\n") + "\n");
+  console.log(`\nCSV written to ${target} (${rows.length} rows; contains emails - gitignored dir)`);
+}
+
 async function main() {
   const cli = parseArgs(process.argv.slice(2));
   const staging = poolFromEnvFile(cli.stagingEnv, "STAGING");
@@ -138,12 +175,6 @@ async function main() {
     }
 
     // --- CLASSIFY ---
-    type Out = {
-      email: string; bucket: string;
-      prod_access: string; staging_access: string;
-      schools_added: string; schools_removed: string;
-      prod_role: string; staging_role: string; note: string;
-    };
     const out: Out[] = [];
     const buckets: Record<string, number> = {};
     let totalAdded = 0, totalRemoved = 0;
@@ -221,17 +252,7 @@ async function main() {
       }
     }
 
-    // CSV
-    const header: (keyof Out)[] = ["bucket","email","prod_role","staging_role","prod_access","staging_access","schools_added","schools_removed","note"];
-    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const csv = [header.join(",")].concat(
-      out.sort((a,b)=> order.indexOf(a.bucket)-order.indexOf(b.bucket) || a.email.localeCompare(b.email))
-        .map((r)=>header.map((h)=>esc(String(r[h] ?? ""))).join(","))
-    ).join("\n");
-    const outPath = path.resolve(cli.out);
-    mkdirSync(path.dirname(outPath), { recursive: true });
-    writeFileSync(outPath, csv + "\n");
-    console.log(`\nCSV: ${outPath}  (${out.length} rows; contains emails — gitignored dir)`);
+    writePromotionCsv(out, order, cli.out);
   } finally { await staging.end(); await prod.end(); }
 }
 main().catch((e) => { console.error(e instanceof Error ? e.stack || e.message : e); process.exitCode = 1; });

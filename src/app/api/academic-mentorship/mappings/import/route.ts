@@ -1,68 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
 import {
-  getAcademicMentorshipActorUserId,
   importAcademicMentorshipMappingsFromCsv,
-  isAcademicMentorshipEditableYear,
-  isValidAcademicYear,
-  requireAcademicMentorshipAccess,
 } from "@/lib/academic-mentorship";
+import {
+  academicMentorshipError,
+  formString,
+  getAcademicMentorshipSession,
+  parseSchoolYear,
+  parseSchoolYearSearchParams,
+  requireAcademicMentorshipActor,
+  requireAcademicMentorshipRouteAccess,
+} from "../../route-helpers";
 
 const TEMPLATE = "mentor_email,student_id\n";
 
-function requireSchoolAndYear(
-  schoolCode: string | null | undefined,
-  academicYear: string | null | undefined
-): { ok: true; schoolCode: string; academicYear: string } | { ok: false; response: NextResponse } {
-  const trimmedSchoolCode = schoolCode?.trim() ?? "";
-  if (!trimmedSchoolCode) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "school_code is required" }, { status: 400 }),
-    };
-  }
-  const trimmedAcademicYear = academicYear?.trim() ?? "";
-  if (!isValidAcademicYear(trimmedAcademicYear)) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "academic_year must use YYYY-YYYY format" },
-        { status: 400 }
-      ),
-    };
-  }
-  if (!isAcademicMentorshipEditableYear(trimmedAcademicYear)) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "Academic year is not editable" },
-        { status: 403 }
-      ),
-    };
-  }
-  return { ok: true, schoolCode: trimmedSchoolCode, academicYear: trimmedAcademicYear };
-}
-
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getAcademicMentorshipSession();
+  if (!session.ok) return session.response;
 
-  const parsed = requireSchoolAndYear(
-    request.nextUrl.searchParams.get("school_code"),
-    request.nextUrl.searchParams.get("academic_year")
-  );
+  const parsed = parseSchoolYearSearchParams(request, {
+    requireEditable: true,
+  });
   if (!parsed.ok) return parsed.response;
 
-  const access = await requireAcademicMentorshipAccess(session, "edit", {
-    schoolCode: parsed.schoolCode,
-  });
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status });
-  }
+  const access = await requireAcademicMentorshipRouteAccess(
+    session.value,
+    "edit",
+    parsed.value.schoolCode
+  );
+  if (!access.ok) return access.response;
 
   return new NextResponse(TEMPLATE, {
     headers: {
@@ -74,54 +41,41 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getAcademicMentorshipSession();
+  if (!session.ok) return session.response;
 
   let formData: FormData;
   try {
     formData = await request.formData();
   } catch {
-    return NextResponse.json({ error: "Invalid multipart form data" }, { status: 400 });
+    return academicMentorshipError("Invalid multipart form data", 400);
   }
 
-  const parsed = requireSchoolAndYear(
-    typeof formData.get("school_code") === "string"
-      ? String(formData.get("school_code"))
-      : "",
-    typeof formData.get("academic_year") === "string"
-      ? String(formData.get("academic_year"))
-      : ""
-  );
+  const parsed = parseSchoolYear({
+    schoolCode: formString(formData, "school_code"),
+    academicYear: formString(formData, "academic_year"),
+    requireEditable: true,
+  });
   if (!parsed.ok) return parsed.response;
 
   const file = formData.get("file");
   if (!file || typeof file === "string" || typeof file.text !== "function") {
-    return NextResponse.json({ error: "CSV file is required" }, { status: 400 });
+    return academicMentorshipError("CSV file is required", 400);
   }
 
-  const access = await requireAcademicMentorshipAccess(session, "edit", {
-    schoolCode: parsed.schoolCode,
-  });
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status });
-  }
-  const actorUserId = await getAcademicMentorshipActorUserId(
-    access.email,
-    access.permission
+  const actor = await requireAcademicMentorshipActor(
+    session.value,
+    parsed.value.schoolCode
   );
-  if (actorUserId === null) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!actor.ok) return actor.response;
 
   const result = await importAcademicMentorshipMappingsFromCsv({
     csvText: await file.text(),
-    schoolId: access.school!.id,
-    schoolCode: access.school!.code,
-    schoolRegion: access.school!.region,
-    academicYear: parsed.academicYear,
-    assignedByUserId: actorUserId,
+    schoolId: actor.value.access.school!.id,
+    schoolCode: actor.value.access.school!.code,
+    schoolRegion: actor.value.access.school!.region,
+    academicYear: parsed.value.academicYear,
+    assignedByUserId: actor.value.actorUserId,
   });
 
   if (result.ok) {
@@ -131,7 +85,7 @@ export async function POST(request: NextRequest) {
     );
   }
   if (result.type === "file") {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    return academicMentorshipError(result.error, 400);
   }
   return NextResponse.json(
     {

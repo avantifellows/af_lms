@@ -1,25 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
+import { requireAdminApiAccess } from "../route-helpers";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
 
 // GET /api/admin/users - List all users
 export async function GET() {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const access = await requireAdminApiAccess();
+  if (!access.ok) return access.response;
 
   const users = await query<{
     id: number;
@@ -47,16 +37,8 @@ export async function GET() {
 
 // POST /api/admin/users - Create new user
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const access = await requireAdminApiAccess();
+  if (!access.ok) return access.response;
 
   try {
     const body = await request.json();
