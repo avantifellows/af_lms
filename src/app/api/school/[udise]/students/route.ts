@@ -89,6 +89,10 @@ async function resolveSchoolAndAccess(
   session: Parameters<typeof requireStudentAdditionAccess>[0],
   udise: string,
 ) {
+  if (!session) {
+    return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+
   const schools = await query<RouteSchool>(
     `SELECT id, code, udise_code, region, program_ids
      FROM school
@@ -263,7 +267,8 @@ export async function GET(
   const resolved = await resolveSchoolAndAccess(session, udise);
   if (resolved.response) return resolved.response;
 
-  return new NextResponse(new Uint8Array(buildStudentAdditionTemplateWorkbook()), {
+  const workbook = await buildStudentAdditionTemplateWorkbook();
+  return new NextResponse(new Uint8Array(workbook), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": 'attachment; filename="lms-student-addition-template.xlsx"',

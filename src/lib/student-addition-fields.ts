@@ -1,3 +1,5 @@
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+
 export const CBSE_BOARD = "CENTRAL BOARD OF SECONDARY EDUCATION";
 
 export const G10_BOARD_OPTIONS = [
@@ -189,7 +191,7 @@ export function buildRejectedRowsCsv(results: StudentAdditionCsvResult[]): strin
   ];
 
   const rows = results
-    .filter((result) => result.status && result.status !== "created")
+    .filter((result) => result.status === "rejected")
     .map((result) => {
       const existing = result.existing_match ?? {};
       return [
@@ -267,9 +269,14 @@ export function normalizeG10RollNo(value: unknown): string {
   return stringValue(value).replace(/\s+/g, "").toUpperCase();
 }
 
-export function generateStudentId(grade: 11 | 12, g10RollNo: string): string | null {
+export function generateStudentId(
+  grade: 11 | 12,
+  g10RollNo: string,
+  academicYear = CURRENT_ACADEMIC_YEAR,
+): string | null {
   if (!g10RollNo) return null;
-  return `${grade === 11 ? 2028 : 2027}${g10RollNo}`;
+  const academicStart = Number(academicYear.split("-")[0]);
+  return `${academicStart + (grade === 11 ? 2 : 1)}${g10RollNo}`;
 }
 
 function parseGrade(value: unknown): 11 | 12 | null {

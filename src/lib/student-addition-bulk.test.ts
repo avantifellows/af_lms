@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 import { parseStudentAdditionUpload } from "./student-addition-bulk";
 import { buildRejectedRowsCsv, CBSE_BOARD } from "./student-addition-fields";
 
-function csvLine(values: string[]) {
-  return values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
+function csvLine(values: unknown[]) {
+  return values.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",");
 }
 
 const uploadHeaders = [
@@ -25,7 +25,7 @@ const uploadHeaders = [
   "Yearly / Annual Family Income",
 ];
 
-const validRowValues = [
+const validRowValues: unknown[] = [
   "11",
   " asha  k. kumar ",
   "02/01/2010",
@@ -45,12 +45,13 @@ const validRowValues = [
 const csvHeaders = csvLine(uploadHeaders);
 const validCsvRow = csvLine(validRowValues);
 
-function workbookBuffer(sheets: Record<string, string[][]>) {
-  const workbook = XLSX.utils.book_new();
+async function workbookBuffer(sheets: Record<string, unknown[][]>) {
+  const workbook = new ExcelJS.Workbook();
   for (const [name, rows] of Object.entries(sheets)) {
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), name);
+    workbook.addWorksheet(name).addRows(rows);
   }
-  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
 }
 
 describe("parseStudentAdditionUpload", () => {
@@ -94,7 +95,7 @@ describe("parseStudentAdditionUpload", () => {
   it("parses the Template xlsx sheet, ignoring extra columns and blank rows", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xlsx",
-      data: workbookBuffer({
+      data: await workbookBuffer({
         "Do Not Use": [
           uploadHeaders,
           ["12", "Wrong Sheet"],
@@ -124,7 +125,7 @@ describe("parseStudentAdditionUpload", () => {
   it("uses the first xlsx sheet when Template is absent and rejects missing columns", async () => {
     const firstSheet = await parseStudentAdditionUpload({
       filename: "students.xlsx",
-      data: workbookBuffer({ Students: [uploadHeaders, validRowValues] }),
+      data: await workbookBuffer({ Students: [uploadHeaders, validRowValues] }),
       selectedGrade: 11,
       today: new Date("2026-07-01T00:00:00Z"),
     });
@@ -135,7 +136,7 @@ describe("parseStudentAdditionUpload", () => {
 
     const missingColumn = await parseStudentAdditionUpload({
       filename: "students.xlsx",
-      data: workbookBuffer({ Students: [uploadHeaders.filter((header) => header !== "Student Name"), validRowValues] }),
+      data: await workbookBuffer({ Students: [uploadHeaders.filter((header) => header !== "Student Name"), validRowValues] }),
       selectedGrade: 11,
     });
 
@@ -143,6 +144,22 @@ describe("parseStudentAdditionUpload", () => {
       ok: false,
       error: "Missing required columns: Student Name",
     });
+  });
+
+  it("parses real xlsx date cells without rejecting valid DOB values", async () => {
+    const row = [...validRowValues];
+    row[2] = new Date(2010, 0, 2);
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [uploadHeaders, row] }),
+      selectedGrade: 11,
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.rows[0].date_of_birth).toBe("2010-01-02");
   });
 
   it("allows exactly 200 non-blank rows and rejects 201", async () => {
@@ -184,6 +201,16 @@ describe("parseStudentAdditionUpload", () => {
         row_errors: ["APAAR ID or Grade 10 Roll no is required"],
         existing_match: { student_id: "202812345678", school_code: "JNV001" },
       },
+      {
+        row_number: 4,
+        status: "already_exists",
+        original: { "Student Name": "Already Present Row" },
+      },
+      {
+        row_number: 5,
+        status: "duplicate_in_file",
+        original: { "Student Name": "Duplicate Student" },
+      },
     ]);
 
     expect(csv).toContain("Original Row Number,Row Status");
@@ -192,6 +219,8 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).toContain("APAAR ID or Grade 10 Roll no is required");
     expect(csv).toContain("202812345678");
     expect(csv).not.toContain("Created Student");
+    expect(csv).not.toContain("Already Present Row");
+    expect(csv).not.toContain("Duplicate Student");
   });
 
   it("returns all local row errors and keeps 200-row validation lightweight", async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 const {
   mockGetServerSession,
@@ -24,6 +24,7 @@ import {
   jsonRequest,
   routeParams,
   ADMIN_SESSION,
+  NO_SESSION,
 } from "../../../__test-utils__/api-test-helpers";
 
 const school = {
@@ -183,6 +184,23 @@ describe("POST /api/school/[udise]/students", () => {
     expect(payload.rows[0]).not.toHaveProperty("batch_id");
   });
 
+  it("returns 401 before resolving schools when unauthenticated", async () => {
+    mockGetServerSession.mockResolvedValue(NO_SESSION);
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: validBody,
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockRequireStudentAdditionAccess).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("returns the shared gate status before calling DB Service", async () => {
     mockRequireStudentAdditionAccess.mockResolvedValue({
       ok: false,
@@ -301,6 +319,7 @@ describe("POST /api/school/[udise]/students", () => {
 
 describe("GET /api/school/[udise]/students template", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.resetAllMocks();
     mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mockQuery.mockResolvedValue([school]);
@@ -327,12 +346,10 @@ describe("GET /api/school/[udise]/students template", () => {
     expect(response.headers.get("content-type")).toBe(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), { type: "buffer" });
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets.Template, {
-      header: 1,
-      raw: false,
-    }) as string[][];
-    expect(rows[0]).toEqual(uploadHeaders);
-    expect(workbook.SheetNames).toContain("Options");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const template = workbook.getWorksheet("Template");
+    expect((template?.getRow(1).values as unknown[]).slice(1)).toEqual(uploadHeaders);
+    expect(workbook.getWorksheet("Options")).toBeDefined();
   });
 });

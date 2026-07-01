@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
-import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
+import { Card, Badge, Button, Modal, DetailField, DetailGroup } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import { PROGRAM_IDS } from "@/lib/constants";
 
 export interface Student {
   group_user_id: string;
@@ -102,20 +103,6 @@ function getCategoryColor(category: string | null): string {
     default:
       return "bg-gray-100 text-gray-800";
   }
-}
-
-function getCurrentAcademicYear(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  if (month >= 3) {
-    return `${year}-${year + 1}`;
-  }
-  return `${year - 1}-${year}`;
-}
-
-function formatDateForAPI(date: Date): string {
-  return date.toISOString().split("T")[0];
 }
 
 interface StudentCardProps {
@@ -310,8 +297,6 @@ interface DropoutModalProps {
 }
 
 function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps) {
-  const [dropoutDate, setDropoutDate] = useState(formatDateForAPI(new Date()));
-  const [dropoutYear, setDropoutYear] = useState(getCurrentAcademicYear());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -320,17 +305,11 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
     setLoading(true);
 
     try {
-      const identifier = student.student_id
-        ? { student_id: student.student_id }
-        : { apaar_id: student.apaar_id };
-
       const response = await fetch("/api/student/dropout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...identifier,
-          start_date: dropoutDate,
-          academic_year: dropoutYear,
+          student_pk_id: student.student_pk_id,
         }),
       });
 
@@ -366,30 +345,6 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
         Are you sure you want to mark <strong>{studentName}</strong> as a dropout?
         This action cannot be undone.
       </p>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">
-            Dropout Date
-          </label>
-          <Input
-            type="date"
-            value={dropoutDate}
-            onChange={(e) => setDropoutDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">
-            Academic Year
-          </label>
-          <Input
-            type="text"
-            value={dropoutYear}
-            onChange={(e) => setDropoutYear(e.target.value)}
-            placeholder="e.g., 2025-2026"
-          />
-        </div>
-      </div>
 
       <div className="flex justify-end gap-3">
         <Button
@@ -446,10 +401,13 @@ export default function StudentTable({
   // Per-row ownership check: combines feature-level canEdit with program ownership
   const canMutateStudent = (student: Student): boolean => {
     if (!canEdit) return false;
-    if (isPasscodeUser || isAdmin) return true;
-    if (student.program_id === null) return true;
+    if (isPasscodeUser || !student.student_pk_id) return false;
+    const programId = student.program_id == null ? null : Number(student.program_id);
+    if (programId !== null && programId !== PROGRAM_IDS.NVS) return false;
+    if (isAdmin) return true;
+    if (programId === null) return true;
     if (!userProgramIds || userProgramIds.length === 0) return false;
-    return userProgramIds.includes(Number(student.program_id));
+    return userProgramIds.includes(PROGRAM_IDS.NVS);
   };
 
   // Determine which students to show based on tab

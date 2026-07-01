@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CBSE_BOARD,
+  generateStudentId,
   validateStudentAdditionInput,
 } from "./student-addition-fields";
 
@@ -98,5 +99,12 @@ describe("validateStudentAdditionInput", () => {
     if (!result.ok) throw new Error("expected valid input");
     expect(result.row.g10_roll_no).toBe("AB12Z");
     expect(result.generatedStudentId).toBe("2028AB12Z");
+  });
+
+  it("derives Student ID passing year from the configured academic year", () => {
+    expect(generateStudentId(11, "AB12Z")).toBe("2028AB12Z");
+    expect(generateStudentId(12, "AB12Z")).toBe("2027AB12Z");
+    expect(generateStudentId(11, "AB12Z", "2027-2028")).toBe("2029AB12Z");
+    expect(generateStudentId(12, "AB12Z", "2027-2028")).toBe("2028AB12Z");
   });
 });

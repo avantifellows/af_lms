@@ -70,4 +70,34 @@ describe("BulkStudentUploadModal", () => {
       expect.stringContaining("data:text/csv"),
     );
   });
+
+  it("does not expose a rejected rows CSV when results only contain skipped rows", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 2, created: 0, duplicate_in_file: 1, already_exists: 1, rejected: 0 },
+          results: [
+            { row_number: 2, status: "already_exists", original: { "Student Name": "Existing" } },
+            { row_number: 3, status: "duplicate_in_file", original: { "Student Name": "Duplicate" } },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    await waitFor(() => expect(screen.getByText("1 done, 1 to go")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "Download rejected rows CSV" })).not.toBeInTheDocument();
+  });
 });

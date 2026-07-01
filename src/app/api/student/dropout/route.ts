@@ -2,13 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
 
 interface DropoutPayload {
-  student_id?: string;
-  apaar_id?: string;
-  start_date: string;
-  academic_year: string;
+  student_pk_id?: string | number;
 }
 
 interface DropoutStudentRow {
@@ -23,17 +21,13 @@ function identifierError(studentId?: string, apaarId?: string) {
   return `Multiple students found with the same ID (${identifier}). Please contact an administrator to resolve this duplicate record issue.`;
 }
 
-async function resolveDropoutStudent(body: DropoutPayload) {
-  const studentId = body.student_id?.trim() || null;
-  const apaarId = body.apaar_id?.trim() || null;
-
+async function resolveDropoutStudent(studentPkId: number) {
   return query<DropoutStudentRow>(
     `SELECT id, student_id, apaar_id, status
      FROM student
-     WHERE ($1::text IS NOT NULL AND student_id = $1)
-        OR ($2::text IS NOT NULL AND apaar_id = $2)
-     LIMIT 2`,
-    [studentId, apaarId],
+     WHERE id = $1
+     LIMIT 1`,
+    [studentPkId],
   );
 }
 
@@ -46,42 +40,27 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: DropoutPayload = await request.json();
+    const studentPkId = Number(body.student_pk_id);
 
-    if (!body.student_id && !body.apaar_id) {
+    if (!Number.isInteger(studentPkId) || studentPkId <= 0) {
       return NextResponse.json(
-        { error: "Either student_id or apaar_id is required" },
+        { error: "student_pk_id is required" },
         { status: 400 },
       );
     }
 
-    if (!body.start_date) {
-      return NextResponse.json(
-        { error: "start_date is required" },
-        { status: 400 },
-      );
+    const access = await requireStudentAdditionStudentAccess(session, studentPkId);
+    if (!access.ok) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
 
-    if (!body.academic_year) {
-      return NextResponse.json(
-        { error: "academic_year is required" },
-        { status: 400 },
-      );
-    }
-
-    const matches = await resolveDropoutStudent(body);
+    const matches = await resolveDropoutStudent(studentPkId);
     if (matches.length === 0) {
       return NextResponse.json(
         { error: "Student not found with the provided identifier" },
         { status: 404 },
       );
     }
-    if (matches.length > 1) {
-      return NextResponse.json(
-        { error: identifierError(body.student_id, body.apaar_id) },
-        { status: 400 },
-      );
-    }
-
     const student = matches[0];
     if (student.status === "dropout") {
       return NextResponse.json(
@@ -89,10 +68,11 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-
-    const access = await requireStudentAdditionStudentAccess(session, student.id);
-    if (!access.ok) {
-      return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!student.student_id && !student.apaar_id) {
+      return NextResponse.json(
+        { error: "Student has no dropout identifier" },
+        { status: 400 },
+      );
     }
 
     const dbServiceUrl = process.env.DB_SERVICE_URL;
@@ -101,10 +81,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
     }
 
-    const requestBody: Record<string, string> = {
-      start_date: body.start_date,
-      academic_year: body.academic_year,
-    };
+    const requestBody: Record<string, string> = deriveLmsEnrollmentPeriod();
 
     if (student.student_id) {
       requestBody.student_id = student.student_id;
@@ -152,7 +129,7 @@ export async function POST(request: NextRequest) {
     if (errorText.includes("expected at most one result but got")) {
       return NextResponse.json(
         {
-          error: identifierError(body.student_id, body.apaar_id),
+          error: identifierError(student.student_id ?? undefined, student.apaar_id ?? undefined),
         },
         { status: 400 },
       );

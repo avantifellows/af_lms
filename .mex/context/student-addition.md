@@ -72,7 +72,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - APAAR ID or G10 Roll Number: at least one is required; both are allowed.
 - Duplicate APAAR and duplicate generated Student ID are blocked. Policy is first-registrant-wins.
 - Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. APAAR-only rows store `student.apaar_id` and leave `student.student_id` null.
-- G12 passing year: Grade 11 -> 2028 for AY26-27; Grade 12 -> 2027.
+- G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
 - G10 roll normalisation: remove spaces, uppercase letters, then validate alphanumeric. Do not left-pad short rolls. Store the normalised Grade 10 Roll no separately from generated Student ID because Student ID is not equivalent to Grade 10 Roll no across programs.
 - Name normalisation: collapse spaces, remove full stops, proper-case words. Show the normalised value back before commit.
 - The file grade must match the upload context grade.
@@ -84,17 +84,17 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - The page already resolves school by UDISE/code and checks passcode user scope or `canAccessSchoolSync`.
 - `students` feature access currently grants edit to all roles, passcode users get students edit, and `read_only` downgrades edit to view in `getFeatureAccess`.
 - Existing `NVS_GATED_FEATURES` does not include `students`, so Student Addition needs its own explicit `PROGRAM_IDS.NVS` allowlist check.
-- `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for existing-student writes. It checks school scope, read-only, and per-program ownership.
+- `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for generic existing-student writes. Student Addition existing-student writes use `requireStudentAdditionStudentAccess(session, studentPkId)`, which starts from the opaque student PK, gates before route-level row lookup, checks school scope, `students` edit, NVS school/actor context, and aggregated current batch program IDs.
 - For create/bulk there is no existing student to resolve, so gate by resolved school: session -> route `[udise]` -> school code -> `canAccessSchool` -> allowed role -> `students` `canEdit` -> not `read_only` -> NVS/JNV program gate. Passcode users can view their school roster but are explicitly blocked from Student Addition writes in this build.
 - Slice #157 adds the shared LMS create gate in `src/lib/student-addition-access.ts`, client-safe field/identity helpers in `src/lib/student-addition-fields.ts`, and the IST enrollment date helper in `src/lib/lms-enrollment-date.ts`.
 - One-by-one creation now uses `POST /api/school/[udise]/students`, which validates one canonical row, derives actor/school/program/start-date/academic-year server-side, and proxies DB Service `POST /api/lms/students/bulk-create-with-enrollments` with a single-row payload.
-- Bulk creation also uses `POST /api/school/[udise]/students` with multipart `.xlsx`/`.csv` upload. LMS parses the first sheet or `Template` sheet, validates up to 200 non-blank rows locally, sends accepted rows to the same DB Service endpoint, merges local rejects with DB Service statuses, and returns rejected-row CSV data from the UI.
+- Bulk creation also uses `POST /api/school/[udise]/students` with multipart `.xlsx`/`.csv` upload. LMS parses `.xlsx` files with ExcelJS from the first sheet or `Template` sheet, normalises real Excel date cells, validates up to 200 non-blank rows locally, sends accepted rows to the same DB Service endpoint, merges local rejects with DB Service statuses, and returns rejected-row CSV data from the UI.
 - The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and the selected program is `PROGRAM_IDS.NVS`; the modals live in `src/components/enrollment/AddStudentModal.tsx` and `src/components/enrollment/BulkStudentUploadModal.tsx`.
-- Existing-student edit now uses the shared Student Addition gate plus `canAccessStudent(session, studentPkId, { requireEdit: true })` before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The edit modal uses the PRD field contract, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service G10-board conflicts next to the G10 board field.
-- Dropout now resolves the target student server-side, uses the shared Student Addition gate plus `canAccessStudent(session, studentPkId, { requireEdit: true })`, and still proxies LMS `POST /api/student/dropout` to DB Service `PATCH /dropout`.
+- Existing-student edit now uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The edit modal uses the PRD field contract, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service G10-board conflicts next to the G10 board field.
+- Dropout now accepts only `student_pk_id` from the UI, authorizes with the shared Student Addition existing-student gate before route-level lookup, derives `start_date` and `academic_year` server-side, and proxies LMS `POST /api/student/dropout` to DB Service `PATCH /dropout`.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
-- `csv-parse` is installed in af_lms; no XLSX parser dependency is currently present. PRD now requires primary `.xlsx` upload support, so implementation needs an XLSX parser. Rejected-row retry is CSV.
+- `csv-parse` and `exceljs` are installed in af_lms for upload parsing/template generation. Do not reintroduce the direct `xlsx` dependency; it was removed during PR review hardening. Rejected-row retry is CSV and should include only `rejected` rows, not skipped/already-existing rows.
 
 ## DB Service Context
 Repo: `/Users/deepanshmathur/Documents/AF/db-service`.

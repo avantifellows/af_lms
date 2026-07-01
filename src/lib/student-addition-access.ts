@@ -1,7 +1,7 @@
 import { PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
 import {
-  canAccessStudent,
+  canAccessSchool,
   canAccessSchoolSync,
   getFeatureAccess,
   getProgramContextSync,
@@ -62,7 +62,7 @@ interface StudentWriteScopeRow {
   udise_code: string | null;
   region: string | null;
   program_ids: number[] | null;
-  student_program_id: number | string | null;
+  student_program_ids: Array<number | string> | null;
 }
 
 function deny(status: 401 | 403, error = "Forbidden"): { ok: false; status: 401 | 403; error: string } {
@@ -119,7 +119,10 @@ async function getStudentWriteScope(studentPkId: number | string) {
        sch.udise_code,
        sch.region,
        sch.program_ids,
-       b.program_id as student_program_id
+       COALESCE(
+         ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+         ARRAY[]::int[]
+       ) AS student_program_ids
      FROM student s
      JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
      JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
@@ -131,6 +134,7 @@ async function getStudentWriteScope(studentPkId: number | string) {
      LEFT JOIN "group" g_batch ON g_batch.id = er_batch.group_id AND g_batch.type = 'batch'
      LEFT JOIN batch b ON b.id = g_batch.child_id
      WHERE s.id = $1
+     GROUP BY sch.code, sch.udise_code, sch.region, sch.program_ids
      LIMIT 1`,
     [studentPkId],
   );
@@ -146,15 +150,24 @@ export async function requireStudentAdditionStudentAccess(
 
   const email = session.user?.email;
   if (!email) return deny(403);
-  if (!(await canAccessStudent(session, studentPkId, { requireEdit: true }))) return deny(403);
 
   const permission = await getResolvedPermission(email);
   if (!permission) return deny(403);
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
+  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
 
   const scope = await getStudentWriteScope(studentPkId);
   if (!scope) return deny(403);
-  if (Number(scope.student_program_id) !== PROGRAM_IDS.NVS) return deny(403);
+  if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
+    if (permission.level !== 2 || !(await canAccessSchool(email, scope.code, scope.region ?? undefined))) {
+      return deny(403);
+    }
+  }
+
+  const studentProgramIds = (scope.student_program_ids ?? []).map(Number);
+  if (studentProgramIds.length > 0 && !studentProgramIds.includes(PROGRAM_IDS.NVS)) {
+    return deny(403);
+  }
   if (!(scope.program_ids ?? []).includes(PROGRAM_IDS.NVS)) return deny(403);
   if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS)) return deny(403);
 

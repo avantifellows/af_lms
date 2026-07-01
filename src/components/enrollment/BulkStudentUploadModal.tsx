@@ -63,7 +63,7 @@ export default function BulkStudentUploadModal({
   const [results, setResults] = useState<UploadResult[]>([]);
 
   const rejectedCsvHref = useMemo(() => {
-    if (!results.some((result) => result.status !== "created")) return null;
+    if (!results.some((result) => result.status === "rejected")) return null;
     return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results))}`;
   }, [results]);
 

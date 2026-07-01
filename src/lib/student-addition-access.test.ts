@@ -2,14 +2,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const {
   mockGetResolvedPermission,
-  mockCanAccessStudent,
+  mockCanAccessSchool,
   mockCanAccessSchoolSync,
   mockGetFeatureAccess,
   mockGetProgramContextSync,
   mockQuery,
 } = vi.hoisted(() => ({
   mockGetResolvedPermission: vi.fn(),
-  mockCanAccessStudent: vi.fn(),
+  mockCanAccessSchool: vi.fn(),
   mockCanAccessSchoolSync: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
@@ -17,7 +17,7 @@ const {
 }));
 
 vi.mock("./permissions", () => ({
-  canAccessStudent: mockCanAccessStudent,
+  canAccessSchool: mockCanAccessSchool,
   getResolvedPermission: mockGetResolvedPermission,
   canAccessSchoolSync: mockCanAccessSchoolSync,
   getFeatureAccess: mockGetFeatureAccess,
@@ -60,7 +60,7 @@ function permission(overrides: Partial<UserPermission> = {}): UserPermission {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockCanAccessStudent.mockResolvedValue(true);
+  mockCanAccessSchool.mockResolvedValue(true);
   mockCanAccessSchoolSync.mockReturnValue(true);
   mockGetFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
   mockGetProgramContextSync.mockReturnValue({
@@ -75,7 +75,7 @@ beforeEach(() => {
       udise_code: "12345678901",
       region: "South",
       program_ids: [PROGRAM_IDS.NVS],
-      student_program_id: PROGRAM_IDS.NVS,
+      student_program_ids: [PROGRAM_IDS.NVS],
     },
   ]);
 });
@@ -157,7 +157,6 @@ describe("requireStudentAdditionStudentAccess", () => {
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
-    expect(mockCanAccessStudent).toHaveBeenCalledWith(session, "100", { requireEdit: true });
     expect(result).toEqual({
       ok: true,
       permission: expect.objectContaining({ role: "program_manager" }),
@@ -179,12 +178,11 @@ describe("requireStudentAdditionStudentAccess", () => {
     );
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
-    expect(mockCanAccessStudent).not.toHaveBeenCalled();
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["student scope denied", () => mockCanAccessStudent.mockResolvedValue(false)],
+    ["school scope denied", () => mockCanAccessSchoolSync.mockReturnValue(false)],
     ["teacher role", () => mockGetResolvedPermission.mockResolvedValue(permission({ role: "teacher" }))],
     [
       "non-NVS student",
@@ -195,7 +193,7 @@ describe("requireStudentAdditionStudentAccess", () => {
             udise_code: "12345678901",
             region: "South",
             program_ids: [PROGRAM_IDS.NVS],
-            student_program_id: PROGRAM_IDS.COE,
+            student_program_ids: [PROGRAM_IDS.COE],
           },
         ]),
     ],
@@ -206,5 +204,39 @@ describe("requireStudentAdditionStudentAccess", () => {
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+
+  it("allows an NVS-school student without a current batch program", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockQuery.mockResolvedValue([
+      {
+        code: "JNV001",
+        udise_code: "12345678901",
+        region: "South",
+        program_ids: [PROGRAM_IDS.NVS],
+        student_program_ids: [],
+      },
+    ]);
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows a student with an NVS current batch among other current batches", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockQuery.mockResolvedValue([
+      {
+        code: "JNV001",
+        udise_code: "12345678901",
+        region: "South",
+        program_ids: [PROGRAM_IDS.NVS],
+        student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+      },
+    ]);
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result.ok).toBe(true);
   });
 });

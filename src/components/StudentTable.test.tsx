@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import StudentTable, { Grade } from "./StudentTable";
+import { PROGRAM_IDS } from "@/lib/constants";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
@@ -73,8 +74,8 @@ function makeStudent(overrides: StudentOverrides = {}) {
     category: has("category") ? overrides.category! : "Gen",
     stream: has("stream") ? overrides.stream! : "science",
     gender: has("gender") ? overrides.gender! : "Male",
-    program_name: has("program_name") ? overrides.program_name! : "CoE",
-    program_id: has("program_id") ? overrides.program_id! : 1,
+    program_name: has("program_name") ? overrides.program_name! : "JNV NVS",
+    program_id: has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS,
     grade: has("grade") ? overrides.grade! : 10,
     grade_id: has("grade_id") ? overrides.grade_id! : "g-10",
     status: has("status") ? overrides.status! : "active",
@@ -465,7 +466,7 @@ describe("StudentTable - Edit button visibility", () => {
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("shows Edit button for passcode user", () => {
+  it("hides Edit button for passcode users", () => {
     render(
       <StudentTable
         students={[makeStudent()]}
@@ -473,7 +474,7 @@ describe("StudentTable - Edit button visibility", () => {
         isPasscodeUser={true}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 });
 
@@ -567,30 +568,43 @@ describe("StudentTable - Dropout button", () => {
 // ─── 9. canEditStudent logic ────────────────────────────────────────────────
 
 describe("StudentTable - canEditStudent logic", () => {
-  it("passcode user can edit any student regardless of program", () => {
-    const student = makeStudent({ program_id: 99 });
+  it("passcode user cannot edit through the Student Addition gate", () => {
+    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
         students={[student]}
         grades={defaultGrades}
         isPasscodeUser={true}
-        userProgramIds={[1]}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("admin can edit any student regardless of program", () => {
-    const student = makeStudent({ program_id: 99 });
+  it("admin can edit NVS students", () => {
+    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
         students={[student]}
         grades={defaultGrades}
         isAdmin={true}
-        userProgramIds={[1]}
+        userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
+  });
+
+  it("admin cannot edit non-NVS students through the Student Addition gate", () => {
+    const student = makeStudent({ program_id: PROGRAM_IDS.COE });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.COE]}
+      />,
+    );
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("non-admin can edit student with null program_id", () => {
@@ -602,14 +616,14 @@ describe("StudentTable - canEditStudent logic", () => {
         canEdit={true}
         isAdmin={false}
         isPasscodeUser={false}
-        userProgramIds={[1]}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("non-admin with matching programIds can edit", () => {
-    const student = makeStudent({ program_id: 5 });
+  it("non-admin with NVS program access can edit NVS students", () => {
+    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
         students={[student]}
@@ -617,14 +631,14 @@ describe("StudentTable - canEditStudent logic", () => {
         canEdit={true}
         isAdmin={false}
         isPasscodeUser={false}
-        userProgramIds={[3, 5, 7]}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("non-admin without matching programIds cannot edit", () => {
-    const student = makeStudent({ program_id: 5 });
+  it("non-admin without NVS program access cannot edit NVS students", () => {
+    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
         students={[student]}
@@ -632,14 +646,14 @@ describe("StudentTable - canEditStudent logic", () => {
         canEdit={true}
         isAdmin={false}
         isPasscodeUser={false}
-        userProgramIds={[1, 2]}
+        userProgramIds={[PROGRAM_IDS.COE, PROGRAM_IDS.NODAL]}
       />,
     );
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("non-admin with empty userProgramIds cannot edit a student that has a program", () => {
-    const student = makeStudent({ program_id: 5 });
+    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
         students={[student]}
@@ -654,7 +668,7 @@ describe("StudentTable - canEditStudent logic", () => {
   });
 
   it("non-admin with null userProgramIds cannot edit a student that has a program", () => {
-    const student = makeStudent({ program_id: 5 });
+    const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
         students={[student]}
@@ -672,12 +686,12 @@ describe("StudentTable - canEditStudent logic", () => {
     const owned = makeStudent({
       group_user_id: "own",
       first_name: "Owned",
-      program_id: 3,
+      program_id: PROGRAM_IDS.NVS,
     });
     const notOwned = makeStudent({
       group_user_id: "nope",
       first_name: "NotOwned",
-      program_id: 7,
+      program_id: PROGRAM_IDS.COE,
     });
     render(
       <StudentTable
@@ -686,7 +700,7 @@ describe("StudentTable - canEditStudent logic", () => {
         canEdit={true}
         isAdmin={false}
         isPasscodeUser={false}
-        userProgramIds={[3]}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     const editButtons = screen.getAllByText("Edit");
@@ -937,7 +951,7 @@ describe("StudentTable - Dropout modal", () => {
     expect(mockFetch).toHaveBeenCalledWith("/api/student/dropout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: expect.stringContaining("STU-DROP"),
+      body: expect.stringContaining("spk-1"),
     });
 
     // Modal should close and router.refresh called
@@ -973,7 +987,7 @@ describe("StudentTable - Dropout modal", () => {
     expect(screen.getByText("Mark as Dropout")).toBeInTheDocument();
   });
 
-  it("uses apaar_id as identifier when student_id is null", async () => {
+  it("uses student_pk_id as the dropout identifier", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -984,7 +998,7 @@ describe("StudentTable - Dropout modal", () => {
     render(
       <StudentTable
         students={[
-          makeStudent({ student_id: null, apaar_id: "APAAR-FALLBACK" }),
+          makeStudent({ student_pk_id: "123", student_id: null, apaar_id: "APAAR-FALLBACK" }),
         ]}
         grades={defaultGrades}
         isAdmin={true}
@@ -997,13 +1011,13 @@ describe("StudentTable - Dropout modal", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/student/dropout",
       expect.objectContaining({
-        body: expect.stringContaining("APAAR-FALLBACK"),
+        body: expect.stringContaining("123"),
       }),
     );
 
-    // Should NOT contain student_id key
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body).toHaveProperty("apaar_id", "APAAR-FALLBACK");
+    expect(body).toHaveProperty("student_pk_id", "123");
+    expect(body).not.toHaveProperty("apaar_id");
     expect(body).not.toHaveProperty("student_id");
   });
 
@@ -1142,95 +1156,6 @@ describe("StudentTable - dropdown reflects current tab grades", () => {
     options = within(select).getAllByRole("option");
     expect(options).toHaveLength(2); // All + 11
     expect(options[1]).toHaveTextContent("Grade 11");
-  });
-});
-
-// ─── Dropout modal input changes (lines 290, 301) ──────────────────────────
-
-describe("StudentTable - Dropout modal form inputs", () => {
-  it("allows changing the dropout date and academic year inputs", async () => {
-    const user = userEvent.setup();
-    render(
-      <StudentTable
-        students={[makeStudent()]}
-        grades={defaultGrades}
-        isAdmin={true}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Dropout" }));
-    expect(screen.getByText("Mark as Dropout")).toBeInTheDocument();
-
-    // Labels lack htmlFor/id association — use querySelector
-    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
-    expect(dateInput).toBeTruthy();
-    await user.clear(dateInput);
-    await user.type(dateInput, "2026-01-15");
-    expect(dateInput.value).toBe("2026-01-15");
-
-    const yearInput = document.querySelector('input[placeholder="e.g., 2025-2026"]') as HTMLInputElement;
-    expect(yearInput).toBeTruthy();
-    await user.clear(yearInput);
-    await user.type(yearInput, "2024-2025");
-    expect(yearInput.value).toBe("2024-2025");
-  });
-
-  it("submits changed academic year in the POST body", async () => {
-    const user = userEvent.setup();
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    });
-    vi.stubGlobal("fetch", mockFetch);
-
-    render(
-      <StudentTable
-        students={[makeStudent({ student_id: "STU-DATE" })]}
-        grades={defaultGrades}
-        isAdmin={true}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Dropout" }));
-
-    const yearInput = document.querySelector('input[placeholder="e.g., 2025-2026"]') as HTMLInputElement;
-    await user.clear(yearInput);
-    await user.type(yearInput, "2024-2025");
-
-    await user.click(screen.getByText("Confirm Dropout"));
-
-    await vi.waitFor(() => {
-      expect(mockFetch).toHaveBeenCalled();
-    });
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.academic_year).toBe("2024-2025");
-  });
-});
-
-// ─── getCurrentAcademicYear branch coverage (line 76) ────────────────────────
-
-describe("StudentTable - getCurrentAcademicYear April+ branch", () => {
-  it("defaults academic year to current-next format when month >= April", async () => {
-    // Set fake date to June 2026 (month=5, >= 3) to cover line 76
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date(2026, 5, 15)); // June 15, 2026
-
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(
-      <StudentTable
-        students={[makeStudent()]}
-        grades={defaultGrades}
-        isAdmin={true}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Dropout" }));
-
-    const yearInput = document.querySelector('input[placeholder="e.g., 2025-2026"]') as HTMLInputElement;
-    expect(yearInput.value).toBe("2026-2027");
-
-    vi.useRealTimers();
   });
 });
 

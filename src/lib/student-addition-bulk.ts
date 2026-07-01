@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
@@ -48,6 +48,25 @@ interface ParseUploadInput {
 }
 
 function text(value: unknown): string {
+  if (value instanceof Date) {
+    return [
+      value.getFullYear(),
+      String(value.getMonth() + 1).padStart(2, "0"),
+      String(value.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+  if (value && typeof value === "object") {
+    const candidate = value as {
+      text?: unknown;
+      result?: unknown;
+      richText?: Array<{ text?: unknown }>;
+    };
+    if (candidate.text != null) return text(candidate.text);
+    if (candidate.result != null) return text(candidate.result);
+    if (Array.isArray(candidate.richText)) {
+      return candidate.richText.map((part) => text(part.text)).join("").trim();
+    }
+  }
   return value == null ? "" : String(value).trim();
 }
 
@@ -171,19 +190,21 @@ function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date) {
   return parseRowsFromAoA(rows, selectedGrade, today);
 }
 
-function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date) {
-  const workbook = XLSX.read(data, { type: "buffer", cellDates: true });
-  const sheetName = workbook.SheetNames.includes("Template")
-    ? "Template"
-    : workbook.SheetNames[0];
-  if (!sheetName) return { ok: false, error: "Workbook has no sheets" } as const;
+async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const sheet = workbook.getWorksheet("Template") ?? workbook.worksheets[0];
+  if (!sheet) return { ok: false, error: "Workbook has no sheets" } as const;
 
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-    header: 1,
-    defval: "",
-    blankrows: true,
-    raw: false,
-  }) as unknown[][];
+  const rows: unknown[][] = [];
+  for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const values: unknown[] = [];
+    for (let columnNumber = 1; columnNumber <= sheet.columnCount; columnNumber += 1) {
+      values.push(row.getCell(columnNumber).value ?? "");
+    }
+    rows.push(values);
+  }
   return parseRowsFromAoA(rows, selectedGrade, today);
 }
 
@@ -211,26 +232,24 @@ export async function parseStudentAdditionUpload({
   return { ok: true, rows: [], rejectedResults: [], totalRows: 0, originalRows: new Map() };
 }
 
-export function buildStudentAdditionTemplateWorkbook(): Buffer {
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.aoa_to_sheet([STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label)]),
-    "Template",
-  );
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.aoa_to_sheet([
-      ["Field", "Allowed values"],
-      ["Gender", GENDER_OPTIONS.join(" | ")],
-      ["Category", CATEGORY_OPTIONS.join(" | ")],
-      ["Physical Handicapped / Vikalang", "Yes | No"],
-      ["G10 board", G10_BOARD_OPTIONS.join(" | ")],
-      ["Board Stream", BOARD_STREAM_OPTIONS.join(" | ")],
-      ["Primary Exam preparing for", STREAM_OPTIONS.join(" | ")],
-      ["Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS.join(" | ")],
-    ]),
-    "Options",
-  );
-  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+export async function buildStudentAdditionTemplateWorkbook(): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const template = workbook.addWorksheet("Template");
+  template.addRow(STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label));
+  template.getColumn(3).numFmt = "dd/mm/yyyy";
+
+  const options = workbook.addWorksheet("Options");
+  options.addRows([
+    ["Field", "Allowed values"],
+    ["Gender", GENDER_OPTIONS.join(" | ")],
+    ["Category", CATEGORY_OPTIONS.join(" | ")],
+    ["Physical Handicapped / Vikalang", "Yes | No"],
+    ["G10 board", G10_BOARD_OPTIONS.join(" | ")],
+    ["Board Stream", BOARD_STREAM_OPTIONS.join(" | ")],
+    ["Primary Exam preparing for", STREAM_OPTIONS.join(" | ")],
+    ["Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS.join(" | ")],
+  ]);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
 }
