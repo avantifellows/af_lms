@@ -18,16 +18,16 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-06-30
+last_updated: 2026-07-01
 ---
 
 # Student Addition
 
-Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/144 is now the default working PRD. The local `lms-user-addition-discord-thread/` folder remains source evidence only; treat the Discord transcript, template CSV exports, and `Board_Values.numbers` preview as source evidence only when auditing whether the PRD is missing context.
+Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/155 is the current Ralph-formatted implementation PRD. Issue #144 remains the source/reference PRD for comparison only. The local `lms-user-addition-discord-thread/` folder remains source evidence only; treat the Discord transcript, template CSV exports, and `Board_Values.numbers` preview as source evidence only when auditing whether the PRD is missing context.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
-- Rollout plan is staff/PMs first, then schools after real upload feedback.
+- Rollout plan is staff/PMs first, then schools after real upload feedback. In the #155 implementation build, student writes are allowed only for `admin`, `program_manager`, and `program_admin`; teachers/staff roles, school-login/passcode users, and `read_only` users cannot create, bulk upload, edit, or dropout students.
 - Both one-by-one add and bulk upload live inside `/school/[udise]`; there is no school selector.
 - School is resolved from the page route context server-side. Never read school from the form or uploaded file. Ignore any school column if present.
 - Bulk v1 uses synchronous `.xlsx` upload -> results table -> downloadable rejected-rows CSV -> user fixes offline and re-uploads that CSV directly. No editable in-browser preview and no drafts table for v1.
@@ -64,7 +64,7 @@ For school-change boundary, v1 behavior is decided: same-school duplicate says t
 
 School-login ops details such as credential delivery, teacher/principal change, password loss, and school email access loss are out of scope for this PRD.
 
-Edit/dropout scope is decided: schools can edit normal profile/detail fields, grade, and stream; grade/stream changes must re-derive batch using the PRD rule and commit atomically with the student update. Schools cannot edit APAAR ID or G10 roll after creation in v1. The school-facing destructive action is Dropout, not Delete; it marks `student.status = "dropout"` through DB Service and hides the student from the active roster.
+Edit/dropout scope is decided: the PM/staff rollout uses the same school-scoped flow intended for later school users. Allowed write actors can edit normal profile/detail fields, grade, and stream; grade/stream changes must re-derive batch using the PRD rule and commit atomically with the student update. APAAR ID and G10 roll cannot be edited after creation in v1. The school-facing destructive action is Dropout, not Delete; it marks `student.status = "dropout"` through DB Service and hides the student from the active roster.
 
 Enrollment date handling is decided: LMS supplies DB Service `start_date` and `academic_year`; schools do not enter them. For creates, `start_date` is the successful creation date in Asia/Kolkata as `YYYY-MM-DD`. `academic_year` is derived from that date using an April-March year: April 1 or later -> `YYYY-YYYY+1`, January-March -> `YYYY-1-YYYY`. Keep this in one shared LMS backend helper for one-by-one and bulk create, with tests around March 31 / April 1. Do not use the hardcoded `CURRENT_ACADEMIC_YEAR` constant or the client-only `StudentTable.tsx` dropout helper for create flows.
 
@@ -85,7 +85,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - `students` feature access currently grants edit to all roles, passcode users get students edit, and `read_only` downgrades edit to view in `getFeatureAccess`.
 - Existing `NVS_GATED_FEATURES` does not include `students`, so Student Addition needs its own explicit `PROGRAM_IDS.NVS` allowlist check.
 - `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for existing-student writes. It checks school scope, read-only, and per-program ownership.
-- For create/bulk there is no existing student to resolve, so gate by resolved school: session -> route `[udise]` -> school code -> `canAccessSchool`/passcode match -> `students` `canEdit` -> NVS/JNV program gate.
+- For create/bulk there is no existing student to resolve, so gate by resolved school: session -> route `[udise]` -> school code -> `canAccessSchool` -> allowed role -> `students` `canEdit` -> not `read_only` -> NVS/JNV program gate. Passcode users can view their school roster but are explicitly blocked from Student Addition writes in this build.
 - Existing LMS write proxies are not safe enough for school rollout yet: `src/app/api/student/[id]/route.ts`, `src/app/api/student/route.ts`, and `src/app/api/student/dropout/route.ts` only check `session` before proxying. Retrofit the document route's permission pattern before schools get write access.
 - Existing dropout API path: LMS `POST /api/student/dropout` proxies to DB Service `PATCH /dropout`, which uses `DropoutService.process_dropout` to mark current enrollments non-current and update `student.status` to `dropout`. Keep this behavior, but harden permissions with `canAccessStudent(..., { requireEdit: true })` before school rollout.
 - `csv-parse` is installed in af_lms; no XLSX parser dependency is currently present. PRD now requires primary `.xlsx` upload support, so implementation needs an XLSX parser. Rejected-row retry is CSV.
@@ -104,7 +104,7 @@ Existing endpoint: `POST /api/student/create-with-enrollments` in `lib/dbservice
 Important caveat: the endpoint documentation/error branch says "Student already exists", but the current code path calls `Users.create_or_update_student`, which can update an existing student instead of returning `:student_exists`. Do not use it as-is for this feature.
 
 Final PRD decision:
-- Add a dedicated create-only bulk endpoint: `POST /api/student/bulk-create-with-enrollments`.
+- Add a dedicated create-only LMS bulk endpoint: `POST /api/lms/students/bulk-create-with-enrollments`.
 - The one-by-one form sends a single-row payload to the same endpoint.
 - Final row statuses are `created`, `duplicate_in_file`, `already_exists`, and `rejected`.
 - Existing matches never update records. APAAR match or generated Student ID match returns `already_exists`; if those identifiers point to different students, return `rejected`.

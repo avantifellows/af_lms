@@ -210,5 +210,5 @@ _Avoid_: Access tier, role level
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
 - The source `program` column maps to **Centre Stream**, not **Program** or **Exam Track**; it should be stored as an array, not a comma-separated string.
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
-- "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
+- "admin" vs "program_admin": These are distinct roles. `program_admin` is read-only for visits and many review workflows, but feature permissions vary; for #155 Student Addition, `program_admin` is intentionally allowed to write student data. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
