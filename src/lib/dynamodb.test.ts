@@ -449,6 +449,44 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       });
     });
 
+    it("derives per-subject total_questions + attempt_rate from chapters, not subject_performance's test-wide totals (#128 item 4)", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1",
+            user_id: "u1",
+            // subject_performance stamps the WHOLE-TEST totals onto every
+            // subject row (75 questions, 25 skipped) — the bug being fixed.
+            subject_performance: [
+              { subject: "Physics", percentage: 50, accuracy: 60, total_questions: 75, num_skipped: 25 },
+              { subject: "Chemistry", percentage: 40, accuracy: 50, total_questions: 75, num_skipped: 25 },
+            ],
+            // chapter_performance carries the true per-chapter counts.
+            chapter_performance: [
+              { chapter_name: "Kinematics", chapter_id: "c-kin", subject: "Physics", marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 20, num_correct: 15, num_wrong: 0, num_skipped: 5 },
+              { chapter_name: "Optics", chapter_id: "c-opt", subject: "Physics", marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 5, num_correct: 0, num_wrong: 0, num_skipped: 5 },
+              { chapter_name: "Mole Concept", chapter_id: "c-mole", subject: "Chemistry", marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 25, num_correct: 25, num_wrong: 0, num_skipped: 0 },
+            ],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      const phys = result!.subjects.find((s) => s.subject === "Physics")!;
+      const chem = result!.subjects.find((s) => s.subject === "Chemistry")!;
+      // 20 + 5 = 25 per subject, NOT the test-wide 75.
+      expect(phys.total_questions).toBe(25);
+      expect(chem.total_questions).toBe(25);
+      // Physics attempt rate = (25 - 10 skipped) / 25 = 60%, not the
+      // test-wide (75 - 25) / 75 = 66.7% that every subject would have shared.
+      expect(phys.avg_attempt_rate).toBe(60);
+      expect(chem.avg_attempt_rate).toBe(100);
+    });
+
     it("groups chapter aggregates by chapter_id and surfaces it on the result", async () => {
       mocks.mockQuery.mockResolvedValueOnce([
         makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
