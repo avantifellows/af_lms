@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       requestBody.apaar_id = student.apaar_id;
     }
 
-    const response = await fetch(`${dbServiceUrl}/dropout`, {
+    const response = await fetch(`${dbServiceUrl}/api/dropout`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

@@ -118,7 +118,7 @@ describe("POST /api/student/dropout", () => {
     );
     expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, 100);
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://db.example.test/dropout",
+      "https://db.example.test/api/dropout",
       expect.objectContaining({ method: "PATCH" }),
     );
     const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
