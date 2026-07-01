@@ -491,6 +491,20 @@ describe("StudentTable - Edit button hidden", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
+  it("hides only the Edit entry when the student-addition edit gate denies", () => {
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        grades={defaultGrades}
+        canEdit={true}
+        canEditStudent={false}
+        isAdmin={true}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
+  });
+
   it("hides Edit and Dropout buttons for dropout-status students even if canEdit is true", () => {
     const dropout = makeStudent({ status: "dropout" });
     render(
@@ -691,8 +705,6 @@ describe("StudentTable - empty states", () => {
   });
 
   it("shows 'No dropout students' when on dropout tab with empty dropout list", async () => {
-    const user = userEvent.setup();
-    const active = makeStudent();
     // Need at least 1 dropout to show tabs, but we'll test empty active -> dropout scenario
     // Actually we need dropoutStudents.length > 0 to show tabs. Let's use a workaround:
     // The only way to see "No dropout students" is if dropout tab is showing but list is empty.

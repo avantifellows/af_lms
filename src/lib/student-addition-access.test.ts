@@ -2,25 +2,34 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const {
   mockGetResolvedPermission,
+  mockCanAccessStudent,
   mockCanAccessSchoolSync,
   mockGetFeatureAccess,
   mockGetProgramContextSync,
+  mockQuery,
 } = vi.hoisted(() => ({
   mockGetResolvedPermission: vi.fn(),
+  mockCanAccessStudent: vi.fn(),
   mockCanAccessSchoolSync: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
+  mockQuery: vi.fn(),
 }));
 
 vi.mock("./permissions", () => ({
+  canAccessStudent: mockCanAccessStudent,
   getResolvedPermission: mockGetResolvedPermission,
   canAccessSchoolSync: mockCanAccessSchoolSync,
   getFeatureAccess: mockGetFeatureAccess,
   getProgramContextSync: mockGetProgramContextSync,
 }));
+vi.mock("@/lib/db", () => ({ query: mockQuery }));
 
 import { PROGRAM_IDS } from "./constants";
-import { requireStudentAdditionAccess } from "./student-addition-access";
+import {
+  requireStudentAdditionAccess,
+  requireStudentAdditionStudentAccess,
+} from "./student-addition-access";
 import type { UserPermission } from "./permissions";
 
 const session = {
@@ -51,6 +60,7 @@ function permission(overrides: Partial<UserPermission> = {}): UserPermission {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mockCanAccessStudent.mockResolvedValue(true);
   mockCanAccessSchoolSync.mockReturnValue(true);
   mockGetFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
   mockGetProgramContextSync.mockReturnValue({
@@ -59,6 +69,15 @@ beforeEach(() => {
     isNVSOnly: true,
     hasCoEOrNodal: false,
   });
+  mockQuery.mockResolvedValue([
+    {
+      code: "JNV001",
+      udise_code: "12345678901",
+      region: "South",
+      program_ids: [PROGRAM_IDS.NVS],
+      student_program_id: PROGRAM_IDS.NVS,
+    },
+  ]);
 });
 
 describe("requireStudentAdditionAccess", () => {
@@ -127,6 +146,64 @@ describe("requireStudentAdditionAccess", () => {
       session,
       label === "non-NVS school" ? { ...school, program_ids: [PROGRAM_IDS.COE] } : school,
     );
+
+    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+});
+
+describe("requireStudentAdditionStudentAccess", () => {
+  it("allows an allowed Google actor for an accessible NVS student", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(mockCanAccessStudent).toHaveBeenCalledWith(session, "100", { requireEdit: true });
+    expect(result).toEqual({
+      ok: true,
+      permission: expect.objectContaining({ role: "program_manager" }),
+      programId: PROGRAM_IDS.NVS,
+      school: { code: "JNV001", udise_code: "12345678901" },
+      actor: {
+        user_id: 501,
+        email: "admin@avantifellows.org",
+        login_type: "google",
+        role: "program_manager",
+      },
+    });
+  });
+
+  it("blocks passcode users before resolving the student", async () => {
+    const result = await requireStudentAdditionStudentAccess(
+      { user: {}, isPasscodeUser: true },
+      "100",
+    );
+
+    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+    expect(mockCanAccessStudent).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["student scope denied", () => mockCanAccessStudent.mockResolvedValue(false)],
+    ["teacher role", () => mockGetResolvedPermission.mockResolvedValue(permission({ role: "teacher" }))],
+    [
+      "non-NVS student",
+      () =>
+        mockQuery.mockResolvedValue([
+          {
+            code: "JNV001",
+            udise_code: "12345678901",
+            region: "South",
+            program_ids: [PROGRAM_IDS.NVS],
+            student_program_id: PROGRAM_IDS.COE,
+          },
+        ]),
+    ],
+  ])("blocks %s", async (_label, arrange) => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    arrange();
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });

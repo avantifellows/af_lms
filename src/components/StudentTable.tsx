@@ -18,8 +18,11 @@ export interface Student {
   student_id: string | null;
   apaar_id: string | null;
   category: string | null;
+  physically_handicapped?: boolean | null;
   stream: string | null;
   gender: string | null;
+  g10_board?: string | null;
+  g10_roll_no?: string | null;
   // Additional editable profile fields. Optional because not every consumer
   // (or test fixture) selects them; the school roster query populates them.
   whatsapp_phone?: string | null;
@@ -63,6 +66,7 @@ interface StudentTableProps {
   students: Student[];
   dropoutStudents?: Student[];
   canEdit?: boolean;                   // feature-level edit (from matrix)
+  canEditStudent?: boolean;            // student-addition edit gate
   userProgramIds?: number[] | null;    // null = owns all (admin/passcode)
   isPasscodeUser?: boolean;
   isAdmin?: boolean;
@@ -116,7 +120,8 @@ function formatDateForAPI(date: Date): string {
 
 interface StudentCardProps {
   student: Student;
-  canEdit: boolean;
+  canEditStudent: boolean;
+  canDropout: boolean;
   onEdit: () => void;
   onDropout: () => void;
   /**
@@ -139,7 +144,8 @@ function parseStudentPkId(raw: string | null): number | null {
 
 function StudentCard({
   student,
-  canEdit,
+  canEditStudent,
+  canDropout,
   onEdit,
   onDropout,
   documentsRefreshNonce,
@@ -205,14 +211,18 @@ function StudentCard({
         </div>
 
         {/* Action buttons */}
-        {canEdit && !isDropout && (
+        {(canEditStudent || canDropout) && !isDropout && (
           <div className="flex items-center gap-2 mt-3">
-            <Button variant="ghost" size="sm" onClick={onEdit}>
-              Edit
-            </Button>
-            <Button variant="danger-ghost" size="sm" onClick={onDropout}>
-              Dropout
-            </Button>
+            {canEditStudent && (
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+            )}
+            {canDropout && (
+              <Button variant="danger-ghost" size="sm" onClick={onDropout}>
+                Dropout
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -281,7 +291,7 @@ function StudentCard({
               </h4>
               <DocumentsList
                 studentId={studentPkId}
-                canDelete={canEdit}
+                canDelete={canEditStudent || canDropout}
                 refreshNonce={documentsRefreshNonce}
               />
             </section>
@@ -405,6 +415,7 @@ export default function StudentTable({
   students,
   dropoutStudents = [],
   canEdit = true,
+  canEditStudent: canEditStudentEntry = canEdit,
   userProgramIds = null,
   isPasscodeUser = false,
   isAdmin = false,
@@ -433,7 +444,7 @@ export default function StudentTable({
   );
 
   // Per-row ownership check: combines feature-level canEdit with program ownership
-  const canEditStudent = (student: Student): boolean => {
+  const canMutateStudent = (student: Student): boolean => {
     if (!canEdit) return false;
     if (isPasscodeUser || isAdmin) return true;
     if (student.program_id === null) return true;
@@ -556,7 +567,8 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
-              canEdit={canEditStudent(student)}
+              canEditStudent={canEditStudentEntry && canMutateStudent(student)}
+              canDropout={canMutateStudent(student)}
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
               documentsRefreshNonce={documentsRefresh}

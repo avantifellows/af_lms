@@ -19,6 +19,7 @@ interface Props {
   activeStudents: Student[];
   dropoutStudents: Student[];
   canEdit: boolean;
+  canEditStudent: boolean;
   canAddStudent: boolean;
   userProgramIds: number[] | null;
   isPasscodeUser: boolean;
@@ -35,6 +36,7 @@ export default function EnrollmentTabContent({
   activeStudents,
   dropoutStudents,
   canEdit,
+  canEditStudent,
   canAddStudent,
   userProgramIds,
   isPasscodeUser,
@@ -167,6 +169,7 @@ export default function EnrollmentTabContent({
         students={filteredActive}
         dropoutStudents={filteredDropouts}
         canEdit={canEdit}
+        canEditStudent={canEditStudent}
         userProgramIds={userProgramIds}
         isPasscodeUser={isPasscodeUser}
         isAdmin={isAdmin}

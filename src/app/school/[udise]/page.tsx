@@ -305,6 +305,7 @@ export default async function SchoolPage({ params }: PageProps) {
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
+        canEditStudent={canAddStudent}
         canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}

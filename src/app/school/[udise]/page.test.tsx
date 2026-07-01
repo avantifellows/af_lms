@@ -683,6 +683,36 @@ describe("SchoolPage (server component)", () => {
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
   });
 
+  it("passes the shared Student Addition gate to existing-student edit entry points", async () => {
+    setupAdminDefaults();
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        role: "teacher",
+        program_ids: [64],
+        level: 1,
+        school_codes: ["70705"],
+      })
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [64],
+      isNVSOnly: true,
+      hasCoEOrNodal: false,
+    });
+    mockGetFeatureAccess.mockImplementation(
+      (_perm: unknown, feature: string) =>
+        feature === "students"
+          ? featureAccess(true, true)
+          : featureAccess(false, false)
+    );
+
+    await renderPage();
+
+    const props = JSON.parse(screen.getByTestId("student-table").dataset.props || "{}");
+    expect(props.canEdit).toBe(true);
+    expect(props.canEditStudent).toBe(false);
+  });
+
   it("passes correct defaultTab to SchoolTabs", async () => {
     setupAdminDefaults();
 

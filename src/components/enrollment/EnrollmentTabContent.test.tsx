@@ -14,7 +14,13 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/StudentTable", () => ({
   __esModule: true,
-  default: () => <div data-testid="student-table" />,
+  default: (props: { canEdit?: boolean; canEditStudent?: boolean }) => (
+    <div
+      data-testid="student-table"
+      data-can-edit={String(props.canEdit)}
+      data-can-edit-student={String(props.canEditStudent)}
+    />
+  ),
 }));
 
 vi.mock("./AddStudentModal", () => ({
@@ -45,6 +51,7 @@ const baseProps = {
   activeStudents: [],
   dropoutStudents: [],
   canEdit: true,
+  canEditStudent: true,
   canAddStudent: true,
   userProgramIds: [PROGRAM_IDS.NVS],
   isPasscodeUser: false,
@@ -96,5 +103,19 @@ describe("EnrollmentTabContent", () => {
     );
     expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
+  });
+
+  it("passes the existing-student edit gate separately from the dropout flag", () => {
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        canEdit={true}
+        canEditStudent={false}
+      />,
+    );
+
+    const table = screen.getByTestId("student-table");
+    expect(table).toHaveAttribute("data-can-edit", "true");
+    expect(table).toHaveAttribute("data-can-edit-student", "false");
   });
 });
