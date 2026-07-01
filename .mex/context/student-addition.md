@@ -92,8 +92,8 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and the selected program is `PROGRAM_IDS.NVS`; the modals live in `src/components/enrollment/AddStudentModal.tsx` and `src/components/enrollment/BulkStudentUploadModal.tsx`.
 - Existing-student edit now uses the shared Student Addition gate plus `canAccessStudent(session, studentPkId, { requireEdit: true })` before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The edit modal uses the PRD field contract, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service G10-board conflicts next to the G10 board field.
-- Remaining LMS write proxies not safe enough for school rollout: `src/app/api/student/route.ts` and `src/app/api/student/dropout/route.ts` only check `session` before proxying. Dropout hardening is tracked separately in #161.
-- Existing dropout API path: LMS `POST /api/student/dropout` proxies to DB Service `PATCH /dropout`, which uses `DropoutService.process_dropout` to mark current enrollments non-current and update `student.status` to `dropout`. Keep this behavior, but harden permissions with `canAccessStudent(..., { requireEdit: true })` before school rollout.
+- Dropout now resolves the target student server-side, uses the shared Student Addition gate plus `canAccessStudent(session, studentPkId, { requireEdit: true })`, and still proxies LMS `POST /api/student/dropout` to DB Service `PATCH /dropout`.
+- Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
 - `csv-parse` is installed in af_lms; no XLSX parser dependency is currently present. PRD now requires primary `.xlsx` upload support, so implementation needs an XLSX parser. Rejected-row retry is CSV.
 
 ## DB Service Context

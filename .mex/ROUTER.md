@@ -43,7 +43,7 @@ Then read this file fully before doing anything else in this session.
 
 **Not yet built / in progress:**
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
-- Student Addition #155 is mid-slice: AF LMS has one-by-one plus bulk NVS Add Student paths on `/school/[udise]`, and existing-student edit now proxies PRD-safe fields to the atomic DB Service LMS edit endpoint; dropout hardening remains a separate slice.
+- Student Addition #155 is implemented in AF LMS for NVS one-by-one add, bulk upload, existing-student edit, and dropout hardening; final review / PR review remains before merge.
 
 **Known issues:**
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
