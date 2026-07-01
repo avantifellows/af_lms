@@ -163,6 +163,19 @@ interface AcademicMentorshipImportMenteeRow {
   active_mapping_id: number | string | null;
 }
 
+interface AcademicMentorshipCsvImportParams {
+  csvText: string;
+  schoolId: number;
+  schoolCode: string;
+  schoolRegion: string | null;
+  academicYear: string;
+  assignedByUserId: number;
+}
+
+type AcademicMentorshipParsedCsv =
+  | { ok: true; header: string[]; rows: AcademicMentorshipCsvRow[] }
+  | { ok: false; result: AcademicMentorshipCsvImportResult };
+
 function hasAcademicMentorshipProgramAccess(permission: UserPermission): boolean {
   if (ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST.includes("*")) return true;
   const allowed = new Set<number>(
@@ -606,65 +619,66 @@ export async function createAcademicMentorshipMapping(params: {
   }
 }
 
-export async function importAcademicMentorshipMappingsFromCsv(params: {
-  csvText: string;
-  schoolId: number;
-  schoolCode: string;
-  schoolRegion: string | null;
-  academicYear: string;
-  assignedByUserId: number;
-}): Promise<AcademicMentorshipCsvImportResult> {
-  let records: string[][];
+function csvFileParseFailure(error: string): AcademicMentorshipParsedCsv {
+  return { ok: false, result: { ok: false, type: "file", error } };
+}
+
+function parseAcademicMentorshipCsvRecords(csvText: string): string[][] | null {
   try {
-    records = parse(params.csvText, {
+    return parse(csvText, {
       bom: true,
       relax_column_count: true,
       skip_empty_lines: false,
     }) as string[][];
   } catch {
-    return { ok: false, type: "file", error: "CSV could not be parsed" };
+    return null;
   }
-  const header = records[0]?.map((value) => value.trim()) ?? [];
+}
+
+function academicMentorshipCsvHeaderError(header: string[]): string | null {
   if (header.length === 0 || header.every((value) => value === "")) {
-    return { ok: false, type: "file", error: "CSV file is empty" };
+    return "CSV file is empty";
   }
   if (!header.includes("mentor_email") || !header.includes("student_id")) {
-    return {
-      ok: false,
-      type: "file",
-      error: "CSV must include mentor_email and student_id headers",
-    };
+    return "CSV must include mentor_email and student_id headers";
   }
+  return null;
+}
 
-  const rows = records
-    .slice(1)
-    .map((record, index): AcademicMentorshipCsvRow | null => {
-      if (record.every((value) => value.trim() === "")) return null;
-      const values = Object.fromEntries(
-        header.map((column, columnIndex) => [column, record[columnIndex] ?? ""])
-      );
-      const mentorEmail = (values.mentor_email ?? "").trim();
-      const studentId = (values.student_id ?? "").trim();
-      const errors: string[] = [];
-      if (!mentorEmail) errors.push("mentor_email is required");
-      if (!studentId) errors.push("student_id is required");
-      return {
-        rowNumber: index + 2,
-        values,
-        mentorEmail,
-        studentId,
-        errors,
-      };
-    })
-    .filter((row): row is AcademicMentorshipCsvRow => row !== null);
+function academicMentorshipCsvRowLimitError(rowCount: number): string | null {
+  if (rowCount === 0) return "CSV file has no data rows";
+  if (rowCount > 2000) return "CSV upload is capped at 2,000 data rows";
+  return null;
+}
 
-  if (rows.length === 0) {
-    return { ok: false, type: "file", error: "CSV file has no data rows" };
-  }
-  if (rows.length > 2000) {
-    return { ok: false, type: "file", error: "CSV upload is capped at 2,000 data rows" };
-  }
+function buildAcademicMentorshipCsvRow(
+  header: string[],
+  record: string[],
+  rowNumber: number
+): AcademicMentorshipCsvRow | null {
+  if (record.every((value) => value.trim() === "")) return null;
+  const values = Object.fromEntries(
+    header.map((column, columnIndex) => [column, record[columnIndex] ?? ""])
+  );
+  const mentorEmail = (values.mentor_email ?? "").trim();
+  const studentId = (values.student_id ?? "").trim();
+  const errors: string[] = [];
+  if (!mentorEmail) errors.push("mentor_email is required");
+  if (!studentId) errors.push("student_id is required");
+  return { rowNumber, values, mentorEmail, studentId, errors };
+}
 
+function buildAcademicMentorshipCsvRows(
+  header: string[],
+  records: string[][]
+): AcademicMentorshipCsvRow[] {
+  return records.slice(1).flatMap((record, index) => {
+    const row = buildAcademicMentorshipCsvRow(header, record, index + 2);
+    return row ? [row] : [];
+  });
+}
+
+function addDuplicateStudentIdErrors(rows: AcademicMentorshipCsvRow[]) {
   const rowsByStudentId = new Map<string, AcademicMentorshipCsvRow[]>();
   for (const row of rows) {
     if (!row.studentId) continue;
@@ -673,6 +687,7 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
       row,
     ]);
   }
+
   for (const [studentId, duplicateRows] of rowsByStudentId) {
     if (duplicateRows.length < 2) continue;
     const rowNumbers = duplicateRows.map((row) => row.rowNumber).join(", ");
@@ -680,24 +695,55 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
       row.errors.push(`Duplicate student_id ${studentId} in rows ${rowNumbers}`);
     }
   }
+}
 
+function academicMentorshipCsvRowsFailure(
+  header: string[],
+  invalidRows: AcademicMentorshipCsvRow[]
+): AcademicMentorshipCsvImportResult {
+  return {
+    ok: false,
+    type: "rows",
+    errors: invalidRows.flatMap((row) =>
+      row.errors.map((error) => ({ rowNumber: row.rowNumber, error }))
+    ),
+    errorCsv: buildAcademicMentorshipImportErrorCsv(header, invalidRows),
+  };
+}
+
+function parseAcademicMentorshipCsv(csvText: string): AcademicMentorshipParsedCsv {
+  const records = parseAcademicMentorshipCsvRecords(csvText);
+  if (!records) return csvFileParseFailure("CSV could not be parsed");
+
+  const header = records[0]?.map((value) => value.trim()) ?? [];
+  const headerError = academicMentorshipCsvHeaderError(header);
+  if (headerError) return csvFileParseFailure(headerError);
+
+  const rows = buildAcademicMentorshipCsvRows(header, records);
+  const rowLimitError = academicMentorshipCsvRowLimitError(rows.length);
+  if (rowLimitError) return csvFileParseFailure(rowLimitError);
+
+  addDuplicateStudentIdErrors(rows);
   const invalidRows = rows.filter((row) => row.errors.length > 0);
   if (invalidRows.length > 0) {
-    return {
-      ok: false,
-      type: "rows",
-      errors: invalidRows.flatMap((row) =>
-        row.errors.map((error) => ({ rowNumber: row.rowNumber, error }))
-      ),
-      errorCsv: buildAcademicMentorshipImportErrorCsv(header, invalidRows),
-    };
+    return { ok: false, result: academicMentorshipCsvRowsFailure(header, invalidRows) };
   }
 
-  const mentorEmails = [
-    ...new Set(rows.map((row) => row.mentorEmail.toLowerCase())),
-  ];
-  const studentIds = [...new Set(rows.map((row) => row.studentId))];
+  return { ok: true, header, rows };
+}
 
+function uniqueMentorEmails(rows: AcademicMentorshipCsvRow[]): string[] {
+  return [...new Set(rows.map((row) => row.mentorEmail.toLowerCase()))];
+}
+
+function uniqueStudentIds(rows: AcademicMentorshipCsvRow[]): string[] {
+  return [...new Set(rows.map((row) => row.studentId))];
+}
+
+async function loadAcademicMentorshipImportMentors(
+  params: AcademicMentorshipCsvImportParams,
+  mentorEmails: string[]
+): Promise<Map<string, number>> {
   const mentorRows = await query<AcademicMentorshipImportMentorRow>(
     `SELECT LOWER(u.email) AS email, u.id AS user_id
      FROM teacher t
@@ -723,10 +769,15 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
      GROUP BY u.id, u.email`,
     [params.schoolCode, params.schoolRegion, params.schoolId, mentorEmails]
   );
-  const mentorByEmail = new Map(
+  return new Map(
     mentorRows.map((row) => [row.email.toLowerCase(), Number(row.user_id)])
   );
+}
 
+async function loadAcademicMentorshipImportMentees(
+  params: AcademicMentorshipCsvImportParams,
+  studentIds: string[]
+): Promise<Map<string, AcademicMentorshipImportMenteeRow>> {
   const menteeRows = await query<AcademicMentorshipImportMenteeRow>(
     `SELECT DISTINCT ON (TRIM(st.student_id))
        TRIM(st.student_id) AS student_id,
@@ -767,10 +818,14 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
      ORDER BY TRIM(st.student_id), active_mapping.id NULLS FIRST`,
     [params.schoolId, params.academicYear, studentIds]
   );
-  const menteeByStudentId = new Map(
-    menteeRows.map((row) => [row.student_id, row])
-  );
+  return new Map(menteeRows.map((row) => [row.student_id, row]));
+}
 
+function addAcademicMentorshipImportLookupErrors(
+  rows: AcademicMentorshipCsvRow[],
+  mentorByEmail: Map<string, number>,
+  menteeByStudentId: Map<string, AcademicMentorshipImportMenteeRow>
+) {
   for (const row of rows) {
     if (!mentorByEmail.has(row.mentorEmail.toLowerCase())) {
       row.errors.push("mentor_email is not an eligible Academic Mentor for this School");
@@ -782,37 +837,49 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
       row.errors.push("Student already has a mentor mapped");
     }
   }
-  const dbInvalidRows = rows.filter((row) => row.errors.length > 0);
-  if (dbInvalidRows.length > 0) {
-    return {
-      ok: false,
-      type: "rows",
-      errors: dbInvalidRows.flatMap((row) =>
-        row.errors.map((error) => ({ rowNumber: row.rowNumber, error }))
-      ),
-      errorCsv: buildAcademicMentorshipImportErrorCsv(header, dbInvalidRows),
-    };
-  }
+}
 
+function academicMentorshipImportValues(rowCount: number): string {
+  return Array.from({ length: rowCount }, (_, index) => {
+    const start = index * 6;
+    return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6}, now(), now(), now())`;
+  }).join(", ");
+}
+
+function academicMentorshipImportParams(
+  params: AcademicMentorshipCsvImportParams,
+  rows: AcademicMentorshipCsvRow[],
+  mentorByEmail: Map<string, number>,
+  menteeByStudentId: Map<string, AcademicMentorshipImportMenteeRow>
+): unknown[] {
+  return rows.flatMap((row) => {
+    const mentee = menteeByStudentId.get(row.studentId)!;
+    return [
+      params.schoolId,
+      params.academicYear,
+      mentorByEmail.get(row.mentorEmail.toLowerCase())!,
+      Number(mentee.student_pk_id),
+      mentee.program_id === null ? null : Number(mentee.program_id),
+      params.assignedByUserId,
+    ];
+  });
+}
+
+async function insertAcademicMentorshipImportRows(
+  params: AcademicMentorshipCsvImportParams,
+  rows: AcademicMentorshipCsvRow[],
+  mentorByEmail: Map<string, number>,
+  menteeByStudentId: Map<string, AcademicMentorshipImportMenteeRow>
+): Promise<AcademicMentorshipCsvImportResult> {
   try {
     return await withTransaction(async (client) => {
-      const values = rows
-        .map((_, index) => {
-          const start = index * 6;
-          return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6}, now(), now(), now())`;
-        })
-        .join(", ");
-      const insertParams = rows.flatMap((row) => {
-        const mentee = menteeByStudentId.get(row.studentId)!;
-        return [
-          params.schoolId,
-          params.academicYear,
-          mentorByEmail.get(row.mentorEmail.toLowerCase())!,
-          Number(mentee.student_pk_id),
-          mentee.program_id === null ? null : Number(mentee.program_id),
-          params.assignedByUserId,
-        ];
-      });
+      const values = academicMentorshipImportValues(rows.length);
+      const insertParams = academicMentorshipImportParams(
+        params,
+        rows,
+        mentorByEmail,
+        menteeByStudentId
+      );
       const inserted = await client.query<{ id: number | string }>(
         `INSERT INTO academic_mentorship_mentor_mentee_mappings
            (school_id, academic_year, mentor_user_id, student_id, program_id, assigned_by_user_id, assigned_at, inserted_at, updated_at)
@@ -828,6 +895,31 @@ export async function importAcademicMentorshipMappingsFromCsv(params: {
     }
     throw error;
   }
+}
+
+export async function importAcademicMentorshipMappingsFromCsv(
+  params: AcademicMentorshipCsvImportParams
+): Promise<AcademicMentorshipCsvImportResult> {
+  const parsed = parseAcademicMentorshipCsv(params.csvText);
+  if (!parsed.ok) return parsed.result;
+
+  const { header, rows } = parsed;
+  const mentorByEmail = await loadAcademicMentorshipImportMentors(
+    params,
+    uniqueMentorEmails(rows)
+  );
+  const menteeByStudentId = await loadAcademicMentorshipImportMentees(
+    params,
+    uniqueStudentIds(rows)
+  );
+
+  addAcademicMentorshipImportLookupErrors(rows, mentorByEmail, menteeByStudentId);
+  const invalidRows = rows.filter((row) => row.errors.length > 0);
+  if (invalidRows.length > 0) {
+    return academicMentorshipCsvRowsFailure(header, invalidRows);
+  }
+
+  return insertAcademicMentorshipImportRows(params, rows, mentorByEmail, menteeByStudentId);
 }
 
 function csvCell(value: string): string {

@@ -3,12 +3,11 @@ import {
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
   PROGRAM_ID_TO_LABEL,
-  ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST,
 } from "./constants";
 
 // Re-exported from constants so existing `@/lib/permissions` imports keep
 // working while the definitions live in a client-safe module.
-export { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL, ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST };
+export { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
 
 // Permission levels (school scope only)
 export type AccessLevel = 1 | 2 | 3;

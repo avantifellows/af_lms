@@ -40,6 +40,12 @@ type MenteeOption = {
   grade: number | null;
 };
 
+type Mapping = MappingGroup["mappings"][number];
+type ReassigningState = {
+  mappingId: number | string;
+  currentMentorUserId: number;
+} | null;
+
 interface AcademicMentorshipManagerProps {
   schoolCode: string;
   academicYear: string;
@@ -61,6 +67,234 @@ function apiError(payload: unknown, fallback: string): string {
   return typeof payload.error === "string" && payload.error.trim() ? payload.error : fallback;
 }
 
+function payloadErrorCsv(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || !("errorCsv" in payload)) return null;
+  return typeof payload.errorCsv === "string" ? payload.errorCsv : null;
+}
+
+function payloadInsertedCount(payload: unknown): number {
+  if (!payload || typeof payload !== "object" || !("insertedCount" in payload)) return 0;
+  return typeof payload.insertedCount === "number" ? payload.insertedCount : 0;
+}
+
+function MappingStatus({
+  mapping,
+  includeHistory,
+}: {
+  mapping: Mapping;
+  includeHistory: boolean;
+}) {
+  const active = mapping.status === "active";
+  return (
+    <div className="text-sm font-semibold text-text-primary">
+      <Badge variant={active ? "success" : "default"} className="w-fit">
+        {active ? "Active" : "Historical"}
+      </Badge>
+      {includeHistory && mapping.endedDate ? (
+        <span className="mt-1 block font-mono text-xs font-normal text-text-muted">
+          Ended {mapping.endedDate}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function MappingActions({
+  canEdit,
+  isActive,
+  busy,
+  mappingId,
+  mentorUserId,
+  onStartReassign,
+  onRemove,
+}: {
+  canEdit: boolean;
+  isActive: boolean;
+  busy: boolean;
+  mappingId: number | string;
+  mentorUserId: number;
+  onStartReassign: (mappingId: number | string, currentMentorUserId: number) => void;
+  onRemove: (mappingId: number | string) => void;
+}) {
+  if (!canEdit || !isActive) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => onStartReassign(mappingId, mentorUserId)}
+        disabled={busy}
+      >
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+        Reassign
+      </Button>
+      <Button
+        type="button"
+        variant="danger-ghost"
+        size="sm"
+        onClick={() => onRemove(mappingId)}
+        disabled={busy}
+      >
+        <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        Remove
+      </Button>
+    </div>
+  );
+}
+
+function ReassignPanel({
+  currentMentorUserId,
+  replacementMentorSearch,
+  replacementMentorUserId,
+  replacementMentorOptions,
+  busy,
+  onSearch,
+  onSelect,
+  onConfirm,
+  onCancel,
+}: {
+  currentMentorUserId: number;
+  replacementMentorSearch: string;
+  replacementMentorUserId: string;
+  replacementMentorOptions: MentorOption[];
+  busy: boolean;
+  onSearch: (value: string) => void;
+  onSelect: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const options = replacementMentorOptions.filter(
+    (mentor) => mentor.userId !== currentMentorUserId
+  );
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-border bg-bg-card-alt p-3 md:col-span-5 md:grid-cols-[1fr_1fr_auto_auto]">
+      <label className="grid gap-1 text-sm font-semibold text-text-primary">
+        Search replacement mentor
+        <Input
+          value={replacementMentorSearch}
+          onChange={(event) => onSearch(event.target.value)}
+        />
+      </label>
+      <label className="grid gap-1 text-sm font-semibold text-text-primary">
+        Replacement Academic Mentor
+        <Select
+          value={replacementMentorUserId}
+          onChange={(event) => onSelect(event.target.value)}
+          className="w-full min-w-0"
+        >
+          <option value="">Select mentor</option>
+          {options.map((mentor) => (
+            <option key={mentor.userId} value={mentor.userId}>
+              {mentor.name} ({mentor.email})
+            </option>
+          ))}
+        </Select>
+      </label>
+      <Button
+        type="button"
+        size="sm"
+        onClick={onConfirm}
+        disabled={busy}
+        className="self-end"
+      >
+        Confirm Reassign
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onCancel}
+        disabled={busy}
+        className="self-end"
+      >
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
+function MappingRow({
+  mapping,
+  mentorUserId,
+  includeHistory,
+  canEdit,
+  busy,
+  reassigning,
+  replacementMentorSearch,
+  replacementMentorUserId,
+  replacementMentorOptions,
+  onStartReassign,
+  onRemove,
+  onReplacementMentorSearch,
+  onReplacementMentorSelect,
+  onConfirmReassign,
+  onCancelReassign,
+}: {
+  mapping: Mapping;
+  mentorUserId: number;
+  includeHistory: boolean;
+  canEdit: boolean;
+  busy: boolean;
+  reassigning: ReassigningState;
+  replacementMentorSearch: string;
+  replacementMentorUserId: string;
+  replacementMentorOptions: MentorOption[];
+  onStartReassign: (mappingId: number | string, currentMentorUserId: number) => void;
+  onRemove: (mappingId: number | string) => void;
+  onReplacementMentorSearch: (value: string) => void;
+  onReplacementMentorSelect: (value: string) => void;
+  onConfirmReassign: () => void;
+  onCancelReassign: () => void;
+}) {
+  const reassigningHere =
+    reassigning && String(reassigning.mappingId) === String(mapping.id)
+      ? reassigning.currentMentorUserId
+      : null;
+
+  return (
+    <div
+      className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_90px_120px_110px_220px] md:items-center"
+    >
+      <div>
+        <div className="font-semibold text-text-primary">{mapping.mentee.name}</div>
+        <div className="font-mono text-xs text-text-muted">
+          {mapping.mentee.studentId ?? "No ID"}
+        </div>
+      </div>
+      <div className="text-sm text-text-muted">Grade {mapping.mentee.grade ?? "-"}</div>
+      <div className="font-mono text-xs text-text-muted">{mapping.assignedDate}</div>
+      <MappingStatus mapping={mapping} includeHistory={includeHistory} />
+      <div className="md:flex md:justify-end">
+        <MappingActions
+          canEdit={canEdit}
+          isActive={mapping.status === "active"}
+          busy={busy}
+          mappingId={mapping.id}
+          mentorUserId={mentorUserId}
+          onStartReassign={onStartReassign}
+          onRemove={onRemove}
+        />
+      </div>
+      {reassigningHere ? (
+        <ReassignPanel
+          currentMentorUserId={reassigningHere}
+          replacementMentorSearch={replacementMentorSearch}
+          replacementMentorUserId={replacementMentorUserId}
+          replacementMentorOptions={replacementMentorOptions}
+          busy={busy}
+          onSearch={onReplacementMentorSearch}
+          onSelect={onReplacementMentorSelect}
+          onConfirm={onConfirmReassign}
+          onCancel={onCancelReassign}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export default function AcademicMentorshipManager({
   schoolCode,
   academicYear,
@@ -75,10 +309,7 @@ export default function AcademicMentorshipManager({
   const [menteeSearch, setMenteeSearch] = useState("");
   const [mentorUserId, setMentorUserId] = useState("");
   const [studentPkId, setStudentPkId] = useState("");
-  const [reassigning, setReassigning] = useState<{
-    mappingId: number | string;
-    currentMentorUserId: number;
-  } | null>(null);
+  const [reassigning, setReassigning] = useState<ReassigningState>(null);
   const [replacementMentorOptions, setReplacementMentorOptions] = useState<MentorOption[]>([]);
   const [replacementMentorSearch, setReplacementMentorSearch] = useState("");
   const [replacementMentorUserId, setReplacementMentorUserId] = useState("");
@@ -200,25 +431,12 @@ export default function AcademicMentorshipManager({
       });
       const payload = await readJson(response);
       if (!response.ok) {
-        if (
-          payload &&
-          typeof payload === "object" &&
-          "errorCsv" in payload &&
-          typeof payload.errorCsv === "string"
-        ) {
-          setErrorCsv(payload.errorCsv);
-        }
+        setErrorCsv(payloadErrorCsv(payload));
         setToast({ variant: "error", message: apiError(payload, "Failed to upload CSV") });
         return;
       }
       await refreshMappings();
-      const insertedCount =
-        payload &&
-        typeof payload === "object" &&
-        "insertedCount" in payload &&
-        typeof payload.insertedCount === "number"
-          ? payload.insertedCount
-          : 0;
+      const insertedCount = payloadInsertedCount(payload);
       setToast({
         variant: "success",
         message: `Imported ${insertedCount} mapping${insertedCount === 1 ? "" : "s"}.`,
@@ -265,6 +483,11 @@ export default function AcademicMentorshipManager({
     setReplacementMentorOptions([]);
     setReplacementMentorSearch("");
     setReplacementMentorUserId("");
+  }
+
+  function searchReplacementMentors(value: string) {
+    setReplacementMentorSearch(value);
+    void loadReplacementMentors(value);
   }
 
   async function reassignMapping() {
@@ -459,111 +682,24 @@ export default function AcademicMentorshipManager({
                   <div className="text-right">Actions</div>
                 </div>
                 {group.mappings.map((mapping) => (
-                  <div
+                  <MappingRow
                     key={String(mapping.id)}
-                    className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_90px_120px_110px_220px] md:items-center"
-                  >
-                    <div>
-                      <div className="font-semibold text-text-primary">{mapping.mentee.name}</div>
-                      <div className="font-mono text-xs text-text-muted">
-                        {mapping.mentee.studentId ?? "No ID"}
-                      </div>
-                    </div>
-                    <div className="text-sm text-text-muted">Grade {mapping.mentee.grade ?? "-"}</div>
-                    <div className="font-mono text-xs text-text-muted">{mapping.assignedDate}</div>
-                    <div className="text-sm font-semibold text-text-primary">
-                      <Badge
-                        variant={mapping.status === "active" ? "success" : "default"}
-                        className="w-fit"
-                      >
-                        {mapping.status === "active" ? "Active" : "Historical"}
-                      </Badge>
-                      {includeHistory && mapping.endedDate ? (
-                        <span className="mt-1 block font-mono text-xs font-normal text-text-muted">
-                          Ended {mapping.endedDate}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="md:flex md:justify-end">
-                      {canEdit && mapping.status === "active" ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => startReassign(mapping.id, group.mentor.userId)}
-                            disabled={busy}
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                            Reassign
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="danger-ghost"
-                            size="sm"
-                            onClick={() => void removeMapping(mapping.id)}
-                            disabled={busy}
-                          >
-                            <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                            Remove
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                    {reassigning && String(reassigning.mappingId) === String(mapping.id) ? (
-                      <div className="grid gap-3 rounded-lg border border-border bg-bg-card-alt p-3 md:col-span-5 md:grid-cols-[1fr_1fr_auto_auto]">
-                        <label className="grid gap-1 text-sm font-semibold text-text-primary">
-                          Search replacement mentor
-                          <Input
-                            value={replacementMentorSearch}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setReplacementMentorSearch(value);
-                              void loadReplacementMentors(value);
-                            }}
-                          />
-                        </label>
-                        <label className="grid gap-1 text-sm font-semibold text-text-primary">
-                          Replacement Academic Mentor
-                          <Select
-                            value={replacementMentorUserId}
-                            onChange={(event) => setReplacementMentorUserId(event.target.value)}
-                            className="w-full min-w-0"
-                          >
-                            <option value="">Select mentor</option>
-                            {replacementMentorOptions
-                              .filter(
-                                (mentor) => mentor.userId !== reassigning.currentMentorUserId
-                              )
-                              .map((mentor) => (
-                                <option key={mentor.userId} value={mentor.userId}>
-                                  {mentor.name} ({mentor.email})
-                                </option>
-                              ))}
-                          </Select>
-                        </label>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void reassignMapping()}
-                          disabled={busy}
-                          className="self-end"
-                        >
-                          Confirm Reassign
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setReassigning(null)}
-                          disabled={busy}
-                          className="self-end"
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
+                    mapping={mapping}
+                    mentorUserId={group.mentor.userId}
+                    includeHistory={includeHistory}
+                    canEdit={canEdit}
+                    busy={busy}
+                    reassigning={reassigning}
+                    replacementMentorSearch={replacementMentorSearch}
+                    replacementMentorUserId={replacementMentorUserId}
+                    replacementMentorOptions={replacementMentorOptions}
+                    onStartReassign={startReassign}
+                    onRemove={(mappingId) => void removeMapping(mappingId)}
+                    onReplacementMentorSearch={searchReplacementMentors}
+                    onReplacementMentorSelect={setReplacementMentorUserId}
+                    onConfirmReassign={() => void reassignMapping()}
+                    onCancelReassign={() => setReassigning(null)}
+                  />
                 ))}
               </div>
             </Card>
