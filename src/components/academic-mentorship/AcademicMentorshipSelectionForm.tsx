@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Card } from "@/components/ui";
 import type {
   AcademicMentorshipProgram,
+  AcademicMentorshipProgramSchoolLink,
   AcademicMentorshipSchool,
 } from "@/lib/academic-mentorship";
 
@@ -15,6 +16,7 @@ interface AcademicMentorshipSelectionFormProps {
   selectedProgramId: number | null;
   includeHistory: boolean;
   programs: AcademicMentorshipProgram[];
+  programSchoolLinks: AcademicMentorshipProgramSchoolLink[];
   schools: AcademicMentorshipSchool[];
 }
 
@@ -25,20 +27,32 @@ export default function AcademicMentorshipSelectionForm({
   selectedProgramId,
   includeHistory,
   programs,
+  programSchoolLinks,
   schools,
 }: AcademicMentorshipSelectionFormProps) {
-  const formRef = useRef<HTMLFormElement>(null);
   const schoolRef = useRef<HTMLSelectElement>(null);
+  const [programId, setProgramId] = useState(
+    selectedProgramId === null ? "" : String(selectedProgramId)
+  );
+  const filteredSchools = useMemo(() => {
+    if (!programId) return schools;
+    const selectedProgramId = Number(programId);
+    const schoolIds = new Set(
+      programSchoolLinks
+        .filter((link) => link.programId === selectedProgramId)
+        .map((link) => link.schoolId)
+    );
+    return schools.filter((school) => schoolIds.has(school.id));
+  }, [programId, programSchoolLinks, schools]);
 
-  function submitProgramFilter() {
+  function handleProgramChange(nextProgramId: string) {
+    setProgramId(nextProgramId);
     if (schoolRef.current) schoolRef.current.value = "";
-    formRef.current?.requestSubmit();
   }
 
   return (
     <Card className="overflow-hidden p-4">
       <form
-        ref={formRef}
         action="/admin/academic-mentorship"
         className="grid min-w-0 gap-3 lg:grid-cols-[220px_minmax(0,1fr)_220px_auto] lg:items-end"
       >
@@ -50,8 +64,8 @@ export default function AcademicMentorshipSelectionForm({
           <select
             id="program_id"
             name="program_id"
-            defaultValue={selectedProgramId ?? ""}
-            onChange={submitProgramFilter}
+            value={programId}
+            onChange={(event) => handleProgramChange(event.target.value)}
             className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
           >
             <option value="">All programs</option>
@@ -75,7 +89,7 @@ export default function AcademicMentorshipSelectionForm({
             className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
           >
             <option value="">Select a School</option>
-            {schools.map((school) => (
+            {filteredSchools.map((school) => (
               <option key={`${school.id}-${school.code}`} value={school.code}>
                 {school.name} ({school.code})
               </option>

@@ -33,6 +33,11 @@ export interface AcademicMentorshipProgram {
   name: string;
 }
 
+export interface AcademicMentorshipProgramSchoolLink {
+  programId: number;
+  schoolId: number;
+}
+
 export type AcademicMentorshipAccessResult =
   | { ok: true; email: string; permission: UserPermission; canEdit: boolean; school?: AcademicMentorshipSchool }
   | { ok: false; status: 401 | 403 | 404; error: "Unauthorized" | "Forbidden" | "School not found" };
@@ -1164,6 +1169,39 @@ export async function listAcademicMentorshipProgramsForSchools(
      ORDER BY p.name ASC`,
     [schoolIds, academicYear]
   );
+}
+
+export async function listAcademicMentorshipProgramSchoolLinks(
+  schoolIds: number[],
+  academicYear: string
+): Promise<AcademicMentorshipProgramSchoolLink[]> {
+  if (schoolIds.length === 0) return [];
+  const rows = await query<{ program_id: number | string; school_id: number | string }>(
+    `SELECT DISTINCT b.program_id, s.id AS school_id
+     FROM school s
+     JOIN "group" school_group
+       ON school_group.child_id = s.id
+      AND school_group.type = 'school'
+     JOIN group_user school_member
+       ON school_member.group_id = school_group.id
+     JOIN enrollment_record er
+       ON er.user_id = school_member.user_id
+      AND er.group_type = 'grade'
+      AND er.academic_year = $2
+     JOIN group_user batch_member
+       ON batch_member.user_id = school_member.user_id
+     JOIN "group" batch_group
+       ON batch_group.id = batch_member.group_id
+      AND batch_group.type = 'batch'
+     JOIN batch b
+       ON b.id = batch_group.child_id
+     WHERE s.id = ANY($1::bigint[])`,
+    [schoolIds, academicYear]
+  );
+  return rows.map((row) => ({
+    programId: Number(row.program_id),
+    schoolId: Number(row.school_id),
+  }));
 }
 
 export async function filterAcademicMentorshipSchoolsByProgram(

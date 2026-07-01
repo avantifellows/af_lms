@@ -13,15 +13,18 @@ const props = {
     { id: 1, name: "JNV COE" },
     { id: 64, name: "JNV NVS" },
   ],
+  programSchoolLinks: [
+    { programId: 1, schoolId: 20 },
+    { programId: 64, schoolId: 21 },
+  ],
   schools: [
     { id: 20, code: "59525", name: "JNV Adilabad", region: "Telangana" },
+    { id: 21, code: "24701", name: "JNV Chandigarh", region: "Chandigarh" },
   ],
 };
 
 describe("AcademicMentorshipSelectionForm", () => {
-  it("resets School and submits when Program changes", async () => {
-    const requestSubmit = vi.fn();
-    HTMLFormElement.prototype.requestSubmit = requestSubmit;
+  it("filters School options and resets School when Program changes", async () => {
     const user = userEvent.setup();
 
     render(<AcademicMentorshipSelectionForm {...props} />);
@@ -30,6 +33,9 @@ describe("AcademicMentorshipSelectionForm", () => {
     await user.selectOptions(screen.getByLabelText("Program"), "1");
 
     expect(screen.getByLabelText("School")).toHaveValue("");
-    expect(requestSubmit).toHaveBeenCalledOnce();
+    expect(screen.getByRole("option", { name: "JNV Adilabad (59525)" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "JNV Chandigarh (24701)" })
+    ).not.toBeInTheDocument();
   });
 });

@@ -8,8 +8,8 @@ const {
   mockListAccessibleAcademicMentorshipSchools,
   mockGetAcademicMentorshipAcademicYears,
   mockListAcademicMentorshipMappings,
+  mockListAcademicMentorshipProgramSchoolLinks,
   mockListAcademicMentorshipProgramsForSchools,
-  mockFilterAcademicMentorshipSchoolsByProgram,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -19,8 +19,8 @@ const {
   mockListAccessibleAcademicMentorshipSchools: vi.fn(),
   mockGetAcademicMentorshipAcademicYears: vi.fn(),
   mockListAcademicMentorshipMappings: vi.fn(),
+  mockListAcademicMentorshipProgramSchoolLinks: vi.fn(),
   mockListAcademicMentorshipProgramsForSchools: vi.fn(),
-  mockFilterAcademicMentorshipSchoolsByProgram: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -31,8 +31,8 @@ vi.mock("@/lib/academic-mentorship", () => ({
   listAccessibleAcademicMentorshipSchools: mockListAccessibleAcademicMentorshipSchools,
   getAcademicMentorshipAcademicYears: mockGetAcademicMentorshipAcademicYears,
   listAcademicMentorshipMappings: mockListAcademicMentorshipMappings,
+  listAcademicMentorshipProgramSchoolLinks: mockListAcademicMentorshipProgramSchoolLinks,
   listAcademicMentorshipProgramsForSchools: mockListAcademicMentorshipProgramsForSchools,
-  filterAcademicMentorshipSchoolsByProgram: mockFilterAcademicMentorshipSchoolsByProgram,
   isValidAcademicYear: (value: string) => /^\d{4}-\d{4}$/.test(value),
   isAcademicMentorshipEditableYear: (value: string) => value === "2026-2027",
 }));
@@ -75,10 +75,10 @@ describe("AcademicMentorshipPage", () => {
     mockListAcademicMentorshipProgramsForSchools.mockResolvedValue([
       { id: 64, name: "JNV NVS" },
     ]);
-    mockFilterAcademicMentorshipSchoolsByProgram.mockImplementation(
-      async (schools: Array<{ id: number; code: string; name: string; region: string | null }>) =>
-        schools
-    );
+    mockListAcademicMentorshipProgramSchoolLinks.mockResolvedValue([
+      { programId: 64, schoolId: 20 },
+      { programId: 64, schoolId: 21 },
+    ]);
   });
 
   it("auto-selects the only accessible School and current academic year into the URL", async () => {
@@ -162,8 +162,8 @@ describe("AcademicMentorshipPage", () => {
       { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
       { id: 21, code: "SCH002", name: "Second School", region: "West" },
     ]);
-    mockFilterAcademicMentorshipSchoolsByProgram.mockResolvedValue([
-      { id: 21, code: "SCH002", name: "Second School", region: "West" },
+    mockListAcademicMentorshipProgramSchoolLinks.mockResolvedValue([
+      { programId: 64, schoolId: 21 },
     ]);
 
     await expect(

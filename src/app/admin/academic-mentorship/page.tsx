@@ -6,15 +6,16 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import {
   getAcademicMentorshipAcademicYears,
-  filterAcademicMentorshipSchoolsByProgram,
   isAcademicMentorshipEditableYear,
   isValidAcademicYear,
   listAcademicMentorshipMappings,
+  listAcademicMentorshipProgramSchoolLinks,
   listAcademicMentorshipProgramsForSchools,
   listAccessibleAcademicMentorshipSchools,
   requireAcademicMentorshipAccess,
   type AcademicMentorshipMappingGroup,
   type AcademicMentorshipProgram,
+  type AcademicMentorshipProgramSchoolLink,
   type AcademicMentorshipSchool,
 } from "@/lib/academic-mentorship";
 import { Badge, Card } from "@/components/ui";
@@ -42,6 +43,7 @@ interface PageModel {
   selectedProgramId: number | null;
   includeHistory: boolean;
   programs: AcademicMentorshipProgram[];
+  programSchoolLinks: AcademicMentorshipProgramSchoolLink[];
   schools: AcademicMentorshipSchool[];
   selectedSchool: AcademicMentorshipSchool | undefined;
   groups: AcademicMentorshipMappingGroup[];
@@ -131,6 +133,20 @@ function redirectToOnlySchool(params: {
   );
 }
 
+function schoolsForProgram(
+  schools: AcademicMentorshipSchool[],
+  programSchoolLinks: AcademicMentorshipProgramSchoolLink[],
+  programId: number | null
+): AcademicMentorshipSchool[] {
+  if (programId === null) return schools;
+  const schoolIds = new Set(
+    programSchoolLinks
+      .filter((link) => link.programId === programId)
+      .map((link) => link.schoolId)
+  );
+  return schools.filter((school) => schoolIds.has(school.id));
+}
+
 function redirectInvalidSchoolSelection(params: {
   selectedSchoolCode: string;
   selectedSchool: AcademicMentorshipSchool | undefined;
@@ -201,25 +217,32 @@ async function loadPageModel(
     includeHistory,
   } = selectedFilters(resolvedSearchParams, academicYears);
   const accessibleSchools = await listAccessibleAcademicMentorshipSchools(baseAccess.permission);
+  const accessibleSchoolIds = accessibleSchools.map((school) => school.id);
   const programs = await listAcademicMentorshipProgramsForSchools(
-    accessibleSchools.map((school) => school.id),
+    accessibleSchoolIds,
     selectedAcademicYear
   );
-  const schools = await filterAcademicMentorshipSchoolsByProgram(
+  const programSchoolLinks = await listAcademicMentorshipProgramSchoolLinks(
+    accessibleSchoolIds,
+    selectedAcademicYear
+  );
+  const schoolsForSelectedProgram = schoolsForProgram(
     accessibleSchools,
-    selectedAcademicYear,
+    programSchoolLinks,
     selectedProgramId
   );
 
   redirectToOnlySchool({
-    schools,
+    schools: schoolsForSelectedProgram,
     selectedSchoolCode,
     selectedAcademicYear,
     selectedProgramId,
     includeHistory,
   });
 
-  const selectedSchool = schools.find((school) => school.code === selectedSchoolCode);
+  const selectedSchool = schoolsForSelectedProgram.find(
+    (school) => school.code === selectedSchoolCode
+  );
   redirectInvalidSchoolSelection({
     selectedSchoolCode,
     selectedSchool,
@@ -255,7 +278,8 @@ async function loadPageModel(
     selectedProgramId,
     includeHistory,
     programs,
-    schools,
+    programSchoolLinks,
+    schools: accessibleSchools,
     selectedSchool,
     groups,
     canEdit,
