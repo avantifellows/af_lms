@@ -155,16 +155,22 @@ export type AcademicMentorshipCsvImportResult =
   | {
       ok: false;
       type: "rows";
-      errors: Array<{ rowNumber: number; error: string }>;
+      errors: Array<{ rowNumber: number; field: AcademicMentorshipCsvField; error: string }>;
       errorCsv: string;
     };
+
+type AcademicMentorshipCsvField = "mentor_email" | "student_id";
+interface AcademicMentorshipCsvRowError {
+  field: AcademicMentorshipCsvField;
+  error: string;
+}
 
 interface AcademicMentorshipCsvRow {
   rowNumber: number;
   values: Record<string, string>;
   mentorEmail: string;
   studentId: string;
-  errors: string[];
+  errors: AcademicMentorshipCsvRowError[];
 }
 
 interface AcademicMentorshipImportMentorRow {
@@ -690,9 +696,9 @@ function buildAcademicMentorshipCsvRow(
   );
   const mentorEmail = (values.mentor_email ?? "").trim();
   const studentId = (values.student_id ?? "").trim();
-  const errors: string[] = [];
-  if (!mentorEmail) errors.push("mentor_email is required");
-  if (!studentId) errors.push("student_id is required");
+  const errors: AcademicMentorshipCsvRowError[] = [];
+  if (!mentorEmail) errors.push({ field: "mentor_email", error: "mentor_email is required" });
+  if (!studentId) errors.push({ field: "student_id", error: "student_id is required" });
   return { rowNumber, values, mentorEmail, studentId, errors };
 }
 
@@ -720,7 +726,10 @@ function addDuplicateStudentIdErrors(rows: AcademicMentorshipCsvRow[]) {
     if (duplicateRows.length < 2) continue;
     const rowNumbers = duplicateRows.map((row) => row.rowNumber).join(", ");
     for (const row of duplicateRows) {
-      row.errors.push(`Duplicate student_id ${studentId} in rows ${rowNumbers}`);
+      row.errors.push({
+        field: "student_id",
+        error: `Duplicate student_id ${studentId} in rows ${rowNumbers}`,
+      });
     }
   }
 }
@@ -733,7 +742,7 @@ function academicMentorshipCsvRowsFailure(
     ok: false,
     type: "rows",
     errors: invalidRows.flatMap((row) =>
-      row.errors.map((error) => ({ rowNumber: row.rowNumber, error }))
+      row.errors.map((error) => ({ rowNumber: row.rowNumber, ...error }))
     ),
     errorCsv: buildAcademicMentorshipImportErrorCsv(header, invalidRows),
   };
@@ -856,13 +865,19 @@ function addAcademicMentorshipImportLookupErrors(
 ) {
   for (const row of rows) {
     if (!mentorByEmail.has(row.mentorEmail.toLowerCase())) {
-      row.errors.push("mentor_email is not an eligible Academic Mentor for this School");
+      row.errors.push({
+        field: "mentor_email",
+        error: "mentor_email is not an eligible Academic Mentor for this School",
+      });
     }
     const mentee = menteeByStudentId.get(row.studentId);
     if (!mentee) {
-      row.errors.push("student_id is not an eligible Mentee for this School and academic year");
+      row.errors.push({
+        field: "student_id",
+        error: "student_id is not an eligible Mentee for this School and academic year",
+      });
     } else if (mentee.active_mapping_id != null) {
-      row.errors.push("Student already has a mentor mapped");
+      row.errors.push({ field: "student_id", error: "Student already has a mentor mapped" });
     }
   }
 }
@@ -964,7 +979,7 @@ function buildAcademicMentorshipImportErrorCsv(
     ...rows.map((row) =>
       [
         ...header.map((column) => row.values[column] ?? ""),
-        row.errors.join("; "),
+        row.errors.map(({ error }) => error).join("; "),
       ]
         .map(csvCell)
         .join(",")

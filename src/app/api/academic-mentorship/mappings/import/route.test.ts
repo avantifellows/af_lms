@@ -213,7 +213,7 @@ describe("POST /api/academic-mentorship/mappings/import", () => {
     expect(response.status).toBe(422);
     expect(body).toMatchObject({
       error: "CSV upload has row errors",
-      errors: [{ rowNumber: 2, error: "student_id is required" }],
+      errors: [{ rowNumber: 2, field: "student_id", error: "student_id is required" }],
     });
     expect(body.errorCsv).toContain("mentor_email,student_id,notes,error_reason");
     expect(mockWithTransaction).not.toHaveBeenCalled();

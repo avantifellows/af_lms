@@ -436,7 +436,7 @@ describe("AcademicMentorshipManager", () => {
           Response.json(
             {
               error: "CSV upload has row errors",
-              errors: [{ rowNumber: 2, error: "student_id is required" }],
+              errors: [{ rowNumber: 2, field: "student_id", error: "student_id is required" }],
               errorCsv: "mentor_email,student_id,error_reason\nanita@x,,student_id is required\n",
             },
             { status: 422 }
@@ -459,6 +459,9 @@ describe("AcademicMentorshipManager", () => {
     await user.click(screen.getAllByRole("button", { name: "Upload CSV" }).at(-1)!);
 
     expect(await screen.findByText("CSV upload has row errors")).toBeInTheDocument();
+    expect(screen.getByText("Upload failed. 0 rows were saved.")).toBeInTheDocument();
+    expect(screen.getByText("student_id")).toBeInTheDocument();
+    expect(screen.getByText("student_id is required")).toBeInTheDocument();
     const errorLink = await screen.findByRole("link", { name: "Download error CSV" });
     expect(errorLink).toHaveAttribute(
       "download",

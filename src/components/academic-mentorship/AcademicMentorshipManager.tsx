@@ -11,6 +11,7 @@ import { Download, Plus, RotateCcw, Upload, XCircle } from "lucide-react";
 import Toast from "@/components/Toast";
 import { Badge, Button, Card, Input, Modal } from "@/components/ui";
 import type { AcademicMentorshipMappingGroup } from "@/lib/academic-mentorship";
+import { parseCsvText } from "@/lib/csv-parser";
 
 type MappingGroup = AcademicMentorshipMappingGroup;
 type Mapping = MappingGroup["mappings"][number];
@@ -35,6 +36,8 @@ type ReassigningState = {
   currentMentorUserId: number;
   menteeName: string;
 } | null;
+type CsvUploadRow = { mentor_email: string; student_id: string };
+type CsvUploadError = { rowNumber: number; field: string; error: string };
 
 interface AcademicMentorshipManagerProps {
   schoolCode: string;
@@ -69,6 +72,36 @@ function apiError(payload: unknown, fallback: string): string {
 function payloadErrorCsv(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || !("errorCsv" in payload)) return null;
   return typeof payload.errorCsv === "string" ? payload.errorCsv : null;
+}
+
+function valueAsRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function firstString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === "string") ?? "";
+}
+
+function csvUploadError(error: unknown): CsvUploadError | null {
+  const row = valueAsRecord(error);
+  if (!row) return null;
+
+  const rowNumber = Number(row.rowNumber ?? row.row);
+  const message = firstString(row.error, row.message);
+  if (!Number.isFinite(rowNumber) || !message) return null;
+
+  return {
+    rowNumber,
+    field: firstString(row.field) || "-",
+    error: message,
+  };
+}
+
+function payloadCsvErrors(payload: unknown): CsvUploadError[] {
+  if (!payload || typeof payload !== "object" || !("errors" in payload)) return [];
+  const { errors } = payload as { errors?: unknown };
+  if (!Array.isArray(errors)) return [];
+  return errors.map(csvUploadError).filter((error): error is CsvUploadError => Boolean(error));
 }
 
 function payloadInsertedCount(payload: unknown): number {
@@ -251,17 +284,22 @@ async function uploadCsvAction(args: {
   refreshMappings: () => Promise<void>;
   setCsvOpen: StateSetter<boolean>;
   setCsvFile: StateSetter<File | null>;
+  setCsvRows: StateSetter<CsvUploadRow[]>;
+  setCsvErrors: StateSetter<CsvUploadError[]>;
+  setCsvFileError: StateSetter<string>;
   setErrorCsv: StateSetter<string | null>;
   setBusy: StateSetter<boolean>;
   setToast: StateSetter<ToastState>;
 }) {
   if (!args.csvFile) {
-    args.setToast({ variant: "error", message: "Select a CSV file" });
+    args.setCsvFileError("Choose a CSV file with at least one row");
     return;
   }
 
   args.setBusy(true);
   args.setErrorCsv(null);
+  args.setCsvErrors([]);
+  args.setCsvFileError("");
   try {
     const formData = new FormData();
     formData.set("school_code", args.schoolCode);
@@ -273,7 +311,12 @@ async function uploadCsvAction(args: {
     });
     const payload = await readJson(response);
     if (!response.ok) {
+      const rowErrors = payloadCsvErrors(payload);
       args.setErrorCsv(payloadErrorCsv(payload));
+      args.setCsvErrors(rowErrors);
+      args.setCsvFileError(
+        rowErrors.length > 0 ? "Upload failed. 0 rows were saved." : apiError(payload, "Failed to upload CSV")
+      );
       args.setToast({ variant: "error", message: apiError(payload, "Failed to upload CSV") });
       return;
     }
@@ -281,6 +324,9 @@ async function uploadCsvAction(args: {
     const insertedCount = payloadInsertedCount(payload);
     args.setCsvOpen(false);
     args.setCsvFile(null);
+    args.setCsvRows([]);
+    args.setCsvErrors([]);
+    args.setCsvFileError("");
     args.setToast({
       variant: "success",
       message: `Imported ${insertedCount} mapping${insertedCount === 1 ? "" : "s"}.`,
@@ -574,7 +620,6 @@ function ActionBar({
   canEdit,
   canUpload,
   templateHref,
-  errorCsv,
   busy,
   onAdd,
   onUpload,
@@ -582,7 +627,6 @@ function ActionBar({
   canEdit: boolean;
   canUpload: boolean;
   templateHref: string;
-  errorCsv: string | null;
   busy: boolean;
   onAdd: () => void;
   onUpload: () => void;
@@ -615,15 +659,6 @@ function ActionBar({
           <Download className="h-4 w-4" aria-hidden="true" />
           Template
         </a>
-        {errorCsv ? (
-          <a
-            href={`data:text/csv;charset=utf-8,${encodeURIComponent(errorCsv)}`}
-            download="academic-mentorship-import-errors.csv"
-            className="inline-flex min-h-[44px] items-center justify-center rounded-lg px-2 text-sm font-bold text-accent hover:text-accent-hover"
-          >
-            Download error CSV
-          </a>
-        ) : null}
       </div>
     </Card>
   );
@@ -708,6 +743,11 @@ function AddMappingPanel({
 function CsvUploadModal({
   open,
   academicYear,
+  templateHref,
+  csvRows,
+  csvErrors,
+  csvFileError,
+  errorCsv,
   busy,
   onClose,
   onFile,
@@ -715,34 +755,118 @@ function CsvUploadModal({
 }: {
   open: boolean;
   academicYear: string;
+  templateHref: string;
+  csvRows: CsvUploadRow[];
+  csvErrors: CsvUploadError[];
+  csvFileError: string;
+  errorCsv: string | null;
   busy: boolean;
   onClose: () => void;
   onFile: (file: File | null) => void;
   onUpload: () => void;
 }) {
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} className="max-w-3xl">
       <div className="border-b border-border px-5 py-4">
         <h2 className="text-base font-bold text-text-primary">Upload CSV</h2>
         <p className="mt-1 text-sm text-text-muted">
-          Upload mentor_email,student_id rows for {academicYear}.
+          CSV must contain mentor_email,student_id rows for {academicYear}.
         </p>
       </div>
-      <div className="grid gap-4 px-5 py-4">
+      <div className="grid max-h-[70vh] gap-4 overflow-y-auto px-5 py-4">
+        <a
+          href={templateHref}
+          download="academic-mentorship-template.csv"
+          className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg border border-border bg-bg-card px-3 text-sm font-medium text-text-primary shadow-sm hover:bg-hover-bg"
+        >
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Download CSV template
+        </a>
         <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
           CSV file
           <Input
             type="file"
             accept=".csv,text/csv"
             onChange={(event) => onFile(event.target.files?.[0] ?? null)}
+            disabled={busy}
           />
         </label>
+        {csvFileError ? (
+          <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            {csvFileError}
+          </div>
+        ) : null}
+        {csvRows.length > 0 ? (
+          <div className="overflow-hidden rounded-lg border border-border">
+            <table className="min-w-full table-fixed divide-y divide-border text-sm">
+              <thead className="bg-bg-card-alt text-left text-xs font-bold uppercase tracking-wide text-text-muted">
+                <tr>
+                  <th className="w-1/2 px-4 py-3">Mentor Email</th>
+                  <th className="w-1/2 px-4 py-3">Student ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {csvRows.map((row, index) => (
+                  <tr key={`${row.mentor_email}-${row.student_id}-${index}`}>
+                    <td className="border-t border-border px-4 py-3 text-text-primary">
+                      {row.mentor_email || "-"}
+                    </td>
+                    <td className="border-t border-border px-4 py-3 font-mono text-text-primary">
+                      {row.student_id || "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {csvErrors.length > 0 ? (
+          <div className="overflow-hidden rounded-lg border border-danger/30">
+            <table className="min-w-full table-fixed divide-y divide-danger/20 text-sm">
+              <thead className="bg-danger/10 text-left text-xs font-bold uppercase tracking-wide text-danger">
+                <tr>
+                  <th className="w-20 px-4 py-3">Row</th>
+                  <th className="w-40 px-4 py-3">Field</th>
+                  <th className="px-4 py-3">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {csvErrors.map((error, index) => (
+                  <tr key={`${error.rowNumber}-${error.field}-${index}`}>
+                    <td className="border-t border-danger/20 px-4 py-3 text-text-primary">
+                      {error.rowNumber}
+                    </td>
+                    <td className="border-t border-danger/20 px-4 py-3 font-mono text-text-primary">
+                      {error.field}
+                    </td>
+                    <td className="border-t border-danger/20 px-4 py-3 text-danger">
+                      {error.error}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {errorCsv ? (
+          <a
+            href={`data:text/csv;charset=utf-8,${encodeURIComponent(errorCsv)}`}
+            download="academic-mentorship-import-errors.csv"
+            className="inline-flex min-h-10 w-fit items-center justify-center rounded-lg px-2 text-sm font-bold text-accent hover:text-accent-hover"
+          >
+            Download error CSV
+          </a>
+        ) : null}
       </div>
       <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
         <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
           Cancel
         </Button>
-        <Button type="button" onClick={onUpload} disabled={busy}>
+        <Button
+          type="button"
+          onClick={onUpload}
+          disabled={busy || csvRows.length === 0 || Boolean(csvFileError)}
+        >
           Upload CSV
         </Button>
       </div>
@@ -936,6 +1060,9 @@ export default function AcademicMentorshipManager({
   const [addOpen, setAddOpen] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvRows, setCsvRows] = useState<CsvUploadRow[]>([]);
+  const [csvErrors, setCsvErrors] = useState<CsvUploadError[]>([]);
+  const [csvFileError, setCsvFileError] = useState("");
   const [errorCsv, setErrorCsv] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
@@ -945,6 +1072,41 @@ export default function AcademicMentorshipManager({
   });
   const templateHref = `/api/academic-mentorship/mappings/import?${templateParams.toString()}`;
 
+  function closeCsvModal() {
+    setCsvOpen(false);
+    setCsvFile(null);
+    setCsvRows([]);
+    setCsvErrors([]);
+    setCsvFileError("");
+  }
+
+  async function handleCsvFile(file: File | null) {
+    setCsvFile(file);
+    setCsvRows([]);
+    setCsvErrors([]);
+    setCsvFileError("");
+    setErrorCsv(null);
+    if (!file) return;
+
+    try {
+      const parsed = parseCsvText(await file.text());
+      const requiredColumns = ["mentor_email", "student_id"];
+      const missingColumns = requiredColumns.filter((column) => !parsed.headers.includes(column));
+      if (missingColumns.length > 0) {
+        setCsvFileError(`Missing required columns: ${missingColumns.join(", ")}`);
+        return;
+      }
+      const rows = parsed.rows.map((row) => ({
+        mentor_email: row.mentor_email ?? "",
+        student_id: row.student_id ?? "",
+      }));
+      setCsvRows(rows);
+      if (rows.length === 0) setCsvFileError("Choose a CSV file with at least one row");
+    } catch {
+      setCsvFileError("Unable to parse CSV file");
+    }
+  }
+
   return (
     <>
       <ManagerToast toast={toast} onDismiss={() => setToast(null)} />
@@ -953,7 +1115,6 @@ export default function AcademicMentorshipManager({
         canEdit={canEdit}
         canUpload={canUpload}
         templateHref={templateHref}
-        errorCsv={errorCsv}
         busy={busy}
         onAdd={() => setAddOpen(true)}
         onUpload={() => setCsvOpen(true)}
@@ -994,9 +1155,16 @@ export default function AcademicMentorshipManager({
       <CsvUploadModal
         open={csvOpen && canUpload}
         academicYear={academicYear}
+        templateHref={templateHref}
+        csvRows={csvRows}
+        csvErrors={csvErrors}
+        csvFileError={csvFileError}
+        errorCsv={errorCsv}
         busy={busy}
-        onClose={() => setCsvOpen(false)}
-        onFile={setCsvFile}
+        onClose={closeCsvModal}
+        onFile={(file) => {
+          void handleCsvFile(file);
+        }}
         onUpload={() =>
           void uploadCsvAction({
             schoolCode,
@@ -1005,6 +1173,9 @@ export default function AcademicMentorshipManager({
             refreshMappings,
             setCsvOpen,
             setCsvFile,
+            setCsvRows,
+            setCsvErrors,
+            setCsvFileError,
             setErrorCsv,
             setBusy,
             setToast,

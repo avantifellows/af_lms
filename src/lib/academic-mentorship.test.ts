@@ -574,10 +574,10 @@ describe("importAcademicMentorshipMappingsFromCsv", () => {
     expect(result).toMatchObject({
       type: "rows",
       errors: [
-        { rowNumber: 2, error: "student_id is required" },
-        { rowNumber: 3, error: "Duplicate student_id STU001 in rows 3, 4" },
-        { rowNumber: 4, error: "Duplicate student_id STU001 in rows 3, 4" },
-        { rowNumber: 5, error: "mentor_email is required" },
+        { rowNumber: 2, field: "student_id", error: "student_id is required" },
+        { rowNumber: 3, field: "student_id", error: "Duplicate student_id STU001 in rows 3, 4" },
+        { rowNumber: 4, field: "student_id", error: "Duplicate student_id STU001 in rows 3, 4" },
+        { rowNumber: 5, field: "mentor_email", error: "mentor_email is required" },
       ],
     });
     if (!result.ok && result.type === "rows") {
