@@ -160,7 +160,7 @@ describe("GET /api/pm/students", () => {
     // current academic year (no grade param — grade filtering happens in JS).
     const rosterCall = mockQuery.mock.calls[2];
     expect(rosterCall[0]).toContain("g.type = 'school' AND g.child_id = $1");
-    expect(rosterCall[0]).toContain("er_grade.academic_year = $2");
+    expect(rosterCall[0]).toContain("er.academic_year = $2");
     expect(rosterCall[1]).toEqual([10, CURRENT_ACADEMIC_YEAR]);
   });
 

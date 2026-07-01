@@ -72,26 +72,39 @@ export async function getSchoolRoster(
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
-    -- Restrict the roster to students enrolled for the current academic year.
-    -- Inner join (not LEFT) so students whose only grade enrollment is from a
-    -- prior year (e.g. graduated cohorts still attached to old batches) are
-    -- excluded rather than shown with a blank grade.
-    JOIN enrollment_record er_grade ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
-      AND er_grade.academic_year = $2
+    -- Restrict the roster to the current academic year. Dropout ends the
+    -- current grade enrollment, so keep the latest same-year grade for those
+    -- rows while still excluding old active cohorts.
+    JOIN LATERAL (
+      SELECT er.group_id
+      FROM enrollment_record er
+      WHERE er.user_id = u.id
+        AND er.group_type = 'grade'
+        AND er.academic_year = $2
+        AND (er.is_current = true OR s.status = 'dropout')
+      ORDER BY er.is_current DESC, er.end_date DESC NULLS LAST, er.updated_at DESC, er.id DESC
+      LIMIT 1
+    ) er_grade ON true
     LEFT JOIN grade gr ON er_grade.group_id = gr.id
     LEFT JOIN LATERAL (
       SELECT p.name as program_name, p.id as program_id
-      FROM group_user gu_batch
-      JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-      JOIN batch b ON g_batch.child_id = b.id
+      FROM enrollment_record er_batch
+      JOIN batch b ON b.id = er_batch.group_id
       JOIN program p ON b.program_id = p.id
-      WHERE gu_batch.user_id = u.id
+      WHERE er_batch.user_id = u.id
+        AND er_batch.group_type = 'batch'
       -- Deterministic tiebreaker for students in multiple program batches:
       -- prefer CoE → Nodal → NVS (matches PROGRAM_IDS_ORDERED). Interim until
       -- a primary_batch field lands; see PR #58 discussion.
-      ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
+      -- Dropout ends the current batch membership, so fall back to the latest
+      -- historical batch when no current batch remains.
+      ORDER BY
+        er_batch.is_current DESC,
+        CASE WHEN er_batch.is_current THEN array_position(ARRAY[1, 2, 64]::int[], b.program_id) END,
+        (er_batch.academic_year = $2) DESC,
+        er_batch.end_date DESC NULLS LAST,
+        er_batch.updated_at DESC,
+        er_batch.id DESC
       LIMIT 1
     ) p ON true
     WHERE g.type = 'school' AND g.child_id = $1

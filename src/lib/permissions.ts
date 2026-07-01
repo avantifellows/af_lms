@@ -455,8 +455,7 @@ export async function getStudentSchool(
        ON er_batch.user_id = s.user_id
        AND er_batch.group_type = 'batch'
        AND er_batch.is_current = true
-     LEFT JOIN "group" g_batch ON g_batch.id = er_batch.group_id AND g_batch.type = 'batch'
-     LEFT JOIN batch b ON b.id = g_batch.child_id
+     LEFT JOIN batch b ON b.id = er_batch.group_id
      WHERE s.id = $1
      LIMIT 1`,
     [studentPkId],

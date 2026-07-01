@@ -53,10 +53,12 @@ describe("getSchoolRoster", () => {
     expect(mocks.mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mocks.mockQuery.mock.calls[0];
     expect(sql).toContain("g.type = 'school' AND g.child_id = $1");
-    expect(sql).toContain("er_grade.academic_year = $2");
-    // Inner join (not LEFT) so prior-year cohorts are excluded entirely.
-    expect(sql).not.toContain("LEFT JOIN enrollment_record");
-    expect(sql).toContain("JOIN enrollment_record");
+    expect(sql).toContain("er.academic_year = $2");
+    // Inner join (not LEFT) so prior-year grade cohorts are excluded entirely.
+    expect(sql).toContain("JOIN LATERAL (\n      SELECT er.group_id");
+    expect(sql).toContain("AND (er.is_current = true OR s.status = 'dropout')");
+    expect(sql).toContain("JOIN batch b ON b.id = er_batch.group_id");
+    expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
     expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR]);
   });
 
