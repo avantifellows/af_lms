@@ -148,6 +148,7 @@ export default function StaffGrid({
 
   // Edit modal state
   const [modalKey, setModalKey] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
   const [codeDraft, setCodeDraft] = useState("");
   const [exitDraft, setExitDraft] = useState("");
   const [exitArmed, setExitArmed] = useState(false);
@@ -260,6 +261,7 @@ export default function StaffGrid({
 
   const openModal = (row: StaffRosterRow) => {
     setModalKey(rowKey(row));
+    setNameDraft(row.name ?? "");
     setCodeDraft(row.employeeCode ?? "");
     setExitDraft(new Date().toISOString().slice(0, 10));
     setExitArmed(false);
@@ -303,55 +305,107 @@ export default function StaffGrid({
     }
   };
 
-  const saveCode = (row: StaffRosterRow) => {
-    const code = codeDraft.trim().toUpperCase();
-    if (!code || code === row.employeeCode) {
-      closeModal();
-      return Promise.resolve(true);
+  // Persist a changed name (no-op when blank or unchanged). Throws on failure
+  // so the caller's try/catch surfaces it. Sends user_id when the person has a
+  // linked user row and permission_id for pending rows (whose name lives on the
+  // user_permission), so both the `user` table and full_name stay in sync.
+  const saveNameIfChanged = async (row: StaffRosterRow) => {
+    const name = nameDraft.trim();
+    if (!name || name === row.name) return;
+    const body: Record<string, unknown> = { full_name: name };
+    if (row.userId !== null) body.user_id = row.userId;
+    if (row.kind === "pending_teacher" || row.kind === "pending_pm") {
+      body.permission_id = row.recordId;
     }
-    if (row.kind === "teacher") {
-      return runAction(
-        () =>
-          fetch(`/api/admin/staff/teachers/${row.recordId}`, {
+    const response = await fetch(`/api/admin/staff/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const fieldError =
+        data.fields && typeof data.fields === "object"
+          ? Object.values(data.fields as Record<string, string>)[0]
+          : undefined;
+      throw new Error(fieldError || data.error || "Failed to update name");
+    }
+  };
+
+  // Modal Save: persist the name change (if any) and the AF-code change (if
+  // any) together, then refresh. pending_teacher uses its own Create flow.
+  const saveEdits = async (row: StaffRosterRow) => {
+    const code = codeDraft.trim().toUpperCase();
+    const nameChanged = !!nameDraft.trim() && nameDraft.trim() !== row.name;
+    const codeChanged = !!code && code !== row.employeeCode;
+    if (!nameChanged && !codeChanged) {
+      closeModal();
+      return;
+    }
+    setActionBusy(true);
+    setActionError("");
+    try {
+      await saveNameIfChanged(row);
+      if (codeChanged) {
+        let response: Response;
+        if (row.kind === "teacher") {
+          response = await fetch(`/api/admin/staff/teachers/${row.recordId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ teacher_id: code }),
-          }),
-        { closeOnSuccess: true }
-      );
-    }
-    if (row.kind === "staff") {
-      return runAction(
-        () =>
-          fetch(`/api/admin/staff/members/${row.recordId}`, {
+          });
+        } else if (row.kind === "staff") {
+          response = await fetch(`/api/admin/staff/members/${row.recordId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ employee_code: code }),
-          }),
-        { closeOnSuccess: true }
-      );
+          });
+        } else {
+          // pending_pm: creating the staff record IS setting the code
+          response = await fetch(`/api/admin/staff/members`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_permission_id: row.recordId,
+              employee_code: code,
+            }),
+          });
+        }
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          const fieldError =
+            data.fields && typeof data.fields === "object"
+              ? Object.values(data.fields as Record<string, string>)[0]
+              : undefined;
+          throw new Error(fieldError || data.error || "Action failed");
+        }
+      }
+      await fetchRoster(filters);
+      closeModal();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Action failed");
+    } finally {
+      setActionBusy(false);
     }
-    // pending_pm: creating the staff record IS setting the code
-    return runAction(
-      () =>
-        fetch(`/api/admin/staff/members`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_permission_id: row.recordId,
-            employee_code: code,
-          }),
-        }),
-      { closeOnSuccess: true }
-    );
   };
 
   // Complete a pending_teacher: create the teacher record + seat at the chosen
   // centre. Subject + centre are required; AF id is optional (a not-yet-hired
   // teacher gets it later via the normal edit flow). row.recordId is the
   // user_permission id for pending rows.
-  const createTeacher = (row: StaffRosterRow) => {
+  const createTeacher = async (row: StaffRosterRow) => {
     const code = codeDraft.trim().toUpperCase();
+    // Save the name first: createTeacher builds the new user row from the
+    // permission's full_name, so persisting the edited name up front means the
+    // created user carries the corrected name.
+    try {
+      await saveNameIfChanged(row);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Failed to update name"
+      );
+      return false;
+    }
     return runAction(
       () =>
         fetch(`/api/admin/staff/teachers`, {
@@ -745,6 +799,19 @@ export default function StaffGrid({
 
             <div className="mt-5">
               <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                Full name
+              </label>
+              <Input
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                placeholder="Jane Doe"
+                aria-label="Full name"
+                className="w-full sm:w-80"
+              />
+            </div>
+
+            <div className="mt-5">
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
                 {modalRow.kind === "pending_pm"
                   ? "AF code (creates the staff record)"
                   : modalRow.kind === "pending_teacher"
@@ -1014,7 +1081,7 @@ export default function StaffGrid({
                 </Button>
               ) : (
                 <Button
-                  onClick={() => void saveCode(modalRow)}
+                  onClick={() => void saveEdits(modalRow)}
                   disabled={actionBusy}
                 >
                   Save

@@ -1263,6 +1263,103 @@ export async function updateStaffMember(params: {
   return { ok: true };
 }
 
+export interface UpdateStaffNameBody {
+  user_id?: unknown;
+  permission_id?: unknown;
+  full_name?: unknown;
+}
+
+// A person's name lives in two places depending on the roster kind: the shared
+// `user` table (teacher/staff rows show first_name + last_name) and
+// `user_permission.full_name` (pending rows, plus what the Users screen and
+// login display). Editing a name here writes BOTH — splitting the full name
+// into first/last for `user` and mirroring the whole string to full_name — so
+// the name stays consistent everywhere instead of drifting between screens.
+export async function updateStaffName(params: {
+  body: UpdateStaffNameBody;
+}): Promise<StaffMutationResult> {
+  const schema = await checkStaffManagementSchema();
+  if (!schema.ok) return schema;
+
+  const fullName =
+    typeof params.body.full_name === "string" ? params.body.full_name.trim() : "";
+  if (!fullName) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Validation failed",
+      fields: { full_name: "Name can't be empty" },
+    };
+  }
+  const tokens = fullName.split(/\s+/).filter(Boolean);
+  const normalized = tokens.join(" ");
+  const firstName = tokens[0] ?? null;
+  const lastName = tokens.length > 1 ? tokens.slice(1).join(" ") : null;
+
+  const userId =
+    params.body.user_id === undefined || params.body.user_id === null
+      ? null
+      : Number(params.body.user_id);
+  if (userId !== null && (!Number.isInteger(userId) || userId <= 0)) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Validation failed",
+      fields: { user_id: "user_id must be a positive integer" },
+    };
+  }
+  const permissionId =
+    params.body.permission_id === undefined || params.body.permission_id === null
+      ? null
+      : Number(params.body.permission_id);
+  if (permissionId !== null && (!Number.isInteger(permissionId) || permissionId <= 0)) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Validation failed",
+      fields: { permission_id: "permission_id must be a positive integer" },
+    };
+  }
+  if (userId === null && permissionId === null) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Provide user_id or permission_id to identify the person",
+    };
+  }
+
+  let touched = 0;
+  await withTransaction(async (client) => {
+    if (userId !== null) {
+      const userUpdate = await client.query(
+        `UPDATE "user" SET first_name = $1, last_name = $2, updated_at = now()
+         WHERE id = $3`,
+        [firstName, lastName, userId]
+      );
+      touched += userUpdate.rowCount ?? 0;
+      const permUpdate = await client.query(
+        `UPDATE user_permission SET full_name = $1, updated_at = now()
+         WHERE user_id = $2 AND revoked_at IS NULL`,
+        [normalized, userId]
+      );
+      touched += permUpdate.rowCount ?? 0;
+    }
+    if (permissionId !== null) {
+      const permUpdate = await client.query(
+        `UPDATE user_permission SET full_name = $1, updated_at = now()
+         WHERE id = $2`,
+        [normalized, permissionId]
+      );
+      touched += permUpdate.rowCount ?? 0;
+    }
+  });
+
+  if (touched === 0) {
+    return { ok: false, status: 404, error: "Person not found" };
+  }
+  return { ok: true };
+}
+
 // --- Centre positions (seats): LMS-direct ---
 
 export interface CreatePositionBody {
