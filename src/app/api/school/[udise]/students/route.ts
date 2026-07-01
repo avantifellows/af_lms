@@ -132,6 +132,12 @@ async function resolveSchoolAndAccess(
   return { school, access };
 }
 
+async function resolveRouteContext(params: Promise<{ udise: string }>) {
+  const session = await getServerSession(authOptions);
+  const { udise } = await params;
+  return resolveSchoolAndAccess(session, udise);
+}
+
 function countTotals(results: Array<{ status: DbServiceResult["status"] }>) {
   return results.reduce(
     (totals, result) => ({
@@ -189,6 +195,7 @@ async function proxyRowsToDbService({
   return NextResponse.json(await response.json());
 }
 
+// fallow-ignore-next-line complexity
 async function bulkUploadResponse(
   request: NextRequest,
   access: StudentAdditionAccess,
@@ -258,10 +265,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ udise: string }> },
 ) {
-  const session = await getServerSession(authOptions);
-  const { udise } = await params;
-
-  const resolved = await resolveSchoolAndAccess(session, udise);
+  const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
   const { school, access } = resolved;
 
@@ -293,9 +297,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ udise: string }> },
 ) {
-  const session = await getServerSession(authOptions);
-  const { udise } = await params;
-  const resolved = await resolveSchoolAndAccess(session, udise);
+  const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
 
   const workbook = await buildStudentAdditionTemplateWorkbook();

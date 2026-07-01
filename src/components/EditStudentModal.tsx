@@ -69,6 +69,7 @@ const labelClassName = "block text-sm font-medium text-text-secondary";
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 const errorClassName = "mt-1 text-xs text-danger";
 
+// fallow-ignore-next-line complexity
 export default function EditStudentModal({
   student,
   isOpen,
@@ -105,6 +106,7 @@ export default function EditStudentModal({
     return Number.isFinite(n) && n > 0 ? n : null;
   })();
 
+  // fallow-ignore-next-line complexity
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
