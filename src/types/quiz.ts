@@ -8,6 +8,10 @@ export interface TestTrendPoint {
   stream_student_count: number;
   test_format: string | null;
   test_stream: string | null;
+  // Grade the test targets (test_grade in BQ), which can differ from the
+  // student's grade — e.g. a grade-12 batch sitting an 11th-grade test. Null
+  // when the source row has no test_grade. Drives the Test Grade filter.
+  test_grade: number | null;
   // Subjects this test covers, derived from non-`overall` `section` values.
   // Empty for tests that have no per-subject breakdown.
   subjects: string[];
@@ -76,6 +80,13 @@ export interface TestDeepDiveSummary {
   avg_score: number;
   min_score: number;
   max_score: number;
+  // Raw-mark counterparts to the percentages above, shown alongside them as
+  // "SCORE (PCT%)". avg/min/max_marks are the achieved marks; total_marks is
+  // the test's max (the shared denominator across all three).
+  avg_marks: number;
+  min_marks: number;
+  max_marks: number;
+  total_marks: number;
   avg_accuracy: number;
   avg_attempt_rate: number;
 }
@@ -99,6 +110,10 @@ export interface ChapterAnalysisRow {
   // etl-next. Null/absent when the chapter has no tag yet.
   priority: string | null;
   avg_score: number;
+  // Raw-mark counterparts to avg_score, shown as "SCORE (PCT%)". avg_marks is
+  // the class-average marks for the chapter; max_marks is the chapter's total.
+  avg_marks: number;
+  max_marks: number;
   accuracy: number;
   attempt_rate: number;
   questions: number;

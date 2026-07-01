@@ -411,6 +411,10 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(result!.summary.avg_score).toBe(80);
       expect(result!.summary.min_score).toBe(70);
       expect(result!.summary.max_score).toBe(90);
+      expect(result!.summary.avg_marks).toBe(80);
+      expect(result!.summary.min_marks).toBe(70);
+      expect(result!.summary.max_marks).toBe(90);
+      expect(result!.summary.total_marks).toBe(100);
       expect(result!.summary.avg_accuracy).toBe(70);
       expect(result!.summary.test_name).toBe("Mid-Term Physics");
       expect(result!.summary.start_date).toBe("2026-01-15");
@@ -533,6 +537,9 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       });
       // Mean of (4/4=100%) and (0/4=0%) → 50%
       expect(result!.chapters[0].avg_score).toBe(50);
+      // Mean marks (4 and 0) → 2 out of a 4-mark chapter
+      expect(result!.chapters[0].avg_marks).toBe(2);
+      expect(result!.chapters[0].max_marks).toBe(4);
     });
 
     it("surfaces the stream-keyed chapter priority on the chapter analysis row (#128 item 2)", async () => {
