@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import {
   getFeatureAccess,
-  getUserPermission,
+  getResolvedPermission,
   type UserPermission,
 } from "@/lib/permissions";
 
@@ -35,7 +35,11 @@ async function requireTeacherFeedbackAccess(
   email: string,
   mode: AccessMode
 ): Promise<TeacherFeedbackAccessResult> {
-  const permission = await getUserPermission(email);
+  // Resolve seat-derived scope (centre_positions), matching the quiz-session
+  // guard. A PM whose school/program access comes from centre seats (after strict
+  // exclusivity clears school_codes/program_ids) would otherwise pass the page
+  // render (which resolves scope) but 403 on every feedback API call.
+  const permission = await getResolvedPermission(email);
   const access = getFeatureAccess(permission, "teacher_feedback");
 
   if ((mode === "view" && !access.canView) || (mode === "edit" && !access.canEdit)) {
