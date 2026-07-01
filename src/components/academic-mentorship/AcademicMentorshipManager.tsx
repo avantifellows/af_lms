@@ -840,35 +840,15 @@ function MappingGroupsSection({
   );
 }
 
-export default function AcademicMentorshipManager({
+function useMappingGroupsState({
   schoolCode,
   academicYear,
   includeHistory,
-  canEdit,
   initialGroups,
 }: AcademicMentorshipManagerProps) {
   const groupsKey = `${schoolCode}:${academicYear}:${includeHistory}`;
   const [groupState, setGroupState] = useState({ key: groupsKey, groups: initialGroups });
   const groups = groupState.key === groupsKey ? groupState.groups : initialGroups;
-  const [mentorOptions, setMentorOptions] = useState<MentorOption[]>([]);
-  const [menteeOptions, setMenteeOptions] = useState<MenteeOption[]>([]);
-  const [mentorSearch, setMentorSearch] = useState("");
-  const [menteeSearch, setMenteeSearch] = useState("");
-  const [mentorUserId, setMentorUserId] = useState("");
-  const [studentPkId, setStudentPkId] = useState("");
-  const [reassigning, setReassigning] = useState<ReassigningState>(null);
-  const [replacementMentorOptions, setReplacementMentorOptions] = useState<MentorOption[]>([]);
-  const [replacementMentorSearch, setReplacementMentorSearch] = useState("");
-  const [replacementMentorUserId, setReplacementMentorUserId] = useState("");
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [errorCsv, setErrorCsv] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<ToastState>(null);
-  const templateParams = new URLSearchParams({
-    school_code: schoolCode,
-    academic_year: academicYear,
-  });
-  const templateHref = `/api/academic-mentorship/mappings/import?${templateParams.toString()}`;
 
   async function refreshMappings() {
     setGroupState({
@@ -876,6 +856,19 @@ export default function AcademicMentorshipManager({
       groups: await fetchMappingGroups(schoolCode, academicYear, includeHistory),
     });
   }
+
+  return { groups, refreshMappings };
+}
+
+function useMentorshipOptionState(schoolCode: string, academicYear: string) {
+  const [mentorOptions, setMentorOptions] = useState<MentorOption[]>([]);
+  const [menteeOptions, setMenteeOptions] = useState<MenteeOption[]>([]);
+  const [mentorSearch, setMentorSearch] = useState("");
+  const [menteeSearch, setMenteeSearch] = useState("");
+  const [reassigning, setReassigning] = useState<ReassigningState>(null);
+  const [replacementMentorOptions, setReplacementMentorOptions] = useState<MentorOption[]>([]);
+  const [replacementMentorSearch, setReplacementMentorSearch] = useState("");
+  const [replacementMentorUserId, setReplacementMentorUserId] = useState("");
 
   function startReassign(mappingId: number | string, currentMentorUserId: number) {
     setReassigning({ mappingId, currentMentorUserId });
@@ -904,6 +897,66 @@ export default function AcademicMentorshipManager({
       menteeOptionParams(schoolCode, academicYear, value)
     ).then(setMenteeOptions);
   }
+
+  return {
+    mentorOptions,
+    menteeOptions,
+    mentorSearch,
+    menteeSearch,
+    reassigning,
+    replacementMentorOptions,
+    replacementMentorSearch,
+    replacementMentorUserId,
+    setReassigning,
+    setReplacementMentorUserId,
+    startReassign,
+    searchReplacementMentors,
+    searchMentors,
+    searchMentees,
+  };
+}
+
+export default function AcademicMentorshipManager({
+  schoolCode,
+  academicYear,
+  includeHistory,
+  canEdit,
+  initialGroups,
+}: AcademicMentorshipManagerProps) {
+  const { groups, refreshMappings } = useMappingGroupsState({
+    schoolCode,
+    academicYear,
+    includeHistory,
+    canEdit,
+    initialGroups,
+  });
+  const {
+    mentorOptions,
+    menteeOptions,
+    mentorSearch,
+    menteeSearch,
+    reassigning,
+    replacementMentorOptions,
+    replacementMentorSearch,
+    replacementMentorUserId,
+    setReassigning,
+    setReplacementMentorUserId,
+    startReassign,
+    searchReplacementMentors,
+    searchMentors,
+    searchMentees,
+  } = useMentorshipOptionState(schoolCode, academicYear);
+  const [mentorUserId, setMentorUserId] = useState("");
+  const [studentPkId, setStudentPkId] = useState("");
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [errorCsv, setErrorCsv] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<ToastState>(null);
+  const templateParams = new URLSearchParams({
+    school_code: schoolCode,
+    academic_year: academicYear,
+  });
+  const templateHref = `/api/academic-mentorship/mappings/import?${templateParams.toString()}`;
 
   return (
     <>
