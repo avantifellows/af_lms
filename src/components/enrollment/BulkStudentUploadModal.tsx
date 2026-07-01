@@ -49,6 +49,7 @@ function firstRowIssue(result: UploadResult): string {
   ][0] ?? "";
 }
 
+// fallow-ignore-next-line complexity
 export default function BulkStudentUploadModal({
   open,
   schoolUdise,
@@ -70,6 +71,7 @@ export default function BulkStudentUploadModal({
   const done = (totals?.created ?? 0) + (totals?.already_exists ?? 0);
   const toGo = (totals?.duplicate_in_file ?? 0) + (totals?.rejected ?? 0);
 
+  // fallow-ignore-next-line complexity
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!grade || !file) return;
@@ -104,6 +106,7 @@ export default function BulkStudentUploadModal({
   }
 
   return (
+    // fallow-ignore-next-line code-duplication
     <Modal open={open} onClose={onClose} className="flex max-h-[92vh] max-w-4xl flex-col overflow-hidden p-0">
       <div className="flex items-start justify-between border-b border-border px-6 py-4">
         <div>

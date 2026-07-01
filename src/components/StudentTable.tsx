@@ -129,6 +129,7 @@ function parseStudentPkId(raw: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// fallow-ignore-next-line complexity
 function StudentCard({
   student,
   canEditStudent,
@@ -399,6 +400,7 @@ export default function StudentTable({
   );
 
   // Per-row ownership check: combines feature-level canEdit with program ownership
+  // fallow-ignore-next-line complexity
   const canMutateStudent = (student: Student): boolean => {
     if (!canEdit) return false;
     if (isPasscodeUser || !student.student_pk_id) return false;

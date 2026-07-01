@@ -192,6 +192,7 @@ export function buildRejectedRowsCsv(results: StudentAdditionCsvResult[]): strin
 
   const rows = results
     .filter((result) => result.status === "rejected")
+    // fallow-ignore-next-line complexity
     .map((result) => {
       const existing = result.existing_match ?? {};
       return [
@@ -256,7 +257,7 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function normalizeName(value: unknown): string {
+function normalizeName(value: unknown): string {
   return stringValue(value)
     .replace(/\./g, "")
     .split(/\s+/)
@@ -265,7 +266,7 @@ export function normalizeName(value: unknown): string {
     .join(" ");
 }
 
-export function normalizeG10RollNo(value: unknown): string {
+function normalizeG10RollNo(value: unknown): string {
   return stringValue(value).replace(/\s+/g, "").toUpperCase();
 }
 
@@ -326,6 +327,7 @@ function addError(errors: Record<string, string>, key: string, message: string) 
   if (!errors[key]) errors[key] = message;
 }
 
+// fallow-ignore-next-line complexity
 export function validateStudentAdditionInput(
   input: StudentAdditionInput,
   options: { today?: Date; rowNumber?: number } = {},

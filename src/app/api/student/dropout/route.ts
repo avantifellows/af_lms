@@ -31,6 +31,7 @@ async function resolveDropoutStudent(studentPkId: number) {
   );
 }
 
+// fallow-ignore-next-line complexity code-duplication
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
 

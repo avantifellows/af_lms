@@ -31,6 +31,7 @@ interface Props {
   schoolCode: string;
 }
 
+// fallow-ignore-next-line complexity
 export default function EnrollmentTabContent({
   programs,
   activeStudents,

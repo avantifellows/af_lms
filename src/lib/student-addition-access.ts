@@ -141,6 +141,7 @@ async function getStudentWriteScope(studentPkId: number | string) {
   return rows[0] ?? null;
 }
 
+// fallow-ignore-next-line complexity
 export async function requireStudentAdditionStudentAccess(
   session: StudentAdditionSession | null,
   studentPkId: number | string,

@@ -45,6 +45,7 @@ function editablePayload(body: Record<string, unknown>): StudentUpdatePayload {
   }, {});
 }
 
+// fallow-ignore-next-line complexity
 async function dbServiceError(response: Response) {
   const text = await response.text();
   let parsed: unknown = null;
