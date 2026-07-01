@@ -373,6 +373,7 @@ interface ParameterScore {
   parameter: string;
   score: number;
   maxScore: number;
+  answeredBy: number;
 }
 interface ReportData {
   teacherName: string;
@@ -382,7 +383,7 @@ interface ReportData {
   percentage: number;
   parameters: ParameterScore[];
   comments: { role: "liked" | "improve"; text: string }[];
-  batches: { batch: string; responseCount: number }[];
+  batches: { batch: string; batchName: string; responseCount: number }[];
 }
 
 function AnalysisModal({
@@ -466,13 +467,23 @@ function AnalysisModal({
               <SectionCard title="Parameter scores">
                 <div className="space-y-2">
                   {data.parameters.map((p) => {
-                    const pct = p.maxScore > 0 ? (p.score / p.maxScore) * 100 : 0;
+                    const rated = p.answeredBy > 0;
+                    const pct = rated && p.maxScore > 0 ? (p.score / p.maxScore) * 100 : 0;
                     return (
                       <div key={p.parameter}>
                         <div className="flex justify-between text-sm">
                           <span className="text-text-primary">{p.parameter}</span>
                           <span className="text-text-secondary">
-                            {p.score.toFixed(1)} / {p.maxScore}
+                            {rated ? (
+                              <>
+                                {p.score.toFixed(1)} / {p.maxScore}
+                                <span className="ml-2 text-xs text-text-muted">
+                                  · {p.answeredBy} rated
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-text-muted">not rated</span>
+                            )}
                           </span>
                         </div>
                         <div className="mt-1 h-2 w-full rounded-full bg-bg-card-alt">
@@ -489,7 +500,7 @@ function AnalysisModal({
                   <ul className="space-y-1 text-sm">
                     {data.batches.map((b) => (
                       <li key={b.batch} className="flex justify-between">
-                        <span className="text-text-primary">{b.batch}</span>
+                        <span className="text-text-primary">{b.batchName}</span>
                         <span className="text-text-secondary">{b.responseCount}</span>
                       </li>
                     ))}

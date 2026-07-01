@@ -56,6 +56,23 @@ export async function GET(request: NextRequest) {
 
   try {
     const report = await getTeacherFeedbackReport(quizId);
+
+    // Resolve batch_id -> readable name (the BQ module returns raw ids).
+    const batchIds = report.batches.map((b) => b.batch);
+    if (batchIds.length > 0) {
+      const nameRows = await query<{ batch_id: string; name: string | null }>(
+        `SELECT batch_id, name FROM batch WHERE batch_id = ANY($1::text[])`,
+        [batchIds]
+      );
+      const nameById = new Map(
+        nameRows.filter((r) => r.name).map((r) => [r.batch_id, r.name as string])
+      );
+      report.batches = report.batches.map((b) => ({
+        ...b,
+        batchName: nameById.get(b.batch) ?? b.batch,
+      }));
+    }
+
     return NextResponse.json({ teacherName: row.teacher_name, ...report });
   } catch (error) {
     console.error("Teacher feedback report error:", error);

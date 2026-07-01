@@ -37,6 +37,8 @@ export interface ParameterScore {
   parameter: string;
   score: number;
   maxScore: number;
+  /** Distinct students who answered at least one question in this parameter. */
+  answeredBy: number;
 }
 
 export interface SubjectiveComment {
@@ -52,8 +54,12 @@ export interface TeacherFeedbackReport {
   percentage: number;
   parameters: ParameterScore[];
   comments: SubjectiveComment[];
-  /** Per-batch response counts (analysis is batch-wise). */
-  batches: { batch: string; responseCount: number }[];
+  /**
+   * Per-batch response counts (analysis is batch-wise). `batch` is the raw
+   * batch_id; `batchName` is the human-readable name, resolved by the API route
+   * (this module only talks to BigQuery). Falls back to the id when unknown.
+   */
+  batches: { batch: string; batchName: string; responseCount: number }[];
 }
 
 function isMeaningful(text: string): boolean {
@@ -96,7 +102,13 @@ export async function getTeacherFeedbackReport(
   const users = new Set<string>();
   const batchCounts = new Map<string, Set<string>>();
   const paramTotals = new Map<string, number>(); // summed across students
-  for (const p of PARAMETERS) paramTotals.set(p, 0);
+  // Distinct users who answered ≥1 question in each parameter — the honest
+  // denominator, so a skipped parameter reads "0 rated" rather than a fake 0.0.
+  const paramResponders = new Map<string, Set<string>>();
+  for (const p of PARAMETERS) {
+    paramTotals.set(p, 0);
+    paramResponders.set(p, new Set());
+  }
   const comments: SubjectiveComment[] = [];
 
   for (const r of raw) {
@@ -114,6 +126,7 @@ export async function getTeacherFeedbackReport(
       const score = scoreUserResponse(qpi, r.user_response);
       if (score !== null) {
         paramTotals.set(question.parameter, (paramTotals.get(question.parameter) ?? 0) + score);
+        paramResponders.get(question.parameter)!.add(r.user_id);
       }
     } else {
       const text = (r.user_response_labels ?? "").trim();
@@ -125,16 +138,22 @@ export async function getTeacherFeedbackReport(
 
   const responseCount = users.size;
 
-  // Average each parameter across responding students.
-  const parameters: ParameterScore[] = PARAMETERS.map((p) => ({
-    parameter: p,
-    score: responseCount > 0 ? (paramTotals.get(p) ?? 0) / responseCount : 0,
-    maxScore: maxScoreForParameter(p),
-  }));
+  // Average each parameter across the students who actually rated it (not all
+  // responders), so a partially-skipped parameter isn't diluted toward 0.
+  const parameters: ParameterScore[] = PARAMETERS.map((p) => {
+    const answeredBy = paramResponders.get(p)?.size ?? 0;
+    return {
+      parameter: p,
+      score: answeredBy > 0 ? (paramTotals.get(p) ?? 0) / answeredBy : 0,
+      maxScore: maxScoreForParameter(p),
+      answeredBy,
+    };
+  });
   const totalScore = parameters.reduce((acc, p) => acc + p.score, 0);
 
   const batches = Array.from(batchCounts.entries())
-    .map(([batch, set]) => ({ batch, responseCount: set.size }))
+    // batchName defaults to the id; the API route fills in the readable name.
+    .map(([batch, set]) => ({ batch, batchName: batch, responseCount: set.size }))
     .sort((a, b) => b.responseCount - a.responseCount);
 
   // Order comments liked-first then improve, for stable rendering.
