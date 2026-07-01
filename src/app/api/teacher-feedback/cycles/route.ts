@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 
 interface Row {
   setup_run_id: string;
@@ -102,13 +100,7 @@ async function resolveSessionLinks(
 
 // GET /api/teacher-feedback/cycles?school_code=XXXXX
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireTeacherFeedbackAccess(email, "view");
+  const access = await authenticateTeacherFeedback("view");
   if (!access.ok) {
     return access.response;
   }

@@ -1,25 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/quiz-session-access", () => ({ canAccessQuizSessionSchool: vi.fn() }));
-vi.mock("@/lib/teacher-feedback-access", () => ({ requireTeacherFeedbackAccess: vi.fn() }));
+vi.mock("@/lib/teacher-feedback-access", () => ({ authenticateTeacherFeedback: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 import { query } from "@/lib/db";
 import { GET } from "./route";
-import { PM_SESSION, NO_SESSION } from "../../__test-utils__/api-test-helpers";
 
-const mockSession = vi.mocked(getServerSession);
-const mockRequire = vi.mocked(requireTeacherFeedbackAccess);
+const mockAuth = vi.mocked(authenticateTeacherFeedback);
 const mockSchool = vi.mocked(canAccessQuizSessionSchool);
 const mockQuery = vi.mocked(query);
 
 const PERMISSION = { email: "pm@avantifellows.org", level: 3 } as never;
+const denied = (status: number) => ({
+  ok: false as const,
+  response: Response.json({ error: "x" }, { status }) as never,
+});
 
 function req(code?: string) {
   const url = code
@@ -30,14 +29,13 @@ function req(code?: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockSession.mockResolvedValue(PM_SESSION);
-  mockRequire.mockResolvedValue({ ok: true, permission: PERMISSION });
+  mockAuth.mockResolvedValue({ ok: true, permission: PERMISSION });
   mockSchool.mockResolvedValue(true);
 });
 
 describe("GET /api/teacher-feedback/cycles", () => {
   it("401 when unauthenticated", async () => {
-    mockSession.mockResolvedValue(NO_SESSION);
+    mockAuth.mockResolvedValue(denied(401));
     expect((await GET(req("34054"))).status).toBe(401);
   });
 

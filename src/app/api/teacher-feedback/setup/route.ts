@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
-import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 import { FEEDBACK_FORM_VERSION } from "@/lib/teacher-feedback-form";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
 import { publishMessage } from "@/lib/sns";
@@ -67,16 +65,11 @@ function deriveGroup(classBatchId: string): string {
 
 // POST /api/teacher-feedback/setup
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireTeacherFeedbackAccess(email, "edit");
+  const access = await authenticateTeacherFeedback("edit");
   if (!access.ok) {
     return access.response;
   }
+  const email = access.permission.email;
 
   let body: SetupBody;
   try {

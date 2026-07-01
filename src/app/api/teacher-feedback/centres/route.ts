@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { canAccessQuizSessionSchool } from "@/lib/quiz-session-access";
-import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 
 interface FeedbackCentre {
   id: number;
@@ -23,13 +21,7 @@ interface CentreRow {
 // The active centres at this school. A school can have multiple (CoE + Nodal);
 // teachers map to a centre, not the school, so the PM picks a centre first.
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireTeacherFeedbackAccess(email, "edit");
+  const access = await authenticateTeacherFeedback("edit");
   if (!access.ok) {
     return access.response;
   }

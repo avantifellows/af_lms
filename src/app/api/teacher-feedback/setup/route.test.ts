@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/quiz-session-access", () => ({
   canAccessQuizSessionBatches: vi.fn(),
 }));
 vi.mock("@/lib/teacher-feedback-access", () => ({
-  requireTeacherFeedbackAccess: vi.fn(),
+  authenticateTeacherFeedback: vi.fn(),
 }));
 vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/teacher-feedback-session")>();
@@ -18,23 +16,25 @@ vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
 vi.mock("@/lib/sns", () => ({ publishMessage: vi.fn() }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
-import { getServerSession } from "next-auth";
 import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
-import { requireTeacherFeedbackAccess } from "@/lib/teacher-feedback-access";
+import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
 import { publishMessage } from "@/lib/sns";
 import { query } from "@/lib/db";
 import { POST } from "./route";
-import { jsonRequest, PM_SESSION, NO_SESSION } from "../../__test-utils__/api-test-helpers";
+import { jsonRequest } from "../../__test-utils__/api-test-helpers";
 
-const mockSession = vi.mocked(getServerSession);
-const mockRequire = vi.mocked(requireTeacherFeedbackAccess);
+const mockAuth = vi.mocked(authenticateTeacherFeedback);
 const mockBatches = vi.mocked(canAccessQuizSessionBatches);
 const mockCreateSession = vi.mocked(createFeedbackSession);
 const mockPublish = vi.mocked(publishMessage);
 const mockQuery = vi.mocked(query);
 
 const PERMISSION = { email: "pm@avantifellows.org", level: 3 } as never;
+const denied = (status: number) => ({
+  ok: false as const,
+  response: Response.json({ error: "x" }, { status }) as never,
+});
 
 function validBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -60,8 +60,7 @@ function req(body: unknown) {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockSession.mockResolvedValue(PM_SESSION);
-  mockRequire.mockResolvedValue({ ok: true, permission: PERMISSION });
+  mockAuth.mockResolvedValue({ ok: true, permission: PERMISSION });
   mockBatches.mockResolvedValue(true);
   // Route runs: batch-ownership (EXISTS -> .ok), centre-ownership (-> .name),
   // auth_group lookup (-> .auth_type), then INSERTs. Return the right shape per
@@ -80,16 +79,13 @@ beforeEach(() => {
 
 describe("POST /api/teacher-feedback/setup", () => {
   it("401 when unauthenticated", async () => {
-    mockSession.mockResolvedValue(NO_SESSION);
+    mockAuth.mockResolvedValue(denied(401));
     const res = await POST(req(validBody()));
     expect(res.status).toBe(401);
   });
 
   it("403 when lacking quiz-session edit access", async () => {
-    mockRequire.mockResolvedValue({
-      ok: false,
-      response: Response.json({ error: "Forbidden" }, { status: 403 }) as never,
-    });
+    mockAuth.mockResolvedValue(denied(403));
     const res = await POST(req(validBody()));
     expect(res.status).toBe(403);
   });

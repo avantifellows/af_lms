@@ -1,4 +1,7 @@
+import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
+
+import { authOptions } from "@/lib/auth";
 import {
   getFeatureAccess,
   getUserPermission,
@@ -6,6 +9,10 @@ import {
 } from "@/lib/permissions";
 
 type AccessMode = "view" | "edit";
+
+function forbidden(): AccessDenied {
+  return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+}
 
 interface AccessOk {
   ok: true;
@@ -32,18 +39,31 @@ export async function requireTeacherFeedbackAccess(
   const access = getFeatureAccess(permission, "teacher_feedback");
 
   if ((mode === "view" && !access.canView) || (mode === "edit" && !access.canEdit)) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
+    return forbidden();
   }
 
   if (!permission) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
+    return forbidden();
   }
 
   return { ok: true, permission };
+}
+
+/**
+ * Full route guard: resolves the session, rejects unauthenticated callers with
+ * 401, then applies {@link requireTeacherFeedbackAccess}. Collapses the identical
+ * preamble every Teacher Feedback route handler repeated.
+ */
+export async function authenticateTeacherFeedback(
+  mode: AccessMode
+): Promise<TeacherFeedbackAccessResult> {
+  const session = await getServerSession(authOptions);
+  const email = session?.user?.email;
+  if (!email) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+  return requireTeacherFeedbackAccess(email, mode);
 }
