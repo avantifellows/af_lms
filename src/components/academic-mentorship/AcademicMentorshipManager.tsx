@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useId,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { Download, Plus, RotateCcw, Upload, XCircle } from "lucide-react";
 
 import Toast from "@/components/Toast";
-import { Badge, Button, Card, Input, Select } from "@/components/ui";
+import { Badge, Button, Card, Input, Modal } from "@/components/ui";
 import type { AcademicMentorshipMappingGroup } from "@/lib/academic-mentorship";
 
 type MappingGroup = AcademicMentorshipMappingGroup;
+type Mapping = MappingGroup["mappings"][number];
+type ToastState = { variant: "success" | "error"; message: string } | null;
+type StateSetter<T> = Dispatch<SetStateAction<T>>;
 
 type MentorOption = {
   userId: number;
@@ -22,51 +30,27 @@ type MenteeOption = {
   grade: number | null;
 };
 
-type Mapping = MappingGroup["mappings"][number];
 type ReassigningState = {
   mappingId: number | string;
   currentMentorUserId: number;
+  menteeName: string;
 } | null;
-type ToastState = { variant: "success" | "error"; message: string } | null;
-type StateSetter<T> = Dispatch<SetStateAction<T>>;
-
-interface MappingControls {
-  canEdit: boolean;
-  busy: boolean;
-  reassigning: ReassigningState;
-  replacementMentorSearch: string;
-  replacementMentorUserId: string;
-  replacementMentorOptions: MentorOption[];
-  onStartReassign: (mappingId: number | string, currentMentorUserId: number) => void;
-  onRemove: (mappingId: number | string) => void;
-  onReplacementMentorSearch: (value: string) => void;
-  onReplacementMentorSelect: (value: string) => void;
-  onConfirmReassign: () => void;
-  onCancelReassign: () => void;
-}
-
-interface MappingRowProps extends MappingControls {
-  mapping: Mapping;
-  mentorUserId: number;
-  includeHistory: boolean;
-}
-
-interface MappingGroupCardProps extends MappingControls {
-  group: MappingGroup;
-  includeHistory: boolean;
-}
-
-interface MappingGroupsSectionProps extends MappingControls {
-  groups: MappingGroup[];
-  includeHistory: boolean;
-}
 
 interface AcademicMentorshipManagerProps {
   schoolCode: string;
   academicYear: string;
+  programId: number | null;
   includeHistory: boolean;
   canEdit: boolean;
+  canUpload: boolean;
   initialGroups: MappingGroup[];
+}
+
+interface MappingControls {
+  canEdit: boolean;
+  busy: boolean;
+  onStartReassign: (mapping: Mapping, currentMentorUserId: number) => void;
+  onRemove: (mappingId: number | string) => void;
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -107,13 +91,15 @@ function payloadOptions<T>(payload: unknown): T[] {
 async function fetchMappingGroups(
   schoolCode: string,
   academicYear: string,
-  includeHistory: boolean
+  includeHistory: boolean,
+  programId: number | null
 ): Promise<MappingGroup[]> {
   const params = new URLSearchParams({
     school_code: schoolCode,
     academic_year: academicYear,
   });
   if (includeHistory) params.set("include_history", "true");
+  if (programId !== null) params.set("program_id", String(programId));
 
   const response = await fetch(`/api/academic-mentorship/mappings?${params.toString()}`);
   return response.ok ? payloadGroups(await readJson(response)) : [];
@@ -136,6 +122,14 @@ async function mappingJsonMutation(
   return { response, payload: await readJson(response) };
 }
 
+function mentorLabel(mentor: MentorOption): string {
+  return `${mentor.name} (${mentor.email})`;
+}
+
+function menteeLabel(mentee: MenteeOption): string {
+  return `${mentee.name} (${mentee.studentId ?? "no id"})`;
+}
+
 function mentorOptionParams(schoolCode: string, search: string): URLSearchParams {
   return new URLSearchParams({
     type: "mentors",
@@ -147,14 +141,62 @@ function mentorOptionParams(schoolCode: string, search: string): URLSearchParams
 function menteeOptionParams(
   schoolCode: string,
   academicYear: string,
+  programId: number | null,
   search: string
 ): URLSearchParams {
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     type: "mentees",
     school_code: schoolCode,
     academic_year: academicYear,
     q: search,
   });
+  if (programId !== null) params.set("program_id", String(programId));
+  return params;
+}
+
+function SearchablePicker<T>({
+  label,
+  value,
+  options,
+  placeholder,
+  getLabel,
+  getValue,
+  onSearch,
+  onSelect,
+}: {
+  label: string;
+  value: string;
+  options: T[];
+  placeholder: string;
+  getLabel: (option: T) => string;
+  getValue: (option: T) => string;
+  onSearch: (value: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  const listId = useId();
+  function handleValue(nextValue: string) {
+    onSearch(nextValue);
+    const selected = options.find((option) => getLabel(option) === nextValue);
+    onSelect(selected ? getValue(selected) : "");
+  }
+
+  return (
+    <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
+      {label}
+      <Input
+        value={value}
+        list={listId}
+        placeholder={placeholder}
+        onFocus={() => onSearch(value)}
+        onChange={(event) => handleValue(event.target.value)}
+      />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option key={getValue(option)} value={getLabel(option)} />
+        ))}
+      </datalist>
+    </label>
+  );
 }
 
 async function addMappingAction(args: {
@@ -163,8 +205,11 @@ async function addMappingAction(args: {
   mentorUserId: string;
   studentPkId: string;
   refreshMappings: () => Promise<void>;
+  setMentorInput: StateSetter<string>;
   setMentorUserId: StateSetter<string>;
+  setMenteeInput: StateSetter<string>;
   setStudentPkId: StateSetter<string>;
+  setAddOpen: StateSetter<boolean>;
   setBusy: StateSetter<boolean>;
   setToast: StateSetter<ToastState>;
 }) {
@@ -186,8 +231,11 @@ async function addMappingAction(args: {
       args.setToast({ variant: "error", message: apiError(payload, "Failed to add Mapping") });
       return;
     }
+    args.setMentorInput("");
     args.setMentorUserId("");
+    args.setMenteeInput("");
     args.setStudentPkId("");
+    args.setAddOpen(false);
     args.setToast({ variant: "success", message: "Mapping added." });
   } catch {
     args.setToast({ variant: "error", message: "Failed to add Mapping" });
@@ -201,6 +249,8 @@ async function uploadCsvAction(args: {
   academicYear: string;
   csvFile: File | null;
   refreshMappings: () => Promise<void>;
+  setCsvOpen: StateSetter<boolean>;
+  setCsvFile: StateSetter<File | null>;
   setErrorCsv: StateSetter<string | null>;
   setBusy: StateSetter<boolean>;
   setToast: StateSetter<ToastState>;
@@ -229,6 +279,8 @@ async function uploadCsvAction(args: {
     }
     await args.refreshMappings();
     const insertedCount = payloadInsertedCount(payload);
+    args.setCsvOpen(false);
+    args.setCsvFile(null);
     args.setToast({
       variant: "success",
       message: `Imported ${insertedCount} mapping${insertedCount === 1 ? "" : "s"}.`,
@@ -280,14 +332,12 @@ async function reassignMappingAction(args: {
   refreshMappings: () => Promise<void>;
   setReassigning: StateSetter<ReassigningState>;
   setReplacementMentorUserId: StateSetter<string>;
+  setReplacementMentorInput: StateSetter<string>;
   setBusy: StateSetter<boolean>;
   setToast: StateSetter<ToastState>;
 }) {
   if (!args.reassigning || !args.replacementMentorUserId) {
     args.setToast({ variant: "error", message: "Select a replacement Academic Mentor" });
-    return;
-  }
-  if (!window.confirm("This will end the old Mapping and create a new Mapping.")) {
     return;
   }
 
@@ -306,12 +356,24 @@ async function reassignMappingAction(args: {
     }
     args.setReassigning(null);
     args.setReplacementMentorUserId("");
+    args.setReplacementMentorInput("");
     args.setToast({ variant: "success", message: "Mapping reassigned." });
   } catch {
     args.setToast({ variant: "error", message: "Failed to reassign Mapping" });
   } finally {
     args.setBusy(false);
   }
+}
+
+function ManagerToast({
+  toast,
+  onDismiss,
+}: {
+  toast: ToastState;
+  onDismiss: () => void;
+}) {
+  if (!toast) return null;
+  return <Toast variant={toast.variant} message={toast.message} onDismiss={onDismiss} />;
 }
 
 function MappingStatus({
@@ -340,7 +402,7 @@ function MappingActions({
   canEdit,
   isActive,
   busy,
-  mappingId,
+  mapping,
   mentorUserId,
   onStartReassign,
   onRemove,
@@ -348,20 +410,20 @@ function MappingActions({
   canEdit: boolean;
   isActive: boolean;
   busy: boolean;
-  mappingId: number | string;
+  mapping: Mapping;
   mentorUserId: number;
-  onStartReassign: (mappingId: number | string, currentMentorUserId: number) => void;
+  onStartReassign: (mapping: Mapping, currentMentorUserId: number) => void;
   onRemove: (mappingId: number | string) => void;
 }) {
   if (!canEdit || !isActive) return null;
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap justify-end gap-2">
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => onStartReassign(mappingId, mentorUserId)}
+        onClick={() => onStartReassign(mapping, mentorUserId)}
         disabled={busy}
       >
         <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
@@ -371,7 +433,7 @@ function MappingActions({
         type="button"
         variant="danger-ghost"
         size="sm"
-        onClick={() => onRemove(mappingId)}
+        onClick={() => onRemove(mapping.id)}
         disabled={busy}
       >
         <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -381,150 +443,21 @@ function MappingActions({
   );
 }
 
-function ReassignPanel({
-  currentMentorUserId,
-  replacementMentorSearch,
-  replacementMentorUserId,
-  replacementMentorOptions,
-  busy,
-  onSearch,
-  onSelect,
-  onConfirm,
-  onCancel,
-}: {
-  currentMentorUserId: number;
-  replacementMentorSearch: string;
-  replacementMentorUserId: string;
-  replacementMentorOptions: MentorOption[];
-  busy: boolean;
-  onSearch: (value: string) => void;
-  onSelect: (value: string) => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const options = replacementMentorOptions.filter(
-    (mentor) => mentor.userId !== currentMentorUserId
-  );
-
-  return (
-    <div className="grid gap-3 rounded-lg border border-border bg-bg-card-alt p-3 md:col-span-5 md:grid-cols-[1fr_1fr_auto_auto]">
-      <label className="grid gap-1 text-sm font-semibold text-text-primary">
-        Search replacement mentor
-        <Input
-          value={replacementMentorSearch}
-          onChange={(event) => onSearch(event.target.value)}
-        />
-      </label>
-      <label className="grid gap-1 text-sm font-semibold text-text-primary">
-        Replacement Academic Mentor
-        <Select
-          value={replacementMentorUserId}
-          onChange={(event) => onSelect(event.target.value)}
-          className="w-full min-w-0"
-        >
-          <option value="">Select mentor</option>
-          {options.map((mentor) => (
-            <option key={mentor.userId} value={mentor.userId}>
-              {mentor.name} ({mentor.email})
-            </option>
-          ))}
-        </Select>
-      </label>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConfirm}
-        disabled={busy}
-        className="self-end"
-      >
-        Confirm Reassign
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onCancel}
-        disabled={busy}
-        className="self-end"
-      >
-        Cancel
-      </Button>
-    </div>
-  );
-}
-
-function reassigningMentorId(
-  reassigning: ReassigningState,
-  mappingId: number | string
-): number | null {
-  if (!reassigning) return null;
-  return String(reassigning.mappingId) === String(mappingId)
-    ? reassigning.currentMentorUserId
-    : null;
-}
-
-function MappingReassignPanel({
-  reassigning,
-  mappingId,
-  replacementMentorSearch,
-  replacementMentorUserId,
-  replacementMentorOptions,
-  busy,
-  onReplacementMentorSearch,
-  onReplacementMentorSelect,
-  onConfirmReassign,
-  onCancelReassign,
-}: {
-  reassigning: ReassigningState;
-  mappingId: number | string;
-  replacementMentorSearch: string;
-  replacementMentorUserId: string;
-  replacementMentorOptions: MentorOption[];
-  busy: boolean;
-  onReplacementMentorSearch: (value: string) => void;
-  onReplacementMentorSelect: (value: string) => void;
-  onConfirmReassign: () => void;
-  onCancelReassign: () => void;
-}) {
-  const currentMentorUserId = reassigningMentorId(reassigning, mappingId);
-  if (currentMentorUserId === null) return null;
-
-  return (
-    <ReassignPanel
-      currentMentorUserId={currentMentorUserId}
-      replacementMentorSearch={replacementMentorSearch}
-      replacementMentorUserId={replacementMentorUserId}
-      replacementMentorOptions={replacementMentorOptions}
-      busy={busy}
-      onSearch={onReplacementMentorSearch}
-      onSelect={onReplacementMentorSelect}
-      onConfirm={onConfirmReassign}
-      onCancel={onCancelReassign}
-    />
-  );
-}
-
 function MappingRow({
   mapping,
   mentorUserId,
   includeHistory,
   canEdit,
   busy,
-  reassigning,
-  replacementMentorSearch,
-  replacementMentorUserId,
-  replacementMentorOptions,
   onStartReassign,
   onRemove,
-  onReplacementMentorSearch,
-  onReplacementMentorSelect,
-  onConfirmReassign,
-  onCancelReassign,
-}: MappingRowProps) {
+}: {
+  mapping: Mapping;
+  mentorUserId: number;
+  includeHistory: boolean;
+} & MappingControls) {
   return (
-    <div
-      className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_90px_120px_110px_220px] md:items-center"
-    >
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_90px_120px_110px_220px] md:items-center">
       <div>
         <div className="font-semibold text-text-primary">{mapping.mentee.name}</div>
         <div className="font-mono text-xs text-text-muted">
@@ -534,193 +467,16 @@ function MappingRow({
       <div className="text-sm text-text-muted">Grade {mapping.mentee.grade ?? "-"}</div>
       <div className="font-mono text-xs text-text-muted">{mapping.assignedDate}</div>
       <MappingStatus mapping={mapping} includeHistory={includeHistory} />
-      <div className="md:flex md:justify-end">
-        <MappingActions
-          canEdit={canEdit}
-          isActive={mapping.status === "active"}
-          busy={busy}
-          mappingId={mapping.id}
-          mentorUserId={mentorUserId}
-          onStartReassign={onStartReassign}
-          onRemove={onRemove}
-        />
-      </div>
-      <MappingReassignPanel
-        reassigning={reassigning}
-        mappingId={mapping.id}
-        replacementMentorSearch={replacementMentorSearch}
-        replacementMentorUserId={replacementMentorUserId}
-        replacementMentorOptions={replacementMentorOptions}
+      <MappingActions
+        canEdit={canEdit}
+        isActive={mapping.status === "active"}
         busy={busy}
-        onReplacementMentorSearch={onReplacementMentorSearch}
-        onReplacementMentorSelect={onReplacementMentorSelect}
-        onConfirmReassign={onConfirmReassign}
-        onCancelReassign={onCancelReassign}
+        mapping={mapping}
+        mentorUserId={mentorUserId}
+        onStartReassign={onStartReassign}
+        onRemove={onRemove}
       />
     </div>
-  );
-}
-
-function ManagerToast({
-  toast,
-  onDismiss,
-}: {
-  toast: ToastState;
-  onDismiss: () => void;
-}) {
-  if (!toast) return null;
-  return (
-    <Toast
-      variant={toast.variant}
-      message={toast.message}
-      onDismiss={onDismiss}
-    />
-  );
-}
-
-function AssignmentCard({
-  canEdit,
-  mentorSearch,
-  mentorUserId,
-  mentorOptions,
-  menteeSearch,
-  studentPkId,
-  menteeOptions,
-  busy,
-  templateHref,
-  errorCsv,
-  onMentorSearch,
-  onMentorSelect,
-  onMenteeSearch,
-  onMenteeSelect,
-  onAddMapping,
-  onCsvFile,
-  onUploadCsv,
-}: {
-  canEdit: boolean;
-  mentorSearch: string;
-  mentorUserId: string;
-  mentorOptions: MentorOption[];
-  menteeSearch: string;
-  studentPkId: string;
-  menteeOptions: MenteeOption[];
-  busy: boolean;
-  templateHref: string;
-  errorCsv: string | null;
-  onMentorSearch: (value: string) => void;
-  onMentorSelect: (value: string) => void;
-  onMenteeSearch: (value: string) => void;
-  onMenteeSelect: (value: string) => void;
-  onAddMapping: () => void;
-  onCsvFile: (file: File | null) => void;
-  onUploadCsv: () => void;
-}) {
-  if (!canEdit) return null;
-
-  return (
-    <Card className="mt-4 overflow-hidden p-0">
-      <div className="border-b border-border bg-bg-card-alt px-4 py-3">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
-          Assign mentee
-        </h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Search before selecting so the dropdowns stay scoped to this School and year.
-        </p>
-      </div>
-
-      <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
-            Search mentors
-            <Input
-              value={mentorSearch}
-              onChange={(event) => onMentorSearch(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
-            Academic Mentor
-            <Select
-              value={mentorUserId}
-              onChange={(event) => onMentorSelect(event.target.value)}
-              className="w-full min-w-0"
-            >
-              <option value="">Select mentor</option>
-              {mentorOptions.map((mentor) => (
-                <option key={mentor.userId} value={mentor.userId}>
-                  {mentor.name} ({mentor.email})
-                </option>
-              ))}
-            </Select>
-          </label>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
-            Search mentees
-            <Input
-              value={menteeSearch}
-              onChange={(event) => onMenteeSearch(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
-            Mentee
-            <Select
-              value={studentPkId}
-              onChange={(event) => onMenteeSelect(event.target.value)}
-              className="w-full min-w-0"
-            >
-              <option value="">Select mentee</option>
-              {menteeOptions.map((mentee) => (
-                <option key={mentee.studentPkId} value={mentee.studentPkId}>
-                  {mentee.name} ({mentee.studentId ?? "no id"})
-                </option>
-              ))}
-            </Select>
-          </label>
-        </div>
-        <Button type="button" onClick={onAddMapping} disabled={busy} className="self-end">
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          Add Mapping
-        </Button>
-      </div>
-
-      <div className="grid gap-3 border-t border-border bg-bg-card-alt/60 px-4 py-3 md:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
-        <a
-          href={templateHref}
-          download="academic-mentorship-template.csv"
-          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-border bg-bg-card px-4 text-sm font-medium text-text-primary shadow-sm hover:bg-hover-bg"
-        >
-          <Download className="h-4 w-4" aria-hidden="true" />
-          Download CSV template
-        </a>
-        <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
-          CSV file
-          <Input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(event) => onCsvFile(event.target.files?.[0] ?? null)}
-          />
-        </label>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onUploadCsv}
-          disabled={busy}
-          className="self-end"
-        >
-          <Upload className="h-4 w-4" aria-hidden="true" />
-          Upload CSV
-        </Button>
-        {errorCsv ? (
-          <a
-            href={`data:text/csv;charset=utf-8,${encodeURIComponent(errorCsv)}`}
-            download="academic-mentorship-import-errors.csv"
-            className="self-end text-sm font-bold text-accent hover:text-accent-hover"
-          >
-            Download error CSV
-          </a>
-        ) : null}
-      </div>
-    </Card>
   );
 }
 
@@ -729,17 +485,12 @@ function MappingGroupCard({
   includeHistory,
   canEdit,
   busy,
-  reassigning,
-  replacementMentorSearch,
-  replacementMentorUserId,
-  replacementMentorOptions,
   onStartReassign,
   onRemove,
-  onReplacementMentorSearch,
-  onReplacementMentorSelect,
-  onConfirmReassign,
-  onCancelReassign,
-}: MappingGroupCardProps) {
+}: {
+  group: MappingGroup;
+  includeHistory: boolean;
+} & MappingControls) {
   return (
     <Card className="overflow-hidden p-0">
       <div className="flex flex-col gap-3 border-b border-border bg-bg-card-alt px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -769,16 +520,8 @@ function MappingGroupCard({
             includeHistory={includeHistory}
             canEdit={canEdit}
             busy={busy}
-            reassigning={reassigning}
-            replacementMentorSearch={replacementMentorSearch}
-            replacementMentorUserId={replacementMentorUserId}
-            replacementMentorOptions={replacementMentorOptions}
             onStartReassign={onStartReassign}
             onRemove={onRemove}
-            onReplacementMentorSearch={onReplacementMentorSearch}
-            onReplacementMentorSelect={onReplacementMentorSelect}
-            onConfirmReassign={onConfirmReassign}
-            onCancelReassign={onCancelReassign}
           />
         ))}
       </div>
@@ -791,17 +534,12 @@ function MappingGroupsSection({
   includeHistory,
   canEdit,
   busy,
-  reassigning,
-  replacementMentorSearch,
-  replacementMentorUserId,
-  replacementMentorOptions,
   onStartReassign,
   onRemove,
-  onReplacementMentorSearch,
-  onReplacementMentorSelect,
-  onConfirmReassign,
-  onCancelReassign,
-}: MappingGroupsSectionProps) {
+}: {
+  groups: MappingGroup[];
+  includeHistory: boolean;
+} & MappingControls) {
   if (groups.length === 0) {
     return (
       <section className="mt-4 space-y-3">
@@ -824,90 +562,330 @@ function MappingGroupsSection({
           includeHistory={includeHistory}
           canEdit={canEdit}
           busy={busy}
-          reassigning={reassigning}
-          replacementMentorSearch={replacementMentorSearch}
-          replacementMentorUserId={replacementMentorUserId}
-          replacementMentorOptions={replacementMentorOptions}
           onStartReassign={onStartReassign}
           onRemove={onRemove}
-          onReplacementMentorSearch={onReplacementMentorSearch}
-          onReplacementMentorSelect={onReplacementMentorSelect}
-          onConfirmReassign={onConfirmReassign}
-          onCancelReassign={onCancelReassign}
         />
       ))}
     </section>
   );
 }
 
+function ActionBar({
+  canEdit,
+  canUpload,
+  templateHref,
+  errorCsv,
+  busy,
+  onAdd,
+  onUpload,
+}: {
+  canEdit: boolean;
+  canUpload: boolean;
+  templateHref: string;
+  errorCsv: string | null;
+  busy: boolean;
+  onAdd: () => void;
+  onUpload: () => void;
+}) {
+  if (!canUpload) return null;
+
+  return (
+    <Card className="mt-4 flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-sm text-text-muted">
+        {canEdit
+          ? "Add mappings manually or upload a CSV for the selected academic year."
+          : "Manual edits are disabled for this year. Use CSV upload for backfill."}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {canEdit ? (
+          <Button type="button" onClick={onAdd} disabled={busy}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add Mapping
+          </Button>
+        ) : null}
+        <Button type="button" variant="secondary" onClick={onUpload} disabled={busy}>
+          <Upload className="h-4 w-4" aria-hidden="true" />
+          Upload CSV
+        </Button>
+        <a
+          href={templateHref}
+          download="academic-mentorship-template.csv"
+          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-border bg-bg-card px-4 text-sm font-medium text-text-primary shadow-sm hover:bg-hover-bg"
+        >
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Template
+        </a>
+        {errorCsv ? (
+          <a
+            href={`data:text/csv;charset=utf-8,${encodeURIComponent(errorCsv)}`}
+            download="academic-mentorship-import-errors.csv"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-lg px-2 text-sm font-bold text-accent hover:text-accent-hover"
+          >
+            Download error CSV
+          </a>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function AddMappingPanel({
+  open,
+  mentorInput,
+  mentorUserId,
+  mentorOptions,
+  menteeInput,
+  studentPkId,
+  menteeOptions,
+  busy,
+  onMentorSearch,
+  onMentorSelect,
+  onMenteeSearch,
+  onMenteeSelect,
+  onSubmit,
+  onCancel,
+}: {
+  open: boolean;
+  mentorInput: string;
+  mentorUserId: string;
+  mentorOptions: MentorOption[];
+  menteeInput: string;
+  studentPkId: string;
+  menteeOptions: MenteeOption[];
+  busy: boolean;
+  onMentorSearch: (value: string) => void;
+  onMentorSelect: (value: string) => void;
+  onMenteeSearch: (value: string) => void;
+  onMenteeSelect: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <Card className="mt-3 overflow-hidden p-0">
+      <div className="border-b border-border bg-bg-card-alt px-4 py-3">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
+          Add Mapping
+        </h2>
+      </div>
+      <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] lg:items-end">
+        <SearchablePicker
+          label="Academic Mentor"
+          value={mentorInput}
+          options={mentorOptions}
+          placeholder="Search mentor name or email"
+          getLabel={mentorLabel}
+          getValue={(mentor) => String(mentor.userId)}
+          onSearch={onMentorSearch}
+          onSelect={onMentorSelect}
+        />
+        <SearchablePicker
+          label="Mentee"
+          value={menteeInput}
+          options={menteeOptions}
+          placeholder="Search student name or ID"
+          getLabel={menteeLabel}
+          getValue={(mentee) => String(mentee.studentPkId)}
+          onSearch={onMenteeSearch}
+          onSelect={onMenteeSelect}
+        />
+        <Button
+          type="button"
+          onClick={onSubmit}
+          disabled={busy || !mentorUserId || !studentPkId}
+        >
+          Submit
+        </Button>
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function CsvUploadModal({
+  open,
+  academicYear,
+  busy,
+  onClose,
+  onFile,
+  onUpload,
+}: {
+  open: boolean;
+  academicYear: string;
+  busy: boolean;
+  onClose: () => void;
+  onFile: (file: File | null) => void;
+  onUpload: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose}>
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="text-base font-bold text-text-primary">Upload CSV</h2>
+        <p className="mt-1 text-sm text-text-muted">
+          Upload mentor_email,student_id rows for {academicYear}.
+        </p>
+      </div>
+      <div className="grid gap-4 px-5 py-4">
+        <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
+          CSV file
+          <Input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(event) => onFile(event.target.files?.[0] ?? null)}
+          />
+        </label>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+        <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button type="button" onClick={onUpload} disabled={busy}>
+          Upload CSV
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function ReassignModal({
+  reassigning,
+  replacementMentorInput,
+  replacementMentorUserId,
+  replacementMentorOptions,
+  busy,
+  onSearch,
+  onSelect,
+  onConfirm,
+  onCancel,
+}: {
+  reassigning: ReassigningState;
+  replacementMentorInput: string;
+  replacementMentorUserId: string;
+  replacementMentorOptions: MentorOption[];
+  busy: boolean;
+  onSearch: (value: string) => void;
+  onSelect: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const options = replacementMentorOptions.filter(
+    (mentor) => mentor.userId !== reassigning?.currentMentorUserId
+  );
+
+  return (
+    <Modal open={reassigning !== null} onClose={onCancel}>
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="text-base font-bold text-text-primary">Reassign Mentee</h2>
+        <p className="mt-1 text-sm text-text-muted">
+          {reassigning ? `Select a new mentor for ${reassigning.menteeName}.` : ""}
+        </p>
+      </div>
+      <div className="px-5 py-4">
+        <SearchablePicker
+          label="Replacement Academic Mentor"
+          value={replacementMentorInput}
+          options={options}
+          placeholder="Search mentor name or email"
+          getLabel={mentorLabel}
+          getValue={(mentor) => String(mentor.userId)}
+          onSearch={onSearch}
+          onSelect={onSelect}
+        />
+      </div>
+      <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button type="button" onClick={onConfirm} disabled={busy || !replacementMentorUserId}>
+          Confirm Reassign
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 function useMappingGroupsState({
   schoolCode,
   academicYear,
+  programId,
   includeHistory,
   initialGroups,
 }: AcademicMentorshipManagerProps) {
-  const groupsKey = `${schoolCode}:${academicYear}:${includeHistory}`;
+  const groupsKey = `${schoolCode}:${academicYear}:${programId ?? "all"}:${includeHistory}`;
   const [groupState, setGroupState] = useState({ key: groupsKey, groups: initialGroups });
   const groups = groupState.key === groupsKey ? groupState.groups : initialGroups;
 
   async function refreshMappings() {
     setGroupState({
       key: groupsKey,
-      groups: await fetchMappingGroups(schoolCode, academicYear, includeHistory),
+      groups: await fetchMappingGroups(schoolCode, academicYear, includeHistory, programId),
     });
   }
 
   return { groups, refreshMappings };
 }
 
-function useMentorshipOptionState(schoolCode: string, academicYear: string) {
+function useMentorshipOptionState(
+  schoolCode: string,
+  academicYear: string,
+  programId: number | null
+) {
   const [mentorOptions, setMentorOptions] = useState<MentorOption[]>([]);
   const [menteeOptions, setMenteeOptions] = useState<MenteeOption[]>([]);
-  const [mentorSearch, setMentorSearch] = useState("");
-  const [menteeSearch, setMenteeSearch] = useState("");
+  const [mentorInput, setMentorInput] = useState("");
+  const [menteeInput, setMenteeInput] = useState("");
   const [reassigning, setReassigning] = useState<ReassigningState>(null);
   const [replacementMentorOptions, setReplacementMentorOptions] = useState<MentorOption[]>([]);
-  const [replacementMentorSearch, setReplacementMentorSearch] = useState("");
+  const [replacementMentorInput, setReplacementMentorInput] = useState("");
   const [replacementMentorUserId, setReplacementMentorUserId] = useState("");
 
-  function startReassign(mappingId: number | string, currentMentorUserId: number) {
-    setReassigning({ mappingId, currentMentorUserId });
-    setReplacementMentorOptions([]);
-    setReplacementMentorSearch("");
-    setReplacementMentorUserId("");
-  }
-
   function searchReplacementMentors(value: string) {
-    setReplacementMentorSearch(value);
+    setReplacementMentorInput(value);
     void fetchOptions<MentorOption>(mentorOptionParams(schoolCode, value)).then(
       setReplacementMentorOptions
     );
   }
 
+  function startReassign(mapping: Mapping, currentMentorUserId: number) {
+    setReassigning({
+      mappingId: mapping.id,
+      currentMentorUserId,
+      menteeName: mapping.mentee.name,
+    });
+    setReplacementMentorUserId("");
+    searchReplacementMentors("");
+  }
+
   function searchMentors(value: string) {
-    setMentorSearch(value);
+    setMentorInput(value);
     void fetchOptions<MentorOption>(mentorOptionParams(schoolCode, value)).then(
       setMentorOptions
     );
   }
 
   function searchMentees(value: string) {
-    setMenteeSearch(value);
+    setMenteeInput(value);
     void fetchOptions<MenteeOption>(
-      menteeOptionParams(schoolCode, academicYear, value)
+      menteeOptionParams(schoolCode, academicYear, programId, value)
     ).then(setMenteeOptions);
   }
 
   return {
     mentorOptions,
     menteeOptions,
-    mentorSearch,
-    menteeSearch,
+    mentorInput,
+    menteeInput,
     reassigning,
     replacementMentorOptions,
-    replacementMentorSearch,
+    replacementMentorInput,
     replacementMentorUserId,
+    setMentorInput,
+    setMenteeInput,
     setReassigning,
+    setReplacementMentorInput,
     setReplacementMentorUserId,
     startReassign,
     searchReplacementMentors,
@@ -919,35 +897,44 @@ function useMentorshipOptionState(schoolCode: string, academicYear: string) {
 export default function AcademicMentorshipManager({
   schoolCode,
   academicYear,
+  programId,
   includeHistory,
   canEdit,
+  canUpload,
   initialGroups,
 }: AcademicMentorshipManagerProps) {
   const { groups, refreshMappings } = useMappingGroupsState({
     schoolCode,
     academicYear,
+    programId,
     includeHistory,
     canEdit,
+    canUpload,
     initialGroups,
   });
   const {
     mentorOptions,
     menteeOptions,
-    mentorSearch,
-    menteeSearch,
+    mentorInput,
+    menteeInput,
     reassigning,
     replacementMentorOptions,
-    replacementMentorSearch,
+    replacementMentorInput,
     replacementMentorUserId,
+    setMentorInput,
+    setMenteeInput,
     setReassigning,
+    setReplacementMentorInput,
     setReplacementMentorUserId,
     startReassign,
     searchReplacementMentors,
     searchMentors,
     searchMentees,
-  } = useMentorshipOptionState(schoolCode, academicYear);
+  } = useMentorshipOptionState(schoolCode, academicYear, programId);
   const [mentorUserId, setMentorUserId] = useState("");
   const [studentPkId, setStudentPkId] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [csvOpen, setCsvOpen] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [errorCsv, setErrorCsv] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -962,41 +949,62 @@ export default function AcademicMentorshipManager({
     <>
       <ManagerToast toast={toast} onDismiss={() => setToast(null)} />
 
-      <AssignmentCard
+      <ActionBar
         canEdit={canEdit}
-        mentorSearch={mentorSearch}
+        canUpload={canUpload}
+        templateHref={templateHref}
+        errorCsv={errorCsv}
+        busy={busy}
+        onAdd={() => setAddOpen(true)}
+        onUpload={() => setCsvOpen(true)}
+      />
+
+      <AddMappingPanel
+        open={addOpen && canEdit}
+        mentorInput={mentorInput}
         mentorUserId={mentorUserId}
         mentorOptions={mentorOptions}
-        menteeSearch={menteeSearch}
+        menteeInput={menteeInput}
         studentPkId={studentPkId}
         menteeOptions={menteeOptions}
         busy={busy}
-        templateHref={templateHref}
-        errorCsv={errorCsv}
         onMentorSearch={searchMentors}
         onMentorSelect={setMentorUserId}
         onMenteeSearch={searchMentees}
         onMenteeSelect={setStudentPkId}
-        onAddMapping={() =>
+        onSubmit={() =>
           void addMappingAction({
             schoolCode,
             academicYear,
             mentorUserId,
             studentPkId,
             refreshMappings,
+            setMentorInput,
             setMentorUserId,
+            setMenteeInput,
             setStudentPkId,
+            setAddOpen,
             setBusy,
             setToast,
           })
         }
-        onCsvFile={setCsvFile}
-        onUploadCsv={() =>
+        onCancel={() => setAddOpen(false)}
+      />
+
+      <CsvUploadModal
+        open={csvOpen && canUpload}
+        academicYear={academicYear}
+        busy={busy}
+        onClose={() => setCsvOpen(false)}
+        onFile={setCsvFile}
+        onUpload={() =>
           void uploadCsvAction({
             schoolCode,
             academicYear,
             csvFile,
             refreshMappings,
+            setCsvOpen,
+            setCsvFile,
             setErrorCsv,
             setBusy,
             setToast,
@@ -1004,15 +1012,36 @@ export default function AcademicMentorshipManager({
         }
       />
 
+      <ReassignModal
+        reassigning={reassigning}
+        replacementMentorInput={replacementMentorInput}
+        replacementMentorUserId={replacementMentorUserId}
+        replacementMentorOptions={replacementMentorOptions}
+        busy={busy}
+        onSearch={searchReplacementMentors}
+        onSelect={setReplacementMentorUserId}
+        onConfirm={() =>
+          void reassignMappingAction({
+            schoolCode,
+            academicYear,
+            reassigning,
+            replacementMentorUserId,
+            refreshMappings,
+            setReassigning,
+            setReplacementMentorUserId,
+            setReplacementMentorInput,
+            setBusy,
+            setToast,
+          })
+        }
+        onCancel={() => setReassigning(null)}
+      />
+
       <MappingGroupsSection
         groups={groups}
         includeHistory={includeHistory}
         canEdit={canEdit}
         busy={busy}
-        reassigning={reassigning}
-        replacementMentorSearch={replacementMentorSearch}
-        replacementMentorUserId={replacementMentorUserId}
-        replacementMentorOptions={replacementMentorOptions}
         onStartReassign={startReassign}
         onRemove={(mappingId) =>
           void removeMappingAction({
@@ -1024,22 +1053,6 @@ export default function AcademicMentorshipManager({
             setToast,
           })
         }
-        onReplacementMentorSearch={searchReplacementMentors}
-        onReplacementMentorSelect={setReplacementMentorUserId}
-        onConfirmReassign={() =>
-          void reassignMappingAction({
-            schoolCode,
-            academicYear,
-            reassigning,
-            replacementMentorUserId,
-            refreshMappings,
-            setReassigning,
-            setReplacementMentorUserId,
-            setBusy,
-            setToast,
-          })
-        }
-        onCancelReassign={() => setReassigning(null)}
       />
     </>
   );

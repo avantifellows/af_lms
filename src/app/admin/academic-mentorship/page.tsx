@@ -6,12 +6,15 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import {
   getAcademicMentorshipAcademicYears,
+  filterAcademicMentorshipSchoolsByProgram,
   isAcademicMentorshipEditableYear,
   isValidAcademicYear,
   listAcademicMentorshipMappings,
+  listAcademicMentorshipProgramsForSchools,
   listAccessibleAcademicMentorshipSchools,
   requireAcademicMentorshipAccess,
   type AcademicMentorshipMappingGroup,
+  type AcademicMentorshipProgram,
   type AcademicMentorshipSchool,
 } from "@/lib/academic-mentorship";
 import { Badge, Card } from "@/components/ui";
@@ -35,11 +38,14 @@ interface PageModel {
   academicYears: string[];
   selectedAcademicYear: string;
   selectedSchoolCode: string;
+  selectedProgramId: number | null;
   includeHistory: boolean;
+  programs: AcademicMentorshipProgram[];
   schools: AcademicMentorshipSchool[];
   selectedSchool: AcademicMentorshipSchool | undefined;
   groups: AcademicMentorshipMappingGroup[];
   canEdit: boolean;
+  canUpload: boolean;
   historyHref: string;
   accessLabel: string;
 }
@@ -51,12 +57,14 @@ function firstParam(value: string | string[] | undefined): string {
 function selectionUrl(params: {
   schoolCode: string;
   academicYear: string;
+  programId?: number | null;
   includeHistory?: boolean;
 }) {
   const searchParams = new URLSearchParams({
     school_code: params.schoolCode,
     academic_year: params.academicYear,
   });
+  if (params.programId) searchParams.set("program_id", String(params.programId));
   if (params.includeHistory) searchParams.set("include_history", "true");
   return `/admin/academic-mentorship?${searchParams.toString()}`;
 }
@@ -71,9 +79,11 @@ async function requirePageAccess(session: Session) {
 }
 
 function selectedFilters(searchParams: SearchParams, academicYears: string[]) {
+  const programId = Number(firstParam(searchParams.program_id));
   return {
     academicYear: firstParam(searchParams.academic_year) || academicYears[0],
     schoolCode: firstParam(searchParams.school_code),
+    programId: Number.isInteger(programId) && programId > 0 ? programId : null,
     includeHistory: firstParam(searchParams.include_history) === "true",
   };
 }
@@ -81,10 +91,11 @@ function selectedFilters(searchParams: SearchParams, academicYears: string[]) {
 function historyUrl(
   schoolCode: string | undefined,
   academicYear: string,
+  programId: number | null,
   includeHistory: boolean
 ) {
   return schoolCode
-    ? selectionUrl({ schoolCode, academicYear, includeHistory: !includeHistory })
+    ? selectionUrl({ schoolCode, academicYear, programId, includeHistory: !includeHistory })
     : "#";
 }
 
@@ -106,6 +117,7 @@ function redirectToOnlySchool(params: {
   schools: AcademicMentorshipSchool[];
   selectedSchoolCode: string;
   selectedAcademicYear: string;
+  selectedProgramId: number | null;
   includeHistory: boolean;
 }) {
   if (params.selectedSchoolCode || params.schools.length !== 1) return;
@@ -113,6 +125,7 @@ function redirectToOnlySchool(params: {
     selectionUrl({
       schoolCode: params.schools[0].code,
       academicYear: params.selectedAcademicYear,
+      programId: params.selectedProgramId,
       includeHistory: params.includeHistory,
     })
   );
@@ -136,13 +149,15 @@ async function resolveSelectedAccess(
 async function loadSelectedGroups(
   selectedAccess: AcademicMentorshipOkAccess | null,
   selectedAcademicYear: string,
-  includeHistory: boolean
+  includeHistory: boolean,
+  programId: number | null
 ): Promise<AcademicMentorshipMappingGroup[]> {
   if (!selectedAccess?.school) return [];
   return listAcademicMentorshipMappings({
     schoolId: selectedAccess.school.id,
     academicYear: selectedAcademicYear,
     includeHistory,
+    programId,
   });
 }
 
@@ -165,11 +180,27 @@ async function loadPageModel(
   const {
     academicYear: selectedAcademicYear,
     schoolCode: selectedSchoolCode,
+    programId: selectedProgramId,
     includeHistory,
   } = selectedFilters(resolvedSearchParams, academicYears);
-  const schools = await listAccessibleAcademicMentorshipSchools(baseAccess.permission);
+  const accessibleSchools = await listAccessibleAcademicMentorshipSchools(baseAccess.permission);
+  const programs = await listAcademicMentorshipProgramsForSchools(
+    accessibleSchools.map((school) => school.id),
+    selectedAcademicYear
+  );
+  const schools = await filterAcademicMentorshipSchoolsByProgram(
+    accessibleSchools,
+    selectedAcademicYear,
+    selectedProgramId
+  );
 
-  redirectToOnlySchool({ schools, selectedSchoolCode, selectedAcademicYear, includeHistory });
+  redirectToOnlySchool({
+    schools,
+    selectedSchoolCode,
+    selectedAcademicYear,
+    selectedProgramId,
+    includeHistory,
+  });
 
   const selectedSchool = schools.find((school) => school.code === selectedSchoolCode);
   const selectedAccess = await resolveSelectedAccess(
@@ -180,21 +211,31 @@ async function loadPageModel(
   const groups = await loadSelectedGroups(
     selectedAccess,
     selectedAcademicYear,
-    includeHistory
+    includeHistory,
+    selectedProgramId
   );
   const canEdit = canEditSelection(selectedAccess, selectedAcademicYear);
-  const historyHref = historyUrl(selectedSchool?.code, selectedAcademicYear, includeHistory);
-  const accessLabel = canEdit ? "Edit access" : "View-only";
+  const canUpload = selectedAccess?.canEdit === true;
+  const historyHref = historyUrl(
+    selectedSchool?.code,
+    selectedAcademicYear,
+    selectedProgramId,
+    includeHistory
+  );
+  const accessLabel = canEdit ? "Edit access" : canUpload ? "CSV-only backfill" : "View-only";
 
   return {
     academicYears,
     selectedAcademicYear,
     selectedSchoolCode,
+    selectedProgramId,
     includeHistory,
+    programs,
     schools,
     selectedSchool,
     groups,
     canEdit,
+    canUpload,
     historyHref,
     accessLabel,
   };
@@ -231,19 +272,39 @@ function SelectionForm({
   academicYears,
   selectedAcademicYear,
   selectedSchoolCode,
+  selectedProgramId,
   includeHistory,
+  programs,
   schools,
 }: Pick<
   PageModel,
   | "academicYears"
   | "selectedAcademicYear"
   | "selectedSchoolCode"
+  | "selectedProgramId"
   | "includeHistory"
+  | "programs"
   | "schools"
 >) {
   return (
     <Card className="overflow-hidden p-4">
-      <form action="/admin/academic-mentorship" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-end">
+      <form action="/admin/academic-mentorship" className="grid min-w-0 gap-3 lg:grid-cols-[220px_minmax(0,1fr)_220px_auto] lg:items-end">
+        <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="program_id">
+          Program
+          <select
+            id="program_id"
+            name="program_id"
+            defaultValue={selectedProgramId ?? ""}
+            className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          >
+            <option value="">All programs</option>
+            {programs.map((program) => (
+              <option key={program.id} value={program.id}>
+                {program.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="school_code">
           School
           <select
@@ -330,12 +391,20 @@ function SelectionSummary({
 function SelectedSchoolContent({
   selectedSchool,
   selectedAcademicYear,
+  selectedProgramId,
   includeHistory,
   canEdit,
+  canUpload,
   groups,
 }: Pick<
   PageModel,
-  "selectedSchool" | "selectedAcademicYear" | "includeHistory" | "canEdit" | "groups"
+  | "selectedSchool"
+  | "selectedAcademicYear"
+  | "selectedProgramId"
+  | "includeHistory"
+  | "canEdit"
+  | "canUpload"
+  | "groups"
 >) {
   if (!selectedSchool) {
     return <Card className="mt-4 p-6 text-sm text-text-muted">Select a School to view mappings.</Card>;
@@ -345,8 +414,10 @@ function SelectedSchoolContent({
     <AcademicMentorshipManager
       schoolCode={selectedSchool.code}
       academicYear={selectedAcademicYear}
+      programId={selectedProgramId}
       includeHistory={includeHistory}
       canEdit={canEdit}
+      canUpload={canUpload}
       initialGroups={groups}
     />
   );

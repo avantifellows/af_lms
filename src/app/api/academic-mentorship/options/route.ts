@@ -10,6 +10,7 @@ import {
   getAcademicMentorshipSession,
   parseAcademicYear,
   parseSchoolCode,
+  positiveInteger,
   requireAcademicMentorshipRouteAccess,
 } from "../route-helpers";
 
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
   if (!access.ok) return access.response;
 
   const search = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const programId = positiveInteger(request.nextUrl.searchParams.get("program_id"));
   if (type === "mentors") {
     const options = await listAcademicMentorshipMentorOptions({
       schoolId: access.value.school!.id,
@@ -55,6 +57,7 @@ export async function GET(request: NextRequest) {
   const options = await listAcademicMentorshipMenteeOptions({
     schoolId: access.value.school!.id,
     academicYear: academicYear.value,
+    programId,
     search,
   });
   return NextResponse.json({ options });

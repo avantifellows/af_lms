@@ -9,14 +9,26 @@ const activeGroup = {
   mappings: [
     {
       id: 7,
-      mentee: { studentPkId: 201, name: "Meena Student", studentId: "STU001", grade: 11 },
+      mentee: {
+        studentPkId: 201,
+        name: "Meena Student",
+        studentId: "STU001",
+        grade: 11,
+        programId: 64,
+      },
       assignedDate: "2026-07-01",
       endedDate: null,
       status: "active" as const,
     },
     {
       id: 8,
-      mentee: { studentPkId: 202, name: "Ravi Student", studentId: "STU002", grade: 12 },
+      mentee: {
+        studentPkId: 202,
+        name: "Ravi Student",
+        studentId: "STU002",
+        grade: 12,
+        programId: 64,
+      },
       assignedDate: "2026-06-01",
       endedDate: "2026-06-30",
       status: "historical" as const,
@@ -27,7 +39,9 @@ const activeGroup = {
 const baseProps = {
   schoolCode: "SCH001",
   academicYear: "2026-2027",
+  programId: null,
   includeHistory: true,
+  canUpload: true,
   initialGroups: [activeGroup],
 };
 
@@ -37,7 +51,7 @@ describe("AcademicMentorshipManager", () => {
   });
 
   it("hides mutation controls in view-only mode and for historical rows", () => {
-    render(<AcademicMentorshipManager {...baseProps} canEdit={false} />);
+    render(<AcademicMentorshipManager {...baseProps} canEdit={false} canUpload={false} />);
 
     expect(screen.queryByRole("button", { name: "Add Mapping" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reassign" })).not.toBeInTheDocument();
@@ -53,7 +67,13 @@ describe("AcademicMentorshipManager", () => {
       mappings: [
         {
           id: 9,
-          mentee: { studentPkId: 203, name: "Fresh Student", studentId: "STU003", grade: 11 },
+          mentee: {
+            studentPkId: 203,
+            name: "Fresh Student",
+            studentId: "STU003",
+            grade: 11,
+            programId: 64,
+          },
           assignedDate: "2026-07-02",
           endedDate: null,
           status: "active" as const,
@@ -61,7 +81,7 @@ describe("AcademicMentorshipManager", () => {
       ],
     };
     const { rerender } = render(
-      <AcademicMentorshipManager {...baseProps} canEdit={false} />
+      <AcademicMentorshipManager {...baseProps} canEdit={false} canUpload={false} />
     );
 
     rerender(
@@ -70,6 +90,7 @@ describe("AcademicMentorshipManager", () => {
         includeHistory={false}
         initialGroups={[nextGroup]}
         canEdit={false}
+        canUpload={false}
       />
     );
 
@@ -87,7 +108,13 @@ describe("AcademicMentorshipManager", () => {
       mappings: [
         {
           id: 9,
-          mentee: { studentPkId: 203, name: "Fresh Student", studentId: "STU003", grade: 11 },
+          mentee: {
+            studentPkId: 203,
+            name: "Fresh Student",
+            studentId: "STU003",
+            grade: 11,
+            programId: 64,
+          },
           assignedDate: "2026-07-02",
           endedDate: null,
           status: "active" as const,
@@ -119,13 +146,22 @@ describe("AcademicMentorshipManager", () => {
 
     render(<AcademicMentorshipManager {...baseProps} canEdit />);
 
-    await user.type(screen.getByLabelText("Search mentors"), "Anita");
-    await screen.findByRole("option", { name: "Anita Mentor (anita@avantifellows.org)" });
-    await user.selectOptions(screen.getByLabelText("Academic Mentor"), "101");
-    await user.type(screen.getByLabelText("Search mentees"), "STU");
-    await screen.findByRole("option", { name: "Fresh Student (STU003)" });
-    await user.selectOptions(screen.getByLabelText("Mentee"), "203");
     await user.click(screen.getByRole("button", { name: "Add Mapping" }));
+    const mentorInput = screen.getByLabelText("Academic Mentor");
+    await user.type(mentorInput, "Anita");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("type=mentors"))
+    );
+    await user.clear(mentorInput);
+    await user.type(mentorInput, "Anita Mentor (anita@avantifellows.org)");
+    const menteeInput = screen.getByLabelText("Mentee");
+    await user.type(menteeInput, "STU");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("type=mentees"))
+    );
+    await user.clear(menteeInput);
+    await user.type(menteeInput, "Fresh Student (STU003)");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/academic-mentorship/mappings",
@@ -172,13 +208,22 @@ describe("AcademicMentorshipManager", () => {
 
     render(<AcademicMentorshipManager {...baseProps} canEdit />);
 
-    await user.type(screen.getByLabelText("Search mentors"), "Anita");
-    await screen.findByRole("option", { name: "Anita Mentor (anita@avantifellows.org)" });
-    await user.selectOptions(screen.getByLabelText("Academic Mentor"), "101");
-    await user.type(screen.getByLabelText("Search mentees"), "STU");
-    await screen.findByRole("option", { name: "Meena Student (STU001)" });
-    await user.selectOptions(screen.getByLabelText("Mentee"), "201");
     await user.click(screen.getByRole("button", { name: "Add Mapping" }));
+    const mentorInput = screen.getByLabelText("Academic Mentor");
+    await user.type(mentorInput, "Anita");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("type=mentors"))
+    );
+    await user.clear(mentorInput);
+    await user.type(mentorInput, "Anita Mentor (anita@avantifellows.org)");
+    const menteeInput = screen.getByLabelText("Mentee");
+    await user.type(menteeInput, "STU");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("type=mentees"))
+    );
+    await user.clear(menteeInput);
+    await user.type(menteeInput, "Meena Student (STU001)");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
 
     expect(await screen.findByText("Student already has a mentor mapped")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -221,10 +266,8 @@ describe("AcademicMentorshipManager", () => {
     expect(screen.getByText("No Academic Mentor-Mentee Mappings found.")).toBeInTheDocument();
   });
 
-  it("reassigns active rows with confirmation and excludes the current Academic Mentor", async () => {
+  it("reassigns active rows and excludes the current Academic Mentor", async () => {
     const user = userEvent.setup();
-    const confirmMock = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirmMock);
     const reassignedGroup = {
       mentor: { userId: 102, name: "New Mentor", email: "new@avantifellows.org" },
       menteeCount: 1,
@@ -261,15 +304,18 @@ describe("AcademicMentorshipManager", () => {
 
     expect(screen.getAllByRole("button", { name: "Reassign" })).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Reassign" }));
-    await user.type(screen.getByLabelText("Search replacement mentor"), "Mentor");
-    expect(await screen.findByRole("option", { name: "New Mentor (new@avantifellows.org)" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Anita Mentor (anita@avantifellows.org)" })).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Replacement Academic Mentor"), "102");
+    const replacementInput = screen.getByLabelText("Replacement Academic Mentor");
+    await user.type(replacementInput, "Mentor");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("type=mentors"))
+    );
+    expect(
+      document.querySelector('option[value="Anita Mentor (anita@avantifellows.org)"]')
+    ).toBeNull();
+    await user.clear(replacementInput);
+    await user.type(replacementInput, "New Mentor (new@avantifellows.org)");
     await user.click(screen.getByRole("button", { name: "Confirm Reassign" }));
 
-    expect(confirmMock).toHaveBeenCalledWith(
-      "This will end the old Mapping and create a new Mapping."
-    );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/academic-mentorship/mappings",
       expect.objectContaining({
@@ -288,7 +334,6 @@ describe("AcademicMentorshipManager", () => {
 
   it("shows reassignment conflicts and still refreshes the table", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal("confirm", vi.fn(() => true));
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("type=mentors")) {
@@ -310,9 +355,13 @@ describe("AcademicMentorshipManager", () => {
     render(<AcademicMentorshipManager {...baseProps} canEdit />);
 
     await user.click(screen.getByRole("button", { name: "Reassign" }));
-    await user.type(screen.getByLabelText("Search replacement mentor"), "New");
-    await screen.findByRole("option", { name: "New Mentor (new@avantifellows.org)" });
-    await user.selectOptions(screen.getByLabelText("Replacement Academic Mentor"), "102");
+    const replacementInput = screen.getByLabelText("Replacement Academic Mentor");
+    await user.type(replacementInput, "New");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("type=mentors"))
+    );
+    await user.clear(replacementInput);
+    await user.type(replacementInput, "New Mentor (new@avantifellows.org)");
     await user.click(screen.getByRole("button", { name: "Confirm Reassign" }));
 
     expect(await screen.findByText("Student already has a mentor mapped")).toBeInTheDocument();
@@ -329,7 +378,13 @@ describe("AcademicMentorshipManager", () => {
       mappings: [
         {
           id: 31,
-          mentee: { studentPkId: 301, name: "CSV Student", studentId: "CSV001", grade: 11 },
+          mentee: {
+            studentPkId: 301,
+            name: "CSV Student",
+            studentId: "CSV001",
+            grade: 11,
+            programId: 64,
+          },
           assignedDate: "2026-07-04",
           endedDate: null,
           status: "active" as const,
@@ -348,17 +403,18 @@ describe("AcademicMentorshipManager", () => {
 
     render(<AcademicMentorshipManager {...baseProps} canEdit />);
 
-    expect(screen.getByRole("link", { name: "Download CSV template" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Template" })).toHaveAttribute(
       "href",
       "/api/academic-mentorship/mappings/import?school_code=SCH001&academic_year=2026-2027"
     );
+    await user.click(screen.getByRole("button", { name: "Upload CSV" }));
     await user.upload(
       screen.getByLabelText("CSV file"),
       new File(["mentor_email,student_id\ncsv@x,CSV001\n"], "mappings.csv", {
         type: "text/csv",
       })
     );
-    await user.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await user.click(screen.getAllByRole("button", { name: "Upload CSV" }).at(-1)!);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/academic-mentorship/mappings/import",
@@ -393,13 +449,14 @@ describe("AcademicMentorshipManager", () => {
 
     render(<AcademicMentorshipManager {...baseProps} canEdit />);
 
+    await user.click(screen.getByRole("button", { name: "Upload CSV" }));
     await user.upload(
       screen.getByLabelText("CSV file"),
       new File(["mentor_email,student_id\nanita@x,\n"], "mappings.csv", {
         type: "text/csv",
       })
     );
-    await user.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await user.click(screen.getAllByRole("button", { name: "Upload CSV" }).at(-1)!);
 
     expect(await screen.findByText("CSV upload has row errors")).toBeInTheDocument();
     const errorLink = await screen.findByRole("link", { name: "Download error CSV" });

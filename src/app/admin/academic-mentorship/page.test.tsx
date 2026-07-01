@@ -8,6 +8,8 @@ const {
   mockListAccessibleAcademicMentorshipSchools,
   mockGetAcademicMentorshipAcademicYears,
   mockListAcademicMentorshipMappings,
+  mockListAcademicMentorshipProgramsForSchools,
+  mockFilterAcademicMentorshipSchoolsByProgram,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -17,6 +19,8 @@ const {
   mockListAccessibleAcademicMentorshipSchools: vi.fn(),
   mockGetAcademicMentorshipAcademicYears: vi.fn(),
   mockListAcademicMentorshipMappings: vi.fn(),
+  mockListAcademicMentorshipProgramsForSchools: vi.fn(),
+  mockFilterAcademicMentorshipSchoolsByProgram: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -27,9 +31,10 @@ vi.mock("@/lib/academic-mentorship", () => ({
   listAccessibleAcademicMentorshipSchools: mockListAccessibleAcademicMentorshipSchools,
   getAcademicMentorshipAcademicYears: mockGetAcademicMentorshipAcademicYears,
   listAcademicMentorshipMappings: mockListAcademicMentorshipMappings,
+  listAcademicMentorshipProgramsForSchools: mockListAcademicMentorshipProgramsForSchools,
+  filterAcademicMentorshipSchoolsByProgram: mockFilterAcademicMentorshipSchoolsByProgram,
   isValidAcademicYear: (value: string) => /^\d{4}-\d{4}$/.test(value),
-  isAcademicMentorshipEditableYear: (value: string) =>
-    ["2026-2027", "2025-2026", "2024-2025"].includes(value),
+  isAcademicMentorshipEditableYear: (value: string) => value === "2026-2027",
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -67,6 +72,13 @@ describe("AcademicMentorshipPage", () => {
       "2024-2025",
     ]);
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipProgramsForSchools.mockResolvedValue([
+      { id: 64, name: "JNV NVS" },
+    ]);
+    mockFilterAcademicMentorshipSchoolsByProgram.mockImplementation(
+      async (schools: Array<{ id: number; code: string; name: string; region: string | null }>) =>
+        schools
+    );
   });
 
   it("auto-selects the only accessible School and current academic year into the URL", async () => {
@@ -104,6 +116,7 @@ describe("AcademicMentorshipPage", () => {
               name: "Meena Student",
               studentId: "STU001",
               grade: 11,
+              programId: 64,
             },
             assignedDate: "2026-07-01",
             endedDate: null,
@@ -121,6 +134,7 @@ describe("AcademicMentorshipPage", () => {
     });
     render(jsx);
 
+    expect(screen.getByLabelText("Program")).toHaveValue("");
     expect(screen.getByLabelText("School")).toHaveValue("SCH001");
     expect(screen.getByLabelText("Academic year")).toHaveValue("2026-2027");
     expect(screen.getByText("2025-2026")).toBeInTheDocument();
@@ -139,6 +153,7 @@ describe("AcademicMentorshipPage", () => {
       schoolId: 20,
       academicYear: "2026-2027",
       includeHistory: false,
+      programId: null,
     });
   });
 });

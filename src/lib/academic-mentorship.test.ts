@@ -134,6 +134,7 @@ describe("listAcademicMentorshipMappings", () => {
         mentee_name: "Meena Student",
         mentee_student_id: "STU001",
         mentee_grade: 11,
+        program_id: PROGRAM_IDS.NVS,
         assigned_date: "2026-07-01",
         ended_date: null,
       },
@@ -146,6 +147,7 @@ describe("listAcademicMentorshipMappings", () => {
         mentee_name: "Ravi Student",
         mentee_student_id: "STU002",
         mentee_grade: 12,
+        program_id: PROGRAM_IDS.NVS,
         assigned_date: "2026-07-02",
         ended_date: null,
       },
@@ -174,6 +176,7 @@ describe("listAcademicMentorshipMappings", () => {
               name: "Meena Student",
               studentId: "STU001",
               grade: 11,
+              programId: PROGRAM_IDS.NVS,
             },
             assignedDate: "2026-07-01",
             endedDate: null,
@@ -186,6 +189,7 @@ describe("listAcademicMentorshipMappings", () => {
               name: "Ravi Student",
               studentId: "STU002",
               grade: 12,
+              programId: PROGRAM_IDS.NVS,
             },
             assignedDate: "2026-07-02",
             endedDate: null,
@@ -311,7 +315,7 @@ describe("listAcademicMentorshipMenteeOptions", () => {
     expect(sql).toContain("status IS DISTINCT FROM 'dropout'");
     expect(sql).toContain("active_mapping.id IS NULL");
     expect(sql).toContain("st.student_id ILIKE $3");
-    expect(mockQuery.mock.calls[0][1]).toEqual([20, "2026-2027", "%mee%"]);
+    expect(mockQuery.mock.calls[0][1]).toEqual([20, "2026-2027", "%mee%", null]);
     expect(mentees).toEqual([
       {
         studentPkId: 201,

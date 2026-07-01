@@ -124,7 +124,7 @@ describe("GET /api/academic-mentorship/options", () => {
     const optionCall = mockQuery.mock.calls.find(([sql]) =>
       String(sql).includes("active_mapping.id IS NULL")
     );
-    expect(optionCall?.[1]).toEqual([20, "2026-2027", "%STU%"]);
+    expect(optionCall?.[1]).toEqual([20, "2026-2027", "%STU%", null]);
   });
 
   it("returns 401 before database access when unauthenticated", async () => {

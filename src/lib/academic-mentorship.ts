@@ -28,6 +28,11 @@ export interface AcademicMentorshipSchool {
   region: string | null;
 }
 
+export interface AcademicMentorshipProgram {
+  id: number;
+  name: string;
+}
+
 export type AcademicMentorshipAccessResult =
   | { ok: true; email: string; permission: UserPermission; canEdit: boolean; school?: AcademicMentorshipSchool }
   | { ok: false; status: 401 | 403 | 404; error: "Unauthorized" | "Forbidden" | "School not found" };
@@ -48,7 +53,7 @@ export function getAcademicMentorshipAcademicYears(
 }
 
 export function isAcademicMentorshipEditableYear(year: string): boolean {
-  return getAcademicMentorshipAcademicYears().includes(year);
+  return year === CURRENT_ACADEMIC_YEAR;
 }
 
 interface AcademicMentorshipMappingRow {
@@ -60,6 +65,7 @@ interface AcademicMentorshipMappingRow {
   mentee_name: string | null;
   mentee_student_id: string | null;
   mentee_grade: number | null;
+  program_id: number | string | null;
   assigned_date: string;
   ended_date: string | null;
 }
@@ -86,6 +92,7 @@ export interface AcademicMentorshipMappingGroup {
       name: string;
       studentId: string | null;
       grade: number | null;
+      programId: number | null;
     };
     assignedDate: string;
     endedDate: string | null;
@@ -245,6 +252,7 @@ export async function listAcademicMentorshipMappings(params: {
   schoolId: number;
   academicYear: string;
   includeHistory: boolean;
+  programId?: number | null;
 }): Promise<AcademicMentorshipMappingGroup[]> {
   const rows = await query<AcademicMentorshipMappingRow>(
     `SELECT
@@ -256,6 +264,7 @@ export async function listAcademicMentorshipMappings(params: {
        NULLIF(TRIM(COALESCE(mentee.first_name, '') || ' ' || COALESCE(mentee.last_name, '')), '') AS mentee_name,
        st.student_id AS mentee_student_id,
        gr.number AS mentee_grade,
+       m.program_id,
        m.assigned_at::date::text AS assigned_date,
        m.ended_at::date::text AS ended_date
      FROM academic_mentorship_mentor_mentee_mappings m
@@ -275,8 +284,9 @@ export async function listAcademicMentorshipMappings(params: {
      WHERE m.school_id = $1
        AND m.academic_year = $2
        AND ($3::boolean OR m.ended_at IS NULL)
+       AND ($4::int IS NULL OR m.program_id = $4)
      ORDER BY mentor_name ASC NULLS LAST, mentor.email ASC, gr.number ASC NULLS LAST, mentee_name ASC NULLS LAST, st.student_id ASC`,
-    [params.schoolId, params.academicYear, params.includeHistory]
+    [params.schoolId, params.academicYear, params.includeHistory, params.programId ?? null]
   );
 
   const groups = new Map<number, AcademicMentorshipMappingGroup>();
@@ -301,6 +311,7 @@ export async function listAcademicMentorshipMappings(params: {
         name: row.mentee_name || row.mentee_student_id || "Unknown student",
         studentId: row.mentee_student_id,
         grade: row.mentee_grade === null ? null : Number(row.mentee_grade),
+        programId: row.program_id === null ? null : Number(row.program_id),
       },
       assignedDate: row.assigned_date,
       endedDate: row.ended_date,
@@ -407,6 +418,7 @@ export async function listAcademicMentorshipMentorOptions(params: {
 export async function listAcademicMentorshipMenteeOptions(params: {
   schoolId: number;
   academicYear: string;
+  programId?: number | null;
   search?: string;
 }): Promise<AcademicMentorshipMenteeOption[]> {
   const search = `%${(params.search ?? "").trim()}%`;
@@ -449,6 +461,7 @@ export async function listAcademicMentorshipMenteeOptions(params: {
        AND g.child_id = $1
        AND st.status IS DISTINCT FROM 'dropout'
        AND active_mapping.id IS NULL
+       AND ($4::int IS NULL OR roster_program.program_id = $4)
        AND (
          $3 = '%%'
          OR st.student_id ILIKE $3
@@ -456,7 +469,7 @@ export async function listAcademicMentorshipMenteeOptions(params: {
        )
      ORDER BY gr.number ASC NULLS LAST, name ASC NULLS LAST, st.student_id ASC
      LIMIT 50`,
-    [params.schoolId, params.academicYear, search]
+    [params.schoolId, params.academicYear, search, params.programId ?? null]
   );
 
   return rows.map((row) => ({
@@ -1119,4 +1132,69 @@ export async function listAccessibleAcademicMentorshipSchools(
      ORDER BY name ASC, code ASC`,
     [schoolCodes]
   );
+}
+
+export async function listAcademicMentorshipProgramsForSchools(
+  schoolIds: number[],
+  academicYear: string
+): Promise<AcademicMentorshipProgram[]> {
+  if (schoolIds.length === 0) return [];
+  return query<AcademicMentorshipProgram>(
+    `SELECT DISTINCT p.id::int AS id, p.name
+     FROM school s
+     JOIN "group" school_group
+       ON school_group.child_id = s.id
+      AND school_group.type = 'school'
+     JOIN group_user school_member
+       ON school_member.group_id = school_group.id
+     JOIN enrollment_record er
+       ON er.user_id = school_member.user_id
+      AND er.group_type = 'grade'
+      AND er.academic_year = $2
+     JOIN group_user batch_member
+       ON batch_member.user_id = school_member.user_id
+     JOIN "group" batch_group
+       ON batch_group.id = batch_member.group_id
+      AND batch_group.type = 'batch'
+     JOIN batch b
+       ON b.id = batch_group.child_id
+     JOIN program p
+       ON p.id = b.program_id
+     WHERE s.id = ANY($1::bigint[])
+     ORDER BY p.name ASC`,
+    [schoolIds, academicYear]
+  );
+}
+
+export async function filterAcademicMentorshipSchoolsByProgram(
+  schools: AcademicMentorshipSchool[],
+  academicYear: string,
+  programId: number | null
+): Promise<AcademicMentorshipSchool[]> {
+  if (programId === null || schools.length === 0) return schools;
+  const rows = await query<{ id: number | string }>(
+    `SELECT DISTINCT s.id
+     FROM school s
+     JOIN "group" school_group
+       ON school_group.child_id = s.id
+      AND school_group.type = 'school'
+     JOIN group_user school_member
+       ON school_member.group_id = school_group.id
+     JOIN enrollment_record er
+       ON er.user_id = school_member.user_id
+      AND er.group_type = 'grade'
+      AND er.academic_year = $2
+     JOIN group_user batch_member
+       ON batch_member.user_id = school_member.user_id
+     JOIN "group" batch_group
+       ON batch_group.id = batch_member.group_id
+      AND batch_group.type = 'batch'
+     JOIN batch b
+       ON b.id = batch_group.child_id
+     WHERE s.id = ANY($1::bigint[])
+       AND b.program_id = $3`,
+    [schools.map((school) => school.id), academicYear, programId]
+  );
+  const matchingIds = new Set(rows.map((row) => Number(row.id)));
+  return schools.filter((school) => matchingIds.has(school.id));
 }

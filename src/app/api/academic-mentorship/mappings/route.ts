@@ -96,10 +96,12 @@ export async function GET(request: NextRequest) {
   }
 
   const includeHistory = request.nextUrl.searchParams.get("include_history") === "true";
+  const programId = positiveInteger(request.nextUrl.searchParams.get("program_id"));
   const groups = await listAcademicMentorshipMappings({
     schoolId: access.value.school!.id,
     academicYear: parsed.value.academicYear,
     includeHistory,
+    programId,
   });
 
   return NextResponse.json({

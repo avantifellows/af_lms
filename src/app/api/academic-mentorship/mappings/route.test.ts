@@ -123,6 +123,7 @@ describe("GET /api/academic-mentorship/mappings", () => {
           mentee_name: "Meena Student",
           mentee_student_id: "STU001",
           mentee_grade: 11,
+          program_id: PROGRAM_IDS.NVS,
           assigned_date: "2026-07-01",
           ended_date: null,
         },
@@ -155,7 +156,7 @@ describe("GET /api/academic-mentorship/mappings", () => {
     const mappingCall = mockQuery.mock.calls.find(([sql]) =>
       String(sql).includes("academic_mentorship_mentor_mentee_mappings")
     );
-    expect(mappingCall?.[1]).toEqual([20, "2026-2027", false]);
+    expect(mappingCall?.[1]).toEqual([20, "2026-2027", false, null]);
   });
 
   it("passes include_history=true through to the mapping read", async () => {
@@ -188,6 +189,7 @@ describe("GET /api/academic-mentorship/mappings", () => {
           mentee_name: "Meena Student",
           mentee_student_id: "STU001",
           mentee_grade: 11,
+          program_id: PROGRAM_IDS.NVS,
           assigned_date: "2026-07-01",
           ended_date: "2026-08-01",
         },
@@ -209,7 +211,7 @@ describe("GET /api/academic-mentorship/mappings", () => {
     const mappingCall = mockQuery.mock.calls.find(([sql]) =>
       String(sql).includes("academic_mentorship_mentor_mentee_mappings")
     );
-    expect(mappingCall?.[1]).toEqual([20, "2026-2027", true]);
+    expect(mappingCall?.[1]).toEqual([20, "2026-2027", true, null]);
   });
 
   it("returns canEdit=false for valid academic years outside the supported picker range", async () => {
