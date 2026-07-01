@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as XLSX from "xlsx";
 
 const {
   mockGetServerSession,
@@ -17,7 +18,7 @@ vi.mock("@/lib/student-addition-access", () => ({
   requireStudentAdditionAccess: mockRequireStudentAdditionAccess,
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
 import {
   jsonRequest,
@@ -52,6 +53,60 @@ const validBody = {
   program_id: 1,
   batch_id: "CLIENT-BATCH",
 };
+
+const uploadHeaders = [
+  "Grade",
+  "Student Name",
+  "Date of Birth",
+  "Gender",
+  "Category",
+  "Physical Handicapped / Vikalang",
+  "APAAR ID",
+  "G10 board",
+  "Grade 10 Roll no",
+  "Board Stream",
+  "Primary Exam preparing for",
+  "Father Name",
+  "Parents Phone Number",
+  "Yearly / Annual Family Income",
+];
+
+const validUploadRow = [
+  "11",
+  " asha  k. kumar ",
+  "02/01/2010",
+  "Female",
+  "Gen",
+  "No",
+  "123456789012",
+  "CENTRAL BOARD OF SECONDARY EDUCATION",
+  "1234 5678",
+  "PCM",
+  "Engineering",
+  "ravi kumar",
+  "9876543210",
+  "Less than Rs. 1,00,000",
+];
+
+function csvLine(values: string[]) {
+  return values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
+}
+
+function multipartUploadRequest(filename: string, contents: string, grade = "11") {
+  const bytes = Buffer.from(contents);
+  const file = {
+    name: filename,
+    type: "text/csv",
+    arrayBuffer: async () =>
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  };
+  return {
+    headers: new Headers({ "content-type": "multipart/form-data; boundary=test" }),
+    formData: async () => ({
+      get: (key: string) => (key === "grade" ? grade : key === "file" ? file : null),
+    }),
+  };
+}
 
 describe("POST /api/school/[udise]/students", () => {
   beforeEach(() => {
@@ -185,5 +240,99 @@ describe("POST /api/school/[udise]/students", () => {
       error: "Failed to create student",
       details: "No matching batch found",
     });
+  });
+
+  it("validates the full upload before sending accepted rows to DB Service", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          upload_id: "upload-1",
+          totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+          results: [{ row_number: 2, status: "created", generated_student_id: "202812345678" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const csv = [
+      csvLine(uploadHeaders),
+      csvLine(validUploadRow),
+      csvLine([...validUploadRow.slice(0, 10), "Not A Stream", ...validUploadRow.slice(11)]),
+    ].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.totals).toEqual({
+      total: 2,
+      created: 1,
+      duplicate_in_file: 0,
+      already_exists: 0,
+      rejected: 1,
+    });
+    expect(body.results).toEqual([
+      expect.objectContaining({
+        row_number: 2,
+        status: "created",
+        original: expect.objectContaining({ "Student Name": "asha  k. kumar" }),
+      }),
+      expect.objectContaining({
+        row_number: 3,
+        status: "rejected",
+        field_errors: { stream: "Primary Exam preparing for is not valid" },
+        original: expect.objectContaining({ "Primary Exam preparing for": "Not A Stream" }),
+      }),
+    ]);
+
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.upload.filename).toBe("students.csv");
+    expect(payload.rows).toEqual([
+      expect.objectContaining({
+        row_number: 2,
+        student_name: "Asha K Kumar",
+        stream: "engineering",
+      }),
+    ]);
+  });
+});
+
+describe("GET /api/school/[udise]/students template", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([school]);
+    mockRequireStudentAdditionAccess.mockResolvedValue({
+      ok: true,
+      programId: PROGRAM_IDS.NVS,
+      permission: { role: "admin" },
+      actor: {
+        user_id: 501,
+        email: "admin@avantifellows.org",
+        login_type: "google",
+        role: "admin",
+      },
+    });
+  });
+
+  it("returns a gated xlsx template with the canonical upload columns", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/school/12345678901/students") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), { type: "buffer" });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets.Template, {
+      header: 1,
+      raw: false,
+    }) as string[][];
+    expect(rows[0]).toEqual(uploadHeaders);
+    expect(workbook.SheetNames).toContain("Options");
   });
 });

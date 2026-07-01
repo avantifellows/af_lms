@@ -44,7 +44,8 @@
     "pg": "^8.16.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "recharts": "^3.6.0"
+    "recharts": "^3.6.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

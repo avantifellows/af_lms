@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
 import EnrollmentStatsCards, {
   type ProgramStats,
@@ -12,6 +12,7 @@ import type { Batch } from "@/components/EditStudentModal";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { Button } from "@/components/ui";
 import AddStudentModal from "./AddStudentModal";
+import BulkStudentUploadModal from "./BulkStudentUploadModal";
 
 interface Props {
   programs: ProgramStats[];
@@ -50,6 +51,7 @@ export default function EnrollmentTabContent({
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const selectedProgramId = programs.some((program) => program.id === selectedId)
     ? selectedId
     : programs[0]?.id ?? null;
@@ -127,15 +129,26 @@ export default function EnrollmentTabContent({
           </span>
         )}
         {showAddStudent && (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => setAddOpen(true)}
-            className="ml-auto"
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Add Student
-          </Button>
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setBulkOpen(true)}
+              className="ml-auto"
+            >
+              <Upload className="h-4 w-4" aria-hidden="true" />
+              Bulk Upload
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setAddOpen(true)}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Add Student
+            </Button>
+          </>
         )}
       </div>
 
@@ -171,6 +184,12 @@ export default function EnrollmentTabContent({
         schoolCode={schoolCode}
         onClose={() => setAddOpen(false)}
         onCreated={() => router.refresh()}
+      />
+      <BulkStudentUploadModal
+        open={bulkOpen}
+        schoolUdise={schoolUdise}
+        onClose={() => setBulkOpen(false)}
+        onUploaded={() => router.refresh()}
       />
     </>
   );

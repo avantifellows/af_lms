@@ -23,6 +23,12 @@ vi.mock("./AddStudentModal", () => ({
     open ? <button onClick={onCreated}>mock add modal</button> : null,
 }));
 
+vi.mock("./BulkStudentUploadModal", () => ({
+  __esModule: true,
+  default: ({ open, onUploaded }: { open: boolean; onUploaded: () => void }) =>
+    open ? <button onClick={onUploaded}>mock bulk modal</button> : null,
+}));
+
 function program(id: number, label: string): ProgramStats {
   return {
     id,
@@ -65,11 +71,22 @@ describe("EnrollmentTabContent", () => {
     expect(mockRefresh).toHaveBeenCalled();
   });
 
+  it("shows the Bulk Upload entry only for the selected NVS program and refreshes after upload", async () => {
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...baseProps} />);
+
+    await user.click(screen.getByRole("button", { name: "Bulk Upload" }));
+    await user.click(screen.getByRole("button", { name: "mock bulk modal" }));
+
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
   it("hides Add Student when the shared gate denies or a non-NVS program is selected", () => {
     const { rerender } = render(
       <EnrollmentTabContent {...baseProps} canAddStudent={false} />,
     );
     expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
 
     rerender(
       <EnrollmentTabContent
@@ -78,5 +95,6 @@ describe("EnrollmentTabContent", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "Add Student" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bulk Upload" })).not.toBeInTheDocument();
   });
 });

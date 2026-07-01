@@ -22,7 +22,7 @@ edges:
     condition: when working on self-service student addition, bulk upload, lateral entry, or school-facing edit/delete rollout
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-06-29
+last_updated: 2026-07-01
 ---
 
 # Session Bootstrap
@@ -43,7 +43,7 @@ Then read this file fully before doing anything else in this session.
 
 **Not yet built / in progress:**
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
-- Student Addition #155 is mid-slice: the DB Service create-only endpoint exists, and AF LMS has the one-by-one NVS Add Student path on `/school/[udise]`; bulk upload, edit hardening, and dropout hardening remain separate slices.
+- Student Addition #155 is mid-slice: the DB Service create-only endpoint exists, and AF LMS has one-by-one plus bulk NVS Add Student paths on `/school/[udise]`; edit hardening and dropout hardening remain separate slices.
 
 **Known issues:**
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).

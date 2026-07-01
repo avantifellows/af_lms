@@ -123,6 +123,99 @@ export interface StudentAdditionInput {
   annual_family_income?: unknown;
 }
 
+export const STUDENT_ADDITION_UPLOAD_COLUMNS: ReadonlyArray<{
+  label: string;
+  key: keyof StudentAdditionInput;
+}> = [
+  { label: "Grade", key: "grade" },
+  { label: "Student Name", key: "student_name" },
+  { label: "Date of Birth", key: "date_of_birth" },
+  { label: "Gender", key: "gender" },
+  { label: "Category", key: "category" },
+  { label: "Physical Handicapped / Vikalang", key: "physically_handicapped" },
+  { label: "APAAR ID", key: "apaar_id" },
+  { label: "G10 board", key: "g10_board" },
+  { label: "Grade 10 Roll no", key: "g10_roll_no" },
+  { label: "Board Stream", key: "board_stream" },
+  { label: "Primary Exam preparing for", key: "stream" },
+  { label: "Father Name", key: "father_name" },
+  { label: "Parents Phone Number", key: "phone" },
+  { label: "Yearly / Annual Family Income", key: "annual_family_income" },
+] as const;
+
+const UPLOAD_FIELD_LABELS = new Map(
+  STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => [column.key, column.label]),
+);
+
+export interface StudentAdditionCsvResult {
+  row_number?: number;
+  status?: string;
+  original?: Record<string, unknown>;
+  field_errors?: Record<string, string>;
+  row_errors?: string[];
+  existing_match?: Record<string, unknown> | null;
+}
+
+function csvCell(value: unknown): string {
+  const text = value == null ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function formatFieldErrors(errors: Record<string, string> | undefined): string {
+  return Object.entries(errors ?? {})
+    .map(([key, message]) => `${UPLOAD_FIELD_LABELS.get(key as keyof StudentAdditionInput) ?? key}: ${message}`)
+    .join("; ");
+}
+
+export function buildRejectedRowsCsv(results: StudentAdditionCsvResult[]): string {
+  const headers = [
+    "Original Row Number",
+    "Row Status",
+    ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label),
+    "Field Errors",
+    "Row Errors",
+    "Matched Identifier",
+    "Existing Student ID",
+    "Existing APAAR ID",
+    "Existing Student Name",
+    "Existing School Name",
+    "Existing School Code",
+    "Existing UDISE",
+    "Existing District",
+    "Existing State",
+    "Existing Grade",
+    "Existing Program",
+    "Existing Stream",
+  ];
+
+  const rows = results
+    .filter((result) => result.status && result.status !== "created")
+    .map((result) => {
+      const existing = result.existing_match ?? {};
+      return [
+        result.row_number ?? "",
+        result.status ?? "",
+        ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => result.original?.[column.label] ?? ""),
+        formatFieldErrors(result.field_errors),
+        (result.row_errors ?? []).join("; "),
+        existing.matched_identifier ?? "",
+        existing.student_id ?? "",
+        existing.apaar_id ?? "",
+        existing.student_name ?? "",
+        existing.school_name ?? "",
+        existing.school_code ?? "",
+        existing.udise_code ?? "",
+        existing.district ?? "",
+        existing.state ?? "",
+        existing.grade ?? "",
+        existing.program ?? "",
+        existing.stream ?? "",
+      ].map(csvCell).join(",");
+    });
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
 export interface LmsStudentAdditionRow {
   row_number: number;
   grade: 11 | 12;
