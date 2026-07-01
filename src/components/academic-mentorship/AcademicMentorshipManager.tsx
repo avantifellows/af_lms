@@ -740,6 +740,13 @@ function AddMappingPanel({
   );
 }
 
+function csvUploadErrorValue(error: CsvUploadError, rows: CsvUploadRow[]): string {
+  const row = rows[error.rowNumber - 2];
+  if (!row) return "-";
+  if (error.field !== "mentor_email" && error.field !== "student_id") return "-";
+  return row[error.field] || "-";
+}
+
 function CsvUploadModal({
   open,
   academicYear,
@@ -828,7 +835,7 @@ function CsvUploadModal({
               <thead className="bg-danger/10 text-left text-xs font-bold uppercase tracking-wide text-danger">
                 <tr>
                   <th className="w-20 px-4 py-3">Row</th>
-                  <th className="w-40 px-4 py-3">Field</th>
+                  <th className="w-48 px-4 py-3">Error Value</th>
                   <th className="px-4 py-3">Reason</th>
                 </tr>
               </thead>
@@ -839,7 +846,7 @@ function CsvUploadModal({
                       {error.rowNumber}
                     </td>
                     <td className="border-t border-danger/20 px-4 py-3 font-mono text-text-primary">
-                      {error.field}
+                      {csvUploadErrorValue(error, csvRows)}
                     </td>
                     <td className="border-t border-danger/20 px-4 py-3 text-danger">
                       {error.error}

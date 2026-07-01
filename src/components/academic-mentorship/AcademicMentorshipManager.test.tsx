@@ -463,7 +463,7 @@ describe("AcademicMentorshipManager", () => {
 
     expect(await screen.findByText("CSV upload has row errors")).toBeInTheDocument();
     expect(screen.getByText("Upload failed. 0 rows were saved.")).toBeInTheDocument();
-    expect(screen.getByText("student_id")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Error Value" })).toBeInTheDocument();
     expect(screen.getByText("student_id is required")).toBeInTheDocument();
     const errorLink = await screen.findByRole("link", { name: "Download error CSV" });
     expect(errorLink).toHaveAttribute(
