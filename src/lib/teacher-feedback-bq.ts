@@ -70,6 +70,59 @@ function isMeaningful(text: string): boolean {
   return true;
 }
 
+interface Accumulator {
+  users: Set<string>;
+  batchCounts: Map<string, Set<string>>;
+  paramTotals: Map<string, number>;
+  /** Distinct users who answered ≥1 question in each parameter — the honest
+   *  denominator, so a skipped parameter reads "0 rated" rather than a fake 0.0. */
+  paramResponders: Map<string, Set<string>>;
+  comments: SubjectiveComment[];
+}
+
+/** Fold one row into the accumulator: track responders/batches, sum scores, collect comments. */
+function foldRow(acc: Accumulator, r: RawRow): void {
+  acc.users.add(r.user_id);
+  if (r.batch) {
+    if (!acc.batchCounts.has(r.batch)) acc.batchCounts.set(r.batch, new Set());
+    acc.batchCounts.get(r.batch)!.add(r.user_id);
+  }
+
+  const qpi = typeof r.qpi === "number" ? r.qpi : Number(r.qpi);
+  const question = FEEDBACK_QUESTIONS[qpi];
+  if (!question) return;
+
+  if (question.kind === "scored") {
+    const score = scoreUserResponse(qpi, r.user_response);
+    if (score === null) return;
+    acc.paramTotals.set(question.parameter, (acc.paramTotals.get(question.parameter) ?? 0) + score);
+    acc.paramResponders.get(question.parameter)!.add(r.user_id);
+    return;
+  }
+
+  const text = (r.user_response_labels ?? "").trim();
+  if (isMeaningful(text)) {
+    acc.comments.push({ role: question.role, text });
+  }
+}
+
+/** Reduce all rows into per-student / per-parameter aggregates. */
+function accumulate(rows: RawRow[]): Accumulator {
+  const acc: Accumulator = {
+    users: new Set<string>(),
+    batchCounts: new Map<string, Set<string>>(),
+    paramTotals: new Map<string, number>(),
+    paramResponders: new Map<string, Set<string>>(),
+    comments: [],
+  };
+  for (const p of PARAMETERS) {
+    acc.paramTotals.set(p, 0);
+    acc.paramResponders.set(p, new Set());
+  }
+  for (const r of rows) foldRow(acc, r);
+  return acc;
+}
+
 /**
  * Build the per-teacher report for one feedback quiz. Averages each scored
  * parameter across all responding students (so the % is comparable regardless
@@ -96,45 +149,8 @@ export async function getTeacherFeedbackReport(
     location: BQ_LOCATION,
   });
 
-  const raw = rows as RawRow[];
-
-  // Per-student, per-parameter score totals.
-  const users = new Set<string>();
-  const batchCounts = new Map<string, Set<string>>();
-  const paramTotals = new Map<string, number>(); // summed across students
-  // Distinct users who answered ≥1 question in each parameter — the honest
-  // denominator, so a skipped parameter reads "0 rated" rather than a fake 0.0.
-  const paramResponders = new Map<string, Set<string>>();
-  for (const p of PARAMETERS) {
-    paramTotals.set(p, 0);
-    paramResponders.set(p, new Set());
-  }
-  const comments: SubjectiveComment[] = [];
-
-  for (const r of raw) {
-    users.add(r.user_id);
-    if (r.batch) {
-      if (!batchCounts.has(r.batch)) batchCounts.set(r.batch, new Set());
-      batchCounts.get(r.batch)!.add(r.user_id);
-    }
-
-    const qpi = typeof r.qpi === "number" ? r.qpi : Number(r.qpi);
-    const question = FEEDBACK_QUESTIONS[qpi];
-    if (!question) continue;
-
-    if (question.kind === "scored") {
-      const score = scoreUserResponse(qpi, r.user_response);
-      if (score !== null) {
-        paramTotals.set(question.parameter, (paramTotals.get(question.parameter) ?? 0) + score);
-        paramResponders.get(question.parameter)!.add(r.user_id);
-      }
-    } else {
-      const text = (r.user_response_labels ?? "").trim();
-      if (isMeaningful(text)) {
-        comments.push({ role: question.role, text });
-      }
-    }
-  }
+  const acc = accumulate(rows as RawRow[]);
+  const { users, batchCounts, paramTotals, paramResponders, comments } = acc;
 
   const responseCount = users.size;
 

@@ -31,7 +31,7 @@ export type TeacherFeedbackAccessResult = AccessOk | AccessDenied;
  * up student feedback ABOUT teachers), so it uses the dedicated `teacher_feedback`
  * feature — NOT `quiz_sessions`, under which teachers have edit access.
  */
-export async function requireTeacherFeedbackAccess(
+async function requireTeacherFeedbackAccess(
   email: string,
   mode: AccessMode
 ): Promise<TeacherFeedbackAccessResult> {
