@@ -15,6 +15,7 @@ interface Props {
   grade: number;
   program?: string;
   stream?: string;
+  testGrade?: number;
 }
 
 // Display order — best (top tier) first. M1/B1 are top of their respective
@@ -167,7 +168,7 @@ function buildGroups(data: CumulativeALData): StreamGroup[] {
   return groups;
 }
 
-export default function CumulativeALTable({ schoolUdise, grade, program, stream }: Props) {
+export default function CumulativeALTable({ schoolUdise, grade, program, stream, testGrade }: Props) {
   const [data, setData] = useState<CumulativeALData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -182,8 +183,9 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream 
 
     const programParam = program ? `&program=${encodeURIComponent(program)}` : "";
     const streamParam = stream ? `&stream=${encodeURIComponent(stream)}` : "";
+    const testGradeParam = testGrade != null ? `&testGrade=${testGrade}` : "";
     fetch(
-      `/api/quiz-analytics/${schoolUdise}/cumulative-als?grade=${grade}${programParam}${streamParam}`,
+      `/api/quiz-analytics/${schoolUdise}/cumulative-als?grade=${grade}${programParam}${streamParam}${testGradeParam}`,
       { signal: controller.signal }
     )
       .then(async (res) => {
@@ -200,7 +202,7 @@ export default function CumulativeALTable({ schoolUdise, grade, program, stream 
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [schoolUdise, grade, program, stream]);
+  }, [schoolUdise, grade, program, stream, testGrade]);
 
   const groups = useMemo(() => (data ? buildGroups(data) : []), [data]);
 

@@ -250,7 +250,9 @@ function ChapterRowFragment({
         <td className="px-3 py-3 text-xs text-text-muted w-8">{isOpen ? "▼" : "▶"}</td>
         <td className="px-4 py-3 text-sm text-text-primary">{chapter.chapter_name}</td>
         <td className="px-4 py-3 text-sm"><PriorityBadge priority={chapter.priority} /></td>
-        <td className="px-4 py-3 text-sm font-bold font-mono text-accent">{chapter.avg_score}%</td>
+        <td className="px-4 py-3 text-sm font-bold font-mono text-accent whitespace-nowrap">
+          {chapter.avg_marks}/{chapter.max_marks} ({chapter.avg_score}%)
+        </td>
         <td className="px-4 py-3 text-sm font-mono text-text-primary">{chapter.accuracy}%</td>
         <td className="px-4 py-3 text-sm font-mono text-text-primary">{chapter.attempt_rate}%</td>
         <td className="px-4 py-3 text-sm font-bold font-mono text-text-primary">{chapter.questions}</td>

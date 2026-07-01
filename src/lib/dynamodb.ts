@@ -282,6 +282,8 @@ export async function getTestDeepDiveFromDynamo(
       chapter_id: string | null;
       priority: string | null;
       totalScore: number;
+      totalMarks: number;
+      maxMarks: number;
       totalAcc: number;
       totalAttempt: number;
       totalQ: number;
@@ -360,6 +362,8 @@ export async function getTestDeepDiveFromDynamo(
           chapter_id: c.chapter_id || null,
           priority: null,
           totalScore: 0,
+          totalMarks: 0,
+          maxMarks: 0,
           totalAcc: 0,
           totalAttempt: 0,
           totalQ: 0,
@@ -371,6 +375,8 @@ export async function getTestDeepDiveFromDynamo(
           chEx.priority = c.priority;
         }
         chEx.totalScore += chPct;
+        chEx.totalMarks += chMarks;
+        chEx.maxMarks = Math.max(chEx.maxMarks, chMax);
         chEx.totalAcc += toNum(c.accuracy);
         chEx.totalAttempt += chAttemptRate;
         chEx.totalQ = Math.max(chEx.totalQ, chTotal);
@@ -422,6 +428,7 @@ export async function getTestDeepDiveFromDynamo(
 
   // Compute summary
   const percentages = studentRows.map((s) => s.percentage);
+  const marks = studentRows.map((s) => s.marks_scored);
   const accuracies = studentRows.map((s) => s.accuracy);
   const attemptRates = studentRows.map((s) => s.attempt_rate);
 
@@ -429,14 +436,20 @@ export async function getTestDeepDiveFromDynamo(
     arr.length > 0
       ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10
       : 0;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
 
   const summary: TestDeepDiveSummary = {
     test_name: testName,
     start_date: startDate,
     students_appeared: studentRows.length,
     avg_score: avg(percentages),
-    min_score: Math.round(Math.min(...percentages) * 10) / 10,
-    max_score: Math.round(Math.max(...percentages) * 10) / 10,
+    min_score: round1(Math.min(...percentages)),
+    max_score: round1(Math.max(...percentages)),
+    avg_marks: avg(marks),
+    min_marks: round1(Math.min(...marks)),
+    max_marks: round1(Math.max(...marks)),
+    // Test max is shared across students; take the largest seen to be safe.
+    total_marks: round1(Math.max(...studentRows.map((s) => s.max_marks))),
     avg_accuracy: avg(accuracies),
     avg_attempt_rate: avg(attemptRates),
   };
@@ -460,6 +473,8 @@ export async function getTestDeepDiveFromDynamo(
       chapter_id: agg.chapter_id,
       priority: agg.priority,
       avg_score: Math.round((agg.totalScore / agg.count) * 10) / 10,
+      avg_marks: Math.round((agg.totalMarks / agg.count) * 10) / 10,
+      max_marks: Math.round(agg.maxMarks * 10) / 10,
       accuracy: Math.round((agg.totalAcc / agg.count) * 10) / 10,
       attempt_rate: Math.round((agg.totalAttempt / agg.count) * 10) / 10,
       questions: agg.totalQ,

@@ -172,6 +172,7 @@ export async function getBatchOverviewData(
       COUNT(DISTINCT CASE WHEN student_stream = test_stream THEN fk_student_id END) AS stream_student_count,
       MAX(test_format) AS test_format,
       MAX(test_stream) AS test_stream,
+      MAX(test_grade) AS test_grade,
       ARRAY_AGG(DISTINCT section IGNORE NULLS) AS sections
     FROM ${FACT_TABLE}
     WHERE student_school_udise_code = @udise
@@ -210,6 +211,7 @@ export async function getBatchOverviewData(
     stream_student_count: number;
     test_format: string | null;
     test_stream: string | null;
+    test_grade: number | null;
     sections: string[] | null;
   }
 
@@ -225,6 +227,7 @@ export async function getBatchOverviewData(
       stream_student_count: r.stream_student_count,
       test_format: r.test_format,
       test_stream: r.test_stream,
+      test_grade: r.test_grade != null ? Number(r.test_grade) : null,
       subjects: subjectSections,
     };
   });
@@ -274,17 +277,20 @@ export async function getCumulativeALData(
   udise: string,
   grade: number,
   program?: string,
-  stream?: string
+  stream?: string,
+  testGrade?: number
 ): Promise<CumulativeALData> {
   const client = getBigQueryClient();
   const programFilter = program ? `AND student_program = @program` : "";
   const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+  const testGradeFilter = testGrade != null ? `AND test_grade = @testGrade` : "";
   const formatList = MAJOR_TEST_FORMATS.map((f) => `'${f}'`).join(",");
   const alList = REAL_AL_VALUES.map((v) => `'${v.replace(/'/g, "\\'")}'`).join(",");
 
   const params: Record<string, string | number> = { udise, grade };
   if (program) params.program = program;
   if (stream) params.stream = stream;
+  if (testGrade != null) params.testGrade = testGrade;
 
   // One row per (student, session) — gives us both the test list (for the
   // matrix columns) and per-student AL points.
@@ -311,6 +317,7 @@ export async function getCumulativeALData(
       AND session_id IS NOT NULL
       ${programFilter}
       ${streamFilter}
+      ${testGradeFilter}
     GROUP BY fk_student_id, session_id
     ORDER BY start_date ASC
   `;
