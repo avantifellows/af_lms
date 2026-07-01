@@ -1018,6 +1018,72 @@ function useMentorshipOptionState(
   };
 }
 
+function useCsvUploadState() {
+  const [open, setCsvOpen] = useState(false);
+  const [file, setCsvFile] = useState<File | null>(null);
+  const [rows, setCsvRows] = useState<CsvUploadRow[]>([]);
+  const [errors, setCsvErrors] = useState<CsvUploadError[]>([]);
+  const [fileError, setCsvFileError] = useState("");
+  const [errorCsv, setErrorCsv] = useState<string | null>(null);
+
+  function resetCsvData() {
+    setCsvRows([]);
+    setCsvErrors([]);
+    setCsvFileError("");
+    setErrorCsv(null);
+  }
+
+  function close() {
+    setCsvOpen(false);
+    setCsvFile(null);
+    resetCsvData();
+  }
+
+  async function selectFile(nextFile: File | null) {
+    setCsvFile(nextFile);
+    resetCsvData();
+    if (!nextFile) return;
+
+    try {
+      const parsed = parseCsvText(await nextFile.text());
+      const requiredColumns = ["mentor_email", "student_id"];
+      const missingColumns = requiredColumns.filter((column) => !parsed.headers.includes(column));
+      if (missingColumns.length > 0) {
+        setCsvFileError(`Missing required columns: ${missingColumns.join(", ")}`);
+        return;
+      }
+      const parsedRows = parsed.rows.map((row) => ({
+        mentor_email: row.mentor_email ?? "",
+        student_id: row.student_id ?? "",
+      }));
+      setCsvRows(parsedRows);
+      if (parsedRows.length === 0) setCsvFileError("Choose a CSV file with at least one row");
+    } catch {
+      setCsvFileError("Unable to parse CSV file");
+    }
+  }
+
+  return {
+    open,
+    file,
+    rows,
+    errors,
+    fileError,
+    errorCsv,
+    openModal: () => setCsvOpen(true),
+    close,
+    selectFile,
+    actionSetters: {
+      setCsvOpen,
+      setCsvFile,
+      setCsvRows,
+      setCsvErrors,
+      setCsvFileError,
+      setErrorCsv,
+    },
+  };
+}
+
 export default function AcademicMentorshipManager({
   schoolCode,
   academicYear,
@@ -1058,12 +1124,7 @@ export default function AcademicMentorshipManager({
   const [mentorUserId, setMentorUserId] = useState("");
   const [studentPkId, setStudentPkId] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [csvOpen, setCsvOpen] = useState(false);
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [csvRows, setCsvRows] = useState<CsvUploadRow[]>([]);
-  const [csvErrors, setCsvErrors] = useState<CsvUploadError[]>([]);
-  const [csvFileError, setCsvFileError] = useState("");
-  const [errorCsv, setErrorCsv] = useState<string | null>(null);
+  const csvUpload = useCsvUploadState();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
   const templateParams = new URLSearchParams({
@@ -1071,41 +1132,6 @@ export default function AcademicMentorshipManager({
     academic_year: academicYear,
   });
   const templateHref = `/api/academic-mentorship/mappings/import?${templateParams.toString()}`;
-
-  function closeCsvModal() {
-    setCsvOpen(false);
-    setCsvFile(null);
-    setCsvRows([]);
-    setCsvErrors([]);
-    setCsvFileError("");
-  }
-
-  async function handleCsvFile(file: File | null) {
-    setCsvFile(file);
-    setCsvRows([]);
-    setCsvErrors([]);
-    setCsvFileError("");
-    setErrorCsv(null);
-    if (!file) return;
-
-    try {
-      const parsed = parseCsvText(await file.text());
-      const requiredColumns = ["mentor_email", "student_id"];
-      const missingColumns = requiredColumns.filter((column) => !parsed.headers.includes(column));
-      if (missingColumns.length > 0) {
-        setCsvFileError(`Missing required columns: ${missingColumns.join(", ")}`);
-        return;
-      }
-      const rows = parsed.rows.map((row) => ({
-        mentor_email: row.mentor_email ?? "",
-        student_id: row.student_id ?? "",
-      }));
-      setCsvRows(rows);
-      if (rows.length === 0) setCsvFileError("Choose a CSV file with at least one row");
-    } catch {
-      setCsvFileError("Unable to parse CSV file");
-    }
-  }
 
   return (
     <>
@@ -1117,7 +1143,7 @@ export default function AcademicMentorshipManager({
         templateHref={templateHref}
         busy={busy}
         onAdd={() => setAddOpen(true)}
-        onUpload={() => setCsvOpen(true)}
+        onUpload={csvUpload.openModal}
       />
 
       <AddMappingPanel
@@ -1153,30 +1179,25 @@ export default function AcademicMentorshipManager({
       />
 
       <CsvUploadModal
-        open={csvOpen && canUpload}
+        open={csvUpload.open && canUpload}
         academicYear={academicYear}
         templateHref={templateHref}
-        csvRows={csvRows}
-        csvErrors={csvErrors}
-        csvFileError={csvFileError}
-        errorCsv={errorCsv}
+        csvRows={csvUpload.rows}
+        csvErrors={csvUpload.errors}
+        csvFileError={csvUpload.fileError}
+        errorCsv={csvUpload.errorCsv}
         busy={busy}
-        onClose={closeCsvModal}
+        onClose={csvUpload.close}
         onFile={(file) => {
-          void handleCsvFile(file);
+          void csvUpload.selectFile(file);
         }}
         onUpload={() =>
           void uploadCsvAction({
             schoolCode,
             academicYear,
-            csvFile,
+            csvFile: csvUpload.file,
             refreshMappings,
-            setCsvOpen,
-            setCsvFile,
-            setCsvRows,
-            setCsvErrors,
-            setCsvFileError,
-            setErrorCsv,
+            ...csvUpload.actionSetters,
             setBusy,
             setToast,
           })
