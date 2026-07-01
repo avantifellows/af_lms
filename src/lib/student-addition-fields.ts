@@ -158,9 +158,48 @@ export interface StudentAdditionCsvResult {
   existing_match?: Record<string, unknown> | null;
 }
 
+type ExistingMatch = Record<string, unknown>;
+
 function csvCell(value: unknown): string {
   const text = value == null ? "" : String(value);
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function matchText(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+// fallow-ignore-next-line complexity
+export function formatStudentAdditionExistingMatch(
+  existing: ExistingMatch | null | undefined,
+  schoolCode?: string,
+): string {
+  const match = existing ?? {};
+  const studentId = matchText(match.student_id) || "blank";
+  const matchSchoolCode = matchText(match.school_code);
+
+  if (schoolCode && (!matchSchoolCode || matchSchoolCode === schoolCode)) {
+    return `This student is already part of this school. Student ID: ${studentId}.`;
+  }
+  if (!matchSchoolCode) {
+    return `This student already exists. Student ID: ${studentId}.`;
+  }
+
+  const schoolName = matchText(match.school_name) || "another school";
+  const udise = matchText(match.udise_code);
+  const location = [matchText(match.district), matchText(match.state)].filter(Boolean).join(", ");
+  const identifiers = [
+    `Student ID: ${studentId}`,
+    matchText(match.apaar_id) ? `APAAR: ${matchText(match.apaar_id)}` : "",
+    matchText(match.grade) ? `Grade ${matchText(match.grade)}` : "",
+    matchText(match.program),
+    matchText(match.stream),
+  ].filter(Boolean).join(" | ");
+
+  return [
+    `This identifier already belongs to ${matchText(match.student_name) || "a student"} at ${schoolName} (${matchSchoolCode}${udise ? `, UDISE ${udise}` : ""})${location ? `, ${location}` : ""}.`,
+    identifiers,
+  ].filter(Boolean).join(" ");
 }
 
 function formatFieldErrors(errors: Record<string, string> | undefined): string {

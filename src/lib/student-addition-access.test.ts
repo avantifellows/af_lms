@@ -111,6 +111,23 @@ describe("requireStudentAdditionAccess", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("allows admins even when explicit program_ids do not include NVS", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({
+      role: "admin",
+      program_ids: [PROGRAM_IDS.COE],
+    }));
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.COE],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    const result = await requireStudentAdditionAccess(session, school);
+
+    expect(result.ok).toBe(true);
+  });
+
   it.each([
     ["teacher role", permission({ role: "teacher" })],
     ["read-only access", permission({ read_only: true })],
@@ -139,12 +156,15 @@ describe("requireStudentAdditionAccess", () => {
     ["wrong school", () => mockCanAccessSchoolSync.mockReturnValue(false)],
     [
       "wrong program",
-      () => mockGetProgramContextSync.mockReturnValue({
-        hasAccess: true,
-        programIds: [PROGRAM_IDS.COE],
-        isNVSOnly: false,
-        hasCoEOrNodal: true,
-      }),
+      () => {
+        mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+        mockGetProgramContextSync.mockReturnValue({
+          hasAccess: true,
+          programIds: [PROGRAM_IDS.COE],
+          isNVSOnly: false,
+          hasCoEOrNodal: true,
+        });
+      },
     ],
     [
       "non-NVS school",
@@ -229,6 +249,23 @@ describe("requireStudentAdditionStudentAccess", () => {
         student_program_ids: [],
       },
     ]);
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows admins to edit/dropout NVS students without explicit NVS program ids", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({
+      role: "admin",
+      program_ids: [PROGRAM_IDS.COE],
+    }));
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.COE],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
 

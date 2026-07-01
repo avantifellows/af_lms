@@ -194,7 +194,11 @@ function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYe
 
 async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYear?: string) {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  try {
+    await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  } catch {
+    return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
+  }
   const sheet = workbook.getWorksheet("Template") ?? workbook.worksheets[0];
   if (!sheet) return { ok: false, error: "Workbook has no sheets" } as const;
 

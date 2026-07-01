@@ -4,7 +4,11 @@ import { useMemo, useState } from "react";
 import { Download, Upload, X } from "lucide-react";
 
 import { Button, Input, Modal, Select } from "@/components/ui";
-import { buildRejectedRowsCsv, type StudentAdditionCsvResult } from "@/lib/student-addition-fields";
+import {
+  buildRejectedRowsCsv,
+  formatStudentAdditionExistingMatch,
+  type StudentAdditionCsvResult,
+} from "@/lib/student-addition-fields";
 
 interface BulkStudentUploadModalProps {
   open: boolean;
@@ -46,7 +50,7 @@ function firstRowIssue(result: UploadResult): string {
   return [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
-  ][0] ?? "";
+  ][0] ?? (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match) : "");
 }
 
 // fallow-ignore-next-line complexity

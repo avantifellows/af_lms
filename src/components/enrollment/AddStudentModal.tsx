@@ -11,6 +11,7 @@ import {
   G10_BOARD_OPTIONS,
   GENDER_OPTIONS,
   STREAM_OPTIONS,
+  formatStudentAdditionExistingMatch,
   validateStudentAdditionInput,
   type StudentAdditionInput,
 } from "@/lib/student-addition-fields";
@@ -22,8 +23,6 @@ interface AddStudentModalProps {
   onClose: () => void;
   onCreated: () => void;
 }
-
-type ExistingMatch = Record<string, unknown>;
 
 const initialForm: Record<keyof StudentAdditionInput, string> = {
   grade: "",
@@ -43,36 +42,6 @@ const initialForm: Record<keyof StudentAdditionInput, string> = {
 };
 
 const labelClassName = "block text-sm font-medium text-text-secondary";
-
-function text(value: unknown): string {
-  return typeof value === "string" || typeof value === "number" ? String(value) : "";
-}
-
-// fallow-ignore-next-line complexity
-function existingMatchMessage(existing: ExistingMatch, schoolCode: string): string {
-  const studentId = text(existing.student_id) || "blank";
-  const matchSchoolCode = text(existing.school_code);
-
-  if (!matchSchoolCode || matchSchoolCode === schoolCode) {
-    return `This student is already part of this school. Student ID: ${studentId}.`;
-  }
-
-  const schoolName = text(existing.school_name) || "another school";
-  const udise = text(existing.udise_code);
-  const location = [text(existing.district), text(existing.state)].filter(Boolean).join(", ");
-  const identifiers = [
-    `Student ID: ${studentId}`,
-    text(existing.apaar_id) ? `APAAR: ${text(existing.apaar_id)}` : "",
-    text(existing.grade) ? `Grade ${text(existing.grade)}` : "",
-    text(existing.program),
-    text(existing.stream),
-  ].filter(Boolean).join(" | ");
-
-  return [
-    `This identifier already belongs to ${text(existing.student_name) || "a student"} at ${schoolName} (${matchSchoolCode}${udise ? `, UDISE ${udise}` : ""})${location ? `, ${location}` : ""}.`,
-    identifiers,
-  ].filter(Boolean).join(" ");
-}
 
 export default function AddStudentModal({
   open,
@@ -175,7 +144,7 @@ export default function AddStudentModal({
         setMessage(`Student added. Student ID: ${generated || "Not generated"}`);
         onCreated();
       } else if (result?.status === "already_exists") {
-        setError(existingMatchMessage(result.existing_match ?? {}, schoolCode));
+        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
       } else if (result?.status === "rejected") {
         setError([...(result.row_errors ?? []), ...Object.values(result.field_errors ?? {})][0] || "Student was rejected");
       } else {

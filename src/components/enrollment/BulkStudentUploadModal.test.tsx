@@ -77,7 +77,23 @@ describe("BulkStudentUploadModal", () => {
         JSON.stringify({
           totals: { total: 2, created: 0, duplicate_in_file: 1, already_exists: 1, rejected: 0 },
           results: [
-            { row_number: 2, status: "already_exists", original: { "Student Name": "Existing" } },
+            {
+              row_number: 2,
+              status: "already_exists",
+              original: { "Student Name": "Existing" },
+              existing_match: {
+                student_id: "202812345678",
+                student_name: "Existing Student",
+                school_name: "JNV Other",
+                school_code: "JNV999",
+                udise_code: "99999999999",
+                district: "Jaipur",
+                state: "Rajasthan",
+                grade: 11,
+                program: "JNV NVS",
+                stream: "engineering",
+              },
+            },
             { row_number: 3, status: "duplicate_in_file", original: { "Student Name": "Duplicate" } },
           ],
         }),
@@ -98,6 +114,8 @@ describe("BulkStudentUploadModal", () => {
     await user.click(screen.getByRole("button", { name: "Upload students" }));
 
     await waitFor(() => expect(screen.getByText("1 done, 1 to go")).toBeInTheDocument());
+    expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
+    expect(screen.getByText(/JNV999, UDISE 99999999999/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Download rejected rows CSV" })).not.toBeInTheDocument();
   });
 });

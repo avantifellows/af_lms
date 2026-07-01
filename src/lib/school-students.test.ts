@@ -30,6 +30,7 @@ function makeStudent(overrides: Partial<Student> = {}): Student {
     gender: null,
     program_name: null,
     program_id: null,
+    student_program_ids: null,
     grade: 12,
     grade_id: null,
     status: null,
@@ -60,6 +61,7 @@ describe("getSchoolRoster", () => {
     expect(sql).toContain("s.status = 'dropout'");
     expect(sql).toContain("SELECT er_latest.id");
     expect(sql).toContain("JOIN batch b ON b.id = er_batch.group_id");
+    expect(sql).toContain("AS student_program_ids");
     expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
     expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR]);
   });

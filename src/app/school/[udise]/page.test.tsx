@@ -206,6 +206,7 @@ const makeSchool = (overrides = {}) => ({
   state: "Gujarat",
   region: "West",
   program_ids: [64],
+  student_program_ids: [64],
   ...overrides,
 });
 
@@ -711,6 +712,15 @@ describe("SchoolPage (server component)", () => {
     const props = JSON.parse(screen.getByTestId("student-table").dataset.props || "{}");
     expect(props.canEdit).toBe(true);
     expect(props.canEditStudent).toBe(false);
+  });
+
+  it("shows add controls when NVS context comes from current student batches", async () => {
+    setupAdminDefaults({ program_ids: null, student_program_ids: [64] });
+
+    await renderPage();
+
+    expect(screen.getByRole("button", { name: /Add Student/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Bulk Upload/ })).toBeInTheDocument();
   });
 
   it("passes correct defaultTab to SchoolTabs", async () => {

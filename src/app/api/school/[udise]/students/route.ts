@@ -162,13 +162,13 @@ async function proxyRowsToDbService({
   upload: { id: string; filename: string };
   period: ReturnType<typeof deriveLmsEnrollmentPeriod>;
 }) {
-  const dbServiceUrl = process.env.DB_SERVICE_URL;
+  const dbServiceUrl = process.env.DB_SERVICE_URL?.replace(/\/+$/, "");
   const dbServiceToken = process.env.DB_SERVICE_TOKEN;
   if (!dbServiceUrl || !dbServiceToken) {
     return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
   }
 
-  const response = await fetch(`${dbServiceUrl}/api/lms/students/bulk-create-with-enrollments`, {
+  const response = await fetch(`${dbServiceUrl}/lms/students/bulk-create-with-enrollments`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

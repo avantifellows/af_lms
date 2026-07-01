@@ -48,6 +48,7 @@ interface StudentOverrides {
   gender?: string | null;
   program_name?: string | null;
   program_id?: number | null;
+  student_program_ids?: Array<number | string> | null;
   grade?: number | null;
   grade_id?: string | null;
   status?: string | null;
@@ -76,6 +77,7 @@ function makeStudent(overrides: StudentOverrides = {}) {
     gender: has("gender") ? overrides.gender! : "Male",
     program_name: has("program_name") ? overrides.program_name! : "JNV NVS",
     program_id: has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS,
+    student_program_ids: has("student_program_ids") ? overrides.student_program_ids! : null,
     grade: has("grade") ? overrides.grade! : 10,
     grade_id: has("grade_id") ? overrides.grade_id! : "g-10",
     status: has("status") ? overrides.status! : "active",
@@ -96,6 +98,7 @@ function makeStudent(overrides: StudentOverrides = {}) {
     gender: string | null;
     program_name: string | null;
     program_id: number | null;
+    student_program_ids?: Array<number | string> | null;
     grade: number | null;
     grade_id: string | null;
     status: string | null;
@@ -607,6 +610,23 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
+  it("admin can edit a mixed-program row with an NVS current batch", () => {
+    const student = makeStudent({
+      program_id: PROGRAM_IDS.COE,
+      student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+    });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        canEdit={true}
+        isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.COE]}
+      />,
+    );
+    expect(screen.getByText("Edit")).toBeInTheDocument();
+  });
+
   it("non-admin can edit student with null program_id", () => {
     const student = makeStudent({ program_id: null });
     render(
@@ -624,6 +644,24 @@ describe("StudentTable - canEditStudent logic", () => {
 
   it("non-admin with NVS program access can edit NVS students", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        canEdit={true}
+        isAdmin={false}
+        isPasscodeUser={false}
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+    expect(screen.getByText("Edit")).toBeInTheDocument();
+  });
+
+  it("non-admin with NVS access can edit mixed-program students with an NVS current batch", () => {
+    const student = makeStudent({
+      program_id: PROGRAM_IDS.COE,
+      student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+    });
     render(
       <StudentTable
         students={[student]}

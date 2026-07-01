@@ -34,6 +34,7 @@ interface School {
   state: string;
   region: string | null;
   program_ids: number[] | null;
+  student_program_ids: Array<number | string> | null;
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -41,13 +42,33 @@ async function getSchoolByCode(code: string): Promise<School | null> {
   // centre (the non-JNV centre rollout: Punjab CoE meritorious / EMRS). Mirrors
   // the dashboard `schoolScope` predicate so a school listed there also opens.
   const schools = await query<School>(
-    `SELECT id, name, code, udise_code, district, state, region, program_ids
+    `SELECT
+       s.id,
+       s.name,
+       s.code,
+       s.udise_code,
+       s.district,
+       s.state,
+       s.region,
+       s.program_ids,
+       COALESCE(
+         ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+         ARRAY[]::int[]
+       ) AS student_program_ids
      FROM school s
+     LEFT JOIN "group" g_sch ON g_sch.child_id = s.id AND g_sch.type = 'school'
+     LEFT JOIN group_user school_member ON school_member.group_id = g_sch.id
+     LEFT JOIN enrollment_record er_batch
+       ON er_batch.user_id = school_member.user_id
+       AND er_batch.group_type = 'batch'
+       AND er_batch.is_current = true
+     LEFT JOIN batch b ON b.id = er_batch.group_id
      WHERE (
          s.af_school_category = 'JNV'
          OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
        )
-       AND (s.udise_code = $1 OR s.code = $1)`,
+       AND (s.udise_code = $1 OR s.code = $1)
+     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region, s.program_ids`,
     [code],
   );
   return schools[0] || null;

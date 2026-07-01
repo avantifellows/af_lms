@@ -67,6 +67,7 @@ export async function getSchoolRoster(
       gr.number as grade,
       p.program_name,
       p.program_id,
+      sp.student_program_ids,
       GREATEST(s.updated_at, u.updated_at) as updated_at
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
@@ -116,6 +117,17 @@ export async function getSchoolRoster(
         er_batch.id DESC
       LIMIT 1
     ) p ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+        ARRAY[]::int[]
+      ) AS student_program_ids
+      FROM enrollment_record er_batch
+      JOIN batch b ON b.id = er_batch.group_id
+      WHERE er_batch.user_id = u.id
+        AND er_batch.group_type = 'batch'
+        AND er_batch.is_current = true
+    ) sp ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
     [schoolId, CURRENT_ACADEMIC_YEAR],

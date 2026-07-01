@@ -27,7 +27,7 @@ const mockFetch = vi.fn();
 
 beforeEach(() => {
   vi.resetAllMocks();
-  process.env.DB_SERVICE_URL = "https://db.example.test";
+  process.env.DB_SERVICE_URL = "https://db.example.test/api";
   process.env.DB_SERVICE_TOKEN = "test-token";
   vi.stubGlobal("fetch", mockFetch);
   mockRequireStudentAdditionStudentAccess.mockResolvedValue({

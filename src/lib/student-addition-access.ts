@@ -94,6 +94,11 @@ function studentAdditionActor(permission: UserPermission, email: string) {
   };
 }
 
+function actorHasNvsProgramAccess(permission: UserPermission) {
+  return permission.role === "admin" ||
+    getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS);
+}
+
 export function getStudentAdditionAccessFromPermission(
   session: StudentAdditionSession | null,
   school: StudentAdditionSchool,
@@ -108,7 +113,7 @@ export function getStudentAdditionAccessFromPermission(
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
   if (!hasNvsSchoolContext(school)) return deny(403);
-  if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS)) return deny(403);
+  if (!actorHasNvsProgramAccess(permission)) return deny(403);
 
   return {
     ok: true,
@@ -184,7 +189,7 @@ export async function requireStudentAdditionStudentAccess(
     return deny(403);
   }
   if (!hasNvsSchoolContext(scope)) return deny(403);
-  if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS)) return deny(403);
+  if (!actorHasNvsProgramAccess(permission)) return deny(403);
 
   return {
     ok: true,

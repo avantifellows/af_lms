@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const dbServiceUrl = process.env.DB_SERVICE_URL;
+    const dbServiceUrl = process.env.DB_SERVICE_URL?.replace(/\/+$/, "");
     const dbServiceToken = process.env.DB_SERVICE_TOKEN;
     if (!dbServiceUrl || !dbServiceToken) {
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       requestBody.apaar_id = student.apaar_id;
     }
 
-    const response = await fetch(`${dbServiceUrl}/api/dropout`, {
+    const response = await fetch(`${dbServiceUrl}/dropout`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

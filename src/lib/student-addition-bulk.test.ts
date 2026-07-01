@@ -162,6 +162,19 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.rows[0].date_of_birth).toBe("2010-01-02");
   });
 
+  it("returns a validation error for corrupt xlsx uploads", async () => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: Buffer.from("not a workbook"),
+      selectedGrade: 11,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Upload a valid .xlsx file or rejected-row .csv file",
+    });
+  });
+
   it("allows exactly 200 non-blank rows and rejects 201", async () => {
     const twoHundredRows = Array.from({ length: 200 }, () => validCsvRow).join("\n");
     const allowed = await parseStudentAdditionUpload({

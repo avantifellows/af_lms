@@ -51,6 +51,7 @@ export interface Student {
   monthly_family_income?: string | null;
   program_name: string | null;
   program_id: number | null;
+  student_program_ids?: Array<number | string> | null;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
@@ -405,9 +406,11 @@ export default function StudentTable({
     if (!canEdit) return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
     const programId = student.program_id == null ? null : Number(student.program_id);
-    if (programId !== null && programId !== PROGRAM_IDS.NVS) return false;
+    const hasNvsBatch = (student.student_program_ids ?? [])
+      .map(Number)
+      .includes(PROGRAM_IDS.NVS);
+    if (!hasNvsBatch && programId !== null && programId !== PROGRAM_IDS.NVS) return false;
     if (isAdmin) return true;
-    if (programId === null) return true;
     if (!userProgramIds || userProgramIds.length === 0) return false;
     return userProgramIds.includes(PROGRAM_IDS.NVS);
   };
