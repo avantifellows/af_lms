@@ -33,6 +33,7 @@ const school = {
   udise_code: "12345678901",
   region: "South",
   program_ids: [PROGRAM_IDS.NVS],
+  student_program_ids: [PROGRAM_IDS.NVS],
 };
 
 const validBody = {
@@ -93,11 +94,17 @@ function csvLine(values: string[]) {
   return values.map((value) => `"${value.replace(/"/g, '""')}"`).join(",");
 }
 
-function multipartUploadRequest(filename: string, contents: string, grade = "11") {
+function multipartUploadRequest(
+  filename: string,
+  contents: string,
+  grade = "11",
+  size = Buffer.from(contents).byteLength,
+) {
   const bytes = Buffer.from(contents);
   const file = {
     name: filename,
     type: "text/csv",
+    size,
     arrayBuffer: async () =>
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
   };
@@ -307,6 +314,7 @@ describe("POST /api/school/[udise]/students", () => {
 
     const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
     expect(payload.upload.filename).toBe("students.csv");
+    expect(payload.academic_year).toBe("2026-2027");
     expect(payload.rows).toEqual([
       expect.objectContaining({
         row_number: 2,
@@ -314,6 +322,24 @@ describe("POST /api/school/[udise]/students", () => {
         stream: "engineering",
       }),
     ]);
+  });
+
+  it("rejects oversized bulk uploads before buffering the file", async () => {
+    const response = await POST(
+      multipartUploadRequest(
+        "students.csv",
+        csvLine(uploadHeaders),
+        "11",
+        5 * 1024 * 1024 + 1,
+      ) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Upload file is too large. Max size is 5 MB.",
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -350,6 +376,8 @@ describe("GET /api/school/[udise]/students template", () => {
     await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
     const template = workbook.getWorksheet("Template");
     expect((template?.getRow(1).values as unknown[]).slice(1)).toEqual(uploadHeaders);
+    expect(template?.getColumn(7).numFmt).toBe("@");
+    expect(template?.getColumn(9).numFmt).toBe("@");
     expect(workbook.getWorksheet("Options")).toBeDefined();
   });
 });

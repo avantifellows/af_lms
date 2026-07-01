@@ -7,6 +7,7 @@ import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-acce
 interface StudentUpdatePayload {
   // user-table fields
   first_name?: string;
+  last_name?: string;
   phone?: string;
   gender?: string;
   date_of_birth?: string;
@@ -23,6 +24,7 @@ interface StudentUpdatePayload {
 
 const EDITABLE_FIELDS: ReadonlyArray<keyof StudentUpdatePayload> = [
   "first_name",
+  "last_name",
   "phone",
   "gender",
   "date_of_birth",

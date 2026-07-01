@@ -22,6 +22,7 @@ interface RouteSchool {
   udise_code: string | null;
   region: string | null;
   program_ids: number[] | null;
+  student_program_ids: Array<number | string> | null;
 }
 
 interface StudentAdditionAccess {
@@ -47,6 +48,7 @@ const EMPTY_TOTALS = {
   already_exists: 0,
   rejected: 0,
 };
+const MAX_STUDENT_ADDITION_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
   return typeof value === "object" &&
@@ -94,9 +96,26 @@ async function resolveSchoolAndAccess(
   }
 
   const schools = await query<RouteSchool>(
-    `SELECT id, code, udise_code, region, program_ids
-     FROM school
-     WHERE udise_code = $1 OR code = $1
+    `SELECT
+       sch.id,
+       sch.code,
+       sch.udise_code,
+       sch.region,
+       sch.program_ids,
+       COALESCE(
+         ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+         ARRAY[]::int[]
+       ) AS student_program_ids
+     FROM school sch
+     LEFT JOIN "group" g_sch ON g_sch.child_id = sch.id AND g_sch.type = 'school'
+     LEFT JOIN group_user gu_sch ON gu_sch.group_id = g_sch.id
+     LEFT JOIN enrollment_record er_batch
+       ON er_batch.user_id = gu_sch.user_id
+       AND er_batch.group_type = 'batch'
+       AND er_batch.is_current = true
+     LEFT JOIN batch b ON b.id = er_batch.group_id
+     WHERE sch.udise_code = $1 OR sch.code = $1
+     GROUP BY sch.id, sch.code, sch.udise_code, sch.region, sch.program_ids
      LIMIT 1`,
     [udise],
   );
@@ -129,11 +148,13 @@ async function proxyRowsToDbService({
   school,
   rows,
   upload,
+  period,
 }: {
   access: StudentAdditionAccess;
   school: RouteSchool;
   rows: LmsStudentAdditionRow[];
   upload: { id: string; filename: string };
+  period: ReturnType<typeof deriveLmsEnrollmentPeriod>;
 }) {
   const dbServiceUrl = process.env.DB_SERVICE_URL;
   const dbServiceToken = process.env.DB_SERVICE_TOKEN;
@@ -141,7 +162,6 @@ async function proxyRowsToDbService({
     return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
   }
 
-  const period = deriveLmsEnrollmentPeriod();
   const response = await fetch(`${dbServiceUrl}/api/lms/students/bulk-create-with-enrollments`, {
     method: "POST",
     headers: {
@@ -183,11 +203,16 @@ async function bulkUploadResponse(
   if (!isUploadFile(file)) {
     return NextResponse.json({ error: "Upload a .xlsx or rejected-row .csv file" }, { status: 400 });
   }
+  if (file.size > MAX_STUDENT_ADDITION_UPLOAD_BYTES) {
+    return NextResponse.json({ error: "Upload file is too large. Max size is 5 MB." }, { status: 400 });
+  }
 
+  const period = deriveLmsEnrollmentPeriod();
   const parsed = await parseStudentAdditionUpload({
     filename: uploadFilename(file),
     data: Buffer.from(await file.arrayBuffer()),
     selectedGrade,
+    academicYear: period.academic_year,
   });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   if (parsed.totalRows === 0) {
@@ -209,6 +234,7 @@ async function bulkUploadResponse(
       id: `student-bulk-${Date.now()}`,
       filename: uploadFilename(file),
     },
+    period,
   });
   if (response.status !== 200) return response;
 
@@ -245,7 +271,11 @@ export async function POST(
   }
 
   const body = await request.json();
-  const validation = validateStudentAdditionInput(body, { rowNumber: 1 });
+  const period = deriveLmsEnrollmentPeriod();
+  const validation = validateStudentAdditionInput(body, {
+    rowNumber: 1,
+    academicYear: period.academic_year,
+  });
   if (!validation.ok) return validationResponse(validation);
   return proxyRowsToDbService({
     access,
@@ -255,6 +285,7 @@ export async function POST(
       id: `single-student-${Date.now()}`,
       filename: "one-by-one",
     },
+    period,
   });
 }
 

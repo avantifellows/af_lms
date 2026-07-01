@@ -99,6 +99,18 @@ describe("requireStudentAdditionAccess", () => {
     });
   });
 
+  it("allows an NVS school inferred from current student batch membership", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission());
+
+    const result = await requireStudentAdditionAccess(session, {
+      ...school,
+      program_ids: null,
+      student_program_ids: [PROGRAM_IDS.NVS],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it.each([
     ["teacher role", permission({ role: "teacher" })],
     ["read-only access", permission({ read_only: true })],
@@ -232,6 +244,23 @@ describe("requireStudentAdditionStudentAccess", () => {
         region: "South",
         program_ids: [PROGRAM_IDS.NVS],
         student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+      },
+    ]);
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows an NVS current-batch student when the school program list is not backfilled", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockQuery.mockResolvedValue([
+      {
+        code: "JNV001",
+        udise_code: "12345678901",
+        region: "South",
+        program_ids: null,
+        student_program_ids: [PROGRAM_IDS.NVS],
       },
     ]);
 

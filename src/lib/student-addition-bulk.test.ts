@@ -235,6 +235,7 @@ describe("parseStudentAdditionUpload", () => {
       data: Buffer.from(`${csvHeaders}\n${badRows}`),
       selectedGrade: 11,
       today: new Date("2026-07-01T00:00:00Z"),
+      academicYear: "2027-2028",
     });
 
     expect(result.ok).toBe(true);
@@ -245,6 +246,7 @@ describe("parseStudentAdditionUpload", () => {
       { grade: "Grade must match the selected upload grade 11" },
       { date_of_birth: "Date of Birth cannot be in the future" },
     ]);
+    expect(result.rejectedResults[0].generated_student_id).toBe("202912345678");
 
     const rows = Array.from({ length: 200 }, () => validCsvRow).join("\n");
     const start = performance.now();

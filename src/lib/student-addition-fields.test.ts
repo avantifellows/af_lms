@@ -107,4 +107,19 @@ describe("validateStudentAdditionInput", () => {
     expect(generateStudentId(11, "AB12Z", "2027-2028")).toBe("2029AB12Z");
     expect(generateStudentId(12, "AB12Z", "2027-2028")).toBe("2028AB12Z");
   });
+
+  it("uses the request academic year for validation previews", () => {
+    const result = validateStudentAdditionInput(
+      {
+        ...validInput,
+        apaar_id: "",
+        g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
+        g10_roll_no: "ab12z",
+      },
+      { academicYear: "2027-2028" },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.generatedStudentId).toBe("2029AB12Z");
+  });
 });

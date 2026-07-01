@@ -72,19 +72,28 @@ export async function getSchoolRoster(
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
-    -- Restrict the roster to the current academic year. Dropout ends the
-    -- current grade enrollment, so keep the latest same-year grade for those
-    -- rows while still excluding old active cohorts.
-    JOIN LATERAL (
-      SELECT er.group_id
-      FROM enrollment_record er
-      WHERE er.user_id = u.id
-        AND er.group_type = 'grade'
-        AND er.academic_year = $2
-        AND (er.is_current = true OR s.status = 'dropout')
-      ORDER BY er.is_current DESC, er.end_date DESC NULLS LAST, er.updated_at DESC, er.id DESC
-      LIMIT 1
-    ) er_grade ON true
+    -- Restrict the roster to the current academic year. Keep every current
+    -- grade row so duplicate-grade data issues still surface, but collapse
+    -- dropout history to the latest same-year grade after DB Service ends
+    -- current grade enrollment.
+    JOIN enrollment_record er_grade ON er_grade.user_id = u.id
+      AND er_grade.group_type = 'grade'
+      AND er_grade.academic_year = $2
+      AND (
+        er_grade.is_current = true
+        OR (
+          s.status = 'dropout'
+          AND er_grade.id = (
+            SELECT er_latest.id
+            FROM enrollment_record er_latest
+            WHERE er_latest.user_id = u.id
+              AND er_latest.group_type = 'grade'
+              AND er_latest.academic_year = $2
+            ORDER BY er_latest.end_date DESC NULLS LAST, er_latest.updated_at DESC, er_latest.id DESC
+            LIMIT 1
+          )
+        )
+      )
     LEFT JOIN grade gr ON er_grade.group_id = gr.id
     LEFT JOIN LATERAL (
       SELECT p.name as program_name, p.id as program_id

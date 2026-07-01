@@ -330,7 +330,7 @@ function addError(errors: Record<string, string>, key: string, message: string) 
 // fallow-ignore-next-line complexity
 export function validateStudentAdditionInput(
   input: StudentAdditionInput,
-  options: { today?: Date; rowNumber?: number } = {},
+  options: { today?: Date; rowNumber?: number; academicYear?: string } = {},
 ): StudentAdditionValidationResult {
   const today = options.today ?? new Date();
   const fieldErrors: Record<string, string> = {};
@@ -397,7 +397,9 @@ export function validateStudentAdditionInput(
     addError(fieldErrors, "annual_family_income", "Annual Family Income is not valid");
   }
 
-  const generatedStudentId = grade ? generateStudentId(grade, g10_roll_no) : null;
+  const generatedStudentId = grade
+    ? generateStudentId(grade, g10_roll_no, options.academicYear)
+    : null;
   const row = {
     row_number: options.rowNumber ?? 1,
     ...(grade ? { grade } : {}),

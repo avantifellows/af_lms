@@ -59,6 +59,10 @@ function legacyPwdCategory(category: string | null) {
   return { category: value === "General" ? "Gen" : value, pwd: true };
 }
 
+function fullName(student: Student) {
+  return [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+}
+
 const inputClassName =
   "mt-1 block w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted transition-colors";
 const labelClassName = "block text-sm font-medium text-text-secondary";
@@ -74,7 +78,7 @@ export default function EditStudentModal({
 }: EditStudentModalProps) {
   const legacyCategory = legacyPwdCategory(student.category);
   const [formData, setFormData] = useState({
-    first_name: student.first_name || "",
+    first_name: fullName(student),
     phone: student.phone || "",
     gender: student.gender || "",
     date_of_birth: formatDateForInput(student.date_of_birth),
@@ -93,7 +97,7 @@ export default function EditStudentModal({
   const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
 
-  const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+  const studentName = fullName(student);
   const studentPkId = (() => {
     const raw = student.student_pk_id;
     if (!raw || !/^\d+$/.test(raw)) return null;
@@ -125,6 +129,7 @@ export default function EditStudentModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           first_name: formData.first_name,
+          last_name: "",
           phone: formData.phone,
           gender: formData.gender,
           date_of_birth: formData.date_of_birth,

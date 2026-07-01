@@ -21,6 +21,7 @@ export interface StudentAdditionSchool {
   udise_code: string | null;
   region: string | null;
   program_ids?: number[] | null;
+  student_program_ids?: Array<number | string> | null;
 }
 
 interface StudentAdditionSession {
@@ -69,6 +70,13 @@ function deny(status: 401 | 403, error = "Forbidden"): { ok: false; status: 401 
   return { ok: false, status, error };
 }
 
+function hasNvsSchoolContext(school: StudentAdditionSchool) {
+  return [
+    ...(school.program_ids ?? []),
+    ...(school.student_program_ids ?? []),
+  ].map(Number).includes(PROGRAM_IDS.NVS);
+}
+
 export function getStudentAdditionAccessFromPermission(
   session: StudentAdditionSession | null,
   school: StudentAdditionSchool,
@@ -82,7 +90,7 @@ export function getStudentAdditionAccessFromPermission(
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
-  if (!(school.program_ids ?? []).includes(PROGRAM_IDS.NVS)) return deny(403);
+  if (!hasNvsSchoolContext(school)) return deny(403);
   if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS)) return deny(403);
 
   return {
@@ -168,7 +176,7 @@ export async function requireStudentAdditionStudentAccess(
   if (studentProgramIds.length > 0 && !studentProgramIds.includes(PROGRAM_IDS.NVS)) {
     return deny(403);
   }
-  if (!(scope.program_ids ?? []).includes(PROGRAM_IDS.NVS)) return deny(403);
+  if (!hasNvsSchoolContext(scope)) return deny(403);
   if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS)) return deny(403);
 
   return {

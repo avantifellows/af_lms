@@ -45,6 +45,7 @@ interface ParseUploadInput {
   data: Buffer;
   selectedGrade: 11 | 12;
   today?: Date;
+  academicYear?: string;
 }
 
 function text(value: unknown): string {
@@ -101,6 +102,7 @@ function parseRowsFromAoA(
   rows: unknown[][],
   selectedGrade: 11 | 12,
   today?: Date,
+  academicYear?: string,
 ): StudentAdditionUploadParseResult {
   const headers = (rows[0] ?? []).map(text);
   const missing = missingColumns(headers);
@@ -143,7 +145,7 @@ function parseRowsFromAoA(
       ? parsedOriginalRowNumber
       : index + 2;
 
-    const validation = validateStudentAdditionInput(input, { today, rowNumber });
+    const validation = validateStudentAdditionInput(input, { today, rowNumber, academicYear });
     originalRows.set(rowNumber, original);
 
     if (!validation.ok) {
@@ -181,16 +183,16 @@ function parseRowsFromAoA(
   };
 }
 
-function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date) {
+function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYear?: string) {
   const rows = parse(data.toString("utf8"), {
     bom: true,
     relax_column_count: true,
     skip_empty_lines: false,
   }) as unknown[][];
-  return parseRowsFromAoA(rows, selectedGrade, today);
+  return parseRowsFromAoA(rows, selectedGrade, today, academicYear);
 }
 
-async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date) {
+async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYear?: string) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
   const sheet = workbook.getWorksheet("Template") ?? workbook.worksheets[0];
@@ -205,7 +207,7 @@ async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date) {
     }
     rows.push(values);
   }
-  return parseRowsFromAoA(rows, selectedGrade, today);
+  return parseRowsFromAoA(rows, selectedGrade, today, academicYear);
 }
 
 export async function parseStudentAdditionUpload({
@@ -213,6 +215,7 @@ export async function parseStudentAdditionUpload({
   data,
   selectedGrade,
   today,
+  academicYear,
 }: ParseUploadInput): Promise<StudentAdditionUploadParseResult> {
   if (filename.toLowerCase().endsWith(".xls")) {
     return {
@@ -222,11 +225,11 @@ export async function parseStudentAdditionUpload({
   }
 
   if (filename.toLowerCase().endsWith(".csv")) {
-    return parseCsv(data, selectedGrade, today);
+    return parseCsv(data, selectedGrade, today, academicYear);
   }
 
   if (filename.toLowerCase().endsWith(".xlsx")) {
-    return parseXlsx(data, selectedGrade, today);
+    return parseXlsx(data, selectedGrade, today, academicYear);
   }
 
   return { ok: true, rows: [], rejectedResults: [], totalRows: 0, originalRows: new Map() };
@@ -237,6 +240,8 @@ export async function buildStudentAdditionTemplateWorkbook(): Promise<Buffer> {
   const template = workbook.addWorksheet("Template");
   template.addRow(STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label));
   template.getColumn(3).numFmt = "dd/mm/yyyy";
+  template.getColumn(7).numFmt = "@";
+  template.getColumn(9).numFmt = "@";
 
   const options = workbook.addWorksheet("Options");
   options.addRows([

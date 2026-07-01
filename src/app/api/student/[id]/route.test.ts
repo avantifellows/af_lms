@@ -70,6 +70,7 @@ describe("PATCH /api/student/[id]", () => {
       method: "PATCH",
       body: {
         first_name: "Ravi Kumar",
+        last_name: "",
         gender: "Others",
         grade: 12,
         stream: "medical",
@@ -108,6 +109,7 @@ describe("PATCH /api/student/[id]", () => {
       start_date: "2026-07-01",
       academic_year: "2026-2027",
       first_name: "Ravi Kumar",
+      last_name: "",
       gender: "Others",
       grade: 12,
       stream: "medical",

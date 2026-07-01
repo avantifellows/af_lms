@@ -116,6 +116,14 @@ describe("EditStudentModal", () => {
     expect(document.querySelector('[name="batch_group_id"]')).toBeNull();
   });
 
+  it("initializes the name field with the full existing student name", () => {
+    renderModal({
+      student: { ...baseStudent, first_name: "Ravi", last_name: "Kumar" },
+    });
+
+    expect(getByName("first_name")).toHaveValue("Ravi Kumar");
+  });
+
   it("submits only PRD-editable fields and refreshes on success", async () => {
     const user = userEvent.setup();
     const { props } = renderModal();
@@ -142,6 +150,7 @@ describe("EditStudentModal", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body).toEqual({
       first_name: "Ravi Updated",
+      last_name: "",
       phone: "9876543210",
       gender: "Others",
       date_of_birth: "2008-05-15",
