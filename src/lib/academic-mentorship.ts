@@ -1203,36 +1203,3 @@ export async function listAcademicMentorshipProgramSchoolLinks(
     schoolId: Number(row.school_id),
   }));
 }
-
-export async function filterAcademicMentorshipSchoolsByProgram(
-  schools: AcademicMentorshipSchool[],
-  academicYear: string,
-  programId: number | null
-): Promise<AcademicMentorshipSchool[]> {
-  if (programId === null || schools.length === 0) return schools;
-  const rows = await query<{ id: number | string }>(
-    `SELECT DISTINCT s.id
-     FROM school s
-     JOIN "group" school_group
-       ON school_group.child_id = s.id
-      AND school_group.type = 'school'
-     JOIN group_user school_member
-       ON school_member.group_id = school_group.id
-     JOIN enrollment_record er
-       ON er.user_id = school_member.user_id
-      AND er.group_type = 'grade'
-      AND er.academic_year = $2
-     JOIN group_user batch_member
-       ON batch_member.user_id = school_member.user_id
-     JOIN "group" batch_group
-       ON batch_group.id = batch_member.group_id
-      AND batch_group.type = 'batch'
-     JOIN batch b
-       ON b.id = batch_group.child_id
-     WHERE s.id = ANY($1::bigint[])
-       AND b.program_id = $3`,
-    [schools.map((school) => school.id), academicYear, programId]
-  );
-  const matchingIds = new Set(rows.map((row) => Number(row.id)));
-  return schools.filter((school) => matchingIds.has(school.id));
-}
