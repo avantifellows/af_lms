@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Download, Plus, RotateCcw, Upload, XCircle } from "lucide-react";
 
 import Toast from "@/components/Toast";
-import { Button, Card, Input, Select } from "@/components/ui";
+import { Badge, Button, Card, Input, Select } from "@/components/ui";
 
 type MappingGroup = {
   mentor: {
@@ -314,10 +315,19 @@ export default function AcademicMentorshipManager({
       ) : null}
 
       {canEdit ? (
-        <Card className="mt-4 p-4">
-          <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+        <Card className="mt-4 overflow-hidden p-0">
+          <div className="border-b border-border bg-bg-card-alt px-4 py-3">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
+              Assign mentee
+            </h2>
+            <p className="mt-1 text-sm text-text-muted">
+              Search before selecting so the dropdowns stay scoped to this School and year.
+            </p>
+          </div>
+
+          <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <div className="grid gap-2 sm:grid-cols-2">
-              <label className="grid gap-1 text-sm font-semibold text-text-primary">
+              <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
                 Search mentors
                 <Input
                   value={mentorSearch}
@@ -328,9 +338,13 @@ export default function AcademicMentorshipManager({
                   }}
                 />
               </label>
-              <label className="grid gap-1 text-sm font-semibold text-text-primary">
+              <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
                 Academic Mentor
-                <Select value={mentorUserId} onChange={(event) => setMentorUserId(event.target.value)}>
+                <Select
+                  value={mentorUserId}
+                  onChange={(event) => setMentorUserId(event.target.value)}
+                  className="w-full min-w-0"
+                >
                   <option value="">Select mentor</option>
                   {mentorOptions.map((mentor) => (
                     <option key={mentor.userId} value={mentor.userId}>
@@ -341,7 +355,7 @@ export default function AcademicMentorshipManager({
               </label>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <label className="grid gap-1 text-sm font-semibold text-text-primary">
+              <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
                 Search mentees
                 <Input
                   value={menteeSearch}
@@ -352,9 +366,13 @@ export default function AcademicMentorshipManager({
                   }}
                 />
               </label>
-              <label className="grid gap-1 text-sm font-semibold text-text-primary">
+              <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
                 Mentee
-                <Select value={studentPkId} onChange={(event) => setStudentPkId(event.target.value)}>
+                <Select
+                  value={studentPkId}
+                  onChange={(event) => setStudentPkId(event.target.value)}
+                  className="w-full min-w-0"
+                >
                   <option value="">Select mentee</option>
                   {menteeOptions.map((mentee) => (
                     <option key={mentee.studentPkId} value={mentee.studentPkId}>
@@ -365,18 +383,21 @@ export default function AcademicMentorshipManager({
               </label>
             </div>
             <Button type="button" onClick={() => void addMapping()} disabled={busy} className="self-end">
+              <Plus className="h-4 w-4" aria-hidden="true" />
               Add Mapping
             </Button>
           </div>
-          <div className="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-[auto_1fr_auto_auto]">
+
+          <div className="grid gap-3 border-t border-border bg-bg-card-alt/60 px-4 py-3 md:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
             <a
               href={templateHref}
               download="academic-mentorship-template.csv"
-              className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-border bg-bg-card px-4 text-sm font-medium text-text-primary shadow-sm hover:bg-hover-bg"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-border bg-bg-card px-4 text-sm font-medium text-text-primary shadow-sm hover:bg-hover-bg"
             >
+              <Download className="h-4 w-4" aria-hidden="true" />
               Download CSV template
             </a>
-            <label className="grid gap-1 text-sm font-semibold text-text-primary">
+            <label className="grid gap-1.5 text-sm font-semibold text-text-primary">
               CSV file
               <Input
                 type="file"
@@ -391,6 +412,7 @@ export default function AcademicMentorshipManager({
               disabled={busy}
               className="self-end"
             >
+              <Upload className="h-4 w-4" aria-hidden="true" />
               Upload CSV
             </Button>
             {errorCsv ? (
@@ -406,41 +428,63 @@ export default function AcademicMentorshipManager({
         </Card>
       ) : null}
 
-      <section className="mt-4 space-y-4">
+      <section className="mt-4 space-y-3">
         {groups.length === 0 ? (
-          <Card className="p-6 text-sm text-text-muted">
-            No Academic Mentor-Mentee Mappings found.
+          <Card className="border-dashed p-8 text-center text-sm text-text-muted">
+            <div className="font-semibold text-text-primary">
+              No Academic Mentor-Mentee Mappings found.
+            </div>
+            <p className="mt-1">Mappings will appear here after a manual add or CSV upload.</p>
           </Card>
         ) : (
           groups.map((group) => (
-            <Card key={group.mentor.userId} className="p-0">
-              <div className="border-b border-border px-4 py-3">
-                <h2 className="font-bold text-text-primary">{group.mentor.name}</h2>
-                <p className="text-sm text-text-muted">
+            <Card key={group.mentor.userId} className="overflow-hidden p-0">
+              <div className="flex flex-col gap-3 border-b border-border bg-bg-card-alt px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-bold text-text-primary">{group.mentor.name}</h2>
+                  {group.mentor.email ? (
+                    <p className="text-sm text-text-muted">{group.mentor.email}</p>
+                  ) : null}
+                </div>
+                <Badge variant="accent" className="w-fit font-mono">
                   {group.menteeCount} mentee{group.menteeCount === 1 ? "" : "s"}
-                </p>
+                </Badge>
               </div>
               <div className="divide-y divide-border">
+                <div className="hidden bg-bg-card px-4 py-2 text-xs font-bold uppercase tracking-wide text-text-muted md:grid md:grid-cols-[minmax(0,1.6fr)_90px_120px_110px_220px]">
+                  <div>Mentee</div>
+                  <div>Grade</div>
+                  <div>Assigned</div>
+                  <div>Status</div>
+                  <div className="text-right">Actions</div>
+                </div>
                 {group.mappings.map((mapping) => (
                   <div
                     key={String(mapping.id)}
-                    className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_120px_140px_120px_160px]"
+                    className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_90px_120px_110px_220px] md:items-center"
                   >
                     <div>
                       <div className="font-semibold text-text-primary">{mapping.mentee.name}</div>
-                      <div className="text-sm text-text-muted">{mapping.mentee.studentId}</div>
+                      <div className="font-mono text-xs text-text-muted">
+                        {mapping.mentee.studentId ?? "No ID"}
+                      </div>
                     </div>
                     <div className="text-sm text-text-muted">Grade {mapping.mentee.grade ?? "-"}</div>
-                    <div className="text-sm text-text-muted">{mapping.assignedDate}</div>
+                    <div className="font-mono text-xs text-text-muted">{mapping.assignedDate}</div>
                     <div className="text-sm font-semibold text-text-primary">
-                      {mapping.status === "active" ? "Active" : "Historical"}
+                      <Badge
+                        variant={mapping.status === "active" ? "success" : "default"}
+                        className="w-fit"
+                      >
+                        {mapping.status === "active" ? "Active" : "Historical"}
+                      </Badge>
                       {includeHistory && mapping.endedDate ? (
-                        <span className="block font-normal text-text-muted">
+                        <span className="mt-1 block font-mono text-xs font-normal text-text-muted">
                           Ended {mapping.endedDate}
                         </span>
                       ) : null}
                     </div>
-                    <div>
+                    <div className="md:flex md:justify-end">
                       {canEdit && mapping.status === "active" ? (
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -450,6 +494,7 @@ export default function AcademicMentorshipManager({
                             onClick={() => startReassign(mapping.id, group.mentor.userId)}
                             disabled={busy}
                           >
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                             Reassign
                           </Button>
                           <Button
@@ -459,6 +504,7 @@ export default function AcademicMentorshipManager({
                             onClick={() => void removeMapping(mapping.id)}
                             disabled={busy}
                           >
+                            <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
                             Remove
                           </Button>
                         </div>
@@ -482,6 +528,7 @@ export default function AcademicMentorshipManager({
                           <Select
                             value={replacementMentorUserId}
                             onChange={(event) => setReplacementMentorUserId(event.target.value)}
+                            className="w-full min-w-0"
                           >
                             <option value="">Select mentor</option>
                             {replacementMentorOptions

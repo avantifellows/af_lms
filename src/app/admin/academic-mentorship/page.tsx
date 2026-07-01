@@ -1,4 +1,5 @@
 import { getServerSession } from "next-auth";
+import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -11,7 +12,7 @@ import {
   listAccessibleAcademicMentorshipSchools,
   requireAcademicMentorshipAccess,
 } from "@/lib/academic-mentorship";
-import { Card } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 import AcademicMentorshipManager from "@/components/academic-mentorship/AcademicMentorshipManager";
 
 interface PageProps {
@@ -100,20 +101,25 @@ export default async function AcademicMentorshipPage({ searchParams }: PageProps
         includeHistory: !includeHistory,
       })
     : "#";
+  const accessLabel = canEdit ? "Edit access" : "View-only";
 
   return (
     <div className="min-h-screen bg-bg">
       <header className="bg-bg-card border-b border-border shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <Link href="/admin" className="text-text-muted hover:text-text-primary p-1 -m-1">
-              <span aria-hidden="true">{"<"}</span>
+            <Link
+              href="/admin"
+              className="-m-1 inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted hover:bg-hover-bg hover:text-text-primary"
+              aria-label="Back to admin"
+            >
+              <ChevronLeft className="h-5 w-5" aria-hidden="true" />
             </Link>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-text-primary uppercase tracking-tight">
+              <h1 className="text-xl font-bold uppercase tracking-tight text-text-primary sm:text-2xl">
                 Academic Mentorship
               </h1>
-              <p className="text-xs text-text-muted font-mono">{session.user.email}</p>
+              <p className="font-mono text-xs text-text-muted">{session.user.email}</p>
             </div>
           </div>
           <Link href="/api/auth/signout" className="text-sm font-bold text-danger hover:text-danger/80">
@@ -123,31 +129,31 @@ export default async function AcademicMentorshipPage({ searchParams }: PageProps
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <Card className="p-4">
-          <form action="/admin/academic-mentorship" className="grid gap-4 md:grid-cols-[1fr_220px_auto]">
-            <label className="grid gap-1 text-sm font-semibold text-text-primary" htmlFor="school_code">
+        <Card className="overflow-hidden p-4">
+          <form action="/admin/academic-mentorship" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-end">
+            <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="school_code">
               School
               <select
                 id="school_code"
                 name="school_code"
                 defaultValue={selectedSchoolCode}
-                className="rounded-md border border-border bg-bg-card px-3 py-2 font-normal"
+                className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               >
                 <option value="">Select a School</option>
                 {schools.map((school) => (
-                  <option key={school.code} value={school.code}>
+                  <option key={`${school.id}-${school.code}`} value={school.code}>
                     {school.name} ({school.code})
                   </option>
                 ))}
               </select>
             </label>
-            <label className="grid gap-1 text-sm font-semibold text-text-primary" htmlFor="academic_year">
+            <label className="grid min-w-0 gap-1.5 text-sm font-semibold text-text-primary" htmlFor="academic_year">
               Academic year
               <select
                 id="academic_year"
                 name="academic_year"
                 defaultValue={selectedAcademicYear}
-                className="rounded-md border border-border bg-bg-card px-3 py-2 font-normal"
+                className="min-h-[44px] w-full min-w-0 max-w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2 text-sm font-normal focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               >
                 {!academicYears.includes(selectedAcademicYear) && (
                   <option value={selectedAcademicYear}>{selectedAcademicYear}</option>
@@ -160,18 +166,28 @@ export default async function AcademicMentorshipPage({ searchParams }: PageProps
               </select>
             </label>
             {includeHistory && <input type="hidden" name="include_history" value="true" />}
-            <button className="self-end rounded-md bg-accent px-4 py-2 text-sm font-bold text-white">
+            <button className="min-h-[44px] rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover">
               Apply
             </button>
           </form>
         </Card>
 
-        <div className="mt-4 flex items-center justify-between">
-          <div className="text-sm text-text-muted">
-            {canEdit ? "Edit access" : "View-only"}
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+            <Badge variant={canEdit ? "success" : "default"}>{accessLabel}</Badge>
+            {selectedSchool ? (
+              <span>
+                {selectedSchool.name} | <span className="font-mono">{selectedAcademicYear}</span>
+              </span>
+            ) : (
+              <span>Select a School to load mentorship mappings.</span>
+            )}
           </div>
           {selectedSchool && (
-            <Link href={historyHref} className="text-sm font-bold text-accent hover:text-accent-hover">
+            <Link
+              href={historyHref}
+              className="inline-flex min-h-9 w-fit items-center justify-center rounded-lg border border-border bg-bg-card px-3 text-sm font-bold text-accent hover:bg-hover-bg hover:text-accent-hover"
+            >
               {includeHistory ? "Hide history" : "Show history"}
             </Link>
           )}

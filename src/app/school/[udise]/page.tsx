@@ -24,7 +24,7 @@ import { type Grade } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
-import { Card } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 import CurriculumTab from "@/components/curriculum/CurriculumTab";
 import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
@@ -121,19 +121,31 @@ function AcademicMentorshipFlatList({
 }) {
   if (mentees.length === 0) {
     return (
-      <Card elevation="sm" className="p-6 text-sm text-text-muted">
-        No mentees assigned for this academic year.
+      <Card elevation="sm" className="border-dashed p-8 text-center text-sm text-text-muted">
+        <div className="font-semibold text-text-primary">
+          No mentees assigned for this academic year.
+        </div>
+        <p className="mt-1">Assigned Students will appear here once mappings are active.</p>
       </Card>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid gap-3 md:grid-cols-2">
       {mentees.map((mentee) => (
         <Card key={mentee.studentPkId} elevation="sm" className="p-4">
-          <div className="font-semibold text-text-primary">{mentee.name}</div>
-          <div className="mt-1 text-sm text-text-muted">
-            {menteeMeta(mentee.grade, mentee.studentId) || "Student details unavailable"}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="font-semibold text-text-primary">{mentee.name}</div>
+              <div className="mt-1 text-sm text-text-muted">
+                {menteeMeta(mentee.grade, mentee.studentId) || "Student details unavailable"}
+              </div>
+            </div>
+            {mentee.grade !== null ? (
+              <Badge variant="default" className="shrink-0 font-mono">
+                G{mentee.grade}
+              </Badge>
+            ) : null}
           </div>
         </Card>
       ))}
@@ -155,35 +167,49 @@ function AcademicMentorshipGroupedOverview({
 
   if (activeGroups.length === 0) {
     return (
-      <Card elevation="sm" className="p-6 text-sm text-text-muted">
-        No active Academic Mentor-Mentee Mappings for this academic year.
+      <Card elevation="sm" className="border-dashed p-8 text-center text-sm text-text-muted">
+        <div className="font-semibold text-text-primary">
+          No active Academic Mentor-Mentee Mappings for this academic year.
+        </div>
+        <p className="mt-1">Use the admin page to add mappings for the selected School.</p>
       </Card>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {activeGroups.map((group) => (
-        <Card key={group.mentor.userId} elevation="sm" className="p-4">
-          <div className="flex flex-col gap-1 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <Card key={group.mentor.userId} elevation="sm" className="overflow-hidden p-0">
+          <div className="flex flex-col gap-3 border-b border-border bg-bg-card-alt px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="font-bold text-text-primary">{group.mentor.name}</h3>
               {group.mentor.email && (
                 <p className="text-sm text-text-muted">{group.mentor.email}</p>
               )}
             </div>
-            <div className="text-sm font-semibold text-text-muted">
+            <Badge variant="accent" className="w-fit font-mono">
               {group.mappings.length} {group.mappings.length === 1 ? "Mentee" : "Mentees"}
-            </div>
+            </Badge>
           </div>
-          <div className="mt-3 divide-y divide-border">
+          <div className="divide-y divide-border">
             {group.mappings.map((mapping) => (
-              <div key={mapping.id} className="py-3 first:pt-0 last:pb-0">
-                <div className="font-medium text-text-primary">{mapping.mentee.name}</div>
-                <div className="mt-1 text-sm text-text-muted">
-                  {menteeMeta(mapping.mentee.grade, mapping.mentee.studentId) ||
-                    "Student details unavailable"}
+              <div
+                key={mapping.id}
+                className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+              >
+                <div>
+                  <div className="font-medium text-text-primary">{mapping.mentee.name}</div>
+                  <div className="mt-1 text-sm text-text-muted">
+                    {mapping.mentee.grade === null
+                      ? "Grade unavailable"
+                      : `Grade ${mapping.mentee.grade}`}
+                  </div>
                 </div>
+                {mapping.mentee.studentId ? (
+                  <span className="font-mono text-xs text-text-muted">
+                    {mapping.mentee.studentId}
+                  </span>
+                ) : null}
               </div>
             ))}
           </div>
@@ -206,19 +232,22 @@ function AcademicMentorshipSchoolTab({
 }) {
   return (
     <section className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
             Academic Mentorship
           </h2>
-          <p className="text-sm text-text-muted">
-            Current academic year: {CURRENT_ACADEMIC_YEAR}
-          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-text-muted">
+            <span>Current academic year: {CURRENT_ACADEMIC_YEAR}</span>
+            <Badge variant={mode === "teacher" ? "info" : "default"}>
+              {mode === "teacher" ? "My mentees" : "School overview"}
+            </Badge>
+          </div>
         </div>
         {manageHref && (
           <Link
             href={manageHref}
-            className="inline-flex min-h-10 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover"
+            className="inline-flex min-h-10 w-fit items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-hover"
           >
             Manage mappings
           </Link>
