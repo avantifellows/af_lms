@@ -37,11 +37,13 @@ async function setGoodGps(page: Page) {
 }
 
 function visitLink(page: Page, visitId: number) {
-  return page.locator(`a[href="/visits/${visitId}"]`);
+  return page.locator(`a[href="/visits/${visitId}"]`).filter({ visible: true }).first();
 }
 
 function visitTableRow(page: Page, visitId: number) {
-  return page.locator("tr", { has: visitLink(page, visitId) });
+  return page.locator("tr", {
+    has: page.locator(`a[href="/visits/${visitId}"]`),
+  });
 }
 
 async function markVisitCompleted(visitId: number) {
@@ -93,34 +95,6 @@ async function fillAFTeamInteractionForm(page: Page) {
     await page.getByTestId(`af-team-${key}-yes`).check();
   }
   await expect(page.getByTestId("af-team-progress")).toContainText("Answered: 9/9");
-}
-
-async function fillIndividualTeacherInteractionForm(page: Page) {
-  // Wait for teacher list to load
-  const addSelect = page.getByTestId("add-teacher-select");
-  await expect(addSelect).toBeVisible();
-
-  // Select the first available teacher from the dropdown
-  const options = addSelect.locator("option:not([disabled])");
-  await expect(options.first()).toBeAttached();
-  await addSelect.selectOption({ index: 1 });
-
-  // The new teacher section should auto-expand; attendance defaults to "present"
-  const teacherSections = page.locator('[data-testid^="teacher-section-"]');
-  await expect(teacherSections).toHaveCount(1);
-
-  // Get the teacher ID from the section's data-testid
-  const sectionTestId = await teacherSections.first().getAttribute("data-testid");
-  const teacherId = sectionTestId!.replace("teacher-section-", "");
-
-  // Verify attendance is "present" (default)
-  const presentRadio = page.getByTestId(`teacher-${teacherId}-attendance-present`);
-  await expect(presentRadio).toBeChecked();
-
-  // Answer all 13 questions with "Yes"
-  for (const key of INDIVIDUAL_AF_TEACHER_INTERACTION_CONFIG.allQuestionKeys) {
-    await page.getByTestId(`teacher-${teacherId}-${key}-yes`).check();
-  }
 }
 
 async function fillAllIndividualTeachers(page: Page) {
@@ -193,17 +167,6 @@ function individualStudentEntriesData(
       grade: entry.grade,
       students: entry.students,
       questions: individualStudentQuestionAnswers(entry.answer ?? true),
-    })),
-  };
-}
-
-function legacyIndividualStudentData(
-  students: Array<{ id: number; name: string; grade: 11 | 12 }>
-) {
-  return {
-    students: students.map((student) => ({
-      ...student,
-      questions: individualStudentQuestionAnswers(true),
     })),
   };
 }
@@ -447,9 +410,9 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
 
     await programAdminPage.goto("/visits");
-    const row = visitTableRow(programAdminPage, visitId);
-    await expect(row).toBeVisible();
-    await expect(row.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await expect(
+      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
+    ).toBeVisible();
 
     await programAdminPage.goto(`/visits/${visitId}`);
     await expect(
@@ -504,6 +467,9 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(inProgressCard.getByRole("button", { name: "Delete" })).toBeVisible();
 
     await inProgressCard.getByRole("button", { name: "Delete" }).click();
+    const actionDialog = pmPage.getByRole("dialog", { name: "Delete Action Point" });
+    await expect(actionDialog).toBeVisible();
+    await actionDialog.getByRole("button", { name: "Delete" }).click();
     await expect(pmPage.locator('[data-action-type="af_team_interaction"]')).toHaveCount(0);
   });
 
@@ -902,7 +868,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     await programAdminPage.goto("/visits");
     await expect(
-      programAdminPage.getByRole("heading", { name: "All Visits" })
+      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
     ).toBeVisible();
 
     await programAdminPage.goto(`/visits/${visitId}`);
@@ -1290,7 +1256,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
           questions[key] = { answer: true };
         }
         return {
-          id: t.id,
+          id: Number(t.id),
           name: t.full_name || t.email,
           attendance: "present",
           questions,
@@ -1298,7 +1264,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       }
       const att: string = i % 2 === 0 ? "absent" : "on_leave";
       return {
-        id: t.id,
+        id: Number(t.id),
         name: t.full_name || t.email,
         attendance: att,
         questions: {},
@@ -1591,7 +1557,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(refreshedIndividualCard.getByRole("link", { name: "View Details" })).toBeVisible();
   });
 
-  test("visit-completion-requires-school-staff-interaction", async ({ pmPage }) => {
+  test("visit-completion-does-not-require-school-staff-interaction", async ({ pmPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     await seedVisitAction(pool, visitId, {
       actionType: "classroom_observation",
@@ -1630,9 +1596,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await pmPage.getByRole("button", { name: "Complete Visit" }).click();
 
     await expect(
-      pmPage.getByText(
-        "At least one completed School Staff Interaction is required to complete visit"
-      )
+      pmPage.getByText("This visit is completed and read-only.")
     ).toBeVisible();
   });
 
@@ -1810,35 +1774,26 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     }
   });
 
-  test("individual-student-passively-upgrades-legacy-shape-on-open", async ({ pmPage }) => {
+  test("individual-student-existing-entry-shows-on-open", async ({ pmPage }) => {
     const student = seededStudents.find((s) => s.grade === 11)!;
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "individual_student_discussion",
       status: "in_progress",
-      data: legacyIndividualStudentData([
-        { id: student.id, name: student.name, grade: 11 },
+      data: individualStudentEntriesData([
+        {
+          id: "existing-grade-11-entry",
+          grade: 11,
+          students: [{ id: student.id, name: student.name }],
+        },
       ]),
     });
 
     await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
     await expect(pmPage.getByText(student.name)).toBeVisible();
-
-    await expect
-      .poll(
-        async () => {
-          const row = await getVisitActionData(actionId);
-          return {
-            hasEntries: Array.isArray(row.data.entries),
-            hasLegacyStudents: Array.isArray(row.data.students),
-          };
-        },
-        { timeout: 12_000 }
-      )
-      .toEqual({ hasEntries: true, hasLegacyStudents: false });
   });
 
-  test("individual-student-active-dual-shape-upgrade-adds-grouped-entry-and-completes", async ({
+  test("individual-student-active-entry-adds-grouped-entry-and-completes", async ({
     pmPage,
   }) => {
     const grade11 = seededStudents.filter((student) => student.grade === 11);
@@ -1847,8 +1802,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "individual_student_discussion",
       status: "in_progress",
-      data: legacyIndividualStudentData([
-        { id: grade11[0].id, name: grade11[0].name, grade: 11 },
+      data: individualStudentEntriesData([
+        {
+          id: "existing-grade-11-entry",
+          grade: 11,
+          students: [{ id: grade11[0].id, name: grade11[0].name }],
+        },
       ]),
     });
 

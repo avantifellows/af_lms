@@ -491,7 +491,7 @@ describe("StudentTable - Edit button hidden", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("hides only the Edit entry when the student-addition edit gate denies", () => {
+  it("hides student write actions when the student-addition edit gate denies", () => {
     render(
       <StudentTable
         students={[makeStudent()]}
@@ -502,7 +502,7 @@ describe("StudentTable - Edit button hidden", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dropout" })).not.toBeInTheDocument();
   });
 
   it("hides Edit and Dropout buttons for dropout-status students even if canEdit is true", () => {

@@ -568,7 +568,7 @@ export default function StudentTable({
               key={student.group_user_id}
               student={student}
               canEditStudent={canEditStudentEntry && canMutateStudent(student)}
-              canDropout={canMutateStudent(student)}
+              canDropout={canEditStudentEntry && canMutateStudent(student)}
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
               documentsRefreshNonce={documentsRefresh}

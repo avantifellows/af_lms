@@ -152,6 +152,21 @@ ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   updated_at = NOW();
 
+INSERT INTO public.topic_curriculum
+  (id, topic_id, curriculum_id, priority, priority_text, inserted_at, updated_at)
+VALUES
+  (900075101, 900075011, 1, 1, NULL, NOW(), NOW()),
+  (900075102, 900075021, 1, 1, NULL, NOW(), NOW()),
+  (900075103, 900075011, 9, 1, NULL, NOW(), NOW()),
+  (900075104, 900075031, 9, 1, NULL, NOW(), NOW()),
+  (900075105, 900075041, 2, 1, NULL, NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+  topic_id = EXCLUDED.topic_id,
+  curriculum_id = EXCLUDED.curriculum_id,
+  priority = EXCLUDED.priority,
+  priority_text = EXCLUDED.priority_text,
+  updated_at = NOW();
+
 INSERT INTO public.lms_chapter_exam_configs
   (chapter_id, exam_track, is_in_syllabus, prescribed_minutes, coverage_sequence, inserted_by_email, updated_by_email)
 VALUES

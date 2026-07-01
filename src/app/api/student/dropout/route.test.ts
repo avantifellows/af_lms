@@ -2,17 +2,46 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/db", () => ({ query: vi.fn() }));
+vi.mock("@/lib/student-addition-access", () => ({
+  requireStudentAdditionStudentAccess: vi.fn(),
+}));
 
 import { getServerSession } from "next-auth";
+import { query } from "@/lib/db";
+import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
 import { POST } from "./route";
 import { jsonRequest, NO_SESSION, ADMIN_SESSION } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
+const mockQuery = vi.mocked(query);
+const mockRequireStudentAdditionStudentAccess = vi.mocked(requireStudentAdditionStudentAccess);
 const mockFetch = vi.fn();
 
 beforeEach(() => {
   vi.resetAllMocks();
+  process.env.DB_SERVICE_URL = "https://db.example.test";
+  process.env.DB_SERVICE_TOKEN = "test-token";
   vi.stubGlobal("fetch", mockFetch);
+  mockQuery.mockResolvedValue([
+    {
+      id: 100,
+      student_id: "S123",
+      apaar_id: "AP123",
+      status: "enrolled",
+    },
+  ]);
+  mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+    ok: true,
+    programId: 64,
+    actor: {
+      user_id: 501,
+      email: "pm@example.org",
+      login_type: "google",
+      role: "program_manager",
+    },
+    school: { code: "JNV001", udise_code: "12345678901" },
+  });
 });
 
 const validBody = {
@@ -82,8 +111,141 @@ describe("POST /api/student/dropout", () => {
     expect(json.success).toBe(true);
   });
 
+  it("resolves the authorized student before proxying the dropout", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(new Response("", { status: 200 }));
+
+    const req = jsonRequest("http://localhost/api/student/dropout", {
+      method: "POST",
+      body: {
+        student_id: "S123",
+        apaar_id: "CLIENT-SHOULD-NOT-WIN",
+        start_date: "2026-07-01",
+        academic_year: "2026-2027",
+      },
+    });
+
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(200);
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.stringContaining("FROM student"),
+      ["S123", "CLIENT-SHOULD-NOT-WIN"],
+    );
+    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, 100);
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://db.example.test/dropout",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(payload).toEqual({
+      student_id: "S123",
+      apaar_id: "AP123",
+      start_date: "2026-07-01",
+      academic_year: "2026-2027",
+      actor: {
+        user_id: 501,
+        email: "pm@example.org",
+        login_type: "google",
+        role: "program_manager",
+      },
+      school: { code: "JNV001", udise_code: "12345678901" },
+      program_id: 64,
+    });
+  });
+
+  it("returns 403 and does not proxy when the shared student gate denies", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
+
+    const req = jsonRequest("http://localhost/api/student/dropout", {
+      method: "POST",
+      body: validBody,
+    });
+
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Forbidden" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 and does not proxy when the identifier is not found", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([]);
+
+    const req = jsonRequest("http://localhost/api/student/dropout", {
+      method: "POST",
+      body: validBody,
+    });
+
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Student not found with the provided identifier" });
+    expect(mockRequireStudentAdditionStudentAccess).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns a plain duplicate identifier error before proxying", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([
+      { id: 100, student_id: "S123", apaar_id: "AP123", status: "enrolled" },
+      { id: 101, student_id: "S456", apaar_id: "CLIENT-SHOULD-NOT-WIN", status: "enrolled" },
+    ]);
+
+    const req = jsonRequest("http://localhost/api/student/dropout", {
+      method: "POST",
+      body: {
+        student_id: "S123",
+        apaar_id: "CLIENT-SHOULD-NOT-WIN",
+        start_date: "2026-07-01",
+        academic_year: "2026-2027",
+      },
+    });
+
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("Multiple students found");
+    expect(mockRequireStudentAdditionStudentAccess).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns already-dropout before proxying", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([
+      { id: 100, student_id: "S123", apaar_id: "AP123", status: "dropout" },
+    ]);
+
+    const req = jsonRequest("http://localhost/api/student/dropout", {
+      method: "POST",
+      body: validBody,
+    });
+
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Student is already marked as dropout" });
+    expect(mockRequireStudentAdditionStudentAccess).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("uses apaar_id when student_id is not provided", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([
+      {
+        id: 100,
+        student_id: null,
+        apaar_id: "AP123",
+        status: "enrolled",
+      },
+    ]);
     mockFetch.mockResolvedValue(new Response("", { status: 200 }));
 
     const req = jsonRequest("http://localhost/api/student/dropout", {
