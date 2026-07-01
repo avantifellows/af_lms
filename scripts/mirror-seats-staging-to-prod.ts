@@ -168,7 +168,7 @@ async function main() {
     const centreIdByKey = new Map<string, number | null>(); // null = needs-decision (skip its seats)
     for (const [ck, c] of centres) {
       // exact match by name+type+program
-      let found = await client.query<{ id: number; school_id: number | null }>(
+      const found = await client.query<{ id: number; school_id: number | null }>(
         `SELECT id, school_id FROM centres WHERE lower(name)=lower($1) AND coalesce(type_code,'')=coalesce($2,'') AND program_id IS NOT DISTINCT FROM $3`,
         [c.centre_name, c.type_code, c.program_id]
       );
@@ -217,7 +217,7 @@ async function main() {
     // ----- 2. USERS: resolve / reuse dot-variant / create -----
     const userIdByEmail = new Map<string, number>();
     for (const [email, p] of people) {
-      let u = await client.query<{ id: number }>(`SELECT id FROM "user" WHERE lower(email)=$1`, [email]);
+      const u = await client.query<{ id: number }>(`SELECT id FROM "user" WHERE lower(email)=$1`, [email]);
       if (u.rows.length === 1) { userIdByEmail.set(email, u.rows[0].id); continue; }
       if (u.rows.length > 1) throw new Error(`Ambiguous target user email ${email} (${u.rows.length} rows)`);
       // try dot-variant

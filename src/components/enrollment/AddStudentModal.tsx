@@ -1,0 +1,255 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { X } from "lucide-react";
+
+import { Button, FormSection, Input, Modal, Select } from "@/components/ui";
+import {
+  ANNUAL_FAMILY_INCOME_OPTIONS,
+  BOARD_STREAM_OPTIONS,
+  CATEGORY_OPTIONS,
+  G10_BOARD_OPTIONS,
+  GENDER_OPTIONS,
+  STREAM_OPTIONS,
+  validateStudentAdditionInput,
+  type StudentAdditionInput,
+} from "@/lib/student-addition-fields";
+
+interface AddStudentModalProps {
+  open: boolean;
+  schoolUdise: string;
+  schoolCode: string;
+  onClose: () => void;
+  onCreated: () => void;
+}
+
+type ExistingMatch = Record<string, unknown>;
+
+const initialForm: Record<keyof StudentAdditionInput, string> = {
+  grade: "",
+  student_name: "",
+  date_of_birth: "",
+  gender: "",
+  category: "",
+  physically_handicapped: "",
+  apaar_id: "",
+  g10_board: "",
+  g10_roll_no: "",
+  board_stream: "",
+  stream: "",
+  father_name: "",
+  phone: "",
+  annual_family_income: "",
+};
+
+const labelClassName = "block text-sm font-medium text-text-secondary";
+
+function text(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function existingMatchMessage(existing: ExistingMatch, schoolCode: string): string {
+  const studentId = text(existing.student_id) || "blank";
+  const matchSchoolCode = text(existing.school_code);
+
+  if (!matchSchoolCode || matchSchoolCode === schoolCode) {
+    return `This student is already part of this school. Student ID: ${studentId}.`;
+  }
+
+  const schoolName = text(existing.school_name) || "another school";
+  const udise = text(existing.udise_code);
+  const location = [text(existing.district), text(existing.state)].filter(Boolean).join(", ");
+  const identifiers = [
+    `Student ID: ${studentId}`,
+    text(existing.apaar_id) ? `APAAR: ${text(existing.apaar_id)}` : "",
+    text(existing.grade) ? `Grade ${text(existing.grade)}` : "",
+    text(existing.program),
+    text(existing.stream),
+  ].filter(Boolean).join(" | ");
+
+  return [
+    `This identifier already belongs to ${text(existing.student_name) || "a student"} at ${schoolName} (${matchSchoolCode}${udise ? `, UDISE ${udise}` : ""})${location ? `, ${location}` : ""}.`,
+    identifiers,
+  ].filter(Boolean).join(" ");
+}
+
+export default function AddStudentModal({
+  open,
+  schoolUdise,
+  schoolCode,
+  onClose,
+  onCreated,
+}: AddStudentModalProps) {
+  const [form, setForm] = useState(initialForm);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const validation = useMemo(() => validateStudentAdditionInput(form), [form]);
+  const canSubmit = validation.ok && !submitting;
+
+  const setField = (name: keyof StudentAdditionInput, value: string) => {
+    setForm((prev) => ({ ...prev, [name]: value }));
+    setMessage(null);
+    setError(null);
+  };
+
+  const inputField = (
+    name: keyof StudentAdditionInput,
+    label: string,
+    type = "text",
+    inputMode?: "text" | "numeric" | "tel",
+  ) => (
+    <div>
+      <label htmlFor={name} className={labelClassName}>{label}</label>
+      <Input
+        id={name}
+        name={name}
+        type={type}
+        inputMode={inputMode}
+        value={form[name]}
+        onChange={(event) => setField(name, event.target.value)}
+      />
+    </div>
+  );
+
+  const selectField = (
+    name: keyof StudentAdditionInput,
+    label: string,
+    options: readonly string[],
+    placeholder = "Select...",
+  ) => (
+    <div>
+      <label htmlFor={name} className={labelClassName}>{label}</label>
+      <Select
+        id={name}
+        name={name}
+        value={form[name]}
+        onChange={(event) => setField(name, event.target.value)}
+        className="w-full"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </Select>
+    </div>
+  );
+
+  const identityMessage = (() => {
+    if (validation.generatedStudentId) {
+      return `Student ID will be ${validation.generatedStudentId}`;
+    }
+    if (form.apaar_id.trim() && !form.g10_roll_no.trim()) {
+      return "APAAR-only: no Student ID will be generated.";
+    }
+    return "Student ID is generated as G12 passing year + Grade 10 Roll no.";
+  })();
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!validation.ok) {
+      setError([...Object.values(validation.fieldErrors), ...validation.rowErrors][0] ?? "Check the form fields");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Failed to add student");
+
+      const result = body.results?.[0];
+      if (result?.status === "created") {
+        const generated = result.generated_student_id || result.normalized?.student_id;
+        setMessage(`Student added. Student ID: ${generated || "Not generated"}`);
+        onCreated();
+      } else if (result?.status === "already_exists") {
+        setError(existingMatchMessage(result.existing_match ?? {}, schoolCode));
+      } else if (result?.status === "rejected") {
+        setError([...(result.row_errors ?? []), ...Object.values(result.field_errors ?? {})][0] || "Student was rejected");
+      } else {
+        setError("Student was not created");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add student");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} className="flex max-h-[92vh] max-w-4xl flex-col overflow-hidden p-0">
+      <div className="flex items-start justify-between border-b border-border px-6 py-4">
+        <div>
+          <h2 className="text-xl font-semibold text-text-primary">Add Student</h2>
+          <p className="mt-1 text-sm text-text-muted">JNV NVS lateral entry</p>
+        </div>
+        <Button type="button" variant="icon" onClick={onClose} aria-label="Close add student">
+          <X className="h-5 w-5" aria-hidden="true" />
+        </Button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {message && (
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              {message}
+            </div>
+          )}
+          {error && (
+            <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
+              {error}
+            </div>
+          )}
+
+          <FormSection>
+            <h3 className="text-sm font-semibold text-text-primary">Student Details</h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {selectField("grade", "Grade", ["11", "12"])}
+              {inputField("student_name", "Student Name")}
+              {inputField("date_of_birth", "Date of Birth", "date")}
+              {selectField("gender", "Gender", GENDER_OPTIONS)}
+              {selectField("category", "Category", CATEGORY_OPTIONS)}
+              {selectField("physically_handicapped", "Physical Handicapped", ["Yes", "No"])}
+              {inputField("phone", "Parents Phone Number", "text", "tel")}
+              {inputField("father_name", "Father Name")}
+              {selectField("annual_family_income", "Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS, "Optional")}
+            </div>
+          </FormSection>
+
+          <FormSection>
+            <h3 className="text-sm font-semibold text-text-primary">Identity</h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {inputField("apaar_id", "APAAR ID", "text", "numeric")}
+              {selectField("g10_board", "G10 board", G10_BOARD_OPTIONS)}
+              {inputField("g10_roll_no", "Grade 10 Roll no")}
+              {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
+              {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS)}
+            </div>
+            <p className="rounded-md bg-bg-card-alt px-3 py-2 text-sm text-text-secondary">
+              {identityMessage}
+            </p>
+          </FormSection>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!canSubmit}>
+            {submitting ? "Adding..." : "Add Student"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

@@ -1,24 +1,32 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Plus } from "lucide-react";
 import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
 import { buildProgramStats } from "@/lib/enrollment-stats";
 import type { Batch } from "@/components/EditStudentModal";
+import { PROGRAM_IDS } from "@/lib/constants";
+import { Button } from "@/components/ui";
+import AddStudentModal from "./AddStudentModal";
 
 interface Props {
   programs: ProgramStats[];
   activeStudents: Student[];
   dropoutStudents: Student[];
   canEdit: boolean;
+  canAddStudent: boolean;
   userProgramIds: number[] | null;
   isPasscodeUser: boolean;
   isAdmin: boolean;
   grades: Grade[];
   batches: Batch[];
   nvsStreams: string[];
+  schoolUdise: string;
+  schoolCode: string;
 }
 
 export default function EnrollmentTabContent({
@@ -26,27 +34,35 @@ export default function EnrollmentTabContent({
   activeStudents,
   dropoutStudents,
   canEdit,
+  canAddStudent,
   userProgramIds,
   isPasscodeUser,
   isAdmin,
   grades,
   batches,
   nvsStreams,
+  schoolUdise,
+  schoolCode,
 }: Props) {
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(
     programs[0]?.id ?? null
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  const [addOpen, setAddOpen] = useState(false);
+  const selectedProgramId = programs.some((program) => program.id === selectedId)
+    ? selectedId
+    : programs[0]?.id ?? null;
 
   const filteredActive = useMemo(() => {
-    if (selectedId == null) return [];
-    return activeStudents.filter((s) => Number(s.program_id) === selectedId);
-  }, [activeStudents, selectedId]);
+    if (selectedProgramId == null) return [];
+    return activeStudents.filter((s) => Number(s.program_id) === selectedProgramId);
+  }, [activeStudents, selectedProgramId]);
 
   const filteredDropouts = useMemo(() => {
-    if (selectedId == null) return [];
-    return dropoutStudents.filter((s) => Number(s.program_id) === selectedId);
-  }, [dropoutStudents, selectedId]);
+    if (selectedProgramId == null) return [];
+    return dropoutStudents.filter((s) => Number(s.program_id) === selectedProgramId);
+  }, [dropoutStudents, selectedProgramId]);
 
   // Grades present in the selected program's active students, for the filter
   // dropdown. The pills + table both react to the selected grade.
@@ -78,6 +94,8 @@ export default function EnrollmentTabContent({
       .length;
   }, [filteredActive, selectedGrade]);
 
+  const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
+
   return (
     <>
       {/* Grade filter — placed above the summary so it's clear the pills react
@@ -108,12 +126,23 @@ export default function EnrollmentTabContent({
             students
           </span>
         )}
+        {showAddStudent && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="ml-auto"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add Student
+          </Button>
+        )}
       </div>
 
-      {selectedId != null && (
+      {selectedProgramId != null && (
         <EnrollmentStatsCards
           programs={scopedPrograms}
-          selectedId={selectedId}
+          selectedId={selectedProgramId}
           onSelect={(id) => {
             setSelectedId(id);
             setSelectedGrade("all");
@@ -134,6 +163,14 @@ export default function EnrollmentTabContent({
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
         hideGradeFilterUI
+      />
+
+      <AddStudentModal
+        open={addOpen}
+        schoolUdise={schoolUdise}
+        schoolCode={schoolCode}
+        onClose={() => setAddOpen(false)}
+        onCreated={() => router.refresh()}
       />
     </>
   );

@@ -9,9 +9,8 @@ import {
   getFeatureAccess,
   canAccessSchoolSync,
   hasMultipleSchools,
-  PROGRAM_IDS,
-  PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
+import { PROGRAM_IDS, PROGRAM_IDS_ORDERED } from "@/lib/constants";
 import { type Grade } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
@@ -24,6 +23,7 @@ import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
+import { getStudentAdditionAccessFromPermission } from "@/lib/student-addition-access";
 
 interface School {
   id: string;
@@ -33,6 +33,7 @@ interface School {
   district: string;
   state: string;
   region: string | null;
+  program_ids: number[] | null;
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -40,7 +41,7 @@ async function getSchoolByCode(code: string): Promise<School | null> {
   // centre (the non-JNV centre rollout: Punjab CoE meritorious / EMRS). Mirrors
   // the dashboard `schoolScope` predicate so a school listed there also opens.
   const schools = await query<School>(
-    `SELECT id, name, code, udise_code, district, state, region
+    `SELECT id, name, code, udise_code, district, state, region, program_ids
      FROM school s
      WHERE (
          s.af_school_category = 'JNV'
@@ -218,6 +219,7 @@ export default async function SchoolPage({ params }: PageProps) {
   const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
+  const canAddStudent = getStudentAdditionAccessFromPermission(session, school, permission).ok;
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
@@ -250,10 +252,14 @@ export default async function SchoolPage({ params }: PageProps) {
   // so a teacher seated at a centre sees that centre's program even when their
   // explicit program_ids is empty.
   const isAdmin = permission?.role === "admin";
-  const visibleProgramIds = (isPasscodeUser || isAdmin
+  const visibleProgramSet = new Set((isPasscodeUser || isAdmin
     ? PROGRAM_IDS_ORDERED
     : programContext.programIds
-  ).filter((id) => programsWithStudents.has(id));
+  ).filter((id) => programsWithStudents.has(id)));
+
+  if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
+
+  const visibleProgramIds = PROGRAM_IDS_ORDERED.filter((id) => visibleProgramSet.has(id));
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
     buildProgramStats(activeStudents, id)
@@ -299,12 +305,15 @@ export default async function SchoolPage({ params }: PageProps) {
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
+        canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
+        schoolUdise={school.udise_code || school.code}
+        schoolCode={school.code}
       />
     </div>
   );

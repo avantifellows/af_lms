@@ -12,12 +12,14 @@ const {
   mockRedirect,
   mockNotFound,
   mockProcessStudents,
+  mockRouterRefresh,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
   mockGetProgramContextSync: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockQuery: vi.fn(),
+  mockRouterRefresh: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -32,6 +34,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
+  useRouter: () => ({ refresh: mockRouterRefresh }),
 }));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
@@ -202,6 +205,7 @@ const makeSchool = (overrides = {}) => ({
   district: "Bhavnagar",
   state: "Gujarat",
   region: "West",
+  program_ids: [64],
   ...overrides,
 });
 
@@ -1190,8 +1194,7 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     const batchQuery = mockQuery.mock.calls.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (call: any[]) =>
+      (call: unknown[]) =>
         typeof call[0] === "string" && call[0].includes("FROM batch b")
     );
     expect(batchQuery).toBeDefined();
@@ -1265,10 +1268,11 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    // No students → no programs visible → no program cards rendered.
+    // No students, but allowed NVS staff still get the NVS add entry point.
     expect(screen.queryByText("JNV CoE Students")).not.toBeInTheDocument();
     expect(screen.queryByText("JNV Nodal Students")).not.toBeInTheDocument();
-    expect(screen.queryByText("JNV NVS Students")).not.toBeInTheDocument();
+    expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeInTheDocument();
 
     expect(screen.getByTestId("student-table")).toBeInTheDocument();
     const table = screen.getByTestId("student-table");
