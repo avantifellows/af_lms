@@ -77,6 +77,23 @@ function hasNvsSchoolContext(school: StudentAdditionSchool) {
   ].map(Number).includes(PROGRAM_IDS.NVS);
 }
 
+function requireGoogleSessionEmail(session: StudentAdditionSession | null) {
+  if (!session) return deny(401, "Unauthorized");
+  if (session.isPasscodeUser) return deny(403);
+
+  const email = session.user?.email;
+  return email ? { ok: true as const, email } : deny(403);
+}
+
+function studentAdditionActor(permission: UserPermission, email: string) {
+  return {
+    user_id: permission.user_id ?? null,
+    email,
+    login_type: "google" as const,
+    role: permission.role,
+  };
+}
+
 export function getStudentAdditionAccessFromPermission(
   session: StudentAdditionSession | null,
   school: StudentAdditionSchool,
@@ -97,12 +114,7 @@ export function getStudentAdditionAccessFromPermission(
     ok: true,
     permission,
     programId: PROGRAM_IDS.NVS,
-    actor: {
-      user_id: permission.user_id ?? null,
-      email,
-      login_type: "google",
-      role: permission.role,
-    },
+    actor: studentAdditionActor(permission, email),
   };
 }
 
@@ -110,13 +122,10 @@ export async function requireStudentAdditionAccess(
   session: StudentAdditionSession | null,
   school: StudentAdditionSchool,
 ): Promise<StudentAdditionAccessResult> {
-  if (!session) return deny(401, "Unauthorized");
-  if (session.isPasscodeUser) return deny(403);
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
 
-  const email = session.user?.email;
-  if (!email) return deny(403);
-
-  const permission = await getResolvedPermission(email);
+  const permission = await getResolvedPermission(sessionEmail.email);
   return getStudentAdditionAccessFromPermission(session, school, permission);
 }
 
@@ -153,12 +162,10 @@ export async function requireStudentAdditionStudentAccess(
   session: StudentAdditionSession | null,
   studentPkId: number | string,
 ): Promise<StudentAdditionStudentAccessResult> {
-  if (!session) return deny(401, "Unauthorized");
-  if (session.isPasscodeUser) return deny(403);
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
 
-  const email = session.user?.email;
-  if (!email) return deny(403);
-
+  const { email } = sessionEmail;
   const permission = await getResolvedPermission(email);
   if (!permission) return deny(403);
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
@@ -184,11 +191,6 @@ export async function requireStudentAdditionStudentAccess(
     permission,
     programId: PROGRAM_IDS.NVS,
     school: { code: scope.code, udise_code: scope.udise_code },
-    actor: {
-      user_id: permission.user_id ?? null,
-      email,
-      login_type: "google",
-      role: permission.role,
-    },
+    actor: studentAdditionActor(permission, email),
   };
 }
