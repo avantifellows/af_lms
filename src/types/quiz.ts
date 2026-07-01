@@ -95,6 +95,9 @@ export interface ChapterAnalysisRow {
   // Populated by the v2 reports flow; null if upstream chapter_tagging lookup
   // missed and only a raw chapter_name was available.
   chapter_id: string | null;
+  // Stream-keyed chapter priority (High/Medium/Low), resolved upstream by
+  // etl-next. Null/absent when the chapter has no tag yet.
+  priority: string | null;
   avg_score: number;
   accuracy: number;
   attempt_rate: number;
