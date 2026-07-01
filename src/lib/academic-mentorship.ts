@@ -761,20 +761,15 @@ function parseAcademicMentorshipCsv(csvText: string): AcademicMentorshipParsedCs
   if (rowLimitError) return csvFileParseFailure(rowLimitError);
 
   addDuplicateStudentIdErrors(rows);
-  const invalidRows = rows.filter((row) => row.errors.length > 0);
-  if (invalidRows.length > 0) {
-    return { ok: false, result: academicMentorshipCsvRowsFailure(header, invalidRows) };
-  }
-
   return { ok: true, header, rows };
 }
 
 function uniqueMentorEmails(rows: AcademicMentorshipCsvRow[]): string[] {
-  return [...new Set(rows.map((row) => row.mentorEmail.toLowerCase()))];
+  return [...new Set(rows.map((row) => row.mentorEmail.toLowerCase()).filter(Boolean))];
 }
 
 function uniqueStudentIds(rows: AcademicMentorshipCsvRow[]): string[] {
-  return [...new Set(rows.map((row) => row.studentId))];
+  return [...new Set(rows.map((row) => row.studentId).filter(Boolean))];
 }
 
 async function loadAcademicMentorshipImportMentors(
@@ -864,19 +859,19 @@ function addAcademicMentorshipImportLookupErrors(
   menteeByStudentId: Map<string, AcademicMentorshipImportMenteeRow>
 ) {
   for (const row of rows) {
-    if (!mentorByEmail.has(row.mentorEmail.toLowerCase())) {
+    if (row.mentorEmail && !mentorByEmail.has(row.mentorEmail.toLowerCase())) {
       row.errors.push({
         field: "mentor_email",
         error: "mentor_email is not an eligible Academic Mentor for this School",
       });
     }
     const mentee = menteeByStudentId.get(row.studentId);
-    if (!mentee) {
+    if (row.studentId && !mentee) {
       row.errors.push({
         field: "student_id",
         error: "student_id is not an eligible Mentee for this School and academic year",
       });
-    } else if (mentee.active_mapping_id != null) {
+    } else if (mentee?.active_mapping_id != null) {
       row.errors.push({ field: "student_id", error: "Student already has a mentor mapped" });
     }
   }

@@ -203,7 +203,9 @@ describe("POST /api/academic-mentorship/mappings/import", () => {
       ])
       .mockResolvedValueOnce([
         { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
-      ]);
+      ])
+      .mockResolvedValueOnce([{ email: "anita@x", user_id: 101 }])
+      .mockResolvedValueOnce([]);
 
     const response = await POST(
       csvUploadRequest("mentor_email,student_id,notes\nanita@x,,missing\n")

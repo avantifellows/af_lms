@@ -770,7 +770,9 @@ function CsvUploadModal({
       <div className="border-b border-border px-5 py-4">
         <h2 className="text-base font-bold text-text-primary">Upload CSV</h2>
         <p className="mt-1 text-sm text-text-muted">
-          CSV must contain mentor_email,student_id rows for {academicYear}.
+          CSV must contain mentor_email,student_id rows for{" "}
+          <strong className="font-bold text-text-primary">{academicYear}</strong>. Change the
+          academic year in the page dropdown before upload if this is not correct.
         </p>
       </div>
       <div className="grid max-h-[70vh] gap-4 overflow-y-auto px-5 py-4">

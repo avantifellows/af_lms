@@ -450,6 +450,9 @@ describe("AcademicMentorshipManager", () => {
     render(<AcademicMentorshipManager {...baseProps} canEdit />);
 
     await user.click(screen.getByRole("button", { name: "Upload CSV" }));
+    expect(
+      screen.getByText(/Change the academic year in the page dropdown before upload/)
+    ).toBeInTheDocument();
     await user.upload(
       screen.getByLabelText("CSV file"),
       new File(["mentor_email,student_id\nanita@x,\n"], "mappings.csv", {
