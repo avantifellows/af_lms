@@ -280,8 +280,8 @@ export async function listAcademicMentorshipMappings(params: {
        st.student_id AS mentee_student_id,
        gr.number AS mentee_grade,
        m.program_id,
-       m.assigned_at::date::text AS assigned_date,
-       m.ended_at::date::text AS ended_date
+       (m.assigned_at AT TIME ZONE 'Asia/Kolkata')::date::text AS assigned_date,
+       (m.ended_at AT TIME ZONE 'Asia/Kolkata')::date::text AS ended_date
      FROM academic_mentorship_mentor_mentee_mappings m
      JOIN "user" mentor ON mentor.id = m.mentor_user_id
      JOIN student st ON st.id = m.student_id
@@ -350,7 +350,7 @@ export async function listAcademicMentorshipTeacherMentees(params: {
        NULLIF(TRIM(COALESCE(mentee.first_name, '') || ' ' || COALESCE(mentee.last_name, '')), '') AS mentee_name,
        st.student_id AS mentee_student_id,
        gr.number AS mentee_grade,
-       m.assigned_at::date::text AS assigned_date
+       (m.assigned_at AT TIME ZONE 'Asia/Kolkata')::date::text AS assigned_date
      FROM academic_mentorship_mentor_mentee_mappings m
      JOIN student st ON st.id = m.student_id
      JOIN "user" mentee ON mentee.id = st.user_id

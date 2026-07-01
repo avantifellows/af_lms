@@ -214,7 +214,9 @@ describe("listAcademicMentorshipMappings", () => {
       includeHistory: false,
     });
 
-    expect(String(mockQuery.mock.calls[0][0])).toContain("m.ended_at IS NULL");
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("AT TIME ZONE 'Asia/Kolkata'");
+    expect(sql).toContain("m.ended_at IS NULL");
     expect(groups).toEqual([
       {
         mentor: {
@@ -279,6 +281,7 @@ describe("listAcademicMentorshipTeacherMentees", () => {
     });
 
     const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("AT TIME ZONE 'Asia/Kolkata'");
     expect(sql).toContain("m.academic_year = $2");
     expect(sql).toContain("m.mentor_user_id = $3");
     expect(sql).not.toContain("LOWER(mentor.email)");
