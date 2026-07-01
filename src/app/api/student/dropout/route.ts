@@ -86,8 +86,7 @@ export async function POST(request: NextRequest) {
 
     if (student.student_id) {
       requestBody.student_id = student.student_id;
-    }
-    if (student.apaar_id) {
+    } else if (student.apaar_id) {
       requestBody.apaar_id = student.apaar_id;
     }
 

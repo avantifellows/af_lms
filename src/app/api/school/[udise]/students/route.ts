@@ -187,7 +187,7 @@ async function proxyRowsToDbService({
   if (!response.ok) {
     const details = await response.text();
     return NextResponse.json(
-      { error: "Failed to create student", details },
+      { error: details || "Failed to create student", details },
       { status: response.status },
     );
   }

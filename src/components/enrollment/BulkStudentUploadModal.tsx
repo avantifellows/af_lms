@@ -13,6 +13,7 @@ import {
 interface BulkStudentUploadModalProps {
   open: boolean;
   schoolUdise: string;
+  schoolCode: string;
   onClose: () => void;
   onUploaded: () => void;
 }
@@ -46,17 +47,18 @@ const emptyTotals: UploadTotals = {
   rejected: 0,
 };
 
-function firstRowIssue(result: UploadResult): string {
+function firstRowIssue(result: UploadResult, schoolCode: string): string {
   return [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
-  ][0] ?? (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match) : "");
+  ][0] ?? (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
 }
 
 // fallow-ignore-next-line complexity
 export default function BulkStudentUploadModal({
   open,
   schoolUdise,
+  schoolCode,
   onClose,
   onUploaded,
 }: BulkStudentUploadModalProps) {
@@ -95,7 +97,7 @@ export default function BulkStudentUploadModal({
       });
       const json = (await response.json()) as UploadResponse;
       if (!response.ok && !json.results) {
-        throw new Error(json.error || json.details || "Upload failed");
+        throw new Error(json.details || json.error || "Upload failed");
       }
 
       setTotals(json.totals ?? emptyTotals);
@@ -214,7 +216,7 @@ export default function BulkStudentUploadModal({
                           <td className="px-3 py-2">
                             {String(result.original?.["Student Name"] ?? result.generated_student_id ?? "")}
                           </td>
-                          <td className="px-3 py-2">{firstRowIssue(result)}</td>
+                          <td className="px-3 py-2">{firstRowIssue(result, schoolCode)}</td>
                         </tr>
                       ))}
                     </tbody>

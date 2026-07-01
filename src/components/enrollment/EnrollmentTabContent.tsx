@@ -192,6 +192,7 @@ export default function EnrollmentTabContent({
       <BulkStudentUploadModal
         open={bulkOpen}
         schoolUdise={schoolUdise}
+        schoolCode={schoolCode}
         onClose={() => setBulkOpen(false)}
         onUploaded={() => router.refresh()}
       />

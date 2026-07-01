@@ -124,7 +124,6 @@ describe("POST /api/student/dropout", () => {
     const payload = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(payload).toEqual({
       student_id: "S123",
-      apaar_id: "AP123",
       start_date: "2026-07-01",
       academic_year: "2026-2027",
       actor: {

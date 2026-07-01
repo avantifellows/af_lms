@@ -184,11 +184,16 @@ function parseRowsFromAoA(
 }
 
 function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYear?: string) {
-  const rows = parse(data.toString("utf8"), {
-    bom: true,
-    relax_column_count: true,
-    skip_empty_lines: false,
-  }) as unknown[][];
+  let rows: unknown[][];
+  try {
+    rows = parse(data.toString("utf8"), {
+      bom: true,
+      relax_column_count: true,
+      skip_empty_lines: false,
+    }) as unknown[][];
+  } catch {
+    return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
+  }
   return parseRowsFromAoA(rows, selectedGrade, today, academicYear);
 }
 

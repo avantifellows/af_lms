@@ -262,7 +262,7 @@ describe("POST /api/school/[udise]/students", () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({
-      error: "Failed to create student",
+      error: "No matching batch found",
       details: "No matching batch found",
     });
   });
@@ -345,6 +345,19 @@ describe("POST /api/school/[udise]/students", () => {
   it("returns a user-facing error for corrupt xlsx uploads", async () => {
     const response = await POST(
       multipartUploadRequest("students.xlsx", "not a real workbook") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Upload a valid .xlsx file or rejected-row .csv file",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("returns a user-facing error for malformed csv uploads", async () => {
+    const response = await POST(
+      multipartUploadRequest("students.csv", `${csvLine(uploadHeaders)}\n"unterminated`) as never,
       routeParams({ udise: "12345678901" }),
     );
 

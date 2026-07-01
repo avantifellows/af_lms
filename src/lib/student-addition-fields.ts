@@ -162,7 +162,8 @@ type ExistingMatch = Record<string, unknown>;
 
 function csvCell(value: unknown): string {
   const text = value == null ? "" : String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\n]/.test(safeText) ? `"${safeText.replace(/"/g, '""')}"` : safeText;
 }
 
 function matchText(value: unknown): string {

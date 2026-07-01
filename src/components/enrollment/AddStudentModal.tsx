@@ -136,7 +136,7 @@ export default function AddStudentModal({
         body: JSON.stringify(form),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Failed to add student");
+      if (!response.ok) throw new Error(body.details || body.error || "Failed to add student");
 
       const result = body.results?.[0];
       if (result?.status === "created") {

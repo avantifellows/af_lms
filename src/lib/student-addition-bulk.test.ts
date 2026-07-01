@@ -175,6 +175,19 @@ describe("parseStudentAdditionUpload", () => {
     });
   });
 
+  it("returns a validation error for malformed csv uploads", async () => {
+    const result = await parseStudentAdditionUpload({
+      filename: "rejected-rows.csv",
+      data: Buffer.from(`${csvHeaders}\n"unterminated`),
+      selectedGrade: 11,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Upload a valid .xlsx file or rejected-row .csv file",
+    });
+  });
+
   it("allows exactly 200 non-blank rows and rejects 201", async () => {
     const twoHundredRows = Array.from({ length: 200 }, () => validCsvRow).join("\n");
     const allowed = await parseStudentAdditionUpload({
@@ -234,6 +247,19 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).not.toContain("Created Student");
     expect(csv).not.toContain("Already Present Row");
     expect(csv).not.toContain("Duplicate Student");
+  });
+
+  it("neutralizes formula-like values in rejected-row csv cells", () => {
+    const csv = buildRejectedRowsCsv([
+      {
+        row_number: 2,
+        status: "rejected",
+        original: { "Student Name": "=cmd", Grade: "+11" },
+      },
+    ]);
+
+    expect(csv).toContain("'=cmd");
+    expect(csv).toContain("'+11");
   });
 
   it("returns all local row errors and keeps 200-row validation lightweight", async () => {

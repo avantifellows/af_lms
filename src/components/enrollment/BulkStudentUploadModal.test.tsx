@@ -7,6 +7,7 @@ import BulkStudentUploadModal from "./BulkStudentUploadModal";
 const baseProps = {
   open: true,
   schoolUdise: "12345678901",
+  schoolCode: "JNV001",
   onClose: vi.fn(),
   onUploaded: vi.fn(),
 };
@@ -117,5 +118,44 @@ describe("BulkStudentUploadModal", () => {
     expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
     expect(screen.getByText(/JNV999, UDISE 99999999999/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Download rejected rows CSV" })).not.toBeInTheDocument();
+  });
+
+  it("uses school code for same-school duplicate messages", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 0, duplicate_in_file: 0, already_exists: 1, rejected: 0 },
+          results: [
+            {
+              row_number: 2,
+              status: "already_exists",
+              original: { "Student Name": "Existing" },
+              existing_match: {
+                student_id: "202812345678",
+                student_name: "Existing Student",
+                school_code: "JNV001",
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/already part of this school/)).toBeInTheDocument();
+    });
   });
 });
