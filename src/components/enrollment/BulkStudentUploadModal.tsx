@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, Upload, X } from "lucide-react";
 
 import { Button, Input, Modal, Select } from "@/components/ui";
@@ -76,6 +76,17 @@ export default function BulkStudentUploadModal({
 
   const done = (totals?.created ?? 0) + (totals?.already_exists ?? 0);
   const toGo = (totals?.duplicate_in_file ?? 0) + (totals?.rejected ?? 0);
+
+  useEffect(() => {
+    if (!open) {
+      setGrade("");
+      setFile(null);
+      setSubmitting(false);
+      setError(null);
+      setTotals(null);
+      setResults([]);
+    }
+  }, [open]);
 
   // fallow-ignore-next-line complexity
   async function handleSubmit(event: React.FormEvent) {

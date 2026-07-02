@@ -185,6 +185,19 @@ describe("EditStudentModal", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("filters restricted edit fields while typing", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "abc12345678901");
+    expect(getByName("phone")).toHaveValue("1234567890");
+
+    await user.clear(getByName("father_name"));
+    await user.type(getByName("father_name"), "Suresh123 !");
+    expect(getByName("father_name")).toHaveValue("Suresh ");
+  });
+
   it("shows field-level G10 board errors returned by the route", async () => {
     const user = userEvent.setup();
     renderModal();

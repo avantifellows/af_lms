@@ -158,4 +158,24 @@ describe("BulkStudentUploadModal", () => {
       expect(screen.getByText(/already part of this school/)).toBeInTheDocument();
     });
   });
+
+  it("resets upload state when reopened", async () => {
+    const { rerender } = render(<BulkStudentUploadModal {...baseProps} />);
+    const user = userEvent.setup();
+
+    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+
+    expect(screen.getByLabelText("Upload grade")).toHaveValue("11");
+    expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 1 }));
+
+    rerender(<BulkStudentUploadModal {...baseProps} open={false} />);
+    rerender(<BulkStudentUploadModal {...baseProps} open />);
+
+    expect(screen.getByLabelText("Upload grade")).toHaveValue("");
+    expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
+  });
 });

@@ -113,14 +113,24 @@ describe("AddStudentModal", () => {
 
     await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
     await user.type(screen.getByLabelText("Grade 10 Roll no"), "abc123456789");
-    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("123456789");
-    expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
+    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("12345678");
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "adasd12345678901");
     expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("1234567890");
 
     await user.type(screen.getByLabelText("Father Name"), "Ravi123 !");
     expect(screen.getByLabelText("Father Name")).toHaveValue("Ravi ");
+  });
+
+  it("shows CBSE roll errors when switching boards makes an existing roll invalid", async () => {
+    render(<AddStudentModal {...baseProps} />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC123");
+    await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
+
+    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("123");
+    expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
   });
 
   it("shows field-level validation for short numeric inputs", async () => {

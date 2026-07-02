@@ -82,11 +82,19 @@ export default function AddStudentModal({
       if (name === "phone") next.phone = digitsOnly(value).slice(0, 10);
       if (name === "apaar_id") next.apaar_id = digitsOnly(value).slice(0, 12);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
-      if (name === "g10_roll_no" && prev.g10_board === CBSE_BOARD) next.g10_roll_no = digitsOnly(value);
-      if (name === "g10_board" && value === CBSE_BOARD) next.g10_roll_no = digitsOnly(prev.g10_roll_no);
+      if (name === "g10_roll_no" && prev.g10_board === CBSE_BOARD) {
+        next.g10_roll_no = digitsOnly(value).slice(0, 8);
+      }
+      if (name === "g10_board" && value === CBSE_BOARD) {
+        next.g10_roll_no = digitsOnly(prev.g10_roll_no).slice(0, 8);
+      }
       return next;
     });
-    setTouched((prev) => ({ ...prev, [name]: true }));
+    setTouched((prev) => ({
+      ...prev,
+      [name]: true,
+      ...(name === "g10_board" && value === CBSE_BOARD && form.g10_roll_no ? { g10_roll_no: true } : {}),
+    }));
     setError(null);
   };
 
@@ -259,7 +267,12 @@ export default function AddStudentModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {inputField("apaar_id", "APAAR ID", "text", "numeric")}
               {selectField("g10_board", "G10 board", G10_BOARD_OPTIONS)}
-              {inputField("g10_roll_no", "Grade 10 Roll no")}
+              {inputField(
+                "g10_roll_no",
+                "Grade 10 Roll no",
+                "text",
+                form.g10_board === CBSE_BOARD ? "numeric" : "text",
+              )}
               {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
               {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS)}
             </div>

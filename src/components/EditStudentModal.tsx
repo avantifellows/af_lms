@@ -69,6 +69,14 @@ const labelClassName = "block text-sm font-medium text-text-secondary";
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
 const errorClassName = "mt-1 text-xs text-danger";
 
+function digitsOnly(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+function lettersAndSpacesOnly(value: string) {
+  return value.replace(/[^A-Za-z ]+/g, "");
+}
+
 // fallow-ignore-next-line complexity
 export default function EditStudentModal({
   student,
@@ -172,7 +180,22 @@ export default function EditStudentModal({
       }));
       return;
     }
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [name]:
+        name === "phone"
+          ? digitsOnly(value).slice(0, 10)
+          : name === "father_name"
+            ? lettersAndSpacesOnly(value)
+            : value,
+    }));
+    setError("");
+    setFieldErrors((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const textField = (
