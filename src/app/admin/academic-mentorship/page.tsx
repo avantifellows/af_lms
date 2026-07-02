@@ -204,6 +204,78 @@ function canEditSelection(
   );
 }
 
+async function loadSelectedSchoolPageModel(params: {
+  session: AuthenticatedSession;
+  academicYears: string[];
+  selectedAcademicYear: string;
+  selectedSchoolCode: string;
+  selectedProgramId: number | null;
+  includeHistory: boolean;
+}): Promise<PageModel> {
+  const selectedAccess = await requireAcademicMentorshipAccess(params.session, "view", {
+    schoolCode: params.selectedSchoolCode,
+  });
+  if (!selectedAccess.ok) {
+    if (selectedAccess.status === 404) {
+      redirect(selectionUrl({
+        academicYear: params.selectedAcademicYear,
+        programId: params.selectedProgramId,
+        includeHistory: params.includeHistory,
+      }));
+    }
+    redirect("/dashboard");
+  }
+
+  const selectedSchool = selectedAccess.school;
+  if (!selectedSchool) redirect("/dashboard");
+  const selectedSchoolIds = [selectedSchool.id];
+  const [programs, programSchoolLinks, groups] = await Promise.all([
+    listAcademicMentorshipProgramsForSchools(selectedSchoolIds, params.selectedAcademicYear),
+    listAcademicMentorshipProgramSchoolLinks(selectedSchoolIds, params.selectedAcademicYear),
+    loadSelectedGroups(
+      selectedAccess,
+      params.selectedAcademicYear,
+      params.includeHistory,
+      params.selectedProgramId
+    ),
+  ]);
+  redirectInvalidSchoolSelection({
+    selectedSchoolCode: params.selectedSchoolCode,
+    selectedSchool: schoolsForProgram(
+      [selectedSchool],
+      programSchoolLinks,
+      params.selectedProgramId
+    )[0],
+    selectedAcademicYear: params.selectedAcademicYear,
+    selectedProgramId: params.selectedProgramId,
+    includeHistory: params.includeHistory,
+  });
+
+  const canEdit = canEditSelection(selectedAccess, params.selectedAcademicYear);
+  const canUpload = selectedAccess.canEdit === true;
+  return {
+    academicYears: params.academicYears,
+    selectedAcademicYear: params.selectedAcademicYear,
+    selectedSchoolCode: params.selectedSchoolCode,
+    selectedProgramId: params.selectedProgramId,
+    includeHistory: params.includeHistory,
+    programs,
+    programSchoolLinks,
+    schools: [selectedSchool],
+    selectedSchool,
+    groups,
+    canEdit,
+    canUpload,
+    historyHref: historyUrl(
+      selectedSchool.code,
+      params.selectedAcademicYear,
+      params.selectedProgramId,
+      params.includeHistory
+    ),
+    accessLabel: canEdit ? "Edit access" : canUpload ? "CSV-only backfill" : "View-only",
+  };
+}
+
 async function loadPageModel(
   session: AuthenticatedSession,
   resolvedSearchParams: SearchParams
@@ -218,68 +290,14 @@ async function loadPageModel(
   } = selectedFilters(resolvedSearchParams, academicYears);
 
   if (selectedSchoolCode) {
-    const selectedAccess = await requireAcademicMentorshipAccess(session, "view", {
-      schoolCode: selectedSchoolCode,
-    });
-    if (!selectedAccess.ok) {
-      if (selectedAccess.status === 404) {
-        redirect(selectionUrl({
-          academicYear: selectedAcademicYear,
-          programId: selectedProgramId,
-          includeHistory,
-        }));
-      }
-      redirect("/dashboard");
-    }
-
-    const selectedSchool = selectedAccess.school;
-    if (!selectedSchool) redirect("/dashboard");
-    const selectedSchoolIds = [selectedSchool.id];
-    const [programs, programSchoolLinks, groups] = await Promise.all([
-      listAcademicMentorshipProgramsForSchools(selectedSchoolIds, selectedAcademicYear),
-      listAcademicMentorshipProgramSchoolLinks(selectedSchoolIds, selectedAcademicYear),
-      loadSelectedGroups(
-        selectedAccess,
-        selectedAcademicYear,
-        includeHistory,
-        selectedProgramId
-      ),
-    ]);
-    redirectInvalidSchoolSelection({
-      selectedSchoolCode,
-      selectedSchool: schoolsForProgram(
-        [selectedSchool],
-        programSchoolLinks,
-        selectedProgramId
-      )[0],
-      selectedAcademicYear,
-      selectedProgramId,
-      includeHistory,
-    });
-
-    const canEdit = canEditSelection(selectedAccess, selectedAcademicYear);
-    const canUpload = selectedAccess.canEdit === true;
-    return {
+    return loadSelectedSchoolPageModel({
+      session,
       academicYears,
       selectedAcademicYear,
       selectedSchoolCode,
       selectedProgramId,
       includeHistory,
-      programs,
-      programSchoolLinks,
-      schools: [selectedSchool],
-      selectedSchool,
-      groups,
-      canEdit,
-      canUpload,
-      historyHref: historyUrl(
-        selectedSchool.code,
-        selectedAcademicYear,
-        selectedProgramId,
-        includeHistory
-      ),
-      accessLabel: canEdit ? "Edit access" : canUpload ? "CSV-only backfill" : "View-only",
-    };
+    });
   }
 
   const accessibleSchools = await listAccessibleAcademicMentorshipSchools(baseAccess.permission);

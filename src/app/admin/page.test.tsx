@@ -1,11 +1,12 @@
+// fallow-ignore-file code-duplication
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
-const { mockGetServerSession, mockIsAdmin, mockRedirect } = vi.hoisted(() => ({
+const { mockGetServerSession, mockRequireAdmin, mockRedirect } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
-  mockIsAdmin: vi.fn(),
+  mockRequireAdmin: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
@@ -14,7 +15,7 @@ const { mockGetServerSession, mockIsAdmin, mockRedirect } = vi.hoisted(() => ({
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin }));
+vi.mock("@/lib/admin-guard", () => ({ requireAdmin: mockRequireAdmin }));
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -39,18 +40,25 @@ const adminSession = {
 describe("AdminPage (server component)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireAdmin.mockResolvedValue({
+      ok: true,
+      email: "admin@avantifellows.org",
+      permission: { role: "admin" },
+    });
   });
 
   it("redirects to / when there is no session", async () => {
     mockGetServerSession.mockResolvedValue(null);
+    mockRequireAdmin.mockResolvedValue({ ok: false, status: 401, error: "Unauthorized" });
 
     await expect(AdminPage()).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-    expect(mockIsAdmin).not.toHaveBeenCalled();
+    expect(mockRequireAdmin).toHaveBeenCalledWith(null);
   });
 
   it("redirects to / when session has no email", async () => {
     mockGetServerSession.mockResolvedValue({ user: {} });
+    mockRequireAdmin.mockResolvedValue({ ok: false, status: 401, error: "Unauthorized" });
 
     await expect(AdminPage()).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
@@ -58,16 +66,15 @@ describe("AdminPage (server component)", () => {
 
   it("redirects to /dashboard when user is not admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
-    mockIsAdmin.mockResolvedValue(false);
+    mockRequireAdmin.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
 
     await expect(AdminPage()).rejects.toThrow("REDIRECT:/dashboard");
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockIsAdmin).toHaveBeenCalledWith("admin@avantifellows.org");
+    expect(mockRequireAdmin).toHaveBeenCalledWith(adminSession);
   });
 
   it("renders admin links when user is admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
-    mockIsAdmin.mockResolvedValue(true);
 
     const jsx = await AdminPage();
     render(jsx);
@@ -105,7 +112,7 @@ describe("AdminPage (server component)", () => {
 
   it("does not let program_admin users enter through /admin", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "program_admin@avantifellows.org" } });
-    mockIsAdmin.mockResolvedValue(false);
+    mockRequireAdmin.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
 
     await expect(AdminPage()).rejects.toThrow("REDIRECT:/dashboard");
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
@@ -113,7 +120,6 @@ describe("AdminPage (server component)", () => {
 
   it("displays user email and navigation links", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
-    mockIsAdmin.mockResolvedValue(true);
 
     const jsx = await AdminPage();
     render(jsx);
