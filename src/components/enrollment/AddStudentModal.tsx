@@ -62,7 +62,6 @@ export default function AddStudentModal({
   const [form, setForm] = useState(initialForm);
   const [touched, setTouched] = useState<Partial<Record<keyof StudentAdditionInput, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const validation = useMemo(() => validateStudentAdditionInput(form), [form]);
@@ -78,7 +77,6 @@ export default function AddStudentModal({
       return next;
     });
     setTouched((prev) => ({ ...prev, [name]: true }));
-    setMessage(null);
     setError(null);
   };
 
@@ -183,7 +181,6 @@ export default function AddStudentModal({
 
     setSubmitting(true);
     setError(null);
-    setMessage(null);
     try {
       const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
         method: "POST",
@@ -195,9 +192,8 @@ export default function AddStudentModal({
 
       const result = body.results?.[0];
       if (result?.status === "created") {
-        const generated = result.generated_student_id || result.normalized?.student_id;
-        setMessage(`Student added. Student ID: ${generated || "Not generated"}`);
         onCreated();
+        onClose();
       } else if (result?.status === "already_exists") {
         setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
       } else if (result?.status === "rejected") {
@@ -227,11 +223,6 @@ export default function AddStudentModal({
 
       <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-          {message && (
-            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
-              {message}
-            </div>
-          )}
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
               {error}

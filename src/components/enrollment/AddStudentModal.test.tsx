@@ -60,7 +60,8 @@ describe("AddStudentModal", () => {
     await user.click(screen.getByRole("button", { name: "Add Student" }));
 
     await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalled());
-    expect(screen.getByText("Student added. Student ID: 202812345678")).toBeInTheDocument();
+    expect(baseProps.onClose).toHaveBeenCalled();
+    expect(screen.queryByText(/Student added/)).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(
       "/api/school/12345678901/students",
       expect.objectContaining({ method: "POST" }),

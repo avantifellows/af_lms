@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Upload } from "lucide-react";
 import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
+import Toast from "@/components/Toast";
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
@@ -55,6 +56,7 @@ export default function EnrollmentTabContent({
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const selectedProgramId = programs.some((program) => program.id === selectedId)
     ? selectedId
     : programs[0]?.id ?? null;
@@ -101,8 +103,21 @@ export default function EnrollmentTabContent({
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
 
+  const handleStudentCreated = () => {
+    setAddOpen(false);
+    setToast("Student added.");
+    router.refresh();
+  };
+
   return (
     <>
+      {toast && (
+        <Toast
+          variant="success"
+          message={toast}
+          onDismiss={() => setToast(null)}
+        />
+      )}
       {/* Grade filter — placed above the summary so it's clear the pills react
           to it. */}
       <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
@@ -187,7 +202,7 @@ export default function EnrollmentTabContent({
         schoolUdise={schoolUdise}
         schoolCode={schoolCode}
         onClose={() => setAddOpen(false)}
-        onCreated={() => router.refresh()}
+        onCreated={handleStudentCreated}
       />
       <BulkStudentUploadModal
         open={bulkOpen}

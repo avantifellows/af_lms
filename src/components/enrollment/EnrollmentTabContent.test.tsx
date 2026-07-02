@@ -76,6 +76,8 @@ describe("EnrollmentTabContent", () => {
     await user.click(screen.getByRole("button", { name: "mock add modal" }));
 
     expect(mockRefresh).toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Student added.");
+    expect(screen.queryByRole("button", { name: "mock add modal" })).not.toBeInTheDocument();
   });
 
   it("shows the Bulk Upload entry only for the selected NVS program and refreshes after upload", async () => {
