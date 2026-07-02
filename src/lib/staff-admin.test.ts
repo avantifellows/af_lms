@@ -39,6 +39,7 @@ import {
   setUserRole,
   updatePosition,
   updateStaffMember,
+  updateStaffName,
   updateTeacherRecord,
   validateTeacherUpdateBody,
 } from "./staff-admin";
@@ -541,6 +542,60 @@ describe("updateStaffMember", () => {
     expect(
       await updateStaffMember({ id: 3, body: { employee_code: "AF7" } })
     ).toMatchObject({ ok: false, status: 409 });
+  });
+});
+
+describe("updateStaffName", () => {
+  it("rejects a blank name", async () => {
+    mockSchemaReady();
+    expect(
+      await updateStaffName({ body: { user_id: 70, full_name: "   " } })
+    ).toMatchObject({ ok: false, status: 422 });
+  });
+
+  it("requires an identifier", async () => {
+    mockSchemaReady();
+    expect(
+      await updateStaffName({ body: { full_name: "Jane Doe" } })
+    ).toMatchObject({ ok: false, status: 422 });
+  });
+
+  it("writes the user table (split) and mirrors full_name for a linked user", async () => {
+    mockSchemaReady();
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // UPDATE "user"
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE user_permission
+    const result = await updateStaffName({
+      body: { user_id: 70, full_name: "  Jane  Kumari Doe " },
+    });
+    expect(result).toEqual({ ok: true });
+    const calls = mockClientQuery.mock.calls;
+    expect(calls[0][0]).toContain('UPDATE "user" SET first_name = $1');
+    expect(calls[0][1]).toEqual(["Jane", "Kumari Doe", 70]);
+    expect(calls[1][0]).toContain("UPDATE user_permission SET full_name = $1");
+    expect(calls[1][1]).toEqual(["Jane Kumari Doe", 70]);
+  });
+
+  it("updates user_permission.full_name for a pending row", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    const result = await updateStaffName({
+      body: { permission_id: 12, full_name: "Asha" },
+    });
+    expect(result).toEqual({ ok: true });
+    const call = mockClientQuery.mock.calls[0];
+    expect(call[0]).toContain("UPDATE user_permission SET full_name = $1");
+    expect(call[1]).toEqual(["Asha", 12]);
+  });
+
+  it("404s when nothing matched", async () => {
+    mockSchemaReady();
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    expect(
+      await updateStaffName({ body: { user_id: 999, full_name: "Ghost" } })
+    ).toMatchObject({ ok: false, status: 404 });
   });
 });
 

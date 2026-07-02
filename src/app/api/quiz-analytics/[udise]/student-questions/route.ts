@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
-import { getCumulativeALData } from "@/lib/bigquery";
+import { getStudentQuestionLevelData } from "@/lib/bigquery";
 
 export async function GET(
   request: Request,
@@ -12,8 +12,13 @@ export async function GET(
 
   const url = new URL(request.url);
   const gradeParam = url.searchParams.get("grade");
-  if (!gradeParam) {
-    return NextResponse.json({ error: "grade is required" }, { status: 400 });
+  const sessionId = url.searchParams.get("sessionId");
+
+  if (!gradeParam || !sessionId) {
+    return NextResponse.json(
+      { error: "grade and sessionId are required" },
+      { status: 400 }
+    );
   }
   const grade = Number(gradeParam);
   if (!Number.isInteger(grade)) {
@@ -23,17 +28,18 @@ export async function GET(
   try {
     const program = url.searchParams.get("program") || undefined;
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
-    const testGradeParam = url.searchParams.get("testGrade");
-    const testGrade =
-      testGradeParam && Number.isInteger(Number(testGradeParam))
-        ? Number(testGradeParam)
-        : undefined;
-    const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
-    return NextResponse.json(data);
+    const questions = await getStudentQuestionLevelData(
+      udise,
+      grade,
+      sessionId,
+      program,
+      stream
+    );
+    return NextResponse.json({ questions });
   } catch (error) {
-    console.error("Cumulative AL error:", error);
+    console.error("Student questions error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch cumulative AL data" },
+      { error: "Failed to fetch student question-level data" },
       { status: 500 }
     );
   }

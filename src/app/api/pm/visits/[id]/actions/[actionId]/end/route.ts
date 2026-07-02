@@ -11,6 +11,7 @@ import { validateIndividualTeacherComplete } from "@/lib/individual-af-teacher-i
 import { validateIndividualStudentDiscussionComplete } from "@/lib/individual-student-discussion";
 import { validatePrincipalInteractionComplete } from "@/lib/principal-interaction";
 import { validateSchoolStaffInteractionComplete } from "@/lib/school-staff-interaction";
+import { getVisitTeachersForSchool } from "@/lib/visit-teachers";
 import {
   apiError,
   enforceVisitWriteAccess,
@@ -173,23 +174,13 @@ function schoolStaffInteractionValidationError(action: VisitActionRow) {
 
 async function allTeachersRecordedError(
   action: VisitActionRow,
-  schoolCode: string,
-  schoolRegion: string | null
+  schoolCode: string
 ) {
   if (action.action_type !== "individual_af_teacher_interaction") {
     return null;
   }
 
-  const allTeachers = await query<{ id: number; full_name: string | null; email: string }>(
-    `SELECT id, full_name, email FROM user_permission
-     WHERE role = 'teacher'
-       AND (
-         school_codes @> ARRAY[$1]::TEXT[]
-         OR ($2::TEXT IS NOT NULL AND regions @> ARRAY[$2]::TEXT[])
-         OR level = 3
-       )`,
-    [schoolCode, schoolRegion]
-  );
+  const allTeachers = await getVisitTeachersForSchool(schoolCode);
 
   const data = action.data as { teachers?: Array<{ id: number }> };
   const recordedIds = new Set((data.teachers ?? []).map((t) => Number(t.id)));
@@ -298,8 +289,7 @@ export async function POST(
 
   const missingTeachersError = await allTeachersRecordedError(
     existingAction,
-    visit.school_code,
-    visit.school_region
+    visit.school_code
   );
   if (missingTeachersError) {
     return missingTeachersError;
@@ -378,8 +368,7 @@ export async function POST(
 
   const currentMissingTeachersError = await allTeachersRecordedError(
     current,
-    visit.school_code,
-    visit.school_region
+    visit.school_code
   );
   if (currentMissingTeachersError) {
     return currentMissingTeachersError;

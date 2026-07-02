@@ -63,7 +63,19 @@ describe("GET /api/quiz-analytics/[udise]/cumulative-als", () => {
       makeRequest("12", { stream: "PCM", program: "JNV" }),
       routeParams({ udise: "1234" })
     );
-    expect(mockGet).toHaveBeenCalledWith("1234", 12, "JNV", "pcm");
+    // 5th arg (testGrade) is undefined when the param is absent.
+    expect(mockGet).toHaveBeenCalledWith("1234", 12, "JNV", "pcm", undefined);
+  });
+
+  it("forwards the testGrade param to the BQ helper", async () => {
+    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
+    mockGet.mockResolvedValue({ students: [], tests: [] });
+
+    await GET(
+      makeRequest("12", { testGrade: "11" }),
+      routeParams({ udise: "1234" })
+    );
+    expect(mockGet).toHaveBeenCalledWith("1234", 12, undefined, undefined, 11);
   });
 
   it("returns the BQ helper's {students, tests} payload directly", async () => {

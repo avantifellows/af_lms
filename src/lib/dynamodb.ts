@@ -103,6 +103,10 @@ interface V2ChapterPerformance {
   chapter_name?: string;
   chapter_id?: string | null;
   subject?: string;
+  // Stream-keyed chapter priority (High/Medium/Low/None/null), written by
+  // etl-next's student_reports_v2_flow from chapter_tagging — already resolved
+  // to the student's stream, so af_lms just surfaces it.
+  priority?: string | null;
   marks_scored?: number | null;
   max_marks_possible?: number | null;
   percentage?: number | null;
@@ -276,7 +280,10 @@ export async function getTestDeepDiveFromDynamo(
       subject: string;
       chapter_name: string;
       chapter_id: string | null;
+      priority: string | null;
       totalScore: number;
+      totalMarks: number;
+      maxMarks: number;
       totalAcc: number;
       totalAttempt: number;
       totalQ: number;
@@ -313,8 +320,13 @@ export async function getTestDeepDiveFromDynamo(
       const sectionDisplay = si.subject || "";
       const sectionKey = sectionDisplay.toLowerCase();
 
-      const total = toNum(si.total_questions);
-      const skipped = toNum(si.num_skipped);
+      // subject_performance stamps TEST-WIDE totals onto every subject row
+      // (e.g. total_questions=75 and num_skipped=25 repeated across all three
+      // subjects of a 75-question JEE test), so the per-subject question count
+      // and attempt rate must be derived from this subject's chapters instead.
+      const subjectChapters = chaptersBySubject.get(sectionKey) || [];
+      const total = subjectChapters.reduce((sum, c) => sum + toNum(c.total_questions), 0);
+      const skipped = subjectChapters.reduce((sum, c) => sum + toNum(c.num_skipped), 0);
       const attemptRate = total > 0 ? ((total - skipped) / total) * 100 : 0;
 
       // Subject analysis aggregates across the class.
@@ -334,7 +346,6 @@ export async function getTestDeepDiveFromDynamo(
       subjectAggMap.set(sectionKey, existing);
 
       // Per-student chapter rows for this subject.
-      const subjectChapters = chaptersBySubject.get(sectionKey) || [];
       const chapters: StudentChapterScore[] = subjectChapters.map((c) => {
         const chTotal = toNum(c.total_questions);
         const chMax = toNum(c.max_marks_possible);
@@ -349,13 +360,23 @@ export async function getTestDeepDiveFromDynamo(
           subject: sectionDisplay,
           chapter_name: c.chapter_name || "",
           chapter_id: c.chapter_id || null,
+          priority: null,
           totalScore: 0,
+          totalMarks: 0,
+          maxMarks: 0,
           totalAcc: 0,
           totalAttempt: 0,
           totalQ: 0,
           count: 0,
         };
+        // Priority is constant per chapter across students; keep the first
+        // meaningful (non-empty, non-"None") value we see.
+        if (!chEx.priority && c.priority && c.priority !== "None") {
+          chEx.priority = c.priority;
+        }
         chEx.totalScore += chPct;
+        chEx.totalMarks += chMarks;
+        chEx.maxMarks = Math.max(chEx.maxMarks, chMax);
         chEx.totalAcc += toNum(c.accuracy);
         chEx.totalAttempt += chAttemptRate;
         chEx.totalQ = Math.max(chEx.totalQ, chTotal);
@@ -365,6 +386,7 @@ export async function getTestDeepDiveFromDynamo(
         return {
           subject: sectionDisplay,
           chapter_name: c.chapter_name || "",
+          chapter_id: c.chapter_id || null,
           marks_scored: chMarks,
           max_marks: chMax,
           accuracy: toNum(c.accuracy),
@@ -390,6 +412,8 @@ export async function getTestDeepDiveFromDynamo(
 
     studentRows.push({
       student_name: studentName,
+      // doc.user_id is the enrollment_user_id (the BQ question-level join key).
+      enrollment_user_id: doc.user_id != null ? String(doc.user_id) : null,
       gender: student.gender,
       marks_scored: toNum(overall.marks_scored),
       max_marks: toNum(overall.max_marks_possible),
@@ -404,6 +428,7 @@ export async function getTestDeepDiveFromDynamo(
 
   // Compute summary
   const percentages = studentRows.map((s) => s.percentage);
+  const marks = studentRows.map((s) => s.marks_scored);
   const accuracies = studentRows.map((s) => s.accuracy);
   const attemptRates = studentRows.map((s) => s.attempt_rate);
 
@@ -411,14 +436,20 @@ export async function getTestDeepDiveFromDynamo(
     arr.length > 0
       ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10
       : 0;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
 
   const summary: TestDeepDiveSummary = {
     test_name: testName,
     start_date: startDate,
     students_appeared: studentRows.length,
     avg_score: avg(percentages),
-    min_score: Math.round(Math.min(...percentages) * 10) / 10,
-    max_score: Math.round(Math.max(...percentages) * 10) / 10,
+    min_score: round1(Math.min(...percentages)),
+    max_score: round1(Math.max(...percentages)),
+    avg_marks: avg(marks),
+    min_marks: round1(Math.min(...marks)),
+    max_marks: round1(Math.max(...marks)),
+    // Test max is shared across students; take the largest seen to be safe.
+    total_marks: round1(Math.max(...studentRows.map((s) => s.max_marks))),
     avg_accuracy: avg(accuracies),
     avg_attempt_rate: avg(attemptRates),
   };
@@ -440,7 +471,10 @@ export async function getTestDeepDiveFromDynamo(
       subject: agg.subject,
       chapter_name: agg.chapter_name,
       chapter_id: agg.chapter_id,
+      priority: agg.priority,
       avg_score: Math.round((agg.totalScore / agg.count) * 10) / 10,
+      avg_marks: Math.round((agg.totalMarks / agg.count) * 10) / 10,
+      max_marks: Math.round(agg.maxMarks * 10) / 10,
       accuracy: Math.round((agg.totalAcc / agg.count) * 10) / 10,
       attempt_rate: Math.round((agg.totalAttempt / agg.count) * 10) / 10,
       questions: agg.totalQ,
