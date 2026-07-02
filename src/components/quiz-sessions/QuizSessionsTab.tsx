@@ -8,6 +8,7 @@ import {
 } from "@/lib/quiz-session-options";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 import { parseBatchStream } from "@/lib/batch-code";
+import type { ExamTrack } from "@/types/curriculum";
 
 interface BatchOption {
   id: number;
@@ -80,6 +81,39 @@ const DEFAULT_DURATION_HOURS = 4;
 const AUTO_SYNC_INTERVAL_MINUTES = 60;
 const QA_GURUKUL_FORMAT = "qa";
 const GradeOptions = [11, 12];
+
+// New-CMS chapter-test picker (source toggle inside session creation).
+type TestSource = "legacy" | "cms";
+// New-CMS test subtypes the picker supports. chapter_test drills Subject -> Chapter;
+// major_test is full-syllabus (picked straight off exam track + grade). The CMS list route
+// is subtype-agnostic, so widening this list is a UI-only change.
+type CmsTestType = "chapter_test" | "major_test";
+const CMS_TEST_TYPE_OPTIONS: { value: CmsTestType; label: string }[] = [
+  { value: "chapter_test", label: "Chapter Test" },
+  { value: "major_test", label: "Major Test" },
+];
+const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
+  { value: "jee_main", label: "JEE Main" },
+  { value: "jee_advanced", label: "JEE Advanced" },
+  { value: "neet", label: "NEET" },
+];
+const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
+const GRADE_ID_BY_NUMBER: Record<string, string> = { "11": "3", "12": "4" };
+
+interface CmsChapterOption {
+  id: number;
+  code: string;
+  name: string;
+}
+
+interface CmsTestOption {
+  id: number;
+  code: string;
+  name: string;
+  chapterId: number | null;
+  marks: number | null;
+  duration: string | null;
+}
 
 function getDefaultSessionName(baseName: string): string {
   return baseName.trim();
@@ -911,6 +945,21 @@ function QuizSessionCreateModal({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [onClose]);
 
+  // New-CMS test picker. chapter_test drills Exam track -> Grade -> Subject -> Chapter -> test;
+  // major_test skips subject/chapter and lists straight off exam track + grade.
+  const [testSource, setTestSource] = useState<TestSource>("legacy");
+  const [cmsTestType, setCmsTestType] = useState<CmsTestType>("chapter_test");
+  const [cmsExamTrack, setCmsExamTrack] = useState<ExamTrack | "">("");
+  const [cmsGrade, setCmsGrade] = useState("");
+  const [cmsSubject, setCmsSubject] = useState("");
+  const [cmsChapters, setCmsChapters] = useState<CmsChapterOption[]>([]);
+  const [cmsChapterId, setCmsChapterId] = useState<number | null>(null);
+  const [cmsTests, setCmsTests] = useState<CmsTestOption[]>([]);
+  const [loadingCmsChapters, setLoadingCmsChapters] = useState(false);
+  const [loadingCmsTests, setLoadingCmsTests] = useState(false);
+  const [cmsError, setCmsError] = useState<string | null>(null);
+  const [selectedCmsTestId, setSelectedCmsTestId] = useState<number | null>(null);
+
   const parentIdSet = useMemo(() => {
     const set = new Set<number>();
     batches.forEach((batch) => {
@@ -1056,6 +1105,100 @@ function QuizSessionCreateModal({
     [selectedTemplateId, templates]
   );
 
+  // CMS cascade: fetch in-syllabus chapters once exam-track + grade + subject are chosen.
+  // Only chapter tests drill by chapter; major tests skip this step entirely.
+  useEffect(() => {
+    if (
+      testSource !== "cms" ||
+      cmsTestType !== "chapter_test" ||
+      !cmsExamTrack ||
+      !cmsGrade ||
+      !cmsSubject
+    ) {
+      setCmsChapters([]);
+      setCmsChapterId(null);
+      return;
+    }
+    let cancelled = false;
+    async function run() {
+      setLoadingCmsChapters(true);
+      setCmsError(null);
+      try {
+        const params = new URLSearchParams({
+          exam_track: cmsExamTrack,
+          grade: cmsGrade,
+          subject: cmsSubject,
+        });
+        const res = await fetch(`/api/cms/chapters?${params.toString()}`);
+        if (!res.ok) throw new Error("Failed to fetch chapters");
+        const data = await res.json();
+        if (!cancelled) setCmsChapters(data.chapters ?? []);
+      } catch (err) {
+        if (!cancelled) {
+          setCmsError((err as Error).message);
+          setCmsChapters([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingCmsChapters(false);
+      }
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [testSource, cmsTestType, cmsExamTrack, cmsGrade, cmsSubject]);
+
+  useEffect(() => {
+    if (cmsChapterId && !cmsChapters.some((chapter) => chapter.id === cmsChapterId)) {
+      setCmsChapterId(null);
+    }
+  }, [cmsChapterId, cmsChapters]);
+
+  // CMS cascade: fetch tests once the type's inputs are complete — chapter tests need a
+  // chapter selected; major tests list straight off exam track + grade.
+  const cmsTestsReady =
+    testSource === "cms" &&
+    !!cmsExamTrack &&
+    !!cmsGrade &&
+    (cmsTestType === "major_test" || cmsChapterId !== null);
+  useEffect(() => {
+    if (!cmsTestsReady) {
+      setCmsTests([]);
+      setSelectedCmsTestId(null);
+      return;
+    }
+    let cancelled = false;
+    async function run() {
+      setLoadingCmsTests(true);
+      setCmsError(null);
+      try {
+        const params = new URLSearchParams({
+          exam_track: cmsExamTrack,
+          grade_id: GRADE_ID_BY_NUMBER[cmsGrade] ?? "",
+          test_type: cmsTestType,
+        });
+        if (cmsTestType === "chapter_test" && cmsChapterId !== null) {
+          params.set("chapter_id", String(cmsChapterId));
+        }
+        const res = await fetch(`/api/cms/tests?${params.toString()}`);
+        if (!res.ok) throw new Error("Failed to fetch tests");
+        const data = await res.json();
+        if (!cancelled) setCmsTests(data.tests ?? []);
+      } catch (err) {
+        if (!cancelled) {
+          setCmsError((err as Error).message);
+          setCmsTests([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingCmsTests(false);
+      }
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [cmsTestsReady, testSource, cmsTestType, cmsExamTrack, cmsGrade, cmsChapterId]);
+
   useEffect(() => {
     if (!selectedTemplate) {
       if (!nameEdited) {
@@ -1089,11 +1232,21 @@ function QuizSessionCreateModal({
     if (!batchDerivation.stream) {
       return "Batch details could not be derived.";
     }
-    if (!selectedGrade) return "Grade is required.";
-    if (!testFormat) return "Test format is required.";
-    if (!selectedTemplate) return "Please select a paper.";
-    if (selectedTemplate.grade === null) {
-      return "Selected paper is missing grade metadata.";
+
+    if (testSource === "cms") {
+      if (!cmsExamTrack) return "Exam track is required.";
+      if (!cmsGrade) return "Grade is required.";
+      if (cmsTestType === "chapter_test" && cmsChapterId === null) {
+        return "Chapter is required.";
+      }
+      if (selectedCmsTestId === null) return "Please select a CMS test.";
+    } else {
+      if (!selectedGrade) return "Grade is required.";
+      if (!testFormat) return "Test format is required.";
+      if (!selectedTemplate) return "Please select a paper.";
+      if (selectedTemplate.grade === null) {
+        return "Selected paper is missing grade metadata.";
+      }
     }
 
     if (timingMode === "schedule") {
@@ -1117,8 +1270,6 @@ function QuizSessionCreateModal({
       return;
     }
 
-    if (!selectedTemplate || selectedTemplate.grade === null) return;
-
     setSaving(true);
     setError(null);
 
@@ -1129,6 +1280,48 @@ function QuizSessionCreateModal({
         timingMode === "start_now"
           ? addHours(computedStart, DEFAULT_DURATION_HOURS)
           : new Date(endTime);
+
+      if (testSource === "cms") {
+        // Synchronous CMS path: af_lms builds the quiz + materializes the session itself
+        // (no SNS/Lambda), so the session is ready when this returns.
+        const selectedCmsTest = cmsTests.find(
+          (test) => test.id === selectedCmsTestId
+        );
+        const cmsPayload = {
+          name: name.trim() || selectedCmsTest?.name || "",
+          cmsTestId: selectedCmsTestId,
+          testType: cmsTestType,
+          examTrack: cmsExamTrack,
+          grade: Number(cmsGrade),
+          testName: selectedCmsTest?.name,
+          testCode: selectedCmsTest?.code,
+          parentBatchId: batchDerivation.parentBatchId,
+          classBatchIds,
+          stream: batchDerivation.stream,
+          showAnswers,
+          showScores,
+          shuffle,
+          gurukulFormatType: getGurukulFormatForShuffle(gurukulFormatType, shuffle),
+          startTime: computedStart.toISOString(),
+          endTime: computedEnd.toISOString(),
+        };
+
+        const response = await fetch("/api/quiz-sessions/from-cms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cmsPayload),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to create session");
+        }
+
+        onCreated("Session created.");
+        return;
+      }
+
+      if (!selectedTemplate || selectedTemplate.grade === null) return;
 
       const payload = {
         name: name.trim() || getDefaultSessionName(selectedTemplate.name),
@@ -1241,6 +1434,30 @@ function QuizSessionCreateModal({
 
               <SectionCard title="2. Select Paper">
                 <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        { value: "legacy", label: "Legacy paper" },
+                        { value: "cms", label: "New CMS Test" },
+                      ] as { value: TestSource; label: string }[]
+                    ).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setTestSource(option.value)}
+                        className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                          testSource === option.value
+                            ? "border-accent bg-accent text-text-on-accent"
+                            : "border-border bg-bg-card text-text-primary hover:bg-hover-bg"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {testSource === "legacy" && (
+                  <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <label
@@ -1367,6 +1584,216 @@ function QuizSessionCreateModal({
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                  </div>
+                  )}
+
+                  {testSource === "cms" && (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                            Test type
+                          </label>
+                          <select
+                            value={cmsTestType}
+                            onChange={(event) => {
+                              setCmsTestType(event.target.value as CmsTestType);
+                              // Chapter/subject are only meaningful for chapter tests; clear
+                              // them (and any selection) when the type changes.
+                              setCmsSubject("");
+                              setCmsChapterId(null);
+                              setSelectedCmsTestId(null);
+                            }}
+                            className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                          >
+                            {CMS_TEST_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                            Exam Track
+                          </label>
+                          <select
+                            value={cmsExamTrack}
+                            onChange={(event) => {
+                              setCmsExamTrack(event.target.value as ExamTrack | "");
+                              setCmsChapterId(null);
+                            }}
+                            className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                          >
+                            <option value="">Select exam track</option>
+                            {EXAM_TRACK_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                            Grade
+                          </label>
+                          <select
+                            value={cmsGrade}
+                            onChange={(event) => {
+                              setCmsGrade(event.target.value);
+                              setCmsChapterId(null);
+                            }}
+                            className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                          >
+                            <option value="">Select grade</option>
+                            {GradeOptions.map((grade) => (
+                              <option key={grade} value={grade}>
+                                {grade}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {cmsTestType === "chapter_test" && (
+                        <div className="grid gap-4 md:grid-cols-3">
+                          <div>
+                            <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                              Subject
+                            </label>
+                            <select
+                              value={cmsSubject}
+                              onChange={(event) => {
+                                setCmsSubject(event.target.value);
+                                setCmsChapterId(null);
+                              }}
+                              className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                            >
+                              <option value="">Select subject</option>
+                              {CMS_SUBJECT_OPTIONS.map((subject) => (
+                                <option key={subject} value={subject}>
+                                  {subject}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted">
+                              Chapter
+                            </label>
+                            <select
+                              value={cmsChapterId ?? ""}
+                              onChange={(event) =>
+                                setCmsChapterId(
+                                  event.target.value ? Number(event.target.value) : null
+                                )
+                              }
+                              disabled={
+                                !cmsExamTrack || !cmsGrade || !cmsSubject || loadingCmsChapters
+                              }
+                              className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                            >
+                              <option value="">
+                                {loadingCmsChapters ? "Loading chapters..." : "Select chapter"}
+                              </option>
+                              {cmsChapters.map((chapter) => (
+                                <option key={chapter.id} value={chapter.id}>
+                                  {chapter.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {cmsError && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                          {cmsError}
+                        </div>
+                      )}
+
+                      {!cmsTestsReady ? (
+                        <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                          {cmsTestType === "chapter_test"
+                            ? "Choose exam track, grade, subject, and chapter to see its tests."
+                            : "Choose exam track and grade to see the major tests."}
+                        </div>
+                      ) : loadingCmsTests ? (
+                        <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                          Loading tests...
+                        </div>
+                      ) : cmsTests.length === 0 ? (
+                        <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                          {cmsTestType === "chapter_test"
+                            ? "No chapter tests found for this chapter."
+                            : "No major tests found for this exam track and grade."}
+                        </div>
+                      ) : (
+                        <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
+                          {cmsTests.map((test) => {
+                            const isSelected = test.id === selectedCmsTestId;
+                            return (
+                              <div
+                                key={test.id}
+                                role="button"
+                                aria-pressed={isSelected}
+                                tabIndex={0}
+                                onClick={() =>
+                                  setSelectedCmsTestId((previous) =>
+                                    previous === test.id ? null : test.id
+                                  )
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setSelectedCmsTestId((previous) =>
+                                      previous === test.id ? null : test.id
+                                    );
+                                  }
+                                }}
+                                className={`flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left last:border-b-0 ${
+                                  isSelected
+                                    ? "bg-success-bg"
+                                    : "bg-bg-card hover:bg-hover-bg"
+                                }`}
+                              >
+                                <span
+                                  className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border text-[11px] leading-none ${
+                                    isSelected
+                                      ? "border-accent bg-accent text-text-on-accent"
+                                      : "border-border bg-bg-card text-transparent"
+                                  }`}
+                                  aria-hidden="true"
+                                >
+                                  ✓
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-sm font-semibold text-text-primary">
+                                    {test.name}
+                                  </div>
+                                  <div className="mt-1 font-mono text-xs text-accent">
+                                    {test.code || "-"}
+                                  </div>
+                                  <div className="mt-1 text-xs text-text-secondary">
+                                    {test.marks !== null ? `${test.marks} marks` : ""}
+                                    {test.duration ? ` · ${test.duration} min` : ""}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-2 text-xs text-text-secondary">
+                        The quiz is built and the session is created in one step when you
+                        click Create Session — this may take a few seconds.
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1976,10 +2403,7 @@ function QuizSessionDetailsModal({
                   label="Ranking Cutoff"
                   value={formatDate(getMetaString(session.meta_data, "ranking_cutoff_date"))}
                 />
-                <PaperResourceLinks
-                  questionHref={getMetaString(session.meta_data, "question_pdf")}
-                  solutionHref={getMetaString(session.meta_data, "solution_pdf")}
-                />
+                <CmsAwarePaperLinks meta={session.meta_data} />
               </div>
             </SectionCard>
 
@@ -2277,6 +2701,40 @@ function PaperLinkChip({
       <span>{label}</span>
       <ExternalLinkIcon />
     </a>
+  );
+}
+
+// Chooses PDF links for the session-details Paper card: for new-CMS sessions the PDFs are
+// generated on demand (proxy route), rebuilt from the CMS ids stored at create time; for
+// legacy sessions they're the stored question_pdf/solution_pdf URLs.
+function CmsAwarePaperLinks({
+  meta,
+}: {
+  meta: Record<string, unknown> | null | undefined;
+}) {
+  const cmsSource = getMetaString(meta, "cms_source");
+  const cmsTestId = getMetaString(meta, "cms_test_id");
+  const curriculumId = getMetaString(meta, "cms_curriculum_id");
+  const gradeId = getMetaString(meta, "cms_grade_id");
+
+  if (cmsSource && cmsTestId && curriculumId && gradeId) {
+    const base =
+      `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}` +
+      `&curriculumId=${encodeURIComponent(curriculumId)}` +
+      `&gradeId=${encodeURIComponent(gradeId)}`;
+    return (
+      <PaperResourceLinks
+        questionHref={`${base}&type=questions`}
+        solutionHref={`${base}&type=answers`}
+      />
+    );
+  }
+
+  return (
+    <PaperResourceLinks
+      questionHref={getMetaString(meta, "question_pdf")}
+      solutionHref={getMetaString(meta, "solution_pdf")}
+    />
   );
 }
 
