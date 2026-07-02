@@ -185,7 +185,7 @@ async function loadSelectedGroups(
   includeHistory: boolean,
   programId: number | null
 ): Promise<AcademicMentorshipMappingGroup[]> {
-  if (!selectedAccess?.school) return [];
+  if (!selectedAccess?.school || !isValidAcademicYear(selectedAcademicYear)) return [];
   return listAcademicMentorshipMappings({
     schoolId: selectedAccess.school.id,
     academicYear: selectedAcademicYear,
@@ -204,6 +204,78 @@ function canEditSelection(
   );
 }
 
+async function loadSelectedSchoolPageModel(params: {
+  session: AuthenticatedSession;
+  academicYears: string[];
+  selectedAcademicYear: string;
+  selectedSchoolCode: string;
+  selectedProgramId: number | null;
+  includeHistory: boolean;
+}): Promise<PageModel> {
+  const selectedAccess = await requireAcademicMentorshipAccess(params.session, "view", {
+    schoolCode: params.selectedSchoolCode,
+  });
+  if (!selectedAccess.ok) {
+    if (selectedAccess.status === 404) {
+      redirect(selectionUrl({
+        academicYear: params.selectedAcademicYear,
+        programId: params.selectedProgramId,
+        includeHistory: params.includeHistory,
+      }));
+    }
+    redirect("/dashboard");
+  }
+
+  const selectedSchool = selectedAccess.school;
+  if (!selectedSchool) redirect("/dashboard");
+  const selectedSchoolIds = [selectedSchool.id];
+  const [programs, programSchoolLinks, groups] = await Promise.all([
+    listAcademicMentorshipProgramsForSchools(selectedSchoolIds, params.selectedAcademicYear),
+    listAcademicMentorshipProgramSchoolLinks(selectedSchoolIds, params.selectedAcademicYear),
+    loadSelectedGroups(
+      selectedAccess,
+      params.selectedAcademicYear,
+      params.includeHistory,
+      params.selectedProgramId
+    ),
+  ]);
+  redirectInvalidSchoolSelection({
+    selectedSchoolCode: params.selectedSchoolCode,
+    selectedSchool: schoolsForProgram(
+      [selectedSchool],
+      programSchoolLinks,
+      params.selectedProgramId
+    )[0],
+    selectedAcademicYear: params.selectedAcademicYear,
+    selectedProgramId: params.selectedProgramId,
+    includeHistory: params.includeHistory,
+  });
+
+  const canEdit = canEditSelection(selectedAccess, params.selectedAcademicYear);
+  const canUpload = selectedAccess.canEdit === true;
+  return {
+    academicYears: params.academicYears,
+    selectedAcademicYear: params.selectedAcademicYear,
+    selectedSchoolCode: params.selectedSchoolCode,
+    selectedProgramId: params.selectedProgramId,
+    includeHistory: params.includeHistory,
+    programs,
+    programSchoolLinks,
+    schools: [selectedSchool],
+    selectedSchool,
+    groups,
+    canEdit,
+    canUpload,
+    historyHref: historyUrl(
+      selectedSchool.code,
+      params.selectedAcademicYear,
+      params.selectedProgramId,
+      params.includeHistory
+    ),
+    accessLabel: canEdit ? "Edit access" : canUpload ? "CSV-only backfill" : "View-only",
+  };
+}
+
 async function loadPageModel(
   session: AuthenticatedSession,
   resolvedSearchParams: SearchParams
@@ -216,16 +288,24 @@ async function loadPageModel(
     programId: selectedProgramId,
     includeHistory,
   } = selectedFilters(resolvedSearchParams, academicYears);
+
+  if (selectedSchoolCode) {
+    return loadSelectedSchoolPageModel({
+      session,
+      academicYears,
+      selectedAcademicYear,
+      selectedSchoolCode,
+      selectedProgramId,
+      includeHistory,
+    });
+  }
+
   const accessibleSchools = await listAccessibleAcademicMentorshipSchools(baseAccess.permission);
   const accessibleSchoolIds = accessibleSchools.map((school) => school.id);
-  const programs = await listAcademicMentorshipProgramsForSchools(
-    accessibleSchoolIds,
-    selectedAcademicYear
-  );
-  const programSchoolLinks = await listAcademicMentorshipProgramSchoolLinks(
-    accessibleSchoolIds,
-    selectedAcademicYear
-  );
+  const [programs, programSchoolLinks] = await Promise.all([
+    listAcademicMentorshipProgramsForSchools(accessibleSchoolIds, selectedAcademicYear),
+    listAcademicMentorshipProgramSchoolLinks(accessibleSchoolIds, selectedAcademicYear),
+  ]);
   const schoolsForSelectedProgram = schoolsForProgram(
     accessibleSchools,
     programSchoolLinks,

@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
@@ -155,13 +156,24 @@ describe("AcademicMentorshipPage", () => {
       includeHistory: false,
       programId: null,
     });
+    expect(mockListAccessibleAcademicMentorshipSchools).not.toHaveBeenCalled();
+    expect(mockListAcademicMentorshipProgramsForSchools).toHaveBeenCalledWith(
+      [20],
+      "2026-2027"
+    );
+    expect(mockListAcademicMentorshipProgramSchoolLinks).toHaveBeenCalledWith(
+      [20],
+      "2026-2027"
+    );
   });
 
   it("clears a School that is not available under the selected Program", async () => {
-    mockListAccessibleAcademicMentorshipSchools.mockResolvedValue([
-      { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
-      { id: 21, code: "SCH002", name: "Second School", region: "West" },
-    ]);
+    mockRequireAcademicMentorshipAccess
+      .mockResolvedValueOnce(access)
+      .mockResolvedValueOnce({
+        ...access,
+        school: { id: 20, code: "SCH001", name: "Mapped School", region: "North" },
+      });
     mockListAcademicMentorshipProgramSchoolLinks.mockResolvedValue([
       { programId: 64, schoolId: 21 },
     ]);
