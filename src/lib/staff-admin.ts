@@ -149,6 +149,92 @@ export function safeStaffApiError(result: {
   };
 }
 
+interface AcademicMentorshipBlockerTarget {
+  school_code: string | null;
+  academic_year: string;
+}
+
+interface AcademicMentorshipBlockerRow extends AcademicMentorshipBlockerTarget {
+  mentee_count: string | number;
+}
+
+function academicMentorshipManagementLink(
+  row: AcademicMentorshipBlockerTarget | undefined
+): string {
+  if (!row?.school_code || !row.academic_year) {
+    return "/admin/academic-mentorship";
+  }
+  return `/admin/academic-mentorship?school_code=${encodeURIComponent(
+    row.school_code
+  )}&academic_year=${encodeURIComponent(row.academic_year)}`;
+}
+
+function isMissingAcademicMentorshipMappingSchema(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "42P01" || code === "42703";
+}
+
+async function queryAcademicMentorshipBlockers<T>(
+  sql: string,
+  mentorUserId: number
+): Promise<T[]> {
+  try {
+    return await query<T>(sql, [mentorUserId]);
+  } catch (error) {
+    if (isMissingAcademicMentorshipMappingSchema(error)) return [];
+    throw error;
+  }
+}
+
+async function blockIfActiveAcademicMentees(
+  mentorUserId: number
+): Promise<StaffValidationFailure | null> {
+  const rows = await queryAcademicMentorshipBlockers<AcademicMentorshipBlockerRow>(
+    `SELECT s.code AS school_code,
+            m.academic_year,
+            COUNT(*) AS mentee_count
+     FROM academic_mentorship_mentor_mentee_mappings m
+     JOIN school s ON s.id = m.school_id
+     WHERE m.mentor_user_id = $1
+       AND m.ended_at IS NULL
+     GROUP BY s.code, m.academic_year
+     ORDER BY m.academic_year DESC, s.code ASC`,
+    mentorUserId
+  );
+  if (rows.length === 0) return null;
+
+  const count = rows.reduce((total, row) => total + Number(row.mentee_count), 0);
+  return {
+    ok: false,
+    status: 409,
+    code: "active_academic_mentees",
+    error: `This Teacher has ${count} active ${count === 1 ? "Mentee" : "Mentees"}. Remove or reassign them before exiting the Teacher: ${academicMentorshipManagementLink(rows[0])}`,
+  };
+}
+
+export async function blockIfAcademicMentorshipHistory(
+  mentorUserId: number
+): Promise<StaffValidationFailure | null> {
+  const rows = await queryAcademicMentorshipBlockers<AcademicMentorshipBlockerTarget>(
+    `SELECT s.code AS school_code,
+            m.academic_year
+     FROM academic_mentorship_mentor_mentee_mappings m
+     JOIN school s ON s.id = m.school_id
+     WHERE m.mentor_user_id = $1
+     GROUP BY s.code, m.academic_year
+     ORDER BY m.academic_year DESC, s.code ASC`,
+    mentorUserId
+  );
+  if (rows.length === 0) return null;
+
+  return {
+    ok: false,
+    status: 409,
+    code: "academic_mentorship_history",
+    error: `This Teacher has Academic Mentor-Mentee Mapping history. Deleting the Teacher is blocked to preserve audit history: ${academicMentorshipManagementLink(rows[0])}`,
+  };
+}
+
 // --- Roster ---
 
 export type StaffRosterResult =
@@ -538,6 +624,11 @@ export async function updateTeacherRecord(params: {
         error: `Employee code ${payload.teacher_id} is already used by another teacher`,
       };
     }
+  }
+
+  if (payload.exit_date && existing[0].user_id !== null) {
+    const blocker = await blockIfActiveAcademicMentees(Number(existing[0].user_id));
+    if (blocker) return blocker;
   }
 
   const patched = await dbServiceTeacherPatch(params.id, payload);
