@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 
 import { Button, FormSection, Input, Modal, Select } from "@/components/ui";
@@ -67,10 +67,20 @@ export default function AddStudentModal({
   const validation = useMemo(() => validateStudentAdditionInput(form), [form]);
   const canSubmit = validation.ok && !submitting;
 
+  useEffect(() => {
+    if (!open) {
+      setForm(initialForm);
+      setTouched({});
+      setError(null);
+      setSubmitting(false);
+    }
+  }, [open]);
+
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      if (name === "phone" || name === "apaar_id") next[name] = digitsOnly(value);
+      if (name === "phone") next.phone = digitsOnly(value).slice(0, 10);
+      if (name === "apaar_id") next.apaar_id = digitsOnly(value).slice(0, 12);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
       if (name === "g10_roll_no" && prev.g10_board === CBSE_BOARD) next.g10_roll_no = digitsOnly(value);
       if (name === "g10_board" && value === CBSE_BOARD) next.g10_roll_no = digitsOnly(prev.g10_roll_no);
