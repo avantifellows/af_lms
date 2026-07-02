@@ -27,10 +27,11 @@ jobs:
         uses: fallow-rs/fallow@v2
         with:
           command: audit
+          # Post ONE sticky summary comment (updates in place on re-runs) instead
+          # of dozens of inline review comments. `annotations` still surfaces
+          # findings on the Files Changed view without adding PR comments.
           annotations: true
           comment: true
-          review-comments: true
-          review-guidance: false
+          review-comments: false
           diff-filter: added
-          max-comments: 30
           artifacts-dir: .var/fallow
