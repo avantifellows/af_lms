@@ -103,6 +103,21 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("APAAR-only: no Student ID will be generated.")).toBeInTheDocument();
   });
 
+  it("shows field-level validation while filling invalid identifiers and phone", async () => {
+    render(<AddStudentModal {...baseProps} />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("APAAR ID"), "123");
+    expect(screen.getByText("APAAR ID must be exactly 12 digits")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
+    await user.type(screen.getByLabelText("Grade 10 Roll no"), "123456789");
+    expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
+    expect(screen.getByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+  });
+
   it("shows different-school existing match details", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(

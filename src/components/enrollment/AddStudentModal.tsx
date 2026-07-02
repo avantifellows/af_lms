@@ -51,6 +51,7 @@ export default function AddStudentModal({
   onCreated,
 }: AddStudentModalProps) {
   const [form, setForm] = useState(initialForm);
+  const [touched, setTouched] = useState<Partial<Record<keyof StudentAdditionInput, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,53 +61,91 @@ export default function AddStudentModal({
 
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => ({ ...prev, [name]: value }));
+    setTouched((prev) => ({ ...prev, [name]: true }));
     setMessage(null);
     setError(null);
   };
+
+  const touchField = (name: keyof StudentAdditionInput) => {
+    setTouched((prev) => ({ ...prev, [name]: true }));
+  };
+
+  const fieldError = (name: keyof StudentAdditionInput) =>
+    touched[name] ? validation.fieldErrors[name] : undefined;
+
+  const identityError =
+    touched.apaar_id || touched.g10_roll_no ? validation.rowErrors[0] : undefined;
+
+  const errorClassName = "border-danger focus:border-danger focus:ring-danger/20";
 
   const inputField = (
     name: keyof StudentAdditionInput,
     label: string,
     type = "text",
     inputMode?: "text" | "numeric" | "tel",
-  ) => (
-    <div>
-      <label htmlFor={name} className={labelClassName}>{label}</label>
-      <Input
-        id={name}
-        name={name}
-        type={type}
-        inputMode={inputMode}
-        value={form[name]}
-        onChange={(event) => setField(name, event.target.value)}
-      />
-    </div>
-  );
+  ) => {
+    const errorText = fieldError(name);
+    const errorId = `${name}-error`;
+    return (
+      <div>
+        <label htmlFor={name} className={labelClassName}>{label}</label>
+        <Input
+          id={name}
+          name={name}
+          type={type}
+          inputMode={inputMode}
+          value={form[name]}
+          onChange={(event) => setField(name, event.target.value)}
+          onBlur={() => touchField(name)}
+          aria-invalid={errorText ? true : undefined}
+          aria-describedby={errorText ? errorId : undefined}
+          className={errorText ? errorClassName : ""}
+        />
+        {errorText && (
+          <p id={errorId} className="mt-1 text-xs text-danger">
+            {errorText}
+          </p>
+        )}
+      </div>
+    );
+  };
 
   const selectField = (
     name: keyof StudentAdditionInput,
     label: string,
     options: readonly string[],
     placeholder = "Select...",
-  ) => (
-    <div>
-      <label htmlFor={name} className={labelClassName}>{label}</label>
-      <Select
-        id={name}
-        name={name}
-        value={form[name]}
-        onChange={(event) => setField(name, event.target.value)}
-        className="w-full"
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </Select>
-    </div>
-  );
+  ) => {
+    const errorText = fieldError(name);
+    const errorId = `${name}-error`;
+    return (
+      <div>
+        <label htmlFor={name} className={labelClassName}>{label}</label>
+        <Select
+          id={name}
+          name={name}
+          value={form[name]}
+          onChange={(event) => setField(name, event.target.value)}
+          onBlur={() => touchField(name)}
+          aria-invalid={errorText ? true : undefined}
+          aria-describedby={errorText ? errorId : undefined}
+          className={`w-full ${errorText ? errorClassName : ""}`}
+        >
+          <option value="">{placeholder}</option>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
+        {errorText && (
+          <p id={errorId} className="mt-1 text-xs text-danger">
+            {errorText}
+          </p>
+        )}
+      </div>
+    );
+  };
 
   const identityMessage = (() => {
     if (validation.generatedStudentId) {
@@ -210,6 +249,11 @@ export default function AddStudentModal({
             <p className="rounded-md bg-bg-card-alt px-3 py-2 text-sm text-text-secondary">
               {identityMessage}
             </p>
+            {identityError && (
+              <p className="text-xs text-danger">
+                {identityError}
+              </p>
+            )}
           </FormSection>
         </div>
 

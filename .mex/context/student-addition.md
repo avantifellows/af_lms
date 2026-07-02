@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-01
+last_updated: 2026-07-02
 ---
 
 # Student Addition
@@ -91,6 +91,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Bulk creation also uses `POST /api/school/[udise]/students` with multipart `.xlsx`/`.csv` upload. LMS parses `.xlsx` files with ExcelJS from the first sheet or `Template` sheet, normalises real Excel date cells, validates up to 200 non-blank rows locally, sends accepted rows to the same DB Service endpoint, merges local rejects with DB Service statuses, and returns rejected-row CSV data from the UI.
 - The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and the selected program is `PROGRAM_IDS.NVS`; the modals live in `src/components/enrollment/AddStudentModal.tsx` and `src/components/enrollment/BulkStudentUploadModal.tsx`.
+- `AddStudentModal` reuses the shared validation helper and shows touched-field errors inline, including APAAR ID, CBSE G10 roll length, parent phone length, date, required dropdowns, and the APAAR-or-G10 identity requirement.
 - Existing-student edit now uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The edit modal uses the PRD field contract, initializes the name input from existing `first_name + last_name`, forwards `last_name` as empty so stale split names are cleared, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service G10-board conflicts next to the G10 board field.
 - Dropout now accepts only `student_pk_id` from the UI, authorizes with the shared Student Addition existing-student gate before route-level lookup, derives `start_date` and `academic_year` server-side, and proxies LMS `POST /api/student/dropout` to DB Service `PATCH /api/dropout`.
 - DB Service dropout ends current grade/batch enrollments but leaves the group memberships. `getSchoolRoster` therefore keeps same-academic-year dropout rows by using their latest historical grade/batch enrollment for display/program attribution.
