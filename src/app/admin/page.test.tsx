@@ -3,22 +3,18 @@ import { render, screen } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
-const { mockGetServerSession, mockIsAdmin, mockRedirect, mockRequireAcademicMentorshipAccess } = vi.hoisted(() => ({
+const { mockGetServerSession, mockIsAdmin, mockRedirect } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockIsAdmin: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
-  mockRequireAcademicMentorshipAccess: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/permissions", () => ({ isAdmin: mockIsAdmin }));
-vi.mock("@/lib/academic-mentorship", () => ({
-  requireAcademicMentorshipAccess: mockRequireAcademicMentorshipAccess,
-}));
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -38,27 +34,11 @@ const adminSession = {
   user: { email: "admin@avantifellows.org" },
 };
 
-const academicAccess = (role: "admin" | "program_admin") => ({
-  ok: true,
-  email: `${role}@avantifellows.org`,
-  permission: {
-    email: `${role}@avantifellows.org`,
-    level: 3,
-    role,
-    school_codes: null,
-    regions: null,
-    program_ids: [64],
-    read_only: false,
-  },
-  canEdit: true,
-});
-
 // ---- tests ----
 
 describe("AdminPage (server component)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireAcademicMentorshipAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
   });
 
   it("redirects to / when there is no session", async () => {
@@ -76,19 +56,18 @@ describe("AdminPage (server component)", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/");
   });
 
-  it("redirects to /dashboard when user lacks Academic Mentorship admin access", async () => {
+  it("redirects to /dashboard when user is not admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
     mockIsAdmin.mockResolvedValue(false);
 
     await expect(AdminPage()).rejects.toThrow("REDIRECT:/dashboard");
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
-    expect(mockRequireAcademicMentorshipAccess).toHaveBeenCalledWith(adminSession, "view");
+    expect(mockIsAdmin).toHaveBeenCalledWith("admin@avantifellows.org");
   });
 
   it("renders admin links when user is admin", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
     mockIsAdmin.mockResolvedValue(true);
-    mockRequireAcademicMentorshipAccess.mockResolvedValue(academicAccess("admin"));
 
     const jsx = await AdminPage();
     render(jsx);
@@ -99,7 +78,7 @@ describe("AdminPage (server component)", () => {
     expect(screen.getByText("School Programs")).toBeInTheDocument();
     expect(screen.getByText("Centre Management")).toBeInTheDocument();
     expect(screen.getByText("Centre Option Configuration")).toBeInTheDocument();
-    expect(screen.getByText("Academic Mentorship")).toBeInTheDocument();
+    expect(screen.queryByText("Academic Mentorship")).not.toBeInTheDocument();
 
     // verify links
     expect(screen.getByText("User Management").closest("a")).toHaveAttribute(
@@ -122,32 +101,19 @@ describe("AdminPage (server component)", () => {
       "href",
       "/admin/centres/config"
     );
-    expect(screen.getByText("Academic Mentorship").closest("a")).toHaveAttribute(
-      "href",
-      "/admin/academic-mentorship"
-    );
   });
 
-  it("lets program_admin users enter for Academic Mentorship only", async () => {
+  it("does not let program_admin users enter through /admin", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "program_admin@avantifellows.org" } });
     mockIsAdmin.mockResolvedValue(false);
-    mockRequireAcademicMentorshipAccess.mockResolvedValue(academicAccess("program_admin"));
 
-    const jsx = await AdminPage();
-    render(jsx);
-
-    expect(screen.getByText("Academic Mentorship")).toBeInTheDocument();
-    expect(screen.queryByText("User Management")).not.toBeInTheDocument();
-    expect(screen.queryByText("Batch Metadata")).not.toBeInTheDocument();
-    expect(screen.queryByText("School Programs")).not.toBeInTheDocument();
-    expect(screen.queryByText("Centre Management")).not.toBeInTheDocument();
-    expect(screen.queryByText("Centre Option Configuration")).not.toBeInTheDocument();
+    await expect(AdminPage()).rejects.toThrow("REDIRECT:/dashboard");
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard");
   });
 
   it("displays user email and navigation links", async () => {
     mockGetServerSession.mockResolvedValue(adminSession);
     mockIsAdmin.mockResolvedValue(true);
-    mockRequireAcademicMentorshipAccess.mockResolvedValue(academicAccess("admin"));
 
     const jsx = await AdminPage();
     render(jsx);

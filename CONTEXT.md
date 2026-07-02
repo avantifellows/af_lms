@@ -297,7 +297,7 @@ _Avoid_: Academic Mentorship tab
 - Academic Mentorship mentee selection uses the same active-student rules as the School page roster for the selected School and academic year, excluding dropouts and students who already have an active mapping
 - Academic Mentorship access in v1 is controlled by role, school scope, `read_only`, and the Academic Mentorship Program allowlist
 - Academic Mentorship data model supports all programs, including NVS and PMU schools
-- `program_admin` users can enter `/admin` only to discover Academic Mentorship management; existing admin-only cards remain restricted to `admin`
+- `/admin` does not show an Academic Mentorship card; Academic Mentorship management entry comes from the School page **Mentorship Tab** Manage mappings link
 - `read_only` downgrades Academic Mentorship management to view-only
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
