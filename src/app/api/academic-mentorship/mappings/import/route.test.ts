@@ -23,10 +23,10 @@ function request(path: string) {
   return new NextRequest(`http://localhost${path}`);
 }
 
-function csvUploadRequest(csvText: string) {
+function csvUploadRequest(csvText: string, academicYear = "2026-2027") {
   const formData = new FormData();
   formData.set("school_code", "SCH001");
-  formData.set("academic_year", "2026-2027");
+  formData.set("academic_year", academicYear);
   formData.set("file", new Blob([csvText], { type: "text/csv" }), "mappings.csv");
   return { formData: async () => formData } as unknown as NextRequest;
 }
@@ -99,6 +99,23 @@ describe("GET /api/academic-mentorship/mappings/import", () => {
     expect(response.status).toBe(403);
     expect(body.error).toBe("Forbidden");
     expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unsupported academic years before template access checks", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+
+    const response = await GET(
+      request(
+        "/api/academic-mentorship/mappings/import?school_code=SCH001&academic_year=2023-2024"
+      )
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Academic year is not supported");
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 });
 
@@ -231,6 +248,22 @@ describe("POST /api/academic-mentorship/mappings/import", () => {
 
     expect(response.status).toBe(401);
     expect(body.error).toBe("Unauthorized");
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported academic years before database access", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "admin@avantifellows.org" },
+    });
+
+    const response = await POST(
+      csvUploadRequest("mentor_email,student_id\nanita@x,STU001\n", "2023-2024")
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Academic year is not supported");
     expect(mockQuery).not.toHaveBeenCalled();
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });

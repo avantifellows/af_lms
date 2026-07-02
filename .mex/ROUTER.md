@@ -37,7 +37,7 @@ Then read this file fully before doing anything else in this session.
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
 - PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; teacher pickers use the Staff Management Visit Teacher roster.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
-- Academic Mentorship foundation: `academic_mentorship` feature key, School page current-year Mentorship tab views, guarded `/admin/academic-mentorship` grouped mapping overview with Program filtering, current-year manual add/remove/reassign controls, CSV template/upload import for selected years, selector options API, direct LMS-owned mapping writes, and Staff Management delete/exit safeguards for Academic Mentors with Mapping history.
+- Academic Mentorship foundation: `academic_mentorship` feature key, School page current-year Mentorship tab views, guarded `/admin/academic-mentorship` grouped mapping overview with Program filtering, current-year manual add/remove/reassign controls, CSV template/upload import for supported years with prior-year rows stored as historical, selector options API, direct LMS-owned mapping writes, and Staff Management delete/exit safeguards for Academic Mentors with Mapping history.
 - Deploy via AWS Amplify; ~2472 unit tests (Vitest/RTL) + 65 E2E (Playwright).
 
 **Not yet built / in progress:**

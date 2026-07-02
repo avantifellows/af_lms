@@ -61,6 +61,10 @@ export function getAcademicMentorshipAcademicYears(
   });
 }
 
+export function isAcademicMentorshipSupportedYear(year: string): boolean {
+  return getAcademicMentorshipAcademicYears().includes(year);
+}
+
 export function isAcademicMentorshipEditableYear(year: string): boolean {
   return year === CURRENT_ACADEMIC_YEAR;
 }
@@ -877,10 +881,12 @@ function addAcademicMentorshipImportLookupErrors(
   }
 }
 
-function academicMentorshipImportValues(rowCount: number): string {
+function academicMentorshipImportValues(rowCount: number, historical: boolean): string {
   return Array.from({ length: rowCount }, (_, index) => {
     const start = index * 6;
-    return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6}, now(), now(), now())`;
+    const endedAt = historical ? "now()" : "NULL";
+    const endedBy = historical ? `$${start + 6}` : "NULL";
+    return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6}, now(), ${endedAt}, ${endedBy}, now(), now())`;
   }).join(", ");
 }
 
@@ -911,7 +917,10 @@ async function insertAcademicMentorshipImportRows(
 ): Promise<AcademicMentorshipCsvImportResult> {
   try {
     return await withTransaction(async (client) => {
-      const values = academicMentorshipImportValues(rows.length);
+      const values = academicMentorshipImportValues(
+        rows.length,
+        !isAcademicMentorshipEditableYear(params.academicYear)
+      );
       const insertParams = academicMentorshipImportParams(
         params,
         rows,
@@ -920,7 +929,7 @@ async function insertAcademicMentorshipImportRows(
       );
       const inserted = await client.query<{ id: number | string }>(
         `INSERT INTO academic_mentorship_mentor_mentee_mappings
-           (school_id, academic_year, mentor_user_id, student_id, program_id, assigned_by_user_id, assigned_at, inserted_at, updated_at)
+           (school_id, academic_year, mentor_user_id, student_id, program_id, assigned_by_user_id, assigned_at, ended_at, ended_by_user_id, inserted_at, updated_at)
          VALUES ${values}
          RETURNING id`,
         insertParams

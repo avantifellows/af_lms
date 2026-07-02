@@ -704,6 +704,8 @@ describe("importAcademicMentorshipMappingsFromCsv", () => {
     expect(String(txQuery.mock.calls[0][0])).toContain(
       "INSERT INTO academic_mentorship_mentor_mentee_mappings"
     );
+    expect(String(txQuery.mock.calls[0][0])).toContain("ended_at, ended_by_user_id");
+    expect(String(txQuery.mock.calls[0][0])).toContain("NULL, NULL");
     expect(txQuery.mock.calls[0][1]).toEqual([
       20,
       "2026-2027",
@@ -716,6 +718,40 @@ describe("importAcademicMentorshipMappingsFromCsv", () => {
       102,
       202,
       null,
+      501,
+    ]);
+  });
+
+  it("marks past-year CSV imports historical so they are not active mappings", async () => {
+    const txQuery = vi.fn().mockResolvedValueOnce({ rows: [{ id: 31 }] });
+    mockQuery
+      .mockResolvedValueOnce([{ email: "anita@avantifellows.org", user_id: 101 }])
+      .mockResolvedValueOnce([
+        { student_id: "STU001", student_pk_id: 201, program_id: 64, active_mapping_id: null },
+      ]);
+    mockWithTransaction.mockImplementationOnce(async (callback) =>
+      callback({ query: txQuery } as never)
+    );
+
+    const result = await importAcademicMentorshipMappingsFromCsv({
+      csvText: "mentor_email,student_id\nanita@avantifellows.org,STU001\n",
+      schoolId: 20,
+      schoolCode: "SCH001",
+      schoolRegion: "North",
+      academicYear: "2025-2026",
+      assignedByUserId: 501,
+    });
+
+    expect(result).toEqual({ ok: true, insertedCount: 1 });
+    const sql = String(txQuery.mock.calls[0][0]);
+    expect(sql).toContain("ended_at, ended_by_user_id");
+    expect(sql).toContain("$6, now(), now(), $6, now(), now()");
+    expect(txQuery.mock.calls[0][1]).toEqual([
+      20,
+      "2025-2026",
+      101,
+      201,
+      64,
       501,
     ]);
   });

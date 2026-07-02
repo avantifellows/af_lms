@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import {
   getAcademicMentorshipActorUserId,
   isAcademicMentorshipEditableYear,
+  isAcademicMentorshipSupportedYear,
   isValidAcademicYear,
   requireAcademicMentorshipAccess,
   type AcademicMentorshipAction,
@@ -76,7 +77,7 @@ export function parseSchoolCode(
 
 export function parseAcademicYear(
   value: string | null | undefined,
-  options: { defaultAcademicYear?: string; requireEditable?: boolean } = {}
+  options: { defaultAcademicYear?: string; requireEditable?: boolean; requireSupported?: boolean } = {}
 ): ApiResult<string> {
   const academicYear = value?.trim() || options.defaultAcademicYear || "";
   if (!isValidAcademicYear(academicYear)) {
@@ -84,6 +85,9 @@ export function parseAcademicYear(
       ok: false,
       response: academicMentorshipError("academic_year must use YYYY-YYYY format", 400),
     };
+  }
+  if (options.requireSupported && !isAcademicMentorshipSupportedYear(academicYear)) {
+    return { ok: false, response: academicMentorshipError("Academic year is not supported", 400) };
   }
   if (options.requireEditable && !isAcademicMentorshipEditableYear(academicYear)) {
     return { ok: false, response: academicMentorshipError("Academic year is not editable", 403) };
@@ -96,6 +100,7 @@ export function parseSchoolYear(params: {
   academicYear: string | null | undefined;
   defaultAcademicYear?: string;
   requireEditable?: boolean;
+  requireSupported?: boolean;
   missingSchoolCodeMessage?: string;
 }): ApiResult<{ schoolCode: string; academicYear: string }> {
   const schoolCode = parseSchoolCode(
@@ -107,6 +112,7 @@ export function parseSchoolYear(params: {
   const academicYear = parseAcademicYear(params.academicYear, {
     defaultAcademicYear: params.defaultAcademicYear,
     requireEditable: params.requireEditable,
+    requireSupported: params.requireSupported,
   });
   if (!academicYear.ok) return academicYear;
 
@@ -121,6 +127,7 @@ export function parseSchoolYearSearchParams(
   options: {
     defaultAcademicYear?: string;
     requireEditable?: boolean;
+    requireSupported?: boolean;
     missingSchoolCodeMessage?: string;
   } = {}
 ): ApiResult<{ schoolCode: string; academicYear: string }> {
@@ -129,6 +136,7 @@ export function parseSchoolYearSearchParams(
     academicYear: request.nextUrl.searchParams.get("academic_year"),
     defaultAcademicYear: options.defaultAcademicYear,
     requireEditable: options.requireEditable,
+    requireSupported: options.requireSupported,
     missingSchoolCodeMessage: options.missingSchoolCodeMessage,
   });
 }

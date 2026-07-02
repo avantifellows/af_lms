@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
 
   const parsed = parseSchoolYearSearchParams(request, {
     requireEditable: false,
+    requireSupported: true,
   });
   if (!parsed.ok) return parsed.response;
 
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
     schoolCode: formString(formData, "school_code"),
     academicYear: formString(formData, "academic_year"),
     requireEditable: false,
+    requireSupported: true,
   });
   if (!parsed.ok) return parsed.response;
 

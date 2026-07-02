@@ -268,8 +268,8 @@ _Avoid_: Academic Mentorship tab
 - Academic Mentorship route handlers use a shared server-side access helper for role, School scope, Program allowlist, `read_only`, and requested action checks
 - The `/admin/academic-mentorship` School picker auto-selects when the user has exactly one accessible School; otherwise it starts empty and asks the user to pick a School
 - The `/admin/academic-mentorship` academic year options reuse the existing LMS current-academic-year source and show current plus two prior academic years
-- The `/admin/academic-mentorship` page allows edits for the current and prior academic years shown in the picker; assignment and end timestamps still use the actual action time
-- The `/admin/academic-mentorship` page blocks edits for academic years outside the supported picker years, even if a user manually changes URL params
+- The `/admin/academic-mentorship` page allows manual add, remove, and reassign only for the current academic year; assignment and end timestamps use the actual action time
+- Academic Mentorship CSV import allows only the current plus two prior academic years shown in the picker; unsupported years are rejected server-side even if a user crafts a direct API request
 - The `/admin/academic-mentorship` selected School and academic year are reflected in URL query params such as `school_code` and `academic_year`
 - Teachers see only their current active Mentees on the School page Mentorship Tab as a flat list sorted by grade, then name
 - Teacher empty state for the School page Mentorship Tab is "No mentees assigned for this academic year."
@@ -281,6 +281,7 @@ _Avoid_: Academic Mentorship tab
 - Academic Mentorship CSV upload validates `mentor_email` as an eligible completed Staff Management Teacher at the selected School
 - Academic Mentorship CSV upload validates `student_id` as an active roster Student at the selected School and academic year
 - Academic Mentorship CSV upload applies to the page-selected academic year, which defaults to the current academic year; CSV files do not include an academic year column
+- Academic Mentorship CSV uploads for prior academic years are inserted as historical mappings by setting `ended_at` and `ended_by_user_id`, so Staff Management does not treat them as active Mentees
 - Academic Mentorship CSV upload requires `mentor_email` and `student_id` headers but allows extra columns and ignores them
 - Academic Mentorship CSV upload shows a normal file-level error, not an error CSV, when the file is empty or required headers are missing
 - Academic Mentorship CSV upload trims `mentor_email` and `student_id`; mentor email lookup is case-insensitive, while `student_id` matches trimmed exact text
