@@ -70,6 +70,7 @@ describe("validateStudentAdditionInput", () => {
         phone: "12345",
         apaar_id: "123",
         g10_roll_no: "ABC123",
+        father_name: "Ravi123",
       },
       { today: new Date("2026-07-01T00:00:00Z") },
     );
@@ -81,6 +82,7 @@ describe("validateStudentAdditionInput", () => {
       phone: "Parents Phone Number must be exactly 10 digits",
       apaar_id: "APAAR ID must be exactly 12 digits",
       g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits",
+      father_name: "Father Name must contain only letters",
     });
   });
 

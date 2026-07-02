@@ -8,6 +8,7 @@ import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
   BOARD_STREAM_OPTIONS,
   CATEGORY_OPTIONS,
+  CBSE_BOARD,
   G10_BOARD_OPTIONS,
   GENDER_OPTIONS,
   STREAM_OPTIONS,
@@ -43,6 +44,14 @@ const initialForm: Record<keyof StudentAdditionInput, string> = {
 
 const labelClassName = "block text-sm font-medium text-text-secondary";
 
+function digitsOnly(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+function lettersAndSpacesOnly(value: string) {
+  return value.replace(/[^A-Za-z ]+/g, "");
+}
+
 export default function AddStudentModal({
   open,
   schoolUdise,
@@ -60,7 +69,14 @@ export default function AddStudentModal({
   const canSubmit = validation.ok && !submitting;
 
   const setField = (name: keyof StudentAdditionInput, value: string) => {
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === "phone" || name === "apaar_id") next[name] = digitsOnly(value);
+      if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
+      if (name === "g10_roll_no" && prev.g10_board === CBSE_BOARD) next.g10_roll_no = digitsOnly(value);
+      if (name === "g10_board" && value === CBSE_BOARD) next.g10_roll_no = digitsOnly(prev.g10_roll_no);
+      return next;
+    });
     setTouched((prev) => ({ ...prev, [name]: true }));
     setMessage(null);
     setError(null);

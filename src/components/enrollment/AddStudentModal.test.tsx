@@ -103,19 +103,25 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("APAAR-only: no Student ID will be generated.")).toBeInTheDocument();
   });
 
-  it("shows field-level validation while filling invalid identifiers and phone", async () => {
+  it("filters restricted fields and shows field-level validation while typing", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("APAAR ID"), "123");
+    await user.type(screen.getByLabelText("APAAR ID"), "abc123");
+    expect(screen.getByLabelText("APAAR ID")).toHaveValue("123");
     expect(screen.getByText("APAAR ID must be exactly 12 digits")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
-    await user.type(screen.getByLabelText("Grade 10 Roll no"), "123456789");
+    await user.type(screen.getByLabelText("Grade 10 Roll no"), "abc123456789");
+    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("123456789");
     expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
+    await user.type(screen.getByLabelText("Parents Phone Number"), "adasd12345");
+    expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("12345");
     expect(screen.getByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Father Name"), "Ravi123 !");
+    expect(screen.getByLabelText("Father Name")).toHaveValue("Ravi ");
   });
 
   it("shows different-school existing match details", async () => {

@@ -427,6 +427,9 @@ export function validateStudentAdditionInput(
   if (!stream) addError(fieldErrors, "stream", "Primary Exam preparing for is not valid");
 
   const father_name = normalizeName(input.father_name);
+  if (father_name && !/^[A-Za-z ]+$/.test(father_name)) {
+    addError(fieldErrors, "father_name", "Father Name must contain only letters");
+  }
   const phone = stringValue(input.phone);
   if (!/^\d{10}$/.test(phone)) {
     addError(fieldErrors, "phone", "Parents Phone Number must be exactly 10 digits");
