@@ -5,6 +5,7 @@ import {
   canAccessQuizSessionBatches,
   canAccessQuizSessionSchool,
   requireQuizSessionAccess,
+  resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import {
@@ -71,7 +72,6 @@ async function getBatchesForSchool(
     JOIN batch b ON b.id = sb.batch_id
     WHERE sb.school_id = $1
       AND b.program_id = ANY($2::int[])
-      AND b.batch_id LIKE 'EnableStudents_%'
     ORDER BY b.name
     `,
     [schoolId, programIds]
@@ -83,7 +83,6 @@ async function getBatchesForSchool(
       SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
       FROM batch b
       WHERE b.program_id = ANY($1::int[])
-        AND b.batch_id LIKE 'EnableStudents_%'
       ORDER BY b.name
       `,
       [programIds]
@@ -178,6 +177,15 @@ export async function GET(request: NextRequest) {
   const limit = perPage + 1;
   const offset = page * perPage;
 
+  // Groups present among the resolved class batches (EnableStudents, EMRSStudents,
+  // …), from the batch→auth_group FK. Replaces the old hardcoded
+  // group='EnableStudents' so EMRS/Punjab/Gujarat sessions list too; batch_id
+  // overlap already scopes to this school's batches.
+  const batchGroups = await resolveBatchGroups(filteredClassIds);
+  const groups = Array.from(
+    new Set(Array.from(batchGroups.values()).map((g) => g.group))
+  );
+
   const sessions = await query<SessionRow>(
     `
     SELECT
@@ -191,12 +199,12 @@ export async function GET(request: NextRequest) {
       s.platform
     FROM session s
     WHERE s.platform = 'quiz'
-      AND s.meta_data->>'group' = 'EnableStudents'
-      AND string_to_array(s.meta_data->>'batch_id', ',') && $1::text[]
+      AND s.meta_data->>'group' = ANY($1::text[])
+      AND string_to_array(s.meta_data->>'batch_id', ',') && $2::text[]
     ORDER BY s.id DESC
-    LIMIT $2 OFFSET $3
+    LIMIT $3 OFFSET $4
     `,
-    [filteredClassIds, limit, offset]
+    [groups, filteredClassIds, limit, offset]
   );
 
   const hasMore = sessions.length > perPage;
@@ -332,11 +340,25 @@ export async function POST(request: NextRequest) {
   const cmsLink = selectedTemplate.cmsLink;
   const cmsSourceId = selectedTemplate.cmsSourceId;
 
+  // Resolve the program group + auth type from the selected class batch via the
+  // batch→auth_group FK (was hardcoded to EnableStudents/"ID,DOB"). Gurukul
+  // matches sessions on meta_data.group and portal-frontend honours the session's
+  // auth_type, so both must match the batch's program (EMRSStudents, Punjab, …).
+  const batchGroups = await resolveBatchGroups([body.classBatchIds[0]]);
+  const resolved = batchGroups.get(body.classBatchIds[0]);
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "Selected batch has no auth group configured" },
+      { status: 400 }
+    );
+  }
+  const { group, authType } = resolved;
+
   const payload = {
     name: sessionName,
     platform: "quiz",
     type: "sign-in",
-    auth_type: "ID,DOB",
+    auth_type: authType,
     redirection: true,
     id_generation: false,
     signup_form: false,
@@ -356,7 +378,7 @@ export async function POST(request: NextRequest) {
     is_active: true,
     purpose: { type: "attendance", params: "quiz" },
     meta_data: {
-      group: "EnableStudents",
+      group,
       parent_id: body.parentBatchId,
       batch_id: Array.isArray(body.classBatchIds)
         ? body.classBatchIds.join(",")

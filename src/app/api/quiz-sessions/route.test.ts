@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   mockRequireQuizSessionAccess: vi.fn(),
   mockCanAccessQuizSessionSchool: vi.fn(),
   mockCanAccessQuizSessionBatches: vi.fn(),
+  mockResolveBatchGroups: vi.fn(),
   mockQuery: vi.fn(),
   mockPublishMessage: vi.fn(),
   mockFetch: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/lib/quiz-session-access", () => ({
   requireQuizSessionAccess: mocks.mockRequireQuizSessionAccess,
   canAccessQuizSessionSchool: mocks.mockCanAccessQuizSessionSchool,
   canAccessQuizSessionBatches: mocks.mockCanAccessQuizSessionBatches,
+  resolveBatchGroups: mocks.mockResolveBatchGroups,
 }));
 vi.mock("@/lib/db", () => ({
   query: mocks.mockQuery,
@@ -71,6 +73,10 @@ beforeEach(() => {
   });
   mocks.mockCanAccessQuizSessionSchool.mockResolvedValue(true);
   mocks.mockCanAccessQuizSessionBatches.mockResolvedValue(true);
+  // Default: the test class batch resolves to EnableStudents / ID,DOB.
+  mocks.mockResolveBatchGroups.mockResolvedValue(
+    new Map([["EnableStudents_11_Engg_A", { group: "EnableStudents", authType: "ID,DOB" }]])
+  );
 });
 
 afterEach(() => {
@@ -145,7 +151,8 @@ describe("GET /api/quiz-sessions", () => {
     expect(mocks.mockQuery).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining("FROM session s"),
-      [["EnableStudents_11_Engg_A"], 11, 0]
+      // groups (derived from the class batch prefix), then class batch ids, limit, offset
+      [["EnableStudents"], ["EnableStudents_11_Engg_A"], 11, 0]
     );
     expect(mocks.mockRequireQuizSessionAccess).toHaveBeenCalledWith(
       ADMIN_SESSION.user.email,
