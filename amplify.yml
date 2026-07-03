@@ -35,6 +35,8 @@ frontend:
           echo "CMS_SERVICE_TOKEN=$CMS_SERVICE_TOKEN" >> .env.production
           echo "QUIZ_BACKEND_URL=$QUIZ_BACKEND_URL" >> .env.production
           echo "SESSION_PORTAL_URL=$SESSION_PORTAL_URL" >> .env.production
+          echo "QUIZ_FRONTEND_URL=$QUIZ_FRONTEND_URL" >> .env.production
+          echo "QUIZ_AF_API_KEY=$QUIZ_AF_API_KEY" >> .env.production
     build:
       commands:
         - npm run build

@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const examTrack = (searchParams.get("exam_track") || "").trim() as ExamTrack;
-  const gradeId = (searchParams.get("grade_id") || "").trim();
+  const grade = Number((searchParams.get("grade") || "").trim());
   const testType = (searchParams.get("test_type") || "chapter_test").trim() as CmsTestType;
   const chapterIdParam = (searchParams.get("chapter_id") || "").trim();
 
@@ -94,8 +94,8 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
-  if (!gradeId) {
-    return NextResponse.json({ error: "grade_id is required" }, { status: 400 });
+  if (grade !== 11 && grade !== 12) {
+    return NextResponse.json({ error: "grade must be 11 or 12" }, { status: 400 });
   }
   if (!CMS_TEST_TYPES.includes(testType)) {
     return NextResponse.json(
@@ -104,11 +104,25 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Resolve the CMS grade id from the grade table (the same lookup the from-cms session
+  // route does), rather than trusting a client-side grade->id mapping that could drift.
+  const gradeRows = await query<{ id: number }>(
+    `SELECT id FROM grade WHERE number = $1 LIMIT 1`,
+    [grade]
+  );
+  const gradeId = gradeRows[0]?.id;
+  if (!gradeId) {
+    return NextResponse.json(
+      { error: `No grade row for grade ${grade}` },
+      { status: 400 }
+    );
+  }
+
   const curriculumId = curriculumIdForExamTrack(examTrack);
   const cmsUrl =
     `${CMS_SERVICE_URL.replace(/\/$/, "")}/api/service/tests` +
     `?curriculum-dropdown=${curriculumId}` +
-    `&grade-dropdown=${encodeURIComponent(gradeId)}` +
+    `&grade-dropdown=${encodeURIComponent(String(gradeId))}` +
     `&testtype-dropdown=${encodeURIComponent(testType)}`;
 
   let response: Response;

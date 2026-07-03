@@ -21,6 +21,11 @@ const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN?.trim();
 const QUIZ_BACKEND_URL = process.env.QUIZ_BACKEND_URL?.trim();
 // Auth/portal base a student opens the session on, e.g. https://staging-auth.avantifellows.org
 const SESSION_PORTAL_URL = process.env.SESSION_PORTAL_URL?.trim();
+// Quiz frontend base + AF org api key, used only to build the admin Q&A testing links
+// (quiz player as whitelisted test_admin, no portal auth) — mirrors legacy sessionCreator.
+// Optional: when unset the links stay blank, session creation itself is unaffected.
+const QUIZ_FRONTEND_URL = process.env.QUIZ_FRONTEND_URL?.trim();
+const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY?.trim();
 
 // Matches the group the session is filed under; also the session_id prefix (EnableStudents_<quizId>).
 const SESSION_GROUP = "EnableStudents";
@@ -193,6 +198,21 @@ export async function POST(request: NextRequest) {
   const shuffle = body.shuffle ?? false;
   const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
 
+  // Admin Q&A testing links: quiz player as the whitelisted test_admin user (legacy
+  // sessionCreator parity). Blank when the frontend URL / api key aren't configured.
+  let adminTestingLink = "";
+  let adminTestingOmrLink = "";
+  if (QUIZ_FRONTEND_URL && QUIZ_AF_API_KEY) {
+    adminTestingLink =
+      `${QUIZ_FRONTEND_URL.replace(/\/$/, "")}/quiz/${quizId}` +
+      `?apiKey=${encodeURIComponent(QUIZ_AF_API_KEY)}&userId=test_admin`;
+    adminTestingOmrLink = `${adminTestingLink}&omrMode=true`;
+  } else {
+    console.warn(
+      "QUIZ_FRONTEND_URL / QUIZ_AF_API_KEY not configured — admin testing links left blank"
+    );
+  }
+
   const sessionPayload = {
     name: sessionName,
     platform: "quiz",
@@ -238,8 +258,8 @@ export async function POST(request: NextRequest) {
       report_link: "",
       shortened_link: "",
       shortened_omr_link: "",
-      admin_testing_link: "",
-      admin_testing_omr_link: "",
+      admin_testing_link: adminTestingLink,
+      admin_testing_omr_link: adminTestingOmrLink,
       show_answers: body.showAnswers ?? true,
       show_scores: body.showScores ?? true,
       shuffle,
@@ -268,6 +288,30 @@ export async function POST(request: NextRequest) {
   const sessionData = (await sessionRes.json()) as { id: number };
   const sessionPk = sessionData.id;
 
+  // If a later step fails, don't leave a live-looking session behind: mark it inactive and
+  // failed (best-effort — the create already failed, so this must not mask that error).
+  async function markSessionFailed(reason: string) {
+    try {
+      const res = await fetch(`${DB_SERVICE_URL}/session/${sessionPk}`, {
+        method: "PATCH",
+        headers: dbHeaders(),
+        body: JSON.stringify({
+          is_active: false,
+          meta_data: { ...sessionPayload.meta_data, status: "failed" },
+        }),
+      });
+      if (!res.ok) {
+        console.error(
+          `Failed to mark session ${sessionPk} failed after ${reason}:`,
+          res.status,
+          await res.text()
+        );
+      }
+    } catch (err) {
+      console.error(`Failed to mark session ${sessionPk} failed after ${reason}:`, err);
+    }
+  }
+
   // 3. One occurrence spanning the whole window (continuous session), mirroring the Lambda.
   const occRes = await fetch(`${DB_SERVICE_URL}/session-occurrence`, {
     method: "POST",
@@ -282,8 +326,13 @@ export async function POST(request: NextRequest) {
   if (!occRes.ok) {
     const errorText = await occRes.text();
     console.error("DB service /session-occurrence error:", occRes.status, errorText);
+    await markSessionFailed("occurrence failure");
     return NextResponse.json(
-      { error: "Session created but occurrence failed", id: sessionPk, quizId },
+      {
+        error: "Occurrence creation failed — session was deactivated. Retry the create.",
+        id: sessionPk,
+        quizId,
+      },
       { status: occRes.status }
     );
   }
@@ -293,8 +342,13 @@ export async function POST(request: NextRequest) {
     const groupId = await resolveGroupId(batchId);
     if (!groupId) {
       console.error(`Could not resolve group for batch ${batchId}`);
+      await markSessionFailed(`unresolvable batch ${batchId}`);
       return NextResponse.json(
-        { error: `Could not resolve group for batch ${batchId}`, id: sessionPk, quizId },
+        {
+          error: `Could not resolve group for batch ${batchId} — session was deactivated. Retry the create.`,
+          id: sessionPk,
+          quizId,
+        },
         { status: 502 }
       );
     }
@@ -306,8 +360,13 @@ export async function POST(request: NextRequest) {
     if (!groupSessionRes.ok) {
       const errorText = await groupSessionRes.text();
       console.error("DB service /group-session error:", groupSessionRes.status, errorText);
+      await markSessionFailed(`group-session failure for batch ${batchId}`);
       return NextResponse.json(
-        { error: `Failed to link batch ${batchId}`, id: sessionPk, quizId },
+        {
+          error: `Failed to link batch ${batchId} — session was deactivated. Retry the create.`,
+          id: sessionPk,
+          quizId,
+        },
         { status: groupSessionRes.status }
       );
     }

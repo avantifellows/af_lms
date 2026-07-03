@@ -98,7 +98,6 @@ const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
   { value: "neet", label: "NEET" },
 ];
 const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
-const GRADE_ID_BY_NUMBER: Record<string, string> = { "11": "3", "12": "4" };
 
 interface CmsChapterOption {
   id: number;
@@ -1174,7 +1173,7 @@ function QuizSessionCreateModal({
       try {
         const params = new URLSearchParams({
           exam_track: cmsExamTrack,
-          grade_id: GRADE_ID_BY_NUMBER[cmsGrade] ?? "",
+          grade: cmsGrade,
           test_type: cmsTestType,
         });
         if (cmsTestType === "chapter_test" && cmsChapterId !== null) {
@@ -1183,7 +1182,17 @@ function QuizSessionCreateModal({
         const res = await fetch(`/api/cms/tests?${params.toString()}`);
         if (!res.ok) throw new Error("Failed to fetch tests");
         const data = await res.json();
-        if (!cancelled) setCmsTests(data.tests ?? []);
+        if (!cancelled) {
+          const tests: CmsTestOption[] = data.tests ?? [];
+          setCmsTests(tests);
+          // The list may have been refetched under new filters (e.g. exam track changed
+          // with major_test still ready) — drop any selection the new list doesn't contain.
+          setSelectedCmsTestId((previous) =>
+            previous !== null && tests.some((test) => test.id === previous)
+              ? previous
+              : null
+          );
+        }
       } catch (err) {
         if (!cancelled) {
           setCmsError((err as Error).message);
@@ -1287,14 +1296,17 @@ function QuizSessionCreateModal({
         const selectedCmsTest = cmsTests.find(
           (test) => test.id === selectedCmsTestId
         );
+        if (!selectedCmsTest) {
+          throw new Error("Selected test is no longer in the list — pick it again.");
+        }
         const cmsPayload = {
-          name: name.trim() || selectedCmsTest?.name || "",
-          cmsTestId: selectedCmsTestId,
+          name: name.trim() || selectedCmsTest.name || "",
+          cmsTestId: selectedCmsTest.id,
           testType: cmsTestType,
           examTrack: cmsExamTrack,
           grade: Number(cmsGrade),
-          testName: selectedCmsTest?.name,
-          testCode: selectedCmsTest?.code,
+          testName: selectedCmsTest.name,
+          testCode: selectedCmsTest.code,
           parentBatchId: batchDerivation.parentBatchId,
           classBatchIds,
           stream: batchDerivation.stream,
@@ -1312,12 +1324,19 @@ function QuizSessionCreateModal({
           body: JSON.stringify(cmsPayload),
         });
 
+        const data = await response.json();
         if (!response.ok) {
-          const data = await response.json();
           throw new Error(data.error || "Failed to create session");
         }
 
-        onCreated("Session created.");
+        // Surface non-fatal quiz-build warnings (e.g. question subtypes the mapper had to
+        // approximate) — the quiz is live, but the creator should eyeball it.
+        const warnings: string[] = data.warnings ?? [];
+        onCreated(
+          warnings.length
+            ? `Session created with warnings: ${warnings.join("; ")}`
+            : "Session created."
+        );
         return;
       }
 

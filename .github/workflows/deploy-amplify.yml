@@ -96,6 +96,8 @@ jobs:
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
           SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
+          QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
+          QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -128,6 +130,8 @@ jobs:
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
             --arg portal_url "$SESSION_PORTAL_URL" \
+            --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
+            --arg quiz_af_key "$QUIZ_AF_API_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -157,7 +161,9 @@ jobs:
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
-              SESSION_PORTAL_URL: $portal_url
+              SESSION_PORTAL_URL: $portal_url,
+              QUIZ_FRONTEND_URL: $quiz_fe_url,
+              QUIZ_AF_API_KEY: $quiz_af_key
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -255,6 +261,8 @@ jobs:
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
           SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
+          QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
+          QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -287,6 +295,8 @@ jobs:
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
             --arg portal_url "$SESSION_PORTAL_URL" \
+            --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
+            --arg quiz_af_key "$QUIZ_AF_API_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -316,7 +326,9 @@ jobs:
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
-              SESSION_PORTAL_URL: $portal_url
+              SESSION_PORTAL_URL: $portal_url,
+              QUIZ_FRONTEND_URL: $quiz_fe_url,
+              QUIZ_AF_API_KEY: $quiz_af_key
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -425,6 +437,8 @@ jobs:
           CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
           QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
           SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
+          QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
+          QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -456,6 +470,8 @@ jobs:
             --arg cms_token "$CMS_SERVICE_TOKEN" \
             --arg quiz_url "$QUIZ_BACKEND_URL" \
             --arg portal_url "$SESSION_PORTAL_URL" \
+            --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
+            --arg quiz_af_key "$QUIZ_AF_API_KEY" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -485,7 +501,9 @@ jobs:
               CMS_SERVICE_URL: $cms_url,
               CMS_SERVICE_TOKEN: $cms_token,
               QUIZ_BACKEND_URL: $quiz_url,
-              SESSION_PORTAL_URL: $portal_url
+              SESSION_PORTAL_URL: $portal_url,
+              QUIZ_FRONTEND_URL: $quiz_fe_url,
+              QUIZ_AF_API_KEY: $quiz_af_key
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
