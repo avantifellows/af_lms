@@ -218,6 +218,16 @@ function getMetaString(
   return typeof value === "string" ? value : undefined;
 }
 
+function getMetaScalar(
+  meta: Record<string, unknown> | null | undefined,
+  key: string
+): string | undefined {
+  const value = meta?.[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
 function getMetaBoolean(
   meta: Record<string, unknown> | null | undefined,
   key: string
@@ -2767,9 +2777,10 @@ function CmsAwarePaperLinks({
   meta: Record<string, unknown> | null | undefined;
 }) {
   const cmsSource = getMetaString(meta, "cms_source");
-  const cmsTestId = getMetaString(meta, "cms_test_id");
-  const curriculumId = getMetaString(meta, "cms_curriculum_id");
-  const gradeId = getMetaString(meta, "cms_grade_id");
+  // Ids may be stored as numbers (older sessions) or strings — accept both.
+  const cmsTestId = getMetaScalar(meta, "cms_test_id");
+  const curriculumId = getMetaScalar(meta, "cms_curriculum_id");
+  const gradeId = getMetaScalar(meta, "cms_grade_id");
 
   if (cmsSource && cmsTestId && curriculumId && gradeId) {
     const base =

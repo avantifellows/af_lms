@@ -297,8 +297,8 @@ export async function POST(request: NextRequest) {
       cms_test_id: String(body.cmsTestId),
       cms_source_id: String(body.cmsTestId),
       // Persist what the on-demand PDF proxy needs to re-fetch the test from the CMS.
-      cms_curriculum_id: curriculumId,
-      cms_grade_id: gradeId,
+      cms_curriculum_id: String(curriculumId),
+      cms_grade_id: String(gradeId),
       has_synced_to_bq: false,
       infinite_session: false,
       report_link: reportLink,
