@@ -62,7 +62,7 @@ describe("validateStudentAdditionInput", () => {
     expect(result.generatedStudentId).toBeNull();
   });
 
-  it("validates identifiers, future DOB, phone, and CBSE roll format", () => {
+  it("validates identifiers, DOB range, phone, and roll format", () => {
     const result = validateStudentAdditionInput(
       {
         ...validInput,
@@ -78,7 +78,7 @@ describe("validateStudentAdditionInput", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors).toMatchObject({
-      date_of_birth: "Date of Birth cannot be in the future",
+      date_of_birth: "Date of Birth must be between 2000 and 2015",
       phone: "Parents Phone Number must be exactly 10 digits",
       apaar_id: "APAAR ID must be exactly 12 digits",
       g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits",

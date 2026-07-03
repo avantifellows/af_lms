@@ -22,7 +22,7 @@ async function fillValidForm() {
   await user.selectOptions(screen.getByLabelText("Category"), "Gen");
   await user.selectOptions(screen.getByLabelText("Physical Handicapped"), "No");
   await user.type(screen.getByLabelText("APAAR ID"), "123456789012");
-  await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
+  await user.type(screen.getByLabelText("G10 board"), CBSE_BOARD);
   await user.type(screen.getByLabelText("Grade 10 Roll no"), "1234 5678");
   await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
   await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
@@ -59,7 +59,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("Student ID will be 202812345678")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add Student" }));
 
-    await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalled());
+    await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalledWith("202812345678"));
     expect(baseProps.onClose).toHaveBeenCalled();
     expect(screen.queryByText(/Student added/)).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(
@@ -111,9 +111,14 @@ describe("AddStudentModal", () => {
     await user.type(screen.getByLabelText("APAAR ID"), "abc1234567890123");
     expect(screen.getByLabelText("APAAR ID")).toHaveValue("123456789012");
 
-    await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
-    await user.type(screen.getByLabelText("Grade 10 Roll no"), "abc123456789");
-    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("12345678");
+    const rollInput = screen.getByLabelText("Grade 10 Roll no");
+    await user.type(screen.getByLabelText("Grade 10 Roll no"), "abc12345678901");
+    expect(rollInput).toHaveValue("ABC1234567");
+
+    await user.clear(rollInput);
+    await user.type(screen.getByLabelText("G10 board"), CBSE_BOARD);
+    await user.type(rollInput, "abc123456789");
+    expect(rollInput).toHaveValue("12345678");
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "adasd12345678901");
     expect(screen.getByLabelText("Parents Phone Number")).toHaveValue("1234567890");
@@ -122,12 +127,24 @@ describe("AddStudentModal", () => {
     expect(screen.getByLabelText("Father Name")).toHaveValue("Ravi ");
   });
 
+  it("shows G10 roll length errors and allows typing in the board field", async () => {
+    render(<AddStudentModal {...baseProps} />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("G10 board"), "CENTRAL");
+    expect(screen.getByLabelText("G10 board")).toHaveValue("CENTRAL");
+
+    await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC");
+    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("ABC");
+    expect(screen.getByText("Grade 10 Roll no must be 4 to 10 characters")).toBeInTheDocument();
+  });
+
   it("shows CBSE roll errors when switching boards makes an existing roll invalid", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC123");
-    await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
+    await user.type(screen.getByLabelText("G10 board"), CBSE_BOARD);
 
     expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("123");
     expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
@@ -142,6 +159,14 @@ describe("AddStudentModal", () => {
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
     expect(screen.getByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+  });
+
+  it("marks required fields without showing Optional for annual family income", () => {
+    render(<AddStudentModal {...baseProps} />);
+
+    expect(screen.queryByText("Optional")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Yearly / Annual Family Income")).toBeInTheDocument();
+    expect(screen.getByText(/Either APAAR ID or Grade 10 Roll no is compulsory/)).toBeInTheDocument();
   });
 
   it("resets the form when reopened", async () => {

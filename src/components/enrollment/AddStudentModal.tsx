@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type InputHTMLAttributes } from "react";
 import { X } from "lucide-react";
 
 import { Button, FormSection, Input, Modal, Select } from "@/components/ui";
@@ -9,9 +9,13 @@ import {
   BOARD_STREAM_OPTIONS,
   CATEGORY_OPTIONS,
   CBSE_BOARD,
+  G10_ROLL_MAX_LENGTH,
+  G10_ROLL_MIN_LENGTH,
   G10_BOARD_OPTIONS,
   GENDER_OPTIONS,
   STREAM_OPTIONS,
+  STUDENT_DOB_MAX,
+  STUDENT_DOB_MIN,
   formatStudentAdditionExistingMatch,
   validateStudentAdditionInput,
   type StudentAdditionInput,
@@ -22,7 +26,7 @@ interface AddStudentModalProps {
   schoolUdise: string;
   schoolCode: string;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (studentId: string | null) => void;
 }
 
 const initialForm: Record<keyof StudentAdditionInput, string> = {
@@ -50,6 +54,10 @@ function digitsOnly(value: string) {
 
 function lettersAndSpacesOnly(value: string) {
   return value.replace(/[^A-Za-z ]+/g, "");
+}
+
+function rollCharactersOnly(value: string) {
+  return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
 }
 
 export default function AddStudentModal({
@@ -82,8 +90,10 @@ export default function AddStudentModal({
       if (name === "phone") next.phone = digitsOnly(value).slice(0, 10);
       if (name === "apaar_id") next.apaar_id = digitsOnly(value).slice(0, 12);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
-      if (name === "g10_roll_no" && prev.g10_board === CBSE_BOARD) {
-        next.g10_roll_no = digitsOnly(value).slice(0, 8);
+      if (name === "g10_roll_no") {
+        next.g10_roll_no = prev.g10_board === CBSE_BOARD
+          ? digitsOnly(value).slice(0, 8)
+          : rollCharactersOnly(value).slice(0, G10_ROLL_MAX_LENGTH);
       }
       if (name === "g10_board" && value === CBSE_BOARD) {
         next.g10_roll_no = digitsOnly(prev.g10_roll_no).slice(0, 8);
@@ -109,21 +119,45 @@ export default function AddStudentModal({
     touched.apaar_id || touched.g10_roll_no ? validation.rowErrors[0] : undefined;
 
   const errorClassName = "border-danger focus:border-danger focus:ring-danger/20";
+  const renderLabel = (label: string, required = false) => (
+    <>
+      {label}
+      {required && (
+        <span aria-hidden="true" className="text-danger">
+          {" *"}
+        </span>
+      )}
+    </>
+  );
+  const renderConditionalLabel = (label: string) => (
+    <>
+      {label}
+      <span aria-hidden="true" className="text-accent">
+        {" #"}
+      </span>
+    </>
+  );
 
   const inputField = (
     name: keyof StudentAdditionInput,
     label: string,
     type = "text",
     inputMode?: "text" | "numeric" | "tel",
+    required = false,
+    inputProps: InputHTMLAttributes<HTMLInputElement> = {},
+    conditional = false,
   ) => {
     const errorText = fieldError(name);
     const errorId = `${name}-error`;
     return (
       <div>
-        <label htmlFor={name} className={labelClassName}>{label}</label>
+        <label htmlFor={name} className={labelClassName}>
+          {conditional ? renderConditionalLabel(label) : renderLabel(label, required)}
+        </label>
         <Input
           id={name}
           name={name}
+          aria-label={label}
           type={type}
           inputMode={inputMode}
           value={form[name]}
@@ -132,6 +166,7 @@ export default function AddStudentModal({
           aria-invalid={errorText ? true : undefined}
           aria-describedby={errorText ? errorId : undefined}
           className={errorText ? errorClassName : ""}
+          {...inputProps}
         />
         {errorText && (
           <p id={errorId} className="mt-1 text-xs text-danger">
@@ -147,15 +182,17 @@ export default function AddStudentModal({
     label: string,
     options: readonly string[],
     placeholder = "Select...",
+    required = false,
   ) => {
     const errorText = fieldError(name);
     const errorId = `${name}-error`;
     return (
       <div>
-        <label htmlFor={name} className={labelClassName}>{label}</label>
+        <label htmlFor={name} className={labelClassName}>{renderLabel(label, required)}</label>
         <Select
           id={name}
           name={name}
+          aria-label={label}
           value={form[name]}
           onChange={(event) => setField(name, event.target.value)}
           onBlur={() => touchField(name)}
@@ -170,6 +207,77 @@ export default function AddStudentModal({
             </option>
           ))}
         </Select>
+        {errorText && (
+          <p id={errorId} className="mt-1 text-xs text-danger">
+            {errorText}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const g10BoardField = () => {
+    const errorText = fieldError("g10_board");
+    const errorId = "g10_board-error";
+    return (
+      <div>
+        <label htmlFor="g10_board" className={labelClassName}>{renderLabel("G10 board", true)}</label>
+        <Input
+          id="g10_board"
+          name="g10_board"
+          aria-label="G10 board"
+          list="g10-board-options"
+          value={form.g10_board}
+          onChange={(event) => setField("g10_board", event.target.value)}
+          onBlur={() => touchField("g10_board")}
+          aria-invalid={errorText ? true : undefined}
+          aria-describedby={errorText ? errorId : undefined}
+          className={errorText ? errorClassName : ""}
+        />
+        <datalist id="g10-board-options">
+          {G10_BOARD_OPTIONS.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+        {errorText && (
+          <p id={errorId} className="mt-1 text-xs text-danger">
+            {errorText}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const g10RollField = () => {
+    const isCbseBoard = form.g10_board === CBSE_BOARD;
+    const errorText = fieldError("g10_roll_no");
+    const errorId = "g10_roll_no-error";
+    const helpId = "g10_roll_no-help";
+    return (
+      <div>
+        <label htmlFor="g10_roll_no" className={labelClassName}>
+          {renderConditionalLabel("Grade 10 Roll no")}
+        </label>
+        <Input
+          id="g10_roll_no"
+          name="g10_roll_no"
+          aria-label="Grade 10 Roll no"
+          type="text"
+          inputMode={isCbseBoard ? "numeric" : "text"}
+          minLength={isCbseBoard ? 8 : G10_ROLL_MIN_LENGTH}
+          maxLength={isCbseBoard ? 8 : G10_ROLL_MAX_LENGTH}
+          value={form.g10_roll_no}
+          onChange={(event) => setField("g10_roll_no", event.target.value)}
+          onBlur={() => touchField("g10_roll_no")}
+          aria-invalid={errorText ? true : undefined}
+          aria-describedby={errorText ? `${helpId} ${errorId}` : helpId}
+          className={errorText ? errorClassName : ""}
+        />
+        <p id={helpId} className="mt-1 text-xs text-text-muted">
+          {isCbseBoard
+            ? "CBSE: enter exactly 8 digits."
+            : `Enter ${G10_ROLL_MIN_LENGTH} to ${G10_ROLL_MAX_LENGTH} characters.`}
+        </p>
         {errorText && (
           <p id={errorId} className="mt-1 text-xs text-danger">
             {errorText}
@@ -210,7 +318,7 @@ export default function AddStudentModal({
 
       const result = body.results?.[0];
       if (result?.status === "created") {
-        onCreated();
+        onCreated(result.generated_student_id ?? result.normalized?.student_id ?? null);
         onClose();
       } else if (result?.status === "already_exists") {
         setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
@@ -232,7 +340,6 @@ export default function AddStudentModal({
       <div className="flex items-start justify-between border-b border-border px-6 py-4">
         <div>
           <h2 className="text-xl font-semibold text-text-primary">Add Student</h2>
-          <p className="mt-1 text-sm text-text-muted">JNV NVS lateral entry</p>
         </div>
         <Button type="button" variant="icon" onClick={onClose} aria-label="Close add student">
           <X className="h-5 w-5" aria-hidden="true" />
@@ -250,41 +357,58 @@ export default function AddStudentModal({
           <FormSection>
             <h3 className="text-sm font-semibold text-text-primary">Student Details</h3>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {selectField("grade", "Grade", ["11", "12"])}
-              {inputField("student_name", "Student Name")}
-              {inputField("date_of_birth", "Date of Birth", "date")}
-              {selectField("gender", "Gender", GENDER_OPTIONS)}
-              {selectField("category", "Category", CATEGORY_OPTIONS)}
-              {selectField("physically_handicapped", "Physical Handicapped", ["Yes", "No"])}
-              {inputField("phone", "Parents Phone Number", "text", "tel")}
-              {inputField("father_name", "Father Name")}
-              {selectField("annual_family_income", "Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS, "Optional")}
+              {inputField("student_name", "Student Name", "text", "text", true)}
+              {inputField("date_of_birth", "Date of Birth", "date", undefined, true, {
+                min: STUDENT_DOB_MIN,
+                max: STUDENT_DOB_MAX,
+              })}
+              {selectField("grade", "Grade", ["11", "12"], "Select...", true)}
+              {selectField("gender", "Gender", GENDER_OPTIONS, "Select...", true)}
+              {selectField("category", "Category", CATEGORY_OPTIONS, "Select...", true)}
+              {selectField("physically_handicapped", "Physical Handicapped", ["Yes", "No"], "Select...", true)}
+              {inputField("apaar_id", "APAAR ID", "text", "numeric", false, {}, true)}
             </div>
           </FormSection>
 
           <FormSection>
-            <h3 className="text-sm font-semibold text-text-primary">Identity</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Grade 10 Info</h3>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {inputField("apaar_id", "APAAR ID", "text", "numeric")}
-              {selectField("g10_board", "G10 board", G10_BOARD_OPTIONS)}
-              {inputField(
-                "g10_roll_no",
-                "Grade 10 Roll no",
-                "text",
-                form.g10_board === CBSE_BOARD ? "numeric" : "text",
-              )}
-              {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
-              {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS)}
+              {g10BoardField()}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)]">
+                {g10RollField()}
+                <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm font-medium text-text-primary">
+                  {identityMessage}
+                </div>
+              </div>
             </div>
-            <p className="rounded-md bg-bg-card-alt px-3 py-2 text-sm text-text-secondary">
-              {identityMessage}
-            </p>
             {identityError && (
               <p className="text-xs text-danger">
                 {identityError}
               </p>
             )}
           </FormSection>
+
+          <FormSection>
+            <h3 className="text-sm font-semibold text-text-primary">Stream</h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS, "Select...", true)}
+              {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS, "Select...", true)}
+            </div>
+          </FormSection>
+
+          <FormSection>
+            <h3 className="text-sm font-semibold text-text-primary">Family Details</h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {inputField("father_name", "Father Name")}
+              {inputField("phone", "Parents Phone Number", "text", "tel", true)}
+              {selectField("annual_family_income", "Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS)}
+            </div>
+          </FormSection>
+
+          <p className="text-xs text-text-muted">
+            <span className="text-danger">*</span> Mandatory fields.{" "}
+            <span className="text-accent">#</span> Either APAAR ID or Grade 10 Roll no is compulsory.
+          </p>
         </div>
 
         <div className="flex justify-end gap-3 border-t border-border px-6 py-4">

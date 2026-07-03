@@ -4,14 +4,13 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Upload } from "lucide-react";
 import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
-import Toast from "@/components/Toast";
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
 import { buildProgramStats } from "@/lib/enrollment-stats";
 import type { Batch } from "@/components/EditStudentModal";
 import { PROGRAM_IDS } from "@/lib/constants";
-import { Button } from "@/components/ui";
+import { Button, Modal } from "@/components/ui";
 import AddStudentModal from "./AddStudentModal";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
 
@@ -56,7 +55,8 @@ export default function EnrollmentTabContent({
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [createdStudentId, setCreatedStudentId] = useState<string | null>(null);
+  const [createdOpen, setCreatedOpen] = useState(false);
   const selectedProgramId = programs.some((program) => program.id === selectedId)
     ? selectedId
     : programs[0]?.id ?? null;
@@ -103,21 +103,53 @@ export default function EnrollmentTabContent({
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
 
-  const handleStudentCreated = () => {
+  const closeCreatedModal = () => {
+    setCreatedOpen(false);
+    setCreatedStudentId(null);
+  };
+
+  const handleAddAnother = () => {
+    closeCreatedModal();
+    setAddOpen(true);
+  };
+
+  const handleStudentCreated = (studentId: string | null) => {
     setAddOpen(false);
-    setToast("Student added.");
+    setCreatedStudentId(studentId);
+    setCreatedOpen(true);
     router.refresh();
   };
 
   return (
     <>
-      {toast && (
-        <Toast
-          variant="success"
-          message={toast}
-          onDismiss={() => setToast(null)}
-        />
-      )}
+      <Modal open={createdOpen} onClose={closeCreatedModal} className="p-0">
+        <div className="border-b border-border px-5 py-4">
+          <h2 className="text-lg font-semibold text-text-primary">Student added</h2>
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          {createdStudentId ? (
+            <>
+              <p className="text-sm text-text-secondary">Student ID created</p>
+              <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-lg font-semibold text-text-primary">
+                {createdStudentId}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-text-secondary">
+              Student was added. No Student ID was created.
+            </p>
+          )}
+        </div>
+        <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
+          <Button type="button" variant="secondary" onClick={closeCreatedModal}>
+            Close
+          </Button>
+          <Button type="button" onClick={handleAddAnother}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add another student
+          </Button>
+        </div>
+      </Modal>
       {/* Grade filter — placed above the summary so it's clear the pills react
           to it. */}
       <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">

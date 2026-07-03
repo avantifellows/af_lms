@@ -25,8 +25,8 @@ vi.mock("@/components/StudentTable", () => ({
 
 vi.mock("./AddStudentModal", () => ({
   __esModule: true,
-  default: ({ open, onCreated }: { open: boolean; onCreated: () => void }) =>
-    open ? <button onClick={onCreated}>mock add modal</button> : null,
+  default: ({ open, onCreated }: { open: boolean; onCreated: (studentId: string | null) => void }) =>
+    open ? <button onClick={() => onCreated("202812345678")}>mock add modal</button> : null,
 }));
 
 vi.mock("./BulkStudentUploadModal", () => ({
@@ -76,7 +76,9 @@ describe("EnrollmentTabContent", () => {
     await user.click(screen.getByRole("button", { name: "mock add modal" }));
 
     expect(mockRefresh).toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Student added.");
+    expect(screen.getByText("Student added")).toBeInTheDocument();
+    expect(screen.getByText("202812345678")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add another student" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "mock add modal" })).not.toBeInTheDocument();
   });
 

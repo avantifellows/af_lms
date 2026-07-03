@@ -283,7 +283,7 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.rejectedResults.map((row) => row.field_errors)).toEqual([
       { stream: "Primary Exam preparing for is not valid" },
       { grade: "Grade must match the selected upload grade 11" },
-      { date_of_birth: "Date of Birth cannot be in the future" },
+      { date_of_birth: "Date of Birth must be between 2000 and 2015" },
     ]);
     expect(result.rejectedResults[0].generated_student_id).toBe("202912345678");
 

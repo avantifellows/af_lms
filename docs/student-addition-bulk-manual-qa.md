@@ -13,7 +13,7 @@ Use one real-like JNV NVS workbook from Ops with Grade 11 or Grade 12 selected o
 - Bad dates, including future Date of Birth, return field errors.
 - Bad reference values for Gender, Category, Board Stream, Primary Exam preparing for, G10 board, and Annual Family Income return field errors.
 - CBSE rows with a non-8-digit Grade 10 Roll no return field errors.
-- Non-CBSE alphanumeric Grade 10 Roll no is accepted and generates an alphanumeric Student ID.
+- Non-CBSE alphanumeric Grade 10 Roll no with 4 to 10 characters is accepted and generates an alphanumeric Student ID.
 - Partial success shows created/already-present/rejected totals and a rejected-row CSV.
 - Re-uploading the rejected-row CSV after offline fixes succeeds without duplicating rows already created in the first attempt.
 

@@ -82,6 +82,10 @@ export const BOARD_STREAM_OPTIONS = [
   "Arts/Humanities",
 ] as const;
 export const STREAM_OPTIONS = ["Engineering", "Medical", "CA", "CLAT"] as const;
+export const STUDENT_DOB_MIN = "2000-01-01";
+export const STUDENT_DOB_MAX = "2015-12-31";
+export const G10_ROLL_MIN_LENGTH = 4;
+export const G10_ROLL_MAX_LENGTH = 10;
 export const ANNUAL_FAMILY_INCOME_OPTIONS = [
   "Less than Rs. 1,00,000",
   "Rs. 1,00,000-2,00,000",
@@ -385,8 +389,8 @@ export function validateStudentAdditionInput(
   const date_of_birth = parseDate(input.date_of_birth);
   if (!date_of_birth) {
     addError(fieldErrors, "date_of_birth", "Date of Birth must be DD/MM/YYYY or YYYY-MM-DD");
-  } else if (date_of_birth > isoToday(today)) {
-    addError(fieldErrors, "date_of_birth", "Date of Birth cannot be in the future");
+  } else if (date_of_birth < STUDENT_DOB_MIN || date_of_birth > STUDENT_DOB_MAX || date_of_birth > isoToday(today)) {
+    addError(fieldErrors, "date_of_birth", "Date of Birth must be between 2000 and 2015");
   }
 
   const gender = stringValue(input.gender);
@@ -413,8 +417,8 @@ export function validateStudentAdditionInput(
   if (g10_roll_no) {
     if (g10_board === CBSE_BOARD && !/^\d{8}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "CBSE Grade 10 Roll no must be exactly 8 digits");
-    } else if (!/^[A-Z0-9]+$/.test(g10_roll_no)) {
-      addError(fieldErrors, "g10_roll_no", "Grade 10 Roll no must contain only letters and digits");
+    } else if (g10_board !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
+      addError(fieldErrors, "g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
     }
   }
 

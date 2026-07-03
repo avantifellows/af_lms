@@ -153,7 +153,7 @@ export default function BulkStudentUploadModal({
               Download template
             </a>
             <p className="text-sm text-text-secondary">
-              Student ID is generated as G12 passing year + Grade 10 Roll no. APAAR-only rows do not get a Student ID. Alphanumeric Student IDs are valid; copy-paste them if needed.
+              Student ID is generated as G12 passing year + Grade 10 Roll no. APAAR-only rows do not get a Student ID. CBSE needs exactly 8 digits; other boards need 4 to 10 characters.
             </p>
           </div>
 

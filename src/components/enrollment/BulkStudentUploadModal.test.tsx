@@ -47,7 +47,7 @@ describe("BulkStudentUploadModal", () => {
       "/api/school/12345678901/students",
     );
     expect(screen.getByText(/Student ID is generated as/)).toHaveTextContent(
-      "Alphanumeric Student IDs are valid",
+      "other boards need 4 to 10 characters",
     );
 
     await user.selectOptions(screen.getByLabelText("Upload grade"), "11");

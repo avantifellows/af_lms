@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 ---
 
 # Student Addition
@@ -54,7 +54,7 @@ Current v1 fields:
 
 Father Name and Annual Family Income are optional in v1. Store them when present, validate Annual Family Income against the dropdown if present, and do not block creation when either is blank.
 
-Dropdowns come from the template exports. CBSE is the only board with an enforced G10 roll format: exactly 8 digits. Other boards are free-form after normalisation.
+Dropdowns come from the template exports. CBSE is the only board with an enforced numeric G10 roll format: exactly 8 digits. Other boards accept normalised alphanumeric Grade 10 rolls between 4 and 10 characters.
 
 No open implementation decisions remain in the PRD. School-login support/recovery is an ops runbook detail and intentionally out of scope for this implementation artifact.
 
@@ -73,7 +73,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Duplicate APAAR and duplicate generated Student ID are blocked. Policy is first-registrant-wins.
 - Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. APAAR-only rows store `student.apaar_id` and leave `student.student_id` null.
 - G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
-- G10 roll normalisation: remove spaces, uppercase letters, then validate alphanumeric. Do not left-pad short rolls. Store the normalised Grade 10 Roll no separately from generated Student ID because Student ID is not equivalent to Grade 10 Roll no across programs.
+- G10 roll normalisation: remove spaces, uppercase letters, then validate. CBSE must be exactly 8 digits; other boards must be 4 to 10 alphanumeric characters. Do not left-pad short rolls. Store the normalised Grade 10 Roll no separately from generated Student ID because Student ID is not equivalent to Grade 10 Roll no across programs.
 - Name normalisation: collapse spaces, remove full stops, proper-case words. Show the normalised value back before commit.
 - The file grade must match the upload context grade.
 - Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
@@ -91,7 +91,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Bulk creation also uses `POST /api/school/[udise]/students` with multipart `.xlsx`/`.csv` upload. LMS parses `.xlsx` files with ExcelJS from the first sheet or `Template` sheet, normalises real Excel date cells, validates up to 200 non-blank rows locally, sends accepted rows to the same DB Service endpoint, merges local rejects with DB Service statuses, and returns rejected-row CSV data from the UI.
 - The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and the selected program is `PROGRAM_IDS.NVS`; the modals live in `src/components/enrollment/AddStudentModal.tsx` and `src/components/enrollment/BulkStudentUploadModal.tsx`.
-- `AddStudentModal` reuses the shared validation helper and shows touched-field errors inline, including APAAR ID, CBSE G10 roll length, parent phone length, date, required dropdowns, and the APAAR-or-G10 identity requirement. The one-by-one form strips invalid characters at entry for numeric-only APAAR/parent phone/CBSE G10 roll and letters/spaces-only Father Name, caps parent phone at 10 digits, APAAR at 12 digits, and CBSE G10 roll at 8 digits, and resets whenever the modal closes. Successful creation closes the modal and shows a page-level success toast before refreshing the roster.
+- `AddStudentModal` reuses the shared validation helper and shows touched-field errors inline, including APAAR ID, G10 roll length, parent phone length, DOB range, required dropdowns, and the APAAR-or-G10 identity requirement. The one-by-one form groups fields into Student Details, Grade 10 Info, Stream, and Family Details; marks required fields with `*`; marks APAAR/G10 roll with `#` plus a bottom note that one of them is compulsory; uses a searchable G10 board datalist; caps parent phone at 10 digits, APAAR at 12 digits, CBSE G10 roll at 8 digits, and other-board G10 roll at 10 characters; and resets whenever the modal closes. Successful creation closes the modal and shows a Student ID popup with an option to add another student before refreshing the roster.
 - Existing-student edit now uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The edit modal uses the PRD field contract, initializes the name input from existing `first_name + last_name`, filters parent phone to 10 digits and Father Name to letters/spaces while typing, forwards `last_name` as empty so stale split names are cleared, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service G10-board conflicts next to the G10 board field.
 - Dropout now accepts only `student_pk_id` from the UI, authorizes with the shared Student Addition existing-student gate before route-level lookup, derives `start_date` and `academic_year` server-side, and proxies LMS `POST /api/student/dropout` to DB Service `PATCH /api/dropout`.
 - DB Service dropout ends current grade/batch enrollments but leaves the group memberships. `getSchoolRoster` therefore keeps same-academic-year dropout rows by using their latest historical grade/batch enrollment for display/program attribution.
