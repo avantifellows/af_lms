@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
   const curriculumId = (searchParams.get("curriculumId") || "").trim();
   const gradeId = (searchParams.get("gradeId") || "").trim();
   const type = (searchParams.get("type") || "questions").trim();
+  const download = (searchParams.get("download") || "").trim() === "1";
 
   if (!testId) {
     return NextResponse.json({ error: "testId is required" }, { status: 400 });
@@ -78,10 +79,17 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Stream the PDF straight through, preserving the CMS-supplied filename.
+  // Stream the PDF straight through, preserving the CMS-supplied filename. With
+  // download=1, force an attachment so the browser saves instead of rendering inline.
   const body = await response.arrayBuffer();
-  const disposition =
+  let disposition =
     response.headers.get("content-disposition") ?? `inline; filename="test.pdf"`;
+  if (download) {
+    disposition = disposition.replace(/^inline/i, "attachment");
+    if (!/^attachment/i.test(disposition)) {
+      disposition = `attachment; ${disposition.replace(/^[^;]*;\s*/, "")}`;
+    }
+  }
   return new NextResponse(body, {
     status: 200,
     headers: {

@@ -2639,6 +2639,16 @@ function ExternalLinkIcon() {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5">
+      <path d="M8 2v8" />
+      <path d="m4.5 7 3.5 3.5L11.5 7" />
+      <path d="M3 13h10" />
+    </svg>
+  );
+}
+
 function ChevronDownIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -2723,6 +2733,31 @@ function PaperLinkChip({
   );
 }
 
+// Icon-only companion to PaperLinkChip: saves the file instead of opening it. Only
+// rendered when a same-origin download href exists (the CMS proxy with download=1).
+function PaperDownloadChip({
+  href,
+  label,
+}: {
+  href?: string;
+  label: string;
+}) {
+  const value = href?.trim();
+  if (!value) return null;
+
+  return (
+    <a
+      href={value}
+      download
+      title={label}
+      aria-label={label}
+      className="inline-flex items-center rounded-full border border-border bg-bg-card px-2 py-1 text-xs font-medium text-text-primary hover:border-accent hover:text-accent"
+    >
+      <DownloadIcon />
+    </a>
+  );
+}
+
 // Chooses PDF links for the session-details Paper card: for new-CMS sessions the PDFs are
 // generated on demand (proxy route), rebuilt from the CMS ids stored at create time; for
 // legacy sessions they're the stored question_pdf/solution_pdf URLs.
@@ -2745,6 +2780,8 @@ function CmsAwarePaperLinks({
       <PaperResourceLinks
         questionHref={`${base}&type=questions`}
         solutionHref={`${base}&type=answers`}
+        questionDownloadHref={`${base}&type=questions&download=1`}
+        solutionDownloadHref={`${base}&type=answers&download=1`}
       />
     );
   }
@@ -2760,10 +2797,14 @@ function CmsAwarePaperLinks({
 function PaperResourceLinks({
   questionHref,
   solutionHref,
+  questionDownloadHref,
+  solutionDownloadHref,
   inline = false,
 }: {
   questionHref?: string;
   solutionHref?: string;
+  questionDownloadHref?: string;
+  solutionDownloadHref?: string;
   inline?: boolean;
 }) {
   if (!questionHref?.trim() && !solutionHref?.trim()) {
@@ -2780,7 +2821,9 @@ function PaperResourceLinks({
   const content = (
     <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
       <PaperLinkChip href={questionHref} label="Question PDF" />
+      <PaperDownloadChip href={questionDownloadHref} label="Download Question PDF" />
       <PaperLinkChip href={solutionHref} label="Answer PDF" />
+      <PaperDownloadChip href={solutionDownloadHref} label="Download Answer PDF" />
     </div>
   );
 
