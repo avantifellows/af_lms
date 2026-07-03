@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import {
   canAccessQuizSessionBatches,
   requireQuizSessionAccess,
+  resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { query } from "@/lib/db";
 import { utcToISTDate } from "@/lib/quiz-session-time";
@@ -32,8 +33,6 @@ const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY?.trim();
 const AF_SHORTENER_URL = process.env.AF_SHORTENER_URL?.trim();
 const AF_SHORTENER_AUTH_TOKEN = process.env.AF_SHORTENER_AUTH_TOKEN?.trim();
 
-// Matches the group the session is filed under; also the session_id prefix (EnableStudents_<quizId>).
-const SESSION_GROUP = "EnableStudents";
 const CMS_TEST_TYPES = ["chapter_test", "major_test"];
 const CMS_SOURCE = "nex-gen-cms";
 
@@ -179,6 +178,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid start or end time" }, { status: 400 });
   }
 
+  const batchGroups = await resolveBatchGroups(body.classBatchIds);
+  const resolved = batchGroups.get(body.classBatchIds[0]);
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "Selected batch has no auth group configured" },
+      { status: 400 }
+    );
+  }
+  const mismatchedBatchId = body.classBatchIds.find((batchId) => {
+    const batchGroup = batchGroups.get(batchId);
+    return (
+      !batchGroup ||
+      batchGroup.group !== resolved.group ||
+      batchGroup.authType !== resolved.authType
+    );
+  });
+  if (mismatchedBatchId) {
+    return NextResponse.json(
+      { error: "Selected class batches must share the same auth group" },
+      { status: 400 }
+    );
+  }
+  const { group, authType } = resolved;
+
   const curriculumId = curriculumIdForExamTrack(body.examTrack);
   const gradeRows = await query<{ id: number }>(
     `SELECT id FROM grade WHERE number = $1 LIMIT 1`,
@@ -225,7 +248,7 @@ export async function POST(request: NextRequest) {
   // 2. Materialize the session row. platform_id/session_id are known up front (unlike the
   // legacy flow, which left them blank for the Lambda to patch), so the session is complete
   // on create and needs no follow-up.
-  const sessionIdStr = `${SESSION_GROUP}_${quizId}`;
+  const sessionIdStr = `${group}_${quizId}`;
   const portalLink = `${SESSION_PORTAL_URL.replace(/\/$/, "")}?sessionId=${sessionIdStr}`;
   const startIst = utcToISTDate(body.startTime);
   const endIst = utcToISTDate(body.endTime);
@@ -255,7 +278,9 @@ export async function POST(request: NextRequest) {
   const shortenedOmrLink = await shortenUrl(`${portalLink}&omrMode=true`, createdBy);
   const reportLink = await shortenUrl(
     `${SESSION_PORTAL_URL.replace(/\/$/, "")}?type=attendance&platform=report` +
-      `&platform_id=${sessionIdStr}&authGroup=${SESSION_GROUP}&auth_type=ID,DOB`,
+      `&platform_id=${encodeURIComponent(sessionIdStr)}` +
+      `&authGroup=${encodeURIComponent(group)}` +
+      `&auth_type=${encodeURIComponent(authType)}`,
     createdBy
   );
 
@@ -263,7 +288,7 @@ export async function POST(request: NextRequest) {
     name: sessionName,
     platform: "quiz",
     type: "sign-in",
-    auth_type: "ID,DOB",
+    auth_type: authType,
     redirection: true,
     id_generation: false,
     signup_form: false,
@@ -280,7 +305,7 @@ export async function POST(request: NextRequest) {
     is_active: true,
     purpose: { type: "attendance", params: "quiz" },
     meta_data: {
-      group: SESSION_GROUP,
+      group,
       parent_id: body.parentBatchId,
       batch_id: body.classBatchIds.join(","),
       grade: body.grade,
