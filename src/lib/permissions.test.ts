@@ -247,6 +247,14 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(false);
     });
 
+    it("gives NVS-only program_admin edit on academic mentorship", () => {
+      const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.NVS] });
+      const result = getFeatureAccess(perm, "academic_mentorship");
+      expect(result.access).toBe("edit");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(true);
+    });
+
     it("gives admin edit on visits", () => {
       const perm = makePermission({ role: "admin" });
       const result = getFeatureAccess(perm, "visits");

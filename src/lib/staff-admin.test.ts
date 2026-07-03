@@ -39,6 +39,7 @@ import {
   setUserRole,
   updatePosition,
   updateStaffMember,
+  updateStaffName,
   updateTeacherRecord,
   validateTeacherUpdateBody,
 } from "./staff-admin";
@@ -298,14 +299,16 @@ describe("updateTeacherRecord", () => {
     ).toMatchObject({ ok: false, status: 409 });
   });
 
-  it("PATCHes db-service and vacates seats on exit", async () => {
+  it("PATCHes db-service and vacates seats on exit when there are no active Academic Mentees", async () => {
     const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", mockFetch);
     vi.stubEnv("DB_SERVICE_URL", "https://db.example/api");
     vi.stubEnv("DB_SERVICE_TOKEN", "token");
 
     mockSchemaReady();
-    mockQuery.mockResolvedValueOnce([{ id: 1, user_id: 70 }]);
+    mockQuery
+      .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
+      .mockResolvedValueOnce([]);
 
     const result = await updateTeacherRecord({
       id: 1,
@@ -316,9 +319,71 @@ describe("updateTeacherRecord", () => {
       "https://db.example/api/teacher/1",
       expect.objectContaining({ method: "PATCH" })
     );
+    const blockerCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("academic_mentorship_mentor_mentee_mappings")
+    );
+    expect(String(blockerCall?.[0])).toContain("m.mentor_user_id = $1");
+    expect(String(blockerCall?.[0])).toContain("m.ended_at IS NULL");
+    expect(blockerCall?.[1]).toEqual([70]);
     const clientSql = mockClientQuery.mock.calls.map((call) => call[0]).join("\n");
     expect(clientSql).toContain("UPDATE centre_positions SET user_id = NULL");
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
+  });
+
+  it("does not break teacher exits before the Academic Mentorship table is deployed", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+    vi.stubEnv("DB_SERVICE_URL", "https://db.example/api");
+    vi.stubEnv("DB_SERVICE_TOKEN", "token");
+    const missingTable = Object.assign(new Error("relation does not exist"), {
+      code: "42P01",
+    });
+
+    mockSchemaReady();
+    mockQuery
+      .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
+      .mockRejectedValueOnce(missingTable);
+
+    const result = await updateTeacherRecord({
+      id: 1,
+      body: { exit_date: "2026-06-12" },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://db.example/api/teacher/1",
+      expect.objectContaining({ method: "PATCH" })
+    );
+  });
+
+  it("blocks teacher exit when the teacher has active Academic Mentees", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+    vi.stubEnv("DB_SERVICE_URL", "https://db.example/api");
+    vi.stubEnv("DB_SERVICE_TOKEN", "token");
+
+    mockSchemaReady();
+    mockQuery
+      .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
+      .mockResolvedValueOnce([
+        {
+          school_code: "54019",
+          academic_year: "2026-2027",
+          mentee_count: "2",
+        },
+      ]);
+
+    const result = await updateTeacherRecord({
+      id: 1,
+      body: { exit_date: "2026-06-12" },
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 409 });
+    expect(result.error).toContain("2 active Mentees");
+    expect(result.error).toContain(
+      "/admin/academic-mentorship?school_code=54019&academic_year=2026-2027"
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("maps db-service failures to 422/502", async () => {
@@ -477,6 +542,60 @@ describe("updateStaffMember", () => {
     expect(
       await updateStaffMember({ id: 3, body: { employee_code: "AF7" } })
     ).toMatchObject({ ok: false, status: 409 });
+  });
+});
+
+describe("updateStaffName", () => {
+  it("rejects a blank name", async () => {
+    mockSchemaReady();
+    expect(
+      await updateStaffName({ body: { user_id: 70, full_name: "   " } })
+    ).toMatchObject({ ok: false, status: 422 });
+  });
+
+  it("requires an identifier", async () => {
+    mockSchemaReady();
+    expect(
+      await updateStaffName({ body: { full_name: "Jane Doe" } })
+    ).toMatchObject({ ok: false, status: 422 });
+  });
+
+  it("writes the user table (split) and mirrors full_name for a linked user", async () => {
+    mockSchemaReady();
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // UPDATE "user"
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE user_permission
+    const result = await updateStaffName({
+      body: { user_id: 70, full_name: "  Jane  Kumari Doe " },
+    });
+    expect(result).toEqual({ ok: true });
+    const calls = mockClientQuery.mock.calls;
+    expect(calls[0][0]).toContain('UPDATE "user" SET first_name = $1');
+    expect(calls[0][1]).toEqual(["Jane", "Kumari Doe", 70]);
+    expect(calls[1][0]).toContain("UPDATE user_permission SET full_name = $1");
+    expect(calls[1][1]).toEqual(["Jane Kumari Doe", 70]);
+  });
+
+  it("updates user_permission.full_name for a pending row", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    const result = await updateStaffName({
+      body: { permission_id: 12, full_name: "Asha" },
+    });
+    expect(result).toEqual({ ok: true });
+    const call = mockClientQuery.mock.calls[0];
+    expect(call[0]).toContain("UPDATE user_permission SET full_name = $1");
+    expect(call[1]).toEqual(["Asha", 12]);
+  });
+
+  it("404s when nothing matched", async () => {
+    mockSchemaReady();
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    expect(
+      await updateStaffName({ body: { user_id: 999, full_name: "Ghost" } })
+    ).toMatchObject({ ok: false, status: 404 });
   });
 });
 

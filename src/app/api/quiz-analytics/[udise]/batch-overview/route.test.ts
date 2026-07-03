@@ -71,9 +71,9 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
     mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
     mockGetBatchOverview.mockResolvedValue({
       tests: [
-        { session_id: "s1", test_name: "Test 1", start_date: "2026-01-10", student_count: 20, stream_student_count: 20, test_format: "chapter", test_stream: null, subjects: ["Physics"] },
-        { session_id: "s2", test_name: "Test 2", start_date: "2026-01-20", student_count: 30, stream_student_count: 30, test_format: "full", test_stream: null, subjects: [] },
-        { session_id: "s3", test_name: "Test 3", start_date: "2026-02-01", student_count: 25, stream_student_count: 25, test_format: null, test_stream: null, subjects: [] },
+        { session_id: "s1", test_name: "Test 1", start_date: "2026-01-10", student_count: 20, stream_student_count: 20, test_format: "chapter", test_stream: null, test_grade: 11, subjects: ["Physics"] },
+        { session_id: "s2", test_name: "Test 2", start_date: "2026-01-20", student_count: 30, stream_student_count: 30, test_format: "full", test_stream: null, test_grade: 12, subjects: [] },
+        { session_id: "s3", test_name: "Test 3", start_date: "2026-02-01", student_count: 25, stream_student_count: 25, test_format: null, test_stream: null, test_grade: null, subjects: [] },
       ],
       totalEnrolled: 40,
       enrolledByStream: {},
@@ -122,7 +122,7 @@ describe("GET /api/quiz-analytics/[udise]/batch-overview", () => {
   it("returns test list and totalEnrolled", async () => {
     mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
     const tests = [
-      { session_id: "s1", test_name: "Midterm", start_date: "2026-01-15", student_count: 35, stream_student_count: 35, test_format: "full", test_stream: null, subjects: [] },
+      { session_id: "s1", test_name: "Midterm", start_date: "2026-01-15", student_count: 35, stream_student_count: 35, test_format: "full", test_stream: null, test_grade: 12, subjects: [] },
     ];
     mockGetBatchOverview.mockResolvedValue({ tests, totalEnrolled: 50, enrolledByStream: {}, streams: [] });
 

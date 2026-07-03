@@ -1,0 +1,10 @@
+{
+  "aiTools": [
+    "claude",
+    "codex"
+  ],
+  "scaffold_id": "07578397-2a10-4876-b07f-95fe2f045479",
+  "scaffold_name": "af_lms",
+  "origin": null,
+  "upstream": null
+}

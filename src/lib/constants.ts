@@ -30,3 +30,5 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.PUNJAB_NODAL]: "Punjab Nodal",
   [PROGRAM_IDS.EMRS_COE]: "EMRS CoE",
 };
+
+export const ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST = ["*"] as const;

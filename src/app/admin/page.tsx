@@ -1,21 +1,14 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/admin-guard";
 import Link from "next/link";
 import { Card } from "@/components/ui";
 
 export default async function AdminPage() {
   const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    redirect("/");
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    redirect("/dashboard");
-  }
+  const access = await requireAdmin(session);
+  if (!access.ok) redirect(access.status === 401 ? "/" : "/dashboard");
 
   return (
     <div className="min-h-screen bg-bg">
@@ -29,7 +22,7 @@ export default async function AdminPage() {
             <Link href="/dashboard" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">
               Dashboard
             </Link>
-            <span className="text-sm text-text-muted font-mono hidden sm:inline">{session.user.email}</span>
+            <span className="text-sm text-text-muted font-mono hidden sm:inline">{access.email}</span>
             <Link
               href="/api/auth/signout"
               className="text-sm font-bold text-danger hover:text-danger/80"

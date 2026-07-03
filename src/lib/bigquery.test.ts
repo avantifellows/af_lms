@@ -369,6 +369,64 @@ describe("getTestQuestionLevelData", () => {
   });
 });
 
+describe("getStudentQuestionLevelData", () => {
+  it("maps is_answered/is_correct to correct/wrong/skipped status", async () => {
+    const rows = [
+      // answered + correct -> correct
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Kinematics", chapter_id: "c-kin", question_id: "q1", position_index: 0, is_answered: 1, is_correct: 1 },
+      // answered + incorrect -> wrong
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Kinematics", chapter_id: "c-kin", question_id: "q2", position_index: 1, is_answered: 1, is_correct: 0 },
+      // not answered -> skipped (is_correct irrelevant)
+      { enrollment_user_id: 368592, subject: "Physics", chapter_name: "Optics", chapter_id: "c-opt", question_id: "q3", position_index: 2, is_answered: 0, is_correct: 0 },
+    ];
+    mocks.mockQueryFn.mockResolvedValueOnce([rows]);
+
+    const { getStudentQuestionLevelData } = await import("./bigquery");
+    const result = await getStudentQuestionLevelData("11223344", 12, "sess-1");
+
+    expect(result).toHaveLength(3);
+    expect(result[0]).toMatchObject({
+      enrollment_user_id: "368592", // stringified for client-side matching
+      chapter_id: "c-kin",
+      question_id: "q1",
+      position_index: 0,
+      status: "correct",
+    });
+    expect(result[1].status).toBe("wrong");
+    expect(result[2].status).toBe("skipped");
+  });
+
+  it("groups by enrollment_user_id and binds filter params", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getStudentQuestionLevelData } = await import("./bigquery");
+    await getStudentQuestionLevelData("11223344", 12, "sess-1", "JNV", "pcm");
+
+    const call = mocks.mockQueryFn.mock.calls[0][0];
+    expect(call.query).toContain("fact_student_test_results_question_level");
+    expect(call.query).toContain("GROUP BY enrollment_user_id");
+    expect(call.query).toContain("enrollment_user_id IS NOT NULL");
+    expect(call.query).toContain("student_program = @program");
+    expect(call.query).toContain("LOWER(student_stream) = @stream");
+    expect(call.params).toMatchObject({
+      udise: "11223344",
+      grade: 12,
+      sessionId: "sess-1",
+      program: "JNV",
+      stream: "pcm",
+    });
+  });
+
+  it("propagates BQ errors to the caller", async () => {
+    mocks.mockQueryFn.mockRejectedValueOnce(new Error("BQ down"));
+
+    const { getStudentQuestionLevelData } = await import("./bigquery");
+    await expect(
+      getStudentQuestionLevelData("11223344", 12, "sess-1")
+    ).rejects.toThrow("BQ down");
+  });
+});
+
 describe("canonicalStream / streamDisplayLabel", () => {
   it("lowercases and trims stream values", async () => {
     const { canonicalStream } = await import("./bigquery");

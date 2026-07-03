@@ -33,5 +33,7 @@ jobs:
           annotations: true
           comment: true
           review-comments: false
-          diff-filter: added
+          # Match the audit gate's changed-file scope. `added` can hide
+          # fail-level findings that anchor to existing/context lines.
+          diff-filter: file
           artifacts-dir: .var/fallow

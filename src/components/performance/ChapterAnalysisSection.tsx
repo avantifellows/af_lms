@@ -19,6 +19,26 @@ function scoreColorClass(score: number): string {
   return "bg-success-bg";
 }
 
+// Stream-keyed chapter priority (resolved upstream by etl-next). Untagged
+// chapters render an em-dash so the column reads cleanly until the curriculum
+// team finishes backfilling chapter_tagging.
+function PriorityBadge({ priority }: { priority: string | null }) {
+  if (!priority || priority === "None") {
+    return <span className="text-text-muted">—</span>;
+  }
+  const cls =
+    priority === "High"
+      ? "bg-danger-bg text-danger"
+      : priority === "Medium"
+        ? "bg-warning-bg text-text-primary"
+        : "bg-success-bg text-text-primary";
+  return (
+    <span className={`inline-block rounded px-2 py-0.5 text-xs font-bold ${cls}`}>
+      {priority}
+    </span>
+  );
+}
+
 const TH = "px-4 py-3 text-left text-xs uppercase tracking-wider font-bold bg-bg-card-alt text-text-muted";
 const QTH = "px-3 py-2 text-left text-xs uppercase tracking-wider font-bold text-text-muted";
 
@@ -169,6 +189,7 @@ export default function ChapterAnalysisSection({
                       <tr className="border-b-2 border-border-accent">
                         <th className={TH}></th>
                         <th className={TH}>Chapter</th>
+                        <th className={TH}>Priority</th>
                         <th className={TH}>Avg Score</th>
                         <th className={TH}>Accuracy</th>
                         <th className={TH}>Attempt Rate</th>
@@ -228,7 +249,10 @@ function ChapterRowFragment({
       >
         <td className="px-3 py-3 text-xs text-text-muted w-8">{isOpen ? "▼" : "▶"}</td>
         <td className="px-4 py-3 text-sm text-text-primary">{chapter.chapter_name}</td>
-        <td className="px-4 py-3 text-sm font-bold font-mono text-accent">{chapter.avg_score}%</td>
+        <td className="px-4 py-3 text-sm"><PriorityBadge priority={chapter.priority} /></td>
+        <td className="px-4 py-3 text-sm font-bold font-mono text-accent whitespace-nowrap">
+          {chapter.avg_marks}/{chapter.max_marks} ({chapter.avg_score}%)
+        </td>
         <td className="px-4 py-3 text-sm font-mono text-text-primary">{chapter.accuracy}%</td>
         <td className="px-4 py-3 text-sm font-mono text-text-primary">{chapter.attempt_rate}%</td>
         <td className="px-4 py-3 text-sm font-bold font-mono text-text-primary">{chapter.questions}</td>
@@ -239,7 +263,7 @@ function ChapterRowFragment({
       {isOpen && (
         <tr className="bg-bg-card-alt/40">
           <td></td>
-          <td colSpan={6} className="px-4 py-3">
+          <td colSpan={7} className="px-4 py-3">
             <QuestionBreakdown
               questions={questions}
               loading={loading}
@@ -288,7 +312,7 @@ function QuestionBreakdown({
           {questions.map((q, idx) => (
             <tr key={q.question_id} className="border-b border-border/15">
               <td className="px-3 py-2 text-sm font-mono text-text-primary">
-                Q{q.position_index ?? idx + 1}
+                Q{q.position_index == null ? idx + 1 : q.position_index + 1}
               </td>
               <td className="px-3 py-2 text-sm font-mono text-text-primary">{q.attempt_rate}%</td>
               <td className="px-3 py-2 text-sm font-mono text-text-primary">{q.accuracy}%</td>

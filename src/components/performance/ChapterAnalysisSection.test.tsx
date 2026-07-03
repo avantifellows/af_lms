@@ -8,7 +8,10 @@ const CHAPTERS: ChapterAnalysisRow[] = [
     subject: "Physics",
     chapter_name: "Kinematics",
     chapter_id: "chap-kin",
+    priority: "High",
     avg_score: 65,
+    avg_marks: 13,
+    max_marks: 20,
     accuracy: 70,
     attempt_rate: 80,
     questions: 5,
@@ -18,7 +21,10 @@ const CHAPTERS: ChapterAnalysisRow[] = [
     subject: "Physics",
     chapter_name: "Dynamics",
     chapter_id: "chap-dyn",
+    priority: null,
     avg_score: 50,
+    avg_marks: 8,
+    max_marks: 16,
     accuracy: 60,
     attempt_rate: 75,
     questions: 4,
@@ -32,7 +38,8 @@ const QUESTIONS: TestQuestionLevelRow[] = [
     chapter_name: "Kinematics",
     chapter_id: "chap-kin",
     question_id: "q1",
-    position_index: 1,
+    // position_index is the 0-based source index; it renders as Q{index + 1}.
+    position_index: 0,
     total_students: 10,
     attempted: 8,
     correct: 6,
@@ -46,7 +53,7 @@ const QUESTIONS: TestQuestionLevelRow[] = [
     chapter_name: "Kinematics",
     chapter_id: "chap-kin",
     question_id: "q2",
-    position_index: 2,
+    position_index: 1,
     total_students: 10,
     attempted: 5,
     correct: 1,
@@ -60,7 +67,7 @@ const QUESTIONS: TestQuestionLevelRow[] = [
     chapter_name: "Dynamics",
     chapter_id: "chap-dyn",
     question_id: "q3",
-    position_index: 3,
+    position_index: 2,
     total_students: 10,
     attempted: 9,
     correct: 8,
@@ -99,6 +106,13 @@ describe("ChapterAnalysisSection", () => {
   it("does not fetch question data before any chapter is expanded", () => {
     render(<ChapterAnalysisSection {...defaultProps} />);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("renders the chapter priority tag, with an em-dash for untagged chapters", () => {
+    render(<ChapterAnalysisSection {...defaultProps} />);
+    // Kinematics is High; Dynamics has no tag (null) -> em-dash.
+    expect(screen.getByText("High")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 
   it("fetches question data on first chapter expand and renders only that chapter's questions", async () => {
@@ -197,7 +211,10 @@ describe("ChapterAnalysisSection", () => {
         subject: "Chemistry",
         chapter_name: "11C3 - Periodic Table",
         chapter_id: "chap-periodic",
+        priority: "Medium",
         avg_score: 0,
+        avg_marks: 0,
+        max_marks: 4,
         accuracy: 4,
         attempt_rate: 37,
         questions: 1,
@@ -210,7 +227,7 @@ describe("ChapterAnalysisSection", () => {
         chapter_name: "Periodic Table",
         chapter_id: "chap-periodic",
         question_id: "qX",
-        position_index: 7,
+        position_index: 6,
         total_students: 24,
         attempted: 9,
         correct: 0,
@@ -238,6 +255,47 @@ describe("ChapterAnalysisSection", () => {
     expect(
       screen.queryByText("No question-level data for this chapter.")
     ).not.toBeInTheDocument();
+  });
+
+  it("displays a 0-based position_index as a 1-based question number (Q0 -> Q1)", async () => {
+    const zeroIndexed: TestQuestionLevelRow[] = [
+      { ...QUESTIONS[0], question_id: "qZero", position_index: 0 },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ questions: zeroIndexed }),
+        })
+      )
+    );
+    render(<ChapterAnalysisSection {...defaultProps} />);
+    fireEvent.click(screen.getByText("Kinematics"));
+    // The off-by-one fix: index 0 must render as "Q1", never "Q0".
+    await screen.findByText("Q1");
+    expect(screen.queryByText("Q0")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the 1-based row position when position_index is null", async () => {
+    const nullIndexed: TestQuestionLevelRow[] = [
+      { ...QUESTIONS[0], question_id: "qNull", position_index: null },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ questions: nullIndexed }),
+        })
+      )
+    );
+    render(<ChapterAnalysisSection {...defaultProps} />);
+    fireEvent.click(screen.getByText("Kinematics"));
+    // Single question, row index 0 -> idx + 1 -> "Q1".
+    await screen.findByText("Q1");
   });
 
   it("renders 'No chapter-level data' when chapters array is empty", () => {
