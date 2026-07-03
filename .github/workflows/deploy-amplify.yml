@@ -92,6 +92,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
+          SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -120,6 +124,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg cms_url "$CMS_SERVICE_URL" \
+            --arg cms_token "$CMS_SERVICE_TOKEN" \
+            --arg quiz_url "$QUIZ_BACKEND_URL" \
+            --arg portal_url "$SESSION_PORTAL_URL" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -145,7 +153,11 @@ jobs:
               S3_DOCS_PREFIX: $v,
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
-              S3_DOCS_SECRET_ACCESS_KEY: $y
+              S3_DOCS_SECRET_ACCESS_KEY: $y,
+              CMS_SERVICE_URL: $cms_url,
+              CMS_SERVICE_TOKEN: $cms_token,
+              QUIZ_BACKEND_URL: $quiz_url,
+              SESSION_PORTAL_URL: $portal_url
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -239,6 +251,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
+          SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -267,6 +283,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg cms_url "$CMS_SERVICE_URL" \
+            --arg cms_token "$CMS_SERVICE_TOKEN" \
+            --arg quiz_url "$QUIZ_BACKEND_URL" \
+            --arg portal_url "$SESSION_PORTAL_URL" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -292,7 +312,11 @@ jobs:
               S3_DOCS_PREFIX: $v,
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
-              S3_DOCS_SECRET_ACCESS_KEY: $y
+              S3_DOCS_SECRET_ACCESS_KEY: $y,
+              CMS_SERVICE_URL: $cms_url,
+              CMS_SERVICE_TOKEN: $cms_token,
+              QUIZ_BACKEND_URL: $quiz_url,
+              SESSION_PORTAL_URL: $portal_url
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -397,6 +421,10 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
+          SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -424,6 +452,10 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg cms_url "$CMS_SERVICE_URL" \
+            --arg cms_token "$CMS_SERVICE_TOKEN" \
+            --arg quiz_url "$QUIZ_BACKEND_URL" \
+            --arg portal_url "$SESSION_PORTAL_URL" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -449,7 +481,11 @@ jobs:
               S3_DOCS_PREFIX: $v,
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
-              S3_DOCS_SECRET_ACCESS_KEY: $y
+              S3_DOCS_SECRET_ACCESS_KEY: $y,
+              CMS_SERVICE_URL: $cms_url,
+              CMS_SERVICE_TOKEN: $cms_token,
+              QUIZ_BACKEND_URL: $quiz_url,
+              SESSION_PORTAL_URL: $portal_url
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
