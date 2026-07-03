@@ -37,6 +37,8 @@ frontend:
           echo "SESSION_PORTAL_URL=$SESSION_PORTAL_URL" >> .env.production
           echo "QUIZ_FRONTEND_URL=$QUIZ_FRONTEND_URL" >> .env.production
           echo "QUIZ_AF_API_KEY=$QUIZ_AF_API_KEY" >> .env.production
+          echo "AF_SHORTENER_URL=$AF_SHORTENER_URL" >> .env.production
+          echo "AF_SHORTENER_AUTH_TOKEN=$AF_SHORTENER_AUTH_TOKEN" >> .env.production
     build:
       commands:
         - npm run build

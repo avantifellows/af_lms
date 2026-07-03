@@ -26,6 +26,11 @@ const SESSION_PORTAL_URL = process.env.SESSION_PORTAL_URL?.trim();
 // Optional: when unset the links stay blank, session creation itself is unaffected.
 const QUIZ_FRONTEND_URL = process.env.QUIZ_FRONTEND_URL?.trim();
 const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY?.trim();
+// AF link shortener (legacy sessionCreator parity), used for the student-facing session /
+// OMR links and the report link. Optional: when unset (or on any failure) the full URL is
+// stored instead — link population must never fail a create.
+const AF_SHORTENER_URL = process.env.AF_SHORTENER_URL?.trim();
+const AF_SHORTENER_AUTH_TOKEN = process.env.AF_SHORTENER_AUTH_TOKEN?.trim();
 
 // Matches the group the session is filed under; also the session_id prefix (EnableStudents_<quizId>).
 const SESSION_GROUP = "EnableStudents";
@@ -57,6 +62,36 @@ function dbHeaders() {
     "Content-Type": "application/json",
     accept: "application/json",
   };
+}
+
+// Best-effort AF-shortened URL (legacy shorten_url_AF): returns the original URL when the
+// shortener is unconfigured, errors, or answers with anything unexpected.
+async function shortenUrl(originalUrl: string, createdBy: string): Promise<string> {
+  if (!AF_SHORTENER_URL || !AF_SHORTENER_AUTH_TOKEN) return originalUrl;
+  try {
+    const res = await fetch(`${AF_SHORTENER_URL.replace(/\/$/, "")}/shorten`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${AF_SHORTENER_AUTH_TOKEN}`,
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        original_url: originalUrl,
+        custom_code: "",
+        created_by: createdBy,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`URL shortener returned ${res.status} — storing full URL`);
+      return originalUrl;
+    }
+    const data = (await res.json()) as { short_url?: string };
+    return data.short_url || originalUrl;
+  } catch (err) {
+    console.warn("URL shortener unreachable — storing full URL:", err);
+    return originalUrl;
+  }
 }
 
 // batch_id (string code) -> db group id, via db-service: batch code -> batch pk -> group.
@@ -213,6 +248,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Student-facing shortened session/OMR links + the attendance report link (legacy
+  // sessionCreator parity; each falls back to its full URL if the shortener is unavailable).
+  const createdBy = session.user.email;
+  const shortenedLink = await shortenUrl(portalLink, createdBy);
+  const shortenedOmrLink = await shortenUrl(`${portalLink}&omrMode=true`, createdBy);
+  const reportLink = await shortenUrl(
+    `${SESSION_PORTAL_URL.replace(/\/$/, "")}?type=attendance&platform=report` +
+      `&platform_id=${sessionIdStr}&authGroup=${SESSION_GROUP}&auth_type=ID,DOB`,
+    createdBy
+  );
+
   const sessionPayload = {
     name: sessionName,
     platform: "quiz",
@@ -255,9 +301,9 @@ export async function POST(request: NextRequest) {
       cms_grade_id: gradeId,
       has_synced_to_bq: false,
       infinite_session: false,
-      report_link: "",
-      shortened_link: "",
-      shortened_omr_link: "",
+      report_link: reportLink,
+      shortened_link: shortenedLink,
+      shortened_omr_link: shortenedOmrLink,
       admin_testing_link: adminTestingLink,
       admin_testing_omr_link: adminTestingOmrLink,
       show_answers: body.showAnswers ?? true,

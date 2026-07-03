@@ -98,6 +98,8 @@ jobs:
           SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
           QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
           QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
+          AF_SHORTENER_URL: ${{ secrets.AF_SHORTENER_URL }}
+          AF_SHORTENER_AUTH_TOKEN: ${{ secrets.AF_SHORTENER_AUTH_TOKEN }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -132,6 +134,8 @@ jobs:
             --arg portal_url "$SESSION_PORTAL_URL" \
             --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
             --arg quiz_af_key "$QUIZ_AF_API_KEY" \
+            --arg shortener_url "$AF_SHORTENER_URL" \
+            --arg shortener_token "$AF_SHORTENER_AUTH_TOKEN" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -163,7 +167,9 @@ jobs:
               QUIZ_BACKEND_URL: $quiz_url,
               SESSION_PORTAL_URL: $portal_url,
               QUIZ_FRONTEND_URL: $quiz_fe_url,
-              QUIZ_AF_API_KEY: $quiz_af_key
+              QUIZ_AF_API_KEY: $quiz_af_key,
+              AF_SHORTENER_URL: $shortener_url,
+              AF_SHORTENER_AUTH_TOKEN: $shortener_token
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -263,6 +269,8 @@ jobs:
           SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
           QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
           QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
+          AF_SHORTENER_URL: ${{ secrets.AF_SHORTENER_URL }}
+          AF_SHORTENER_AUTH_TOKEN: ${{ secrets.AF_SHORTENER_AUTH_TOKEN }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -297,6 +305,8 @@ jobs:
             --arg portal_url "$SESSION_PORTAL_URL" \
             --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
             --arg quiz_af_key "$QUIZ_AF_API_KEY" \
+            --arg shortener_url "$AF_SHORTENER_URL" \
+            --arg shortener_token "$AF_SHORTENER_AUTH_TOKEN" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -328,7 +338,9 @@ jobs:
               QUIZ_BACKEND_URL: $quiz_url,
               SESSION_PORTAL_URL: $portal_url,
               QUIZ_FRONTEND_URL: $quiz_fe_url,
-              QUIZ_AF_API_KEY: $quiz_af_key
+              QUIZ_AF_API_KEY: $quiz_af_key,
+              AF_SHORTENER_URL: $shortener_url,
+              AF_SHORTENER_AUTH_TOKEN: $shortener_token
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -439,6 +451,8 @@ jobs:
           SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
           QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
           QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
+          AF_SHORTENER_URL: ${{ secrets.AF_SHORTENER_URL }}
+          AF_SHORTENER_AUTH_TOKEN: ${{ secrets.AF_SHORTENER_AUTH_TOKEN }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -472,6 +486,8 @@ jobs:
             --arg portal_url "$SESSION_PORTAL_URL" \
             --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
             --arg quiz_af_key "$QUIZ_AF_API_KEY" \
+            --arg shortener_url "$AF_SHORTENER_URL" \
+            --arg shortener_token "$AF_SHORTENER_AUTH_TOKEN" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -503,7 +519,9 @@ jobs:
               QUIZ_BACKEND_URL: $quiz_url,
               SESSION_PORTAL_URL: $portal_url,
               QUIZ_FRONTEND_URL: $quiz_fe_url,
-              QUIZ_AF_API_KEY: $quiz_af_key
+              QUIZ_AF_API_KEY: $quiz_af_key,
+              AF_SHORTENER_URL: $shortener_url,
+              AF_SHORTENER_AUTH_TOKEN: $shortener_token
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
