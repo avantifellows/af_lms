@@ -49,6 +49,10 @@ function poolFromEnvFile(envFile: string, label: string): Pool {
     max: 4, connectionTimeoutMillis: 8000, statement_timeout: 30000,
   });
 }
+async function databaseName(pool: Pool): Promise<string> {
+  const result = await pool.query<{ d: string }>("SELECT current_database() d");
+  return result.rows[0].d;
+}
 const setsEqual = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
 const sortedList = (s: Iterable<string>) => [...s].sort();
 
@@ -65,13 +69,33 @@ type PersonAgg = {
   seated: boolean;
 };
 
+type Out = {
+  email: string; bucket: string;
+  prod_access: string; staging_access: string;
+  schools_added: string; schools_removed: string;
+  prod_role: string; staging_role: string; note: string;
+};
+
+function promotionReportName(): string {
+  return "promotion-school-diff";
+}
+
+function openPromotionContext(argv: string[]) {
+  const cli = parseArgs(argv);
+  return {
+    cli,
+    staging: poolFromEnvFile(cli.stagingEnv, "STAGING"),
+    prod: poolFromEnvFile(cli.prodEnv, "PROD"),
+  };
+}
+
 async function main() {
-  const cli = parseArgs(process.argv.slice(2));
-  const staging = poolFromEnvFile(cli.stagingEnv, "STAGING");
-  const prod = poolFromEnvFile(cli.prodEnv, "PROD");
+  const { cli, staging, prod } = openPromotionContext(process.argv.slice(2));
   try {
-    const sName = (await staging.query<{ d: string }>("SELECT current_database() d")).rows[0].d;
-    const pName = (await prod.query<{ d: string }>("SELECT current_database() d")).rows[0].d;
+    const [sName, pName] = await Promise.all([
+      databaseName(staging),
+      databaseName(prod),
+    ]);
 
     // --- DOMAIN: centre-linked schools in program 1/2 (staging = target model) ---
     const domRows = (await staging.query<{ code: string; name: string }>(
@@ -138,12 +162,6 @@ async function main() {
     }
 
     // --- CLASSIFY ---
-    type Out = {
-      email: string; bucket: string;
-      prod_access: string; staging_access: string;
-      schools_added: string; schools_removed: string;
-      prod_role: string; staging_role: string; note: string;
-    };
     const out: Out[] = [];
     const buckets: Record<string, number> = {};
     let totalAdded = 0, totalRemoved = 0;
@@ -191,7 +209,7 @@ async function main() {
 
     // --- OUTPUT ---
     const order = ["LOST_ONLY", "CHANGED_BOTH", "GAINED_ONLY", "NEW_IN_STAGING", "UNCHANGED", "UNTOUCHED"];
-    console.log(`\n=== Promotion school-access diff — JNV CoE (1) + JNV Nodal (2), teachers & staff ===`);
+    console.log(`\n=== ${promotionReportName()} - JNV CoE (1) + JNV Nodal (2), teachers & staff ===`);
     console.log(`staging(target): ${sName}   prod(current): ${pName}`);
     console.log(`migration domain: ${DOMAIN.size} centre-linked schools in prog 1/2`);
     console.log(`people in scope: ${people.size}`);
@@ -221,18 +239,49 @@ async function main() {
       }
     }
 
-    // CSV
-    const header = ["bucket","email","prod_role","staging_role","prod_access","staging_access","schools_added","schools_removed","note"] as const;
-    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const csv = [header.join(",")].concat(
-      out.sort((a,b)=> order.indexOf(a.bucket)-order.indexOf(b.bucket) || a.email.localeCompare(b.email))
-        // fallow-ignore-next-line code-duplication -- one-off CSV output mirrors another audit script.
-        .map((r)=>header.map((h)=>esc(String(r[h] ?? ""))).join(","))
-    ).join("\n");
-    const outPath = path.resolve(cli.out);
-    mkdirSync(path.dirname(outPath), { recursive: true });
-    writeFileSync(outPath, csv + "\n");
-    console.log(`\nCSV: ${outPath}  (${out.length} rows; contains emails — gitignored dir)`);
-  } finally { await staging.end(); await prod.end(); }
+    writePromotionCsv(out, order, cli.out);
+  } finally {
+    await closePools(staging, prod);
+  }
 }
-main().catch((e) => { console.error(e instanceof Error ? e.stack || e.message : e); process.exitCode = 1; });
+
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function writePromotionCsv(rows: Out[], bucketOrder: string[], outFile: string) {
+  const columns: (keyof Out)[] = [
+    "bucket",
+    "email",
+    "prod_role",
+    "staging_role",
+    "prod_access",
+    "staging_access",
+    "schools_added",
+    "schools_removed",
+    "note",
+  ];
+  const sortedRows = rows.sort(
+    (a, b) =>
+      bucketOrder.indexOf(a.bucket) - bucketOrder.indexOf(b.bucket) ||
+      a.email.localeCompare(b.email)
+  );
+  const csvRows = sortedRows.map((row) =>
+    columns.map((column) => csvCell(String(row[column] ?? ""))).join(",")
+  );
+  const target = path.resolve(outFile);
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, [columns.join(","), ...csvRows].join("\n") + "\n");
+  console.log(`\nCSV written to ${target} (${rows.length} rows; contains emails - gitignored dir)`);
+}
+
+async function closePools(staging: Pool, prod: Pool): Promise<void> {
+  await Promise.all([staging.end(), prod.end()]);
+}
+
+function reportFailure(error: unknown): void {
+  console.error(error instanceof Error ? error.stack || error.message : error);
+  process.exitCode = 1;
+}
+
+void main().catch(reportFailure);

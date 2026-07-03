@@ -64,6 +64,40 @@ export async function canAccessQuizSessionSchool(
   return canAccessSchoolSync(permission, school.code, school.region || undefined);
 }
 
+export interface BatchGroupInfo {
+  /** auth_group.name — the program tag stamped as meta_data.group (Gurukul matches on it). */
+  group: string;
+  /** auth_group.input_schema.auth_type — "ID,DOB", "ID", etc. portal-frontend honours it. */
+  authType: string;
+}
+
+/**
+ * Resolve each class batch's program group + login auth type from the
+ * batch.auth_group_id FK (NOT by parsing the batch_id prefix — ~29% of batches
+ * use short codes like "EMRS-11-25-P01"/"AIS-11-A25" whose prefix does not match
+ * the auth_group name). Returns a map keyed by batch_id; batches with no row are
+ * absent. auth_type defaults to "ID" when the auth_group lacks the field.
+ */
+export async function resolveBatchGroups(
+  batchIds: string[]
+): Promise<Map<string, BatchGroupInfo>> {
+  const byBatch = new Map<string, BatchGroupInfo>();
+  if (batchIds.length === 0) return byBatch;
+  const rows = await query<{ batch_id: string; group: string; auth_type: string | null }>(
+    `
+    SELECT b.batch_id, ag.name AS group, ag.input_schema->>'auth_type' AS auth_type
+    FROM batch b
+    JOIN auth_group ag ON ag.id = b.auth_group_id
+    WHERE b.batch_id = ANY($1::text[])
+    `,
+    [batchIds]
+  );
+  for (const r of rows) {
+    byBatch.set(r.batch_id, { group: r.group, authType: r.auth_type || "ID" });
+  }
+  return byBatch;
+}
+
 export async function canAccessQuizSessionBatches(
   permission: UserPermission,
   batchIds: string[]

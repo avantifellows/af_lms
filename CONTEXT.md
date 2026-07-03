@@ -120,6 +120,32 @@ _Avoid_: Viewer, observer
 Numeric access scope: Level 3 = all schools, Level 2 = region, Level 1 = specific school codes.
 _Avoid_: Access tier, role level
 
+### Academic Mentorship
+
+**Academic Mentorship**:
+The LMS domain for assigning teacher mentors to selected students for a school and academic year.
+_Avoid_: Mentorship tab, holistic mentorship, AI report generation
+
+**Academic Mentor**:
+A completed Staff Management Teacher who is eligible to be assigned responsibility for one or more Mentees at their school.
+_Avoid_: Pending teacher, owner, counsellor
+
+**Mentee**:
+A Student assigned to an Academic Mentor for the academic year.
+_Avoid_: Learner, advisee
+
+**Academic Mentor-Mentee Mapping**:
+A historical assignment record connecting one Academic Mentor to one Mentee for one school and academic year.
+_Avoid_: Pairing, link row, live assignment only
+
+**Academic Mentorship Mentor-Mentee Mapping Table**:
+The database table `academic_mentorship_mentor_mentee_mappings`, storing Academic Mentor-Mentee Mapping history.
+_Avoid_: `acad_mentorship_teacher_feedback`, report-generation tables
+
+**Mentorship Tab**:
+The School page umbrella surface for school mentorship workflows.
+_Avoid_: Academic Mentorship tab
+
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
@@ -191,6 +217,88 @@ _Avoid_: Access tier, role level
 - In Curriculum, **Exam Track** is selected before grade and subject; available subjects are filtered by the selected **Exam Track**
 - Curriculum chapter order follows **LMS Chapter Exam Config** coverage order before falling back to chapter code
 - Deleting an **LMS Curriculum Log** means soft deletion, so covered-topic and teaching-time progress ignores it without losing audit history
+- **Academic Mentorship** uses the `academic_mentorship` permission key and is part of the same mentorship product language as AI Mentorship Guide, not a separate generic "mentorship" feature
+- The School page **Mentorship Tab** remains labelled `Mentorship`; **Academic Mentorship** is one workflow inside that tab
+- An **Academic Mentor** must be a completed Staff Management Teacher: active LMS permission with teacher role, a real AF `teacher` record, a non-exited Staff Management state, and effective access to the selected School
+- The Academic Mentor dropdown includes eligible Academic Mentors even if they already have active Mentees
+- Academic Mentorship mentor selectors are searchable by mentor name and email
+- Academic Mentorship uses a dedicated Program allowlist, separate from the existing CoE/Nodal-only gate used by other LMS features
+- Academic Mentorship allowed Program gating uses a code constant in v1
+- Academic Mentorship can proceed with the approved Program gating list set to `[*]` (all Programs) while exact Program ids are confirmed later
+- Exact Academic Mentorship allowed Program ids are not a blocker for the rest of requirements grilling; confirm before implementation and update the code constant when needed
+- Academic Mentor and Mentee eligibility requires the same selected School and an allowed Academic Mentorship Program; Mentor and Mentee do not need to be in the same Program
+- **Academic Mentor-Mentee Mappings** store the Academic Mentor as the mentor's `user.id`; `teacher` is joined only for completed Staff Management eligibility and display metadata
+- An **Academic Mentor** can have many **Mentees** in an academic year
+- A **Mentee** has at most one active **Academic Mentor-Mentee Mapping** per school and academic year
+- A **Mentee** can have multiple historical **Academic Mentor-Mentee Mappings** in one academic year when they are removed from mentorship and later selected again, or when they are reassigned from one Academic Mentor to another
+- The db-service table for **Academic Mentor-Mentee Mappings** is `academic_mentorship_mentor_mentee_mappings`
+- The **Academic Mentorship Mentor-Mentee Mapping Table** stores `id`, `school_id`, nullable `program_id`, `academic_year`, `mentor_user_id`, `student_id`, `assigned_at`, `assigned_by_user_id`, `ended_at`, `ended_by_user_id`, optional `end_reason`, and normal timestamps
+- `assigned_by_user_id` and `ended_by_user_id` on the **Academic Mentorship Mentor-Mentee Mapping Table** reference `user.id`, not `user_permission.id`, because mappings audit the person taking the action rather than the person's mutable permission row
+- `program_id` on the **Academic Mentorship Mentor-Mentee Mapping Table** is nullable in v1 and stores the Mentee's roster Program when available
+- New **Academic Mentor-Mentee Mappings** auto-fill nullable `program_id` from the selected Mentee's current roster program when available; otherwise it stays null
+- The **Academic Mentorship Mentor-Mentee Mapping Table** enforces one active mapping per Mentee per School and academic year with a partial unique index on `(school_id, academic_year, student_id)` where `ended_at IS NULL`
+- **Academic Mentor-Mentee Mappings** preserve history when removed or reassigned
+- Staff Management hard delete blocks Teachers with any Academic Mentor-Mentee Mapping history
+- Staff Management exit/revoke blocks Teachers only when they have active Mentees; historical mappings can remain after exit
+- Staff Management shows a warning/blocking message when Teacher delete or exit/revoke is blocked by Academic Mentor-Mentee Mappings
+- Staff Management mentorship block warnings include active Mentee count and a link to `/admin/academic-mentorship` for the relevant School and academic year when available
+- Manual reassignment is a dedicated Reassign action on an existing active **Academic Mentor-Mentee Mapping**
+- The Add Mapping form only shows unassigned **Mentees**; it does not implicitly reassign already-mapped Students
+- Academic Mentorship student selectors are searchable by Student name and external `student_id`
+- The Academic Mentorship admin table defaults to active mappings only, grouped by Academic Mentor
+- The Academic Mentorship admin table shows a Mentee count in each Academic Mentor group header
+- Academic Mentorship mapping rows show Mentee name, grade, external `student_id`, assigned date, and status; when Show history is enabled, rows also show ended date
+- Academic Mentorship mapping rows do not show `program_id`, `assigned_by_user_id`, or `ended_by_user_id` by default in v1; those fields stay stored for audit and future use
+- Active Academic Mentorship mapping rows show Reassign and Remove actions for users with edit access; historical mapping rows show no actions
+- Removing an active Academic Mentor-Mentee Mapping requires confirmation that the Student will no longer have an active Academic Mentor
+- Reassigning an active Academic Mentor-Mentee Mapping requires confirmation that the old mapping will be ended and a new mapping will be created
+- If a manual add fails because the Student was already mapped concurrently, the UI shows "Student already has a mentor mapped" and refreshes the table
+- After manual add, remove, or reassign succeeds, the UI shows a small success message and refreshes the mapping table automatically
+- Reassignment excludes the current active Academic Mentor from the replacement Academic Mentor options
+- The Academic Mentorship admin table can include historical mappings via a Show history toggle that extends the same view
+- Academic Mentorship grouped overview only shows Academic Mentors who have mappings in the selected view and academic year
+- The `/admin/academic-mentorship` page is accessible only to Admins and Program Admins; Teachers use only the School page Mentorship Tab
+- Admins and Program Admins see a read-only overview on the School page Mentorship Tab, with management actions kept on `/admin/academic-mentorship`
+- Admins and Program Admins see a Manage mappings link from the School page Mentorship Tab to `/admin/academic-mentorship`; read-only Program Admins land there in view-only mode
+- The Manage mappings link preselects the current School and current academic year on `/admin/academic-mentorship` via query params
+- The School page Mentorship Tab shows the current academic year only, with no academic year picker
+- Passcode users do not see the School page Mentorship Tab; Academic Mentorship is for Google-login staff governed by Staff Management permissions
+- Program Managers do not get an admin page link for Academic Mentorship; they use only the School page Mentorship Tab read-only view
+- Academic Mentorship APIs live under `/api/academic-mentorship/*`, with route handlers checking role, School scope, Program allowlist, and requested action
+- Academic Mentorship route handlers use a shared server-side access helper for role, School scope, Program allowlist, `read_only`, and requested action checks
+- The `/admin/academic-mentorship` School picker auto-selects when the user has exactly one accessible School; otherwise it starts empty and asks the user to pick a School
+- The `/admin/academic-mentorship` academic year options reuse the existing LMS current-academic-year source and show current plus two prior academic years
+- The `/admin/academic-mentorship` page allows manual add, remove, and reassign only for the current academic year; assignment and end timestamps use the actual action time
+- Academic Mentorship CSV import allows only the current plus two prior academic years shown in the picker; unsupported years are rejected server-side even if a user crafts a direct API request
+- The `/admin/academic-mentorship` selected School and academic year are reflected in URL query params such as `school_code` and `academic_year`
+- Teachers see only their current active Mentees on the School page Mentorship Tab as a flat list sorted by grade, then name
+- Teacher empty state for the School page Mentorship Tab is "No mentees assigned for this academic year."
+- Program Managers see active Academic Mentor-Mentee Mappings only on the School page Mentorship Tab in v1; history stays on the admin management page
+- Ending an **Academic Mentor-Mentee Mapping** does not ask for a reason in v1; `end_reason` stays optional in the table for later use
+- In v1, **Academic Mentor-Mentee Mapping** assignment and end timestamps are system-recorded when the action happens; admins do not backdate assignment or removal dates
+- Academic Mentorship CSV upload identifies mentors by email and mentees by external `student.student_id`; stored mappings still use internal Main DB ids
+- The Academic Mentorship admin page provides a CSV template download with `mentor_email,student_id` headers
+- Academic Mentorship CSV upload validates `mentor_email` as an eligible completed Staff Management Teacher at the selected School
+- Academic Mentorship CSV upload validates `student_id` as an active roster Student at the selected School and academic year
+- Academic Mentorship CSV upload applies to the page-selected academic year, which defaults to the current academic year; CSV files do not include an academic year column
+- Academic Mentorship CSV uploads for prior academic years are inserted as historical mappings by setting `ended_at` and `ended_by_user_id`, so Staff Management does not treat them as active Mentees
+- Academic Mentorship CSV upload requires `mentor_email` and `student_id` headers but allows extra columns and ignores them
+- Academic Mentorship CSV upload shows a normal file-level error, not an error CSV, when the file is empty or required headers are missing
+- Academic Mentorship CSV upload trims `mentor_email` and `student_id`; mentor email lookup is case-insensitive, while `student_id` matches trimmed exact text
+- Academic Mentorship CSV upload ignores completely blank rows; rows with one required field present and another required field blank produce row-level validation errors
+- Academic Mentorship CSV upload is capped at 2,000 data rows in v1
+- Academic Mentorship CSV upload fails the whole file when a row targets a student who already has an active Academic Mentor-Mentee Mapping; the validation error must include the CSV row number and say the student already has a mentor mapped
+- Academic Mentorship CSV upload fails the whole file when the same `student_id` appears more than once in the CSV; duplicate rows should be reported as duplicate student rows in the file
+- Academic Mentorship CSV upload should let admins download an error CSV containing only rejected rows and an error reason column
+- Academic Mentorship CSV error downloads include the original uploaded columns plus an `error_reason` column
+- Academic Mentorship CSV validation row numbers match spreadsheet row numbers: the header is row 1, and the first data row is row 2
+- Successful Academic Mentorship CSV upload shows a success count, and the mapping table refreshes automatically
+- Academic Mentorship v1 does not include a general "Export mappings CSV" action
+- Academic Mentorship mentee selection uses the same active-student rules as the School page roster for the selected School and academic year, excluding dropouts and students who already have an active mapping
+- Academic Mentorship access in v1 is controlled by role, school scope, `read_only`, and the Academic Mentorship Program allowlist
+- Academic Mentorship data model supports all programs, including NVS and PMU schools
+- `/admin` does not show an Academic Mentorship card; Academic Mentorship management entry comes from the School page **Mentorship Tab** Manage mappings link
+- `read_only` downgrades Academic Mentorship management to view-only
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
 - A **Visit** can only be completed when all 7 **Action Types** have at least one completed **Action**
@@ -234,4 +342,5 @@ _Avoid_: Access tier, role level
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
+- "mentorship" as a UI label vs permission key: the School page tab stays **Mentorship Tab** as an umbrella, while the internal feature key and domain term are **Academic Mentorship** / `academic_mentorship`.
 - "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.
