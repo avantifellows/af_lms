@@ -40,11 +40,18 @@ must include both explicit `program_ids` and seat-derived `scope.programs`.
 5. If the user sees the school through a seat, verify code uses
    `getResolvedPermission` and `getProgramContextSync(permission).programIds`
    instead of raw `permission.program_ids`.
-6. If a screenshot shows a modal date, verify an actual saved log exists for that
+6. Check both school-tab APIs and `/curriculum-summary`; both need effective
+   programs, not raw `program_ids`.
+7. For a specific school page, default the Program picker to that school's
+   assigned centre program when available; otherwise mixed CoE/Nodal users can
+   land on the wrong empty Program.
+8. If a screenshot shows a modal date, verify an actual saved log exists for that
    `log_date` or `inserted_at`; the modal date can just be today's default.
 
 ## Gotchas
 - Empty progress can be a program-scope bug, not missing teacher logs.
+- A user can have raw CoE plus a Nodal school seat, or raw Nodal plus a CoE
+  school seat. Do not assume CoE-first default is the right school default.
 - A topic marked "covered" in the log modal comes from loaded progress; it is not
   proof that the current modal was saved.
 - Chapter completion is separate from topic coverage. `0/11 chapters completed`

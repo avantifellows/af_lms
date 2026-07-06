@@ -210,6 +210,7 @@ describe("GET /api/curriculum/options", () => {
         { id: "1", name: "JNV CoE" },
         { id: "2", name: "JNV Nodal" },
       ])
+      .mockResolvedValueOnce([{ program_id: 1 }])
       .mockResolvedValueOnce([]);
 
     const res = await GET(nextReq("/api/curriculum/options?school_code=49045"));
@@ -221,6 +222,44 @@ describe("GET /api/curriculum/options", () => {
       { id: 2, name: "JNV Nodal" },
     ]);
     expect(json.defaults.programId).toBe(1);
+  });
+
+  it("defaults to the selected school's seat-derived Program over global Program order", async () => {
+    mockGetUserPermission.mockResolvedValue({
+      email: "pm@avantifellows.org",
+      level: 1,
+      role: "program_manager",
+      school_codes: null,
+      regions: null,
+      program_ids: [1],
+      read_only: false,
+      scope: {
+        schools: new Set(["49046"]),
+        centres: new Set([45]),
+        programs: new Set([2]),
+      },
+    });
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "49046", region: "HYDERABAD", program_ids: [] },
+      ])
+      .mockResolvedValueOnce([
+        { id: "1", name: "JNV CoE" },
+        { id: "2", name: "JNV Nodal" },
+      ])
+      .mockResolvedValueOnce([{ program_id: 2 }])
+      .mockResolvedValueOnce([]);
+
+    const res = await GET(nextReq("/api/curriculum/options?school_code=49046"));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.programs).toEqual([
+      { id: 1, name: "JNV CoE" },
+      { id: 2, name: "JNV Nodal" },
+    ]);
+    expect(json.defaults.programId).toBe(2);
   });
 
   it("returns an empty state when the user has no curriculum-backed Program", async () => {
