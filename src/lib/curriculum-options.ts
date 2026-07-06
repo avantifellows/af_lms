@@ -3,6 +3,7 @@ import { query } from "./db";
 import {
   PROGRAM_IDS,
   canAccessSchoolSync,
+  getProgramContextSync,
   type UserPermission,
 } from "./permissions";
 import type {
@@ -149,7 +150,9 @@ export async function resolveCurriculumProgramScope(
   }
 
   const callerProgramIds =
-    permission.role === "admin" ? CURRICULUM_PROGRAM_IDS : permission.program_ids ?? [];
+    permission.role === "admin"
+      ? CURRICULUM_PROGRAM_IDS
+      : getProgramContextSync(permission).programIds;
   const allowedProgramIds = CURRICULUM_PROGRAM_IDS.filter((id) =>
     callerProgramIds.includes(id)
   );

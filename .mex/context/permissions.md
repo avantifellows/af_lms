@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-07-01
+last_updated: 2026-07-06
 ---
 
 # Permissions
@@ -63,6 +63,7 @@ Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, n
 
 ## Gotchas
 - **`getUserPermission` for a school decision = bug.** Seats are absent, so a seated-but-no-explicit-codes user is wrongly denied. Use `getResolvedPermission`.
+- **Raw `program_ids` for program filtering = bug.** Use `getProgramContextSync(permission).programIds` so centre-seat-derived programs are included. Otherwise a seated manager can access a school but see empty curriculum/program data for the wrong program.
 - **`requireEdit` matters on writes.** `canAccessStudent(session, id, { requireEdit: true })` for upload/delete — without it a `read_only` user could mutate via direct API call even though the UI hides the button. It also enforces per-program ownership in mixed schools.
 - **Passcode users** must be handled explicitly (`session.isPasscodeUser`) — they're blocked from visits and all non-`students` features; the gate checks `session.schoolCode` against the target school.
 - **`revoked_at`** is the single "exited" switch — a revoked user resolves to no permission everywhere.
