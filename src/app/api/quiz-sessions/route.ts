@@ -174,19 +174,50 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ sessions: [], hasMore: false });
   }
 
+  const { sessions, hasMore } = await listQuizSessions(
+    filteredClassIds,
+    page,
+    perPage
+  );
+  return NextResponse.json({ sessions, hasMore });
+}
+
+/** IST db timestamp → UTC ISO; meta_data.date_created likewise normalised. */
+function normalizeSessionTimes(s: SessionRow) {
+  const meta = s.meta_data;
+  const dateCreated =
+    meta && typeof (meta as Record<string, unknown>).date_created === "string"
+      ? ((meta as Record<string, unknown>).date_created as string)
+      : undefined;
+  return {
+    ...s,
+    start_time: s.start_time ? dbIstTimestampToUtcIso(s.start_time) : null,
+    end_time: s.end_time ? dbIstTimestampToUtcIso(s.end_time) : null,
+    meta_data: meta
+      ? { ...meta, date_created: dateCreated ? istToUTCDate(dateCreated) : undefined }
+      : meta,
+  };
+}
+
+/**
+ * List quiz sessions overlapping the given class batches, one page at a time.
+ * Groups are derived from the batches' auth_group FK (so EMRS/Punjab/Gujarat
+ * list, not just EnableStudents); Teacher Feedback forms are excluded (own tab).
+ */
+async function listQuizSessions(
+  filteredClassIds: string[],
+  page: number,
+  perPage: number
+): Promise<{ sessions: ReturnType<typeof normalizeSessionTimes>[]; hasMore: boolean }> {
   const limit = perPage + 1;
   const offset = page * perPage;
 
-  // Groups present among the resolved class batches (EnableStudents, EMRSStudents,
-  // …), from the batch→auth_group FK. Replaces the old hardcoded
-  // group='EnableStudents' so EMRS/Punjab/Gujarat sessions list too; batch_id
-  // overlap already scopes to this school's batches.
   const batchGroups = await resolveBatchGroups(filteredClassIds);
   const groups = Array.from(
     new Set(Array.from(batchGroups.values()).map((g) => g.group))
   );
 
-  const sessions = await query<SessionRow>(
+  const rows = await query<SessionRow>(
     `
     SELECT
       s.id,
@@ -209,30 +240,9 @@ export async function GET(request: NextRequest) {
     [groups, filteredClassIds, limit, offset]
   );
 
-  const hasMore = sessions.length > perPage;
-  const items = hasMore ? sessions.slice(0, perPage) : sessions;
-
-  const parsed = items.map((s) => {
-    const meta = s.meta_data;
-    const dateCreated =
-      meta && typeof (meta as Record<string, unknown>).date_created === "string"
-        ? ((meta as Record<string, unknown>).date_created as string)
-        : undefined;
-
-    return {
-      ...s,
-      start_time: s.start_time ? dbIstTimestampToUtcIso(s.start_time) : null,
-      end_time: s.end_time ? dbIstTimestampToUtcIso(s.end_time) : null,
-      meta_data: meta
-        ? {
-            ...meta,
-            date_created: dateCreated ? istToUTCDate(dateCreated) : undefined,
-          }
-        : meta,
-    };
-  });
-
-  return NextResponse.json({ sessions: parsed, hasMore });
+  const hasMore = rows.length > perPage;
+  const items = hasMore ? rows.slice(0, perPage) : rows;
+  return { sessions: items.map(normalizeSessionTimes), hasMore };
 }
 
 export async function POST(request: NextRequest) {

@@ -80,29 +80,37 @@ interface Accumulator {
   comments: SubjectiveComment[];
 }
 
+function trackBatch(acc: Accumulator, r: RawRow): void {
+  if (!r.batch) return;
+  if (!acc.batchCounts.has(r.batch)) acc.batchCounts.set(r.batch, new Set());
+  acc.batchCounts.get(r.batch)!.add(r.user_id);
+}
+
+function foldScored(acc: Accumulator, r: RawRow, qpi: number, parameter: string): void {
+  const score = scoreUserResponse(qpi, r.user_response);
+  if (score === null) return;
+  acc.paramTotals.set(parameter, (acc.paramTotals.get(parameter) ?? 0) + score);
+  acc.paramResponders.get(parameter)!.add(r.user_id);
+}
+
+function foldComment(acc: Accumulator, r: RawRow, role: "liked" | "improve"): void {
+  const text = (r.user_response_labels ?? "").trim();
+  if (isMeaningful(text)) acc.comments.push({ role, text });
+}
+
 /** Fold one row into the accumulator: track responders/batches, sum scores, collect comments. */
 function foldRow(acc: Accumulator, r: RawRow): void {
   acc.users.add(r.user_id);
-  if (r.batch) {
-    if (!acc.batchCounts.has(r.batch)) acc.batchCounts.set(r.batch, new Set());
-    acc.batchCounts.get(r.batch)!.add(r.user_id);
-  }
+  trackBatch(acc, r);
 
   const qpi = typeof r.qpi === "number" ? r.qpi : Number(r.qpi);
   const question = FEEDBACK_QUESTIONS[qpi];
   if (!question) return;
 
   if (question.kind === "scored") {
-    const score = scoreUserResponse(qpi, r.user_response);
-    if (score === null) return;
-    acc.paramTotals.set(question.parameter, (acc.paramTotals.get(question.parameter) ?? 0) + score);
-    acc.paramResponders.get(question.parameter)!.add(r.user_id);
-    return;
-  }
-
-  const text = (r.user_response_labels ?? "").trim();
-  if (isMeaningful(text)) {
-    acc.comments.push({ role: question.role, text });
+    foldScored(acc, r, qpi, question.parameter);
+  } else {
+    foldComment(acc, r, question.role);
   }
 }
 
