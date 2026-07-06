@@ -964,6 +964,25 @@ describe("buildCommonQueryParams (seat-aware scope)", () => {
     expect(params[2]).toBeNull(); // $3: regions
   });
 
+  it("passes explicit plus seat-derived program ids as the program scope ($6)", () => {
+    const params = buildCommonQueryParams(
+      {
+        ...pmPermission,
+        level: 1,
+        role: "program_manager",
+        school_codes: [],
+        program_ids: [2],
+        scope: {
+          schools: new Set(["49045"]),
+          centres: new Set([21]),
+          programs: new Set([1]),
+        },
+      },
+      emptyFilters
+    );
+    expect(new Set(params[5] as number[])).toEqual(new Set([1, 2]));
+  });
+
   it("falls back to raw school_codes for level 1 when scope is unresolved", () => {
     const params = buildCommonQueryParams(
       { ...pmPermission, level: 1, role: "teacher", school_codes: ["70705"], regions: null },

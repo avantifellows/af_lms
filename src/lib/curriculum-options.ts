@@ -3,6 +3,7 @@ import { query } from "./db";
 import {
   PROGRAM_IDS,
   canAccessSchoolSync,
+  getProgramContextSync,
   type UserPermission,
 } from "./permissions";
 import type {
@@ -26,6 +27,10 @@ const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
 interface SchoolScopeRow {
   code: string;
   region: string | null;
+}
+
+interface PreferredSeatProgramRow {
+  program_id: number | string | null;
 }
 
 interface ConfigScopeRow {
@@ -65,6 +70,7 @@ interface ScopeSuccess {
   school: SchoolScopeRow;
   programs: CurriculumProgramOption[];
   allowedProgramIds: number[];
+  preferredProgramId: number | null;
 }
 
 type ProgramScopeResult = ScopeSuccess | ScopeFailure;
@@ -149,7 +155,9 @@ export async function resolveCurriculumProgramScope(
   }
 
   const callerProgramIds =
-    permission.role === "admin" ? CURRICULUM_PROGRAM_IDS : permission.program_ids ?? [];
+    permission.role === "admin"
+      ? CURRICULUM_PROGRAM_IDS
+      : getProgramContextSync(permission).programIds;
   const allowedProgramIds = CURRICULUM_PROGRAM_IDS.filter((id) =>
     callerProgramIds.includes(id)
   );
@@ -163,12 +171,32 @@ export async function resolveCurriculumProgramScope(
         [allowedProgramIds]
       )).map((program) => ({ ...program, id: Number(program.id) }))
     : [];
+  const seatCentreIds = permission.scope?.centres;
+  const preferredProgramRows =
+    allowedProgramIds.length > 0 && seatCentreIds instanceof Set && seatCentreIds.size > 0
+      ? await query<PreferredSeatProgramRow>(
+          `SELECT c.program_id
+           FROM centres c
+           JOIN school s ON s.id = c.school_id
+           WHERE c.id = ANY($1::int[])
+             AND s.code = $2
+             AND c.program_id = ANY($3::int[])
+           ORDER BY array_position($3::int[], c.program_id), c.id
+           LIMIT 1`,
+          [[...seatCentreIds], schoolCode, allowedProgramIds]
+        )
+      : [];
+  const preferredProgramId =
+    preferredProgramRows[0]?.program_id == null
+      ? null
+      : Number(preferredProgramRows[0].program_id);
 
   return {
     ok: true,
     school,
     programs,
     allowedProgramIds: programs.map((program) => program.id),
+    preferredProgramId,
   };
 }
 
@@ -243,7 +271,7 @@ export async function getCurriculumOptions(params: {
     examTracks,
     gradeSubjects,
     defaults: {
-      programId: overrideProgramId ?? scope.programs[0]?.id ?? null,
+      programId: overrideProgramId ?? scope.preferredProgramId ?? scope.programs[0]?.id ?? null,
       examTrack: examTracks[0] ?? null,
       grade: firstGradeSubject?.grade ?? null,
       gradeId: firstGradeSubject?.gradeId ?? null,

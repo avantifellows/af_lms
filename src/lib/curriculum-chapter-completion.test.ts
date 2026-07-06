@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn() }));
-vi.mock("./permissions", () => ({
-  PROGRAM_IDS: { COE: 1, NODAL: 2, NVS: 64 },
-  canAccessSchoolSync: vi.fn(),
-}));
+vi.mock("./permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./permissions")>();
+  return {
+    ...actual,
+    canAccessSchoolSync: vi.fn(),
+  };
+});
 
 import { query } from "./db";
 import { canAccessSchoolSync } from "./permissions";
