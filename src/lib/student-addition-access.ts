@@ -20,8 +20,7 @@ export interface StudentAdditionSchool {
   code: string;
   udise_code: string | null;
   region: string | null;
-  program_ids?: number[] | null;
-  student_program_ids?: Array<number | string> | null;
+  centre_program_ids?: Array<number | string> | null;
 }
 
 interface StudentAdditionSession {
@@ -62,19 +61,15 @@ interface StudentWriteScopeRow {
   code: string;
   udise_code: string | null;
   region: string | null;
-  program_ids: number[] | null;
-  student_program_ids: Array<number | string> | null;
+  centre_program_ids: Array<number | string> | null;
 }
 
 function deny(status: 401 | 403, error = "Forbidden"): { ok: false; status: 401 | 403; error: string } {
   return { ok: false, status, error };
 }
 
-function hasNvsSchoolContext(school: StudentAdditionSchool) {
-  return [
-    ...(school.program_ids ?? []),
-    ...(school.student_program_ids ?? []),
-  ].map(Number).includes(PROGRAM_IDS.NVS);
+function hasNvsCentreContext(school: StudentAdditionSchool) {
+  return (school.centre_program_ids ?? []).map(Number).includes(PROGRAM_IDS.NVS);
 }
 
 function requireGoogleSessionEmail(session: StudentAdditionSession | null) {
@@ -112,7 +107,7 @@ export function getStudentAdditionAccessFromPermission(
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
-  if (!hasNvsSchoolContext(school)) return deny(403);
+  if (!hasNvsCentreContext(school)) return deny(403);
   if (!actorHasNvsProgramAccess(permission)) return deny(403);
 
   return {
@@ -140,22 +135,17 @@ async function getStudentWriteScope(studentPkId: number | string) {
        sch.code,
        sch.udise_code,
        sch.region,
-       sch.program_ids,
        COALESCE(
-         ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
          ARRAY[]::int[]
-       ) AS student_program_ids
+       ) AS centre_program_ids
      FROM student s
      JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
      JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
      JOIN school sch ON sch.id = g_sch.child_id
-     LEFT JOIN enrollment_record er_batch
-       ON er_batch.user_id = s.user_id
-       AND er_batch.group_type = 'batch'
-       AND er_batch.is_current = true
-     LEFT JOIN batch b ON b.id = er_batch.group_id
+     LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
      WHERE s.id = $1
-     GROUP BY sch.code, sch.udise_code, sch.region, sch.program_ids
+     GROUP BY sch.code, sch.udise_code, sch.region
      LIMIT 1`,
     [studentPkId],
   );
@@ -184,11 +174,7 @@ export async function requireStudentAdditionStudentAccess(
     }
   }
 
-  const studentProgramIds = (scope.student_program_ids ?? []).map(Number);
-  if (studentProgramIds.length > 0 && !studentProgramIds.includes(PROGRAM_IDS.NVS)) {
-    return deny(403);
-  }
-  if (!hasNvsSchoolContext(scope)) return deny(403);
+  if (!hasNvsCentreContext(scope)) return deny(403);
   if (!actorHasNvsProgramAccess(permission)) return deny(403);
 
   return {

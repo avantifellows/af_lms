@@ -21,8 +21,7 @@ interface RouteSchool {
   code: string;
   udise_code: string | null;
   region: string | null;
-  program_ids: number[] | null;
-  student_program_ids: Array<number | string> | null;
+  centre_program_ids: Array<number | string> | null;
 }
 
 interface StudentAdditionAccess {
@@ -101,21 +100,14 @@ async function resolveSchoolAndAccess(
        sch.code,
        sch.udise_code,
        sch.region,
-       sch.program_ids,
        COALESCE(
-         ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
          ARRAY[]::int[]
-       ) AS student_program_ids
+       ) AS centre_program_ids
      FROM school sch
-     LEFT JOIN "group" g_sch ON g_sch.child_id = sch.id AND g_sch.type = 'school'
-     LEFT JOIN group_user gu_sch ON gu_sch.group_id = g_sch.id
-     LEFT JOIN enrollment_record er_batch
-       ON er_batch.user_id = gu_sch.user_id
-       AND er_batch.group_type = 'batch'
-       AND er_batch.is_current = true
-     LEFT JOIN batch b ON b.id = er_batch.group_id
+     LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
      WHERE sch.udise_code = $1 OR sch.code = $1
-     GROUP BY sch.id, sch.code, sch.udise_code, sch.region, sch.program_ids
+     GROUP BY sch.id, sch.code, sch.udise_code, sch.region
      LIMIT 1`,
     [udise],
   );

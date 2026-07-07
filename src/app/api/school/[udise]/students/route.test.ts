@@ -32,8 +32,7 @@ const school = {
   code: "JNV001",
   udise_code: "12345678901",
   region: "South",
-  program_ids: [PROGRAM_IDS.NVS],
-  student_program_ids: [PROGRAM_IDS.NVS],
+  centre_program_ids: [PROGRAM_IDS.NVS],
 };
 
 const validBody = {

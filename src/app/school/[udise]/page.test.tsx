@@ -205,8 +205,7 @@ const makeSchool = (overrides = {}) => ({
   district: "Bhavnagar",
   state: "Gujarat",
   region: "West",
-  program_ids: [64],
-  student_program_ids: [64],
+  centre_program_ids: [64],
   ...overrides,
 });
 
@@ -714,8 +713,8 @@ describe("SchoolPage (server component)", () => {
     expect(props.canEditStudent).toBe(false);
   });
 
-  it("shows add controls when NVS context comes from current student batches", async () => {
-    setupAdminDefaults({ program_ids: null, student_program_ids: [64] });
+  it("shows add controls when NVS context comes from active centre mapping", async () => {
+    setupAdminDefaults({ centre_program_ids: [64] });
 
     await renderPage();
 
@@ -1209,7 +1208,7 @@ describe("SchoolPage (server component)", () => {
     expect(firstCall[0]).toContain("s.udise_code = $1 OR s.code = $1");
     // Visible schools = JNV OR linked to an active centre (centre rollout).
     expect(firstCall[0]).toContain("af_school_category = 'JNV'");
-    expect(firstCall[0]).toContain("FROM centres c WHERE c.school_id = s.id AND c.is_active");
+    expect(firstCall[0]).toContain("LEFT JOIN centres c ON c.school_id = s.id AND c.is_active = true");
     expect(firstCall[1]).toEqual(["12345678901"]);
   });
 

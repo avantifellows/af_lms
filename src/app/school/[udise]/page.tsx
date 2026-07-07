@@ -33,8 +33,7 @@ interface School {
   district: string;
   state: string;
   region: string | null;
-  program_ids: number[] | null;
-  student_program_ids: Array<number | string> | null;
+  centre_program_ids: Array<number | string> | null;
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -50,25 +49,18 @@ async function getSchoolByCode(code: string): Promise<School | null> {
        s.district,
        s.state,
        s.region,
-       s.program_ids,
        COALESCE(
-         ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
          ARRAY[]::int[]
-       ) AS student_program_ids
+       ) AS centre_program_ids
      FROM school s
-     LEFT JOIN "group" g_sch ON g_sch.child_id = s.id AND g_sch.type = 'school'
-     LEFT JOIN group_user school_member ON school_member.group_id = g_sch.id
-     LEFT JOIN enrollment_record er_batch
-       ON er_batch.user_id = school_member.user_id
-       AND er_batch.group_type = 'batch'
-       AND er_batch.is_current = true
-     LEFT JOIN batch b ON b.id = er_batch.group_id
+     LEFT JOIN centres c ON c.school_id = s.id AND c.is_active = true
      WHERE (
          s.af_school_category = 'JNV'
-         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+         OR c.id IS NOT NULL
        )
        AND (s.udise_code = $1 OR s.code = $1)
-     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region, s.program_ids`,
+     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region`,
     [code],
   );
   return schools[0] || null;
