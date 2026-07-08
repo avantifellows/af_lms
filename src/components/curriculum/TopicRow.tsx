@@ -10,17 +10,12 @@ interface TopicRowProps {
 export default function TopicRow({ topic, isCompleted }: TopicRowProps) {
   return (
     <div className="px-4 py-2.5 pl-12 flex items-center gap-3">
-      {/* Checkbox (read-only) */}
-      <span
-        className={`w-4 h-4 flex items-center justify-center rounded border ${
-          isCompleted
-            ? "bg-green-500 border-green-500 text-white"
-            : "border-gray-300 bg-white"
-        }`}
-      >
-        {isCompleted && (
+      {/* Read-only status marker: green check when taught, quiet ring otherwise.
+          Not a control — topics are marked from what you log. */}
+      <span className="w-4 h-4 flex items-center justify-center" aria-hidden="true">
+        {isCompleted ? (
           <svg
-            className="w-3 h-3"
+            className="w-4 h-4 text-success"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -32,8 +27,11 @@ export default function TopicRow({ topic, isCompleted }: TopicRowProps) {
               d="M5 13l4 4L19 7"
             />
           </svg>
+        ) : (
+          <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-gray-300 bg-white" />
         )}
       </span>
+      <span className="sr-only">{isCompleted ? "Taught" : "Not taught yet"}</span>
 
       {/* Topic Name */}
       <span

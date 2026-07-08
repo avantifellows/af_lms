@@ -18,11 +18,11 @@ export default function SessionHistory({
 }: SessionHistoryProps) {
   if (logs.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-        No LMS Curriculum Logs yet.
+      <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
+        No classes logged yet.
         <br />
         <span className="text-sm">
-          Click &quot;+ Add Log&quot; to record your first LMS Curriculum Log.
+          Click &quot;+ Log a class&quot; to record your first class.
         </span>
       </div>
     );
@@ -74,10 +74,10 @@ export default function SessionHistory({
           <div
             key={log.id}
             data-curriculum-log-row
-            className="bg-white rounded-lg shadow overflow-hidden"
+            className="bg-bg-card border border-border rounded-lg shadow-sm overflow-hidden"
           >
             {/* Session Header */}
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-3">
+            <div className="px-4 py-3 bg-bg-card-alt border-b border-border flex items-center justify-between gap-3">
               <div className="font-medium text-gray-900">
                 {formatSessionDate(log.logDate)}
               </div>
