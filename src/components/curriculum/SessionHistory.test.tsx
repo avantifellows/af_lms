@@ -31,8 +31,8 @@ function makeLog(overrides: Partial<LmsCurriculumLog> = {}): LmsCurriculumLog {
 describe("SessionHistory", () => {
   it("renders empty state when no LMS Curriculum Logs exist", () => {
     render(<SessionHistory logs={[]} />);
-    expect(screen.getByText("No LMS Curriculum Logs yet.")).toBeInTheDocument();
-    expect(screen.getByText(/Click .+ Add Log/)).toBeInTheDocument();
+    expect(screen.getByText("No classes logged yet.")).toBeInTheDocument();
+    expect(screen.getByText(/Click .+ Log a class/)).toBeInTheDocument();
   });
 
   it("renders a single LMS Curriculum Log with date, duration, and topics", () => {

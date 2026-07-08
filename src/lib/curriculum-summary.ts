@@ -1,6 +1,6 @@
 import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curriculum-schema";
 import { query } from "./db";
-import { PROGRAM_IDS, type UserPermission } from "./permissions";
+import { getProgramContextSync, PROGRAM_IDS, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumSummarySortKey =
@@ -397,7 +397,7 @@ export function buildCommonQueryParams(
     permission.level === 2 ? permission.regions ?? [] : null,
     CURRICULUM_PROGRAM_IDS,
     permission.role === "admin",
-    permission.program_ids ?? [],
+    getProgramContextSync(permission).programIds,
     filters.schools.length ? filters.schools : null,
     filters.programs.length ? filters.programs : null,
     filters.grades.length ? filters.grades : null,
