@@ -8,6 +8,11 @@ import {
 } from "@/lib/quiz-session-options";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 import { parseBatchStream } from "@/lib/batch-code";
+import {
+  CMS_SOURCE,
+  CMS_TEST_TYPE_OPTIONS,
+  type CmsTestType,
+} from "@/lib/cms-tests";
 import type { ExamTrack } from "@/types/curriculum";
 
 interface BatchOption {
@@ -82,16 +87,9 @@ const AUTO_SYNC_INTERVAL_MINUTES = 60;
 const QA_GURUKUL_FORMAT = "qa";
 const GradeOptions = [11, 12];
 
-// New-CMS chapter-test picker (source toggle inside session creation).
+// New-CMS chapter-test picker (source toggle inside session creation). Test subtypes +
+// their labels are shared with the server routes via CMS_TEST_TYPE_OPTIONS (@/lib/cms-tests).
 type TestSource = "legacy" | "cms";
-// New-CMS test subtypes the picker supports. chapter_test drills Subject -> Chapter;
-// major_test is full-syllabus (picked straight off exam track + grade). The CMS list route
-// is subtype-agnostic, so widening this list is a UI-only change.
-type CmsTestType = "chapter_test" | "major_test";
-const CMS_TEST_TYPE_OPTIONS: { value: CmsTestType; label: string }[] = [
-  { value: "chapter_test", label: "Chapter Test" },
-  { value: "major_test", label: "Major Test" },
-];
 const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
   { value: "jee_main", label: "JEE Main" },
   { value: "jee_advanced", label: "JEE Advanced" },
@@ -845,6 +843,11 @@ export default function QuizSessionsTab({
             const busy = savingAction?.id === menuState.id;
             const enabled = currentSession?.is_active !== false;
             const endNowAvailable = canEndNow(currentSession, currentTimeMs);
+            // Regenerate fires the legacy SNS -> etl-data-flow path, which cannot rebuild a
+            // new-CMS quiz. Hide it for CMS sessions until the CMS regenerate path ships;
+            // clicking it would flip the session to a stuck "pending" and brick its actions.
+            const isCmsSession =
+              getMetaString(currentSession?.meta_data, "cms_source") === CMS_SOURCE;
 
             return (
               <>
@@ -889,17 +892,19 @@ export default function QuizSessionsTab({
                     </span>
                   </button>
                 ) : null}
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleRegenerate(menuState.id);
-                    setMenuState(null);
-                  }}
-                  disabled={sessionProcessing || busy}
-                  className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-                >
-                  Regenerate
-                </button>
+                {!isCmsSession ? (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleRegenerate(menuState.id);
+                      setMenuState(null);
+                    }}
+                    disabled={sessionProcessing || busy}
+                    className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                  >
+                    Regenerate
+                  </button>
+                ) : null}
               </>
             );
           })()}

@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
-import { EXAM_TRACKS, curriculumIdForExamTrack } from "@/lib/curriculum-options";
+import {
+  EXAM_TRACKS,
+  curriculumIdForExamTrack,
+  resolveGradeId,
+} from "@/lib/curriculum-options";
+import { CMS_TEST_TYPES, type CmsTestType } from "@/lib/cms-tests";
 import { query } from "@/lib/db";
 import type { ExamTrack } from "@/types/curriculum";
 
@@ -14,12 +19,6 @@ import type { ExamTrack } from "@/types/curriculum";
 // chapter". Bearer-authed, mirrors the DB_SERVICE_URL/TOKEN pattern.
 const CMS_SERVICE_URL = process.env.CMS_SERVICE_URL;
 const CMS_SERVICE_TOKEN = process.env.CMS_SERVICE_TOKEN;
-
-// Test subtypes the picker can request today. chapter_test is chapter-scoped (filtered by
-// chapter_id); major_test is full-syllabus (no chapter). Both flow through the same CMS
-// list route + quiz-backend ingest, so adding a type here is a UI change only.
-const CMS_TEST_TYPES = ["chapter_test", "major_test"] as const;
-type CmsTestType = (typeof CMS_TEST_TYPES)[number];
 
 interface RawCmsTest {
   id: number;
@@ -104,13 +103,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Resolve the CMS grade id from the grade table (the same lookup the from-cms session
-  // route does), rather than trusting a client-side grade->id mapping that could drift.
-  const gradeRows = await query<{ id: number }>(
-    `SELECT id FROM grade WHERE number = $1 LIMIT 1`,
-    [grade]
-  );
-  const gradeId = gradeRows[0]?.id;
+  // Resolve the CMS grade id from the grade table (shared with the from-cms session route),
+  // rather than trusting a client-side grade->id mapping that could drift.
+  const gradeId = await resolveGradeId(grade);
   if (!gradeId) {
     return NextResponse.json(
       { error: `No grade row for grade ${grade}` },
@@ -148,7 +143,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const rawTests = (await response.json()) as RawCmsTest[];
+  const rawBody = (await response.json()) as unknown;
+  // Defend against the CMS answering 200 with a non-array body (error/paginated shape after
+  // an upstream change): surface an empty list, not a 500 from calling .filter on a non-array.
+  if (!Array.isArray(rawBody)) {
+    console.error("CMS tests response was not an array:", rawBody);
+    return NextResponse.json({ tests: [] });
+  }
+  const rawTests = rawBody as RawCmsTest[];
   // chapter_id is only meaningful for chapter tests; other types ignore the filter. Match
   // against every sibling chapter id sharing the selected chapter's code (duplicate rows),
   // so a test linked to any of them shows up regardless of which duplicate was picked.

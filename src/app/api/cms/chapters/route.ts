@@ -4,17 +4,11 @@ import { authOptions } from "@/lib/auth";
 import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
 import { EXAM_TRACKS } from "@/lib/curriculum-options";
 import { query } from "@/lib/db";
-import type { ExamTrack } from "@/types/curriculum";
+import { SUBJECT_IDS, type SubjectName, type ExamTrack } from "@/types/curriculum";
 
 // Chapters for the new-CMS chapter-test picker: in-syllabus chapters for an
 // exam-track/grade/subject, so the session creator can drill Subject -> Chapter -> Test.
 // Global content (keyed by exam_track), not school-scoped like /api/curriculum/chapters.
-const SUBJECT_IDS: Record<string, number> = {
-  Maths: 1,
-  Chemistry: 2,
-  Biology: 3,
-  Physics: 4,
-};
 
 interface ChapterNameRow {
   id: number;
@@ -60,7 +54,7 @@ export async function GET(request: NextRequest) {
   if (grade !== 11 && grade !== 12) {
     return NextResponse.json({ error: "grade must be 11 or 12" }, { status: 400 });
   }
-  const subjectId = SUBJECT_IDS[subject];
+  const subjectId = SUBJECT_IDS[subject as SubjectName];
   if (!subjectId) {
     return NextResponse.json({ error: "Invalid or missing subject" }, { status: 400 });
   }

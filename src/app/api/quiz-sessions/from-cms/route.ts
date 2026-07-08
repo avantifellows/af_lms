@@ -6,9 +6,14 @@ import {
   requireQuizSessionAccess,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
-import { query } from "@/lib/db";
 import { utcToISTDate } from "@/lib/quiz-session-time";
-import { EXAM_TRACKS, curriculumIdForExamTrack } from "@/lib/curriculum-options";
+import {
+  EXAM_TRACKS,
+  curriculumIdForExamTrack,
+  resolveGradeId,
+  streamForExamTrack,
+} from "@/lib/curriculum-options";
+import { CMS_SOURCE, isCmsTestType } from "@/lib/cms-tests";
 import type { ExamTrack } from "@/types/curriculum";
 
 // Create a quiz session from a new-CMS test. This is the SYNCHRONOUS replacement for the
@@ -32,9 +37,6 @@ const QUIZ_AF_API_KEY = process.env.QUIZ_AF_API_KEY?.trim();
 // stored instead — link population must never fail a create.
 const AF_SHORTENER_URL = process.env.AF_SHORTENER_URL?.trim();
 const AF_SHORTENER_AUTH_TOKEN = process.env.AF_SHORTENER_AUTH_TOKEN?.trim();
-
-const CMS_TEST_TYPES = ["chapter_test", "major_test"];
-const CMS_SOURCE = "nex-gen-cms";
 
 interface CreateFromCmsBody {
   name?: string;
@@ -148,7 +150,7 @@ export async function POST(request: NextRequest) {
   if (body.grade !== 11 && body.grade !== 12) {
     return NextResponse.json({ error: "grade must be 11 or 12" }, { status: 400 });
   }
-  if (!body.testType || !CMS_TEST_TYPES.includes(body.testType)) {
+  if (!isCmsTestType(body.testType)) {
     return NextResponse.json({ error: "Valid testType is required" }, { status: 400 });
   }
   if (!body.parentBatchId) {
@@ -165,6 +167,19 @@ export async function POST(request: NextRequest) {
   }
   if (!body.stream) {
     return NextResponse.json({ error: "stream is required" }, { status: 400 });
+  }
+  // Guard against a wrong-subject test going live: the exam track (chosen independently in
+  // the picker) must match the stream derived from the selected batch — e.g. a NEET test
+  // cannot be attached to an engineering batch. Mirrors the legacy route's template.stream
+  // vs body.stream check.
+  const expectedStream = streamForExamTrack(body.examTrack);
+  if (expectedStream && body.stream !== expectedStream) {
+    return NextResponse.json(
+      {
+        error: `Selected test's exam track (${body.examTrack}) does not match the batch stream (${body.stream})`,
+      },
+      { status: 400 }
+    );
   }
   if (!body.startTime || !body.endTime) {
     return NextResponse.json(
@@ -203,11 +218,7 @@ export async function POST(request: NextRequest) {
   const { group, authType } = resolved;
 
   const curriculumId = curriculumIdForExamTrack(body.examTrack);
-  const gradeRows = await query<{ id: number }>(
-    `SELECT id FROM grade WHERE number = $1 LIMIT 1`,
-    [body.grade]
-  );
-  const gradeId = gradeRows[0]?.id;
+  const gradeId = await resolveGradeId(body.grade);
   if (!gradeId) {
     return NextResponse.json(
       { error: `No grade row for grade ${body.grade}` },
@@ -237,7 +248,14 @@ export async function POST(request: NextRequest) {
         { status: 502 }
       );
     }
-    const quizData = (await quizRes.json()) as { id: string; warnings?: string[] };
+    const quizData = (await quizRes.json()) as { id?: string; warnings?: string[] };
+    if (!quizData.id) {
+      console.error("quiz-backend /quiz/from-cms returned no quiz id:", quizData);
+      return NextResponse.json(
+        { error: "Quiz build returned no id" },
+        { status: 502 }
+      );
+    }
     quizId = quizData.id;
     warnings = quizData.warnings ?? [];
   } catch (err) {
@@ -274,15 +292,19 @@ export async function POST(request: NextRequest) {
   // Student-facing shortened session/OMR links + the attendance report link (legacy
   // sessionCreator parity; each falls back to its full URL if the shortener is unavailable).
   const createdBy = session.user.email;
-  const shortenedLink = await shortenUrl(portalLink, createdBy);
-  const shortenedOmrLink = await shortenUrl(`${portalLink}&omrMode=true`, createdBy);
-  const reportLink = await shortenUrl(
-    `${SESSION_PORTAL_URL.replace(/\/$/, "")}?type=attendance&platform=report` +
-      `&platform_id=${encodeURIComponent(sessionIdStr)}` +
-      `&authGroup=${encodeURIComponent(group)}` +
-      `&auth_type=${encodeURIComponent(authType)}`,
-    createdBy
-  );
+  // The three shortener calls are independent — run them concurrently so a create pays one
+  // shortener round-trip's latency, not three.
+  const [shortenedLink, shortenedOmrLink, reportLink] = await Promise.all([
+    shortenUrl(portalLink, createdBy),
+    shortenUrl(`${portalLink}&omrMode=true`, createdBy),
+    shortenUrl(
+      `${SESSION_PORTAL_URL.replace(/\/$/, "")}?type=attendance&platform=report` +
+        `&platform_id=${encodeURIComponent(sessionIdStr)}` +
+        `&authGroup=${encodeURIComponent(group)}` +
+        `&auth_type=${encodeURIComponent(authType)}`,
+      createdBy
+    ),
+  ]);
 
   const sessionPayload = {
     name: sessionName,
@@ -317,6 +339,10 @@ export async function POST(request: NextRequest) {
       test_type: "assessment",
       gurukul_format_type: gurukulFormatType,
       marking_scheme: "4,-1",
+      // Intentionally null for CMS sessions: optional-attempt limits are encoded
+      // structurally in the quiz doc itself (the quiz-backend CMS mapper sets per-
+      // question-set attempt limits from section.optional.mandatory_count), so the
+      // legacy session-level optional_limits string is superseded here.
       optional_limits: null,
       cms_source: CMS_SOURCE,
       cms_test_id: String(body.cmsTestId),
