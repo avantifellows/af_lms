@@ -29,6 +29,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
+  getResolvedPermission: mockGetUserPermission,
   getFeatureAccess: mockGetFeatureAccess,
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
@@ -112,6 +113,12 @@ const actions = [
     action_type: "classroom_observation",
     status: "completed",
     data: {
+      teacher_name: "Anita Teacher",
+      grade: "11",
+      curriculum_name: "JEE Mains",
+      chapter_name: "Fundamentals of Mathematics",
+      subject_name: "Maths",
+      topic_name: "Introduction",
       params: { teacher_on_time: { score: 1, remarks: "Started on time" } },
       observer_summary_strengths: "Students were engaged",
     },
@@ -168,6 +175,7 @@ const actions = [
     action_type: "principal_interaction",
     status: "completed",
     data: {
+      additional_notes: "Bring district schedule next visit",
       questions: {
         oh_program_feedback: { answer: true, remark: "Principal asked for monthly updates" },
       },
@@ -311,20 +319,24 @@ describe("SchoolVisitSummaryDetailPage", () => {
     expect(screen.getByText("2h 30m")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "GPS" })).toHaveLength(2);
 
-    expect(screen.getByRole("heading", { name: "Classroom Observation" })).toBeInTheDocument();
-    expect(screen.getByText("Score 1/45")).toBeInTheDocument();
-    expect(screen.getByText("Remarks 1")).toBeInTheDocument();
-    expect(screen.getByText("Answered 2/9")).toBeInTheDocument();
-    expect(screen.getByText("Teachers 2")).toBeInTheDocument();
-    expect(screen.getByText("Teachers 3 (1 present, 1 on leave, 1 absent)")).toBeInTheDocument();
-    expect(screen.getByText("Avg answered 2/13")).toBeInTheDocument();
-    expect(screen.getByText("Answered 1/7")).toBeInTheDocument();
-    expect(screen.getByText("Grade 12")).toBeInTheDocument();
-    expect(screen.getByText("Answered 1/4")).toBeInTheDocument();
-    expect(screen.getByText("Entries 2")).toBeInTheDocument();
-    expect(screen.getByText("Students 3")).toBeInTheDocument();
-    expect(screen.getByText("Avg answered 1/2")).toBeInTheDocument();
-    expect(screen.getByText("Answered 1/2")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Classroom Observation" }).length).toBeGreaterThan(0);
+    for (const chip of [
+      "Score 1/45",
+      "Remarks 1",
+      "Answered 2/9",
+      "Teachers 2",
+      "Teachers 3 (1 present, 1 on leave, 1 absent)",
+      "Avg answered 2/13",
+      "Answered 1/7",
+      "Grade 12",
+      "Answered 1/4",
+      "Entries 2",
+      "Students 3",
+      "Avg answered 1/2",
+      "Answered 1/2",
+    ]) {
+      expect(screen.getAllByText(chip).length).toBeGreaterThan(0);
+    }
     expect(screen.getByRole("heading", { name: "Other" })).toBeInTheDocument();
 
     const detailLinks = screen.getAllByRole("link", { name: "View full detail" });
@@ -334,11 +346,37 @@ describe("SchoolVisitSummaryDetailPage", () => {
     expect(detailHrefs).toContain("/visits/101/actions/208?from=summary");
 
     const remarks = screen.getByRole("region", { name: "Remarks" });
-    expect(within(remarks).getByText("Started on time")).toBeInTheDocument();
-    expect(within(remarks).getByText("Students were engaged")).toBeInTheDocument();
-    expect(within(remarks).getByText("Classes are on schedule")).toBeInTheDocument();
-    expect(within(remarks).getByText("Principal asked for monthly updates")).toBeInTheDocument();
-    expect(within(remarks).getByText("Students want slower pacing")).toBeInTheDocument();
+    const classroomRemarks = within(remarks).getByRole("group", {
+      name: "Classroom Observation #201",
+    });
+    expect(within(classroomRemarks).getByText("Action #201")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Teacher Anita Teacher")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Grade 11")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Curriculum JEE Mains")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Chapter Maths - Fundamentals of Mathematics")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Topic Introduction")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Started on time")).toBeInTheDocument();
+    expect(within(classroomRemarks).getByText("Students were engaged")).toBeInTheDocument();
+    expect(within(classroomRemarks).queryByText("Classes are on schedule")).not.toBeInTheDocument();
+
+    const afTeamRemarks = within(remarks).getByRole("group", {
+      name: "AF Team Interaction #202",
+    });
+    expect(within(afTeamRemarks).getByText("Classes are on schedule")).toBeInTheDocument();
+
+    const principalRemarks = within(remarks).getByRole("group", {
+      name: "Principal Interaction #204",
+    });
+    expect(within(principalRemarks).getByText("Principal asked for monthly updates")).toBeInTheDocument();
+    expect(within(principalRemarks).getByText("Additional Notes or Concerns")).toBeInTheDocument();
+    expect(within(principalRemarks).getByText("Bring district schedule next visit")).toBeInTheDocument();
+    expect(within(principalRemarks).queryByText("Students want slower pacing")).not.toBeInTheDocument();
+
+    const individualStudentRemarks = within(remarks).getByRole("group", {
+      name: "Individual Student Interaction #206",
+    });
+    expect(within(individualStudentRemarks).getByText("Students want slower pacing")).toBeInTheDocument();
+    expect(within(remarks).queryByRole("group", { name: "Other #208" })).not.toBeInTheDocument();
 
     expect(screen.queryByText("Delete")).not.toBeInTheDocument();
     expect(screen.queryByText("Start")).not.toBeInTheDocument();

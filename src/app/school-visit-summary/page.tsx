@@ -8,8 +8,15 @@ import VisitSummaryFilterBar from "@/components/visits/VisitSummaryFilterBar";
 import { Card } from "@/components/ui";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { getFeatureAccess, getUserPermission, type UserPermission } from "@/lib/permissions";
-import { ACTION_TYPES, ACTION_TYPE_VALUES, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
+import { getFeatureAccess, getResolvedPermission, type UserPermission } from "@/lib/permissions";
+import {
+  ACTION_TYPES,
+  ACTION_TYPE_VALUES,
+  REQUIRED_ACTION_TYPE_VALUES,
+  isOptionalActionType,
+  statusBadgeClass,
+  type ActionType,
+} from "@/lib/visit-actions";
 import {
   resolvePresetDateRange,
   rollupActionTypes,
@@ -325,17 +332,17 @@ function buildWhereClause(
         GROUP BY visit_id
       ) AS action_agg ON action_agg.visit_id = v.id`
     );
-    params.push(ACTION_TYPE_VALUES);
+    params.push(REQUIRED_ACTION_TYPE_VALUES);
     nextIndex += 1;
 
     if (filters.bucket === "none") {
       predicates.push("COALESCE(action_agg.touched_types, 0) = 0");
     } else if (filters.bucket === "partial") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${ACTION_TYPE_VALUES.length}`);
+      predicates.push(`COALESCE(action_agg.touched_types, 0) > 0 AND COALESCE(action_agg.touched_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
     } else if (filters.bucket === "all_present") {
-      predicates.push(`COALESCE(action_agg.touched_types, 0) = ${ACTION_TYPE_VALUES.length} AND COALESCE(action_agg.completed_types, 0) < ${ACTION_TYPE_VALUES.length}`);
+      predicates.push(`COALESCE(action_agg.touched_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length} AND COALESCE(action_agg.completed_types, 0) < ${REQUIRED_ACTION_TYPE_VALUES.length}`);
     } else {
-      predicates.push(`COALESCE(action_agg.completed_types, 0) = ${ACTION_TYPE_VALUES.length}`);
+      predicates.push(`COALESCE(action_agg.completed_types, 0) = ${REQUIRED_ACTION_TYPE_VALUES.length}`);
     }
   }
 
@@ -408,7 +415,7 @@ async function getSummaryStats(
      LEFT JOIN action_completion ac ON ac.visit_id = v.id
      ${joinSql}
      WHERE ${whereSql}`,
-    [ACTION_TYPE_VALUES, ACTION_TYPE_VALUES.length, ...params]
+    [REQUIRED_ACTION_TYPE_VALUES, REQUIRED_ACTION_TYPE_VALUES.length, ...params]
   );
 
   const row = rows[0];
@@ -503,7 +510,7 @@ async function getActionRowsForVisits(visitIds: number[]): Promise<VisitActionRo
 
 function summarizeActions(actions: VisitActionRow[]): VisitActionSummary {
   const rollup = rollupActionTypes(actions);
-  const countStatuses = (statuses: ActionTypeRollupStatus[]) => ACTION_TYPE_VALUES.filter(
+  const countStatuses = (statuses: ActionTypeRollupStatus[]) => REQUIRED_ACTION_TYPE_VALUES.filter(
     (actionType: ActionType) => statuses.includes(rollup[actionType])
   ).length;
   const completedTypes = countStatuses(["completed"]);
@@ -517,7 +524,7 @@ function summarizeActions(actions: VisitActionRow[]): VisitActionSummary {
     notStartedTypes: countStatuses(["not_started"]),
     completionPercent: totalActions === 0
       ? null
-      : (completedTypes / ACTION_TYPE_VALUES.length) * 100,
+      : (completedTypes / REQUIRED_ACTION_TYPE_VALUES.length) * 100,
     rollup,
   };
 }
@@ -700,7 +707,7 @@ function ActionTypeBar({ summary }: { summary: VisitActionSummary }) {
         {ACTION_TYPE_VALUES.map((actionType) => {
           const status = summary.rollup[actionType];
           const label = ACTION_TYPES[actionType];
-          const statusLabel = status.replace("_", " ");
+          const statusLabel = `${status.replace("_", " ")}${isOptionalActionType(actionType) ? " (optional)" : ""}`;
           const colorClass =
             status === "completed"
               ? "bg-success"
@@ -726,7 +733,7 @@ function ActionTypeBar({ summary }: { summary: VisitActionSummary }) {
 }
 
 function formatMobileActionSummary(summary: VisitActionSummary): string {
-  return `${summary.completedTypes}/${ACTION_TYPE_VALUES.length} complete`;
+  return `${summary.completedTypes}/${REQUIRED_ACTION_TYPE_VALUES.length} required complete`;
 }
 
 function StatCards({ stats }: { stats: SummaryStats }) {
@@ -912,7 +919,7 @@ export default async function SchoolVisitSummaryPage({ searchParams }: PageProps
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   if (!permission) {
     redirect("/dashboard");
   }

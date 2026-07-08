@@ -97,10 +97,24 @@ describe("validatePrincipalInteractionSave (lenient)", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("accepts optional action-level additional notes", () => {
+    const result = validatePrincipalInteractionSave({
+      ...buildCompletePayload(),
+      additional_notes: "Principal asked for extra monthly context",
+    });
+    expect(result.valid).toBe(true);
+  });
+
   it("rejects unknown top-level keys", () => {
     const result = validatePrincipalInteractionSave({ foo: "bar" });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("Unknown field: foo");
+  });
+
+  it("rejects non-string action-level additional notes", () => {
+    const result = validatePrincipalInteractionSave({ additional_notes: 42 });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("additional_notes must be a string");
   });
 
   it("rejects teachers top-level key (not allowed for principal interaction)", () => {
@@ -209,6 +223,14 @@ describe("validatePrincipalInteractionComplete (strict)", () => {
     const result = validatePrincipalInteractionComplete(buildCompletePayload());
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it("accepts optional action-level additional notes when complete", () => {
+    const result = validatePrincipalInteractionComplete({
+      ...buildCompletePayload(),
+      additional_notes: "Principal asked for extra monthly context",
+    });
+    expect(result.valid).toBe(true);
   });
 
   it("ignores unknown question keys alongside requiring all known keys", () => {

@@ -105,7 +105,7 @@ describe("VisitSummaryFilterBar", () => {
       { scroll: false }
     );
 
-    fireEvent.change(screen.getByLabelText("Action Completion"), { target: { value: "partial" } });
+    fireEvent.change(screen.getByLabelText("Required Completion"), { target: { value: "partial" } });
     vi.advanceTimersByTime(300);
     expect(mockReplace).toHaveBeenLastCalledWith(
       "/school-visit-summary?page=1&bucket=partial",

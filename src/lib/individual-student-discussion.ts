@@ -1,4 +1,8 @@
 import type { RemarkEntry } from "./visit-summary";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  validateActionAdditionalNotes,
+} from "./visit-form-utils";
 
 export interface ValidationResult {
   valid: boolean;
@@ -42,6 +46,7 @@ export interface IndividualStudentDiscussionEntry {
 
 export interface IndividualStudentDiscussionData {
   entries: IndividualStudentDiscussionEntry[];
+  additional_notes?: string;
 }
 
 const sections: SectionConfig[] = [
@@ -59,7 +64,10 @@ export const INDIVIDUAL_STUDENT_DISCUSSION_CONFIG: IndividualStudentDiscussionCo
   allQuestionKeys: sections.flatMap((s) => s.questions.map((q) => q.key)),
 };
 
-export const ALLOWED_TOP_LEVEL_KEYS = new Set(["entries"]);
+export const ALLOWED_TOP_LEVEL_KEYS = new Set([
+  "entries",
+  ACTION_ADDITIONAL_NOTES_KEY,
+]);
 
 const questionKeyToLabel = new Map<string, string>(
   INDIVIDUAL_STUDENT_DISCUSSION_CONFIG.allQuestionKeys.map((key) => {
@@ -267,6 +275,7 @@ export function validateIndividualStudentDiscussionSave(data: unknown): Validati
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   const canonical = getEntriesForValidation(payload);
   errors.push(...canonical.errors);
@@ -292,6 +301,7 @@ export function validateIndividualStudentDiscussionComplete(data: unknown): Vali
   for (const key of unknownKeys) {
     errors.push(`Unknown field: ${key}`);
   }
+  errors.push(...validateActionAdditionalNotes(payload));
 
   const canonical = getEntriesForValidation(payload);
   errors.push(...canonical.errors);

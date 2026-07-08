@@ -17,7 +17,12 @@ interface BatchOverviewProps {
   program?: string;
   stream?: string;
   subject?: string;
-  onFilterOptions?: (opts: { streams: string[]; subjects: string[] }) => void;
+  testGrade?: number;
+  onFilterOptions?: (opts: {
+    streams: string[];
+    subjects: string[];
+    testGrades: number[];
+  }) => void;
 }
 
 let lastBatchOverviewProps: BatchOverviewProps | null = null;
@@ -30,12 +35,13 @@ vi.mock("./performance/BatchOverview", () => ({
         props.onFilterOptions?.({
           streams: ["pcm", "pcb"],
           subjects: ["Physics", "Chemistry"],
+          testGrades: [11, 12],
         })
       );
     }
     return (
       <div data-testid="batch-overview">
-        BatchOverview: udise={props.schoolUdise}, grade={props.grade}, category={props.testCategory}, program={props.program ?? "none"}, stream={props.stream ?? "none"}, subject={props.subject ?? "none"}
+        BatchOverview: udise={props.schoolUdise}, grade={props.grade}, category={props.testCategory}, program={props.program ?? "none"}, stream={props.stream ?? "none"}, subject={props.subject ?? "none"}, testGrade={props.testGrade ?? "none"}
       </div>
     );
   },
@@ -50,11 +56,12 @@ interface CumulativeALProps {
   grade: number;
   program?: string;
   stream?: string;
+  testGrade?: number;
 }
 vi.mock("./performance/CumulativeALTable", () => ({
   default: (props: CumulativeALProps) => (
     <div data-testid="cumulative-al-table">
-      CumulativeALTable: udise={props.schoolUdise}, grade={props.grade}, stream={props.stream ?? "none"}
+      CumulativeALTable: udise={props.schoolUdise}, grade={props.grade}, stream={props.stream ?? "none"}, testGrade={props.testGrade ?? "none"}
     </div>
   ),
 }));
@@ -174,6 +181,37 @@ describe("PerformanceTab", () => {
     expect(calls.some((url) => url.includes("grade=12"))).toBe(true);
   });
 
+  it("re-picks a valid grade when the program scope narrows available grades", async () => {
+    // Nellore case: the all-programs grade list (CoE gr11 + NVS gr12) makes the
+    // default prefer grade 12, but the PM is scoped to CoE only, which has just
+    // grade 11. The program-scoped re-fetch returns [11]; the stale grade=12
+    // must be reconciled to 11 so data renders instead of a blank tab.
+    lastBatchOverviewProps = null;
+    const fetchByProgram = vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("program=")
+              ? { grades: [11], programs: ["JNV CoE"] }
+              : { grades: [11, 12], programs: ["JNV CoE"] }
+          ),
+      })
+    ) as any;
+    vi.stubGlobal("fetch", fetchByProgram);
+
+    render(<PerformanceTab schoolUdise="28191100306" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+    // Lands on grade 11 (CoE's only grade), not the stale default of 12.
+    await waitFor(() => {
+      expect(lastBatchOverviewProps?.grade).toBe(11);
+      expect(lastBatchOverviewProps?.program).toBe("JNV CoE");
+    });
+  });
+
   it("shows program tabs when multiple programs exist", async () => {
     vi.stubGlobal("fetch", mockGradesResponse([10], ["JNV CoE", "JNV Nodal", "JNV NVS"]));
 
@@ -213,6 +251,27 @@ describe("PerformanceTab", () => {
     fireEvent.click(pcmBtn);
     await waitFor(() => {
       expect(lastBatchOverviewProps?.stream).toBe("pcm");
+    });
+  });
+
+  it("renders the Test Grade dropdown from reported options and forwards selection", async () => {
+    vi.stubGlobal("fetch", mockGradesResponse([12], ["JNV CoE"]));
+    lastBatchOverviewProps = null;
+
+    render(<PerformanceTab schoolUdise="12345" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-overview")).toBeInTheDocument();
+    });
+
+    // The dropdown appears once BatchOverview reports its test grades.
+    const allOption = await screen.findByRole("option", { name: "All test grades" });
+    const testGradeSelect = allOption.closest("select") as HTMLSelectElement;
+    expect(testGradeSelect).not.toBeNull();
+
+    fireEvent.change(testGradeSelect, { target: { value: "11" } });
+    await waitFor(() => {
+      expect(lastBatchOverviewProps?.testGrade).toBe(11);
     });
   });
 

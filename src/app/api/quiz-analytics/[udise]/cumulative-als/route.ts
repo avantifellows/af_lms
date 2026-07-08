@@ -23,7 +23,12 @@ export async function GET(
   try {
     const program = url.searchParams.get("program") || undefined;
     const stream = url.searchParams.get("stream")?.toLowerCase() || undefined;
-    const data = await getCumulativeALData(udise, grade, program, stream);
+    const testGradeParam = url.searchParams.get("testGrade");
+    const testGrade =
+      testGradeParam && Number.isInteger(Number(testGradeParam))
+        ? Number(testGradeParam)
+        : undefined;
+    const data = await getCumulativeALData(udise, grade, program, stream, testGrade);
     return NextResponse.json(data);
   } catch (error) {
     console.error("Cumulative AL error:", error);

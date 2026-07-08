@@ -13,6 +13,7 @@ vi.mock("./curriculum-schema", () => ({
 }));
 
 import {
+  buildCommonQueryParams,
   getCurriculumSummary,
   normalizeCurriculumSummaryPageSize,
   normalizeCurriculumSummarySearchParams,
@@ -941,5 +942,68 @@ describe("curriculum summary", () => {
       "ORDER BY page_row_order ASC, coverage_sequence ASC NULLS LAST, chapter_code ASC, chapter_sort_name ASC, chapter_id ASC"
     );
     expect(mockQuery.mock.calls[4][1].slice(-2)).toEqual([10, 10]);
+  });
+});
+
+describe("buildCommonQueryParams (seat-aware scope)", () => {
+  const emptyFilters = normalizeCurriculumSummarySearchParams({}, "2026-06-13");
+
+  it("passes the resolved scope set (explicit ∪ seats) as the level-1 school param ($2)", () => {
+    const params = buildCommonQueryParams(
+      {
+        ...pmPermission,
+        level: 1,
+        role: "teacher",
+        school_codes: ["70705"],
+        scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
+      },
+      emptyFilters
+    );
+    expect(params[0]).toBe(false); // $1: level === 3
+    expect(new Set(params[1] as string[])).toEqual(new Set(["70705", "99999"])); // $2
+    expect(params[2]).toBeNull(); // $3: regions
+  });
+
+  it("passes explicit plus seat-derived program ids as the program scope ($6)", () => {
+    const params = buildCommonQueryParams(
+      {
+        ...pmPermission,
+        level: 1,
+        role: "program_manager",
+        school_codes: [],
+        program_ids: [2],
+        scope: {
+          schools: new Set(["49045"]),
+          centres: new Set([21]),
+          programs: new Set([1]),
+        },
+      },
+      emptyFilters
+    );
+    expect(new Set(params[5] as number[])).toEqual(new Set([1, 2]));
+  });
+
+  it("falls back to raw school_codes for level 1 when scope is unresolved", () => {
+    const params = buildCommonQueryParams(
+      { ...pmPermission, level: 1, role: "teacher", school_codes: ["70705"], regions: null },
+      emptyFilters
+    );
+    expect(params[1]).toEqual(["70705"]);
+  });
+
+  it("includes level-2 seat schools in $2 while regions flow through $3", () => {
+    const params = buildCommonQueryParams(
+      {
+        ...pmPermission,
+        level: 2,
+        role: "admin",
+        school_codes: null,
+        regions: ["West"],
+        scope: { schools: new Set(["55555"]), centres: new Set([9]), programs: new Set([1]) },
+      },
+      emptyFilters
+    );
+    expect(params[1]).toEqual(["55555"]); // $2 seat schools
+    expect(params[2]).toEqual(["West"]); // $3 regions
   });
 });

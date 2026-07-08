@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useAutoSave, type AutoSaveStatus } from "@/hooks/use-auto-save";
 
 import Toast from "@/components/Toast";
+import { FormSection, baseInputClasses } from "@/components/ui";
 import AFTeamInteractionForm from "@/components/visits/AFTeamInteractionForm";
 import ClassroomObservationForm from "@/components/visits/ClassroomObservationForm";
 import IndividualAFTeacherInteractionForm from "@/components/visits/IndividualAFTeacherInteractionForm";
@@ -26,7 +27,13 @@ import {
 } from "@/lib/classroom-observation-rubric";
 import { getAccurateLocation } from "@/lib/geolocation";
 import { getActionTypeLabel, isActionType, statusBadgeClass, type ActionType } from "@/lib/visit-actions";
-import { isPlainObject } from "@/lib/visit-form-utils";
+import {
+  ACTION_ADDITIONAL_NOTES_KEY,
+  ACTION_ADDITIONAL_NOTES_LABEL,
+  appendActionAdditionalNotes,
+  isPlainObject,
+  readActionAdditionalNotes,
+} from "@/lib/visit-form-utils";
 
 interface ActionRecord {
   id: number;
@@ -180,6 +187,137 @@ function isLocationCancelled(error: unknown): boolean {
   );
 }
 
+function assignStringField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+): void {
+  const value = source[key];
+  if (typeof value === "string") {
+    target[key] = value;
+  }
+}
+
+function assignPositiveNumberField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+): void {
+  const value = source[key];
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value > 0
+  ) {
+    target[key] = value;
+  }
+}
+
+function assignNonNegativeNumberField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+): void {
+  const value = source[key];
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= 0
+  ) {
+    target[key] = value;
+  }
+}
+
+function sanitizeRubricParam(value: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const nextValue: Record<string, unknown> = {};
+
+  if (typeof value.score === "number" && Number.isFinite(value.score)) {
+    nextValue.score = value.score;
+  }
+
+  if (typeof value.remarks === "string") {
+    nextValue.remarks = value.remarks;
+  }
+
+  return Object.keys(nextValue).length > 0 ? nextValue : null;
+}
+
+function sanitizeRubricParams(paramsValue: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(paramsValue)) {
+    return null;
+  }
+
+  const params: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(paramsValue)) {
+    const sanitizedParam = sanitizeRubricParam(value);
+    if (sanitizedParam) {
+      params[key] = sanitizedParam;
+    }
+  }
+
+  return params;
+}
+
+function sanitizeQuestionEntry(value: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const entry: Record<string, unknown> = {};
+  if (value.answer === null || typeof value.answer === "boolean") {
+    entry.answer = value.answer;
+  }
+  if (typeof value.remark === "string") {
+    entry.remark = value.remark;
+  }
+
+  return Object.keys(entry).length > 0 ? entry : null;
+}
+
+function sanitizeQuestionMap(
+  questionsValue: unknown,
+  questionKeys: readonly string[]
+): Record<string, unknown> {
+  const questions: Record<string, unknown> = {};
+  if (!isPlainObject(questionsValue)) {
+    return questions;
+  }
+
+  for (const key of questionKeys) {
+    const entry = sanitizeQuestionEntry(questionsValue[key]);
+    if (entry) {
+      questions[key] = entry;
+    }
+  }
+
+  return questions;
+}
+
+function sanitizeTeacherRefs(value: unknown): Array<{ id: number; name: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (
+      isPlainObject(entry) &&
+      typeof entry.id === "number" &&
+      Number.isFinite(entry.id) &&
+      typeof entry.name === "string"
+    ) {
+      return [{ id: entry.id, name: entry.name }];
+    }
+
+    return [];
+  });
+}
+
 function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
   if (!isPlainObject(data)) {
     return {};
@@ -191,51 +329,31 @@ function sanitizeClassroomPayload(data: unknown): Record<string, unknown> {
     sanitized.rubric_version = data.rubric_version;
   }
 
-  if (isPlainObject(data.params)) {
-    const params: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(data.params)) {
-      if (!isPlainObject(value)) {
-        continue;
-      }
-
-      const nextValue: Record<string, unknown> = {};
-
-      if (typeof value.score === "number" && Number.isFinite(value.score)) {
-        nextValue.score = value.score;
-      }
-
-      if (typeof value.remarks === "string") {
-        nextValue.remarks = value.remarks;
-      }
-
-      if (Object.keys(nextValue).length > 0) {
-        params[key] = nextValue;
-      }
-    }
-
+  const params = sanitizeRubricParams(data.params);
+  if (params) {
     sanitized.params = params;
   }
 
-  if (typeof data.observer_summary_strengths === "string") {
-    sanitized.observer_summary_strengths = data.observer_summary_strengths;
-  }
+  assignStringField(sanitized, data, "observer_summary_strengths");
+  assignStringField(sanitized, data, "observer_summary_improvements");
 
-  if (typeof data.observer_summary_improvements === "string") {
-    sanitized.observer_summary_improvements = data.observer_summary_improvements;
-  }
+  assignPositiveNumberField(sanitized, data, "teacher_id");
+  assignStringField(sanitized, data, "teacher_name");
+  assignStringField(sanitized, data, "grade");
+  assignPositiveNumberField(sanitized, data, "curriculum_id");
+  assignStringField(sanitized, data, "curriculum_name");
+  assignStringField(sanitized, data, "curriculum_code");
+  assignPositiveNumberField(sanitized, data, "chapter_id");
+  assignStringField(sanitized, data, "chapter_name");
+  assignStringField(sanitized, data, "chapter_code");
+  assignNonNegativeNumberField(sanitized, data, "chapter_topic_count");
+  assignPositiveNumberField(sanitized, data, "subject_id");
+  assignStringField(sanitized, data, "subject_name");
+  assignPositiveNumberField(sanitized, data, "topic_id");
+  assignStringField(sanitized, data, "topic_name");
+  assignStringField(sanitized, data, "topic_code");
 
-  if (typeof data.teacher_id === "number" && Number.isFinite(data.teacher_id) && data.teacher_id > 0) {
-    sanitized.teacher_id = data.teacher_id;
-  }
-
-  if (typeof data.teacher_name === "string") {
-    sanitized.teacher_name = data.teacher_name;
-  }
-
-  if (typeof data.grade === "string") {
-    sanitized.grade = data.grade;
-  }
+  appendActionAdditionalNotes(sanitized, data);
 
   return sanitized;
 }
@@ -250,45 +368,20 @@ function bootstrapClassroomPayload(data: unknown): Record<string, unknown> {
   return sanitized;
 }
 
-function sanitizeAFTeamPayload(data: Record<string, unknown>): Record<string, unknown> {
+function sanitizeAFTeamPayload(data: unknown): Record<string, unknown> {
   if (!isPlainObject(data)) {
     return { teachers: [], questions: {} };
   }
 
-  const teachers: Array<{ id: number; name: string }> = [];
-  if (Array.isArray(data.teachers)) {
-    for (const entry of data.teachers) {
-      if (
-        isPlainObject(entry) &&
-        typeof entry.id === "number" &&
-        Number.isFinite(entry.id) &&
-        typeof entry.name === "string"
-      ) {
-        teachers.push({ id: entry.id, name: entry.name });
-      }
-    }
-  }
-
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of AF_TEAM_INTERACTION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  return { teachers, questions };
+  const sanitized = {
+    teachers: sanitizeTeacherRefs(data.teachers),
+    questions: sanitizeQuestionMap(
+      data.questions,
+      AF_TEAM_INTERACTION_CONFIG.allQuestionKeys
+    ),
+  };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapAFTeamPayload(data: unknown): Record<string, unknown> {
@@ -345,7 +438,9 @@ function sanitizeIndividualTeacherPayload(data: unknown): Record<string, unknown
     }
   }
 
-  return { teachers };
+  const sanitized = { teachers };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapIndividualTeacherPayload(data: unknown): Record<string, unknown> {
@@ -360,26 +455,14 @@ function sanitizePrincipalInteractionPayload(data: unknown): Record<string, unkn
     return { questions: {} };
   }
 
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  return { questions };
+  const sanitized = {
+    questions: sanitizeQuestionMap(
+      data.questions,
+      PRINCIPAL_INTERACTION_CONFIG.allQuestionKeys
+    ),
+  };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapPrincipalInteractionPayload(data: unknown): Record<string, unknown> {
@@ -395,27 +478,15 @@ function sanitizeGroupStudentDiscussionPayload(data: unknown): Record<string, un
   }
 
   const grade = typeof data.grade === "number" && Number.isFinite(data.grade) ? data.grade : null;
-
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  return { grade, questions };
+  const sanitized = {
+    grade,
+    questions: sanitizeQuestionMap(
+      data.questions,
+      GROUP_STUDENT_DISCUSSION_CONFIG.allQuestionKeys
+    ),
+  };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapGroupStudentDiscussionPayload(data: unknown): Record<string, unknown> {
@@ -484,12 +555,14 @@ function sanitizeIndividualStudentDiscussionPayload(data: unknown): Record<strin
     }
   }
 
-  return { entries };
+  const sanitized = { entries };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapIndividualStudentDiscussionPayload(data: unknown): Record<string, unknown> {
-  if (data && typeof data === "object" && !Array.isArray(data) && "entries" in data) {
-    return data as Record<string, unknown>;
+  if (isPlainObject(data)) {
+    return sanitizeIndividualStudentDiscussionPayload(data);
   }
   return { entries: [] };
 }
@@ -499,26 +572,14 @@ function sanitizeSchoolStaffInteractionPayload(data: unknown): Record<string, un
     return { questions: {} };
   }
 
-  const questions: Record<string, unknown> = {};
-  if (isPlainObject(data.questions)) {
-    for (const key of SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys) {
-      const value = (data.questions as Record<string, unknown>)[key];
-      if (isPlainObject(value)) {
-        const entry: Record<string, unknown> = {};
-        if (value.answer === null || typeof value.answer === "boolean") {
-          entry.answer = value.answer;
-        }
-        if (typeof value.remark === "string") {
-          entry.remark = value.remark;
-        }
-        if (Object.keys(entry).length > 0) {
-          questions[key] = entry;
-        }
-      }
-    }
-  }
-
-  return { questions };
+  const sanitized = {
+    questions: sanitizeQuestionMap(
+      data.questions,
+      SCHOOL_STAFF_INTERACTION_CONFIG.allQuestionKeys
+    ),
+  };
+  appendActionAdditionalNotes(sanitized, data);
+  return sanitized;
 }
 
 function bootstrapSchoolStaffInteractionPayload(data: unknown): Record<string, unknown> {
@@ -746,6 +807,7 @@ export default function ActionDetailForm({
     isClassroomObservation && rubricVersion !== null && getRubricConfig(rubricVersion) === null;
 
   const isVisitCompleted = visitStatus === "completed";
+  const additionalNotes = readActionAdditionalNotes(formData);
   const canSave =
     !isVisitCompleted &&
     canWrite &&
@@ -1097,6 +1159,29 @@ export default function ActionDetailForm({
             </label>
           ))
         )}
+
+        <FormSection spacing="space-y-2" className="bg-bg-card-alt">
+          <label className="block">
+            <span className="mb-1 block text-sm font-semibold uppercase text-text-primary">
+              {ACTION_ADDITIONAL_NOTES_LABEL}
+            </span>
+            <textarea
+              value={additionalNotes}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setFormData((current) => ({
+                  ...current,
+                  [ACTION_ADDITIONAL_NOTES_KEY]: nextValue,
+                }));
+              }}
+              disabled={!canSave || isBusy}
+              rows={4}
+              placeholder="Capture extra context, observations, or concerns"
+              className={`w-full ${baseInputClasses}`}
+              data-testid="action-additional-notes"
+            />
+          </label>
+        </FormSection>
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
           {canSave && (

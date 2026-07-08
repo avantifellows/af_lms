@@ -12,6 +12,9 @@ const {
   mockRedirect,
   mockNotFound,
   mockProcessStudents,
+  mockGetAcademicMentorshipActorUserId,
+  mockListAcademicMentorshipMappings,
+  mockListAcademicMentorshipTeacherMentees,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -25,6 +28,9 @@ const {
     throw new Error("NOT_FOUND");
   }),
   mockProcessStudents: vi.fn(),
+  mockGetAcademicMentorshipActorUserId: vi.fn(),
+  mockListAcademicMentorshipMappings: vi.fn(),
+  mockListAcademicMentorshipTeacherMentees: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -38,6 +44,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   return {
     ...actual,
     getUserPermission: mockGetUserPermission,
+    getResolvedPermission: mockGetUserPermission,
     getProgramContextSync: mockGetProgramContextSync,
     getFeatureAccess: mockGetFeatureAccess,
   };
@@ -45,6 +52,11 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
+}));
+vi.mock("@/lib/academic-mentorship", () => ({
+  getAcademicMentorshipActorUserId: mockGetAcademicMentorshipActorUserId,
+  listAcademicMentorshipMappings: mockListAcademicMentorshipMappings,
+  listAcademicMentorshipTeacherMentees: mockListAcademicMentorshipTeacherMentees,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -310,6 +322,9 @@ describe("SchoolPage (server component)", () => {
         json: async () => ({ consent: {} }),
       }),
     );
+    mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
   });
 
   // --- Auth redirects ---
@@ -401,10 +416,13 @@ describe("SchoolPage (server component)", () => {
     // Only enrollment tab should be visible (passcode user gets none for other features)
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Curriculum Summary" })
     ).not.toBeInTheDocument();
+    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+    expect(mockListAcademicMentorshipTeacherMentees).not.toHaveBeenCalled();
   });
 
   // --- Google user permission checks ---
@@ -933,17 +951,45 @@ describe("SchoolPage (server component)", () => {
     expect(props.isPasscodeUser).toBe(false);
   });
 
-  it("passes userProgramIds from permission to StudentTable", async () => {
+  it("passes effective program-context ids as userProgramIds to StudentTable", async () => {
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
       makePermission({ program_ids: [1, 2, 64] })
     );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [1, 2, 64],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
 
     await renderPage();
 
     const table = screen.getByTestId("student-table");
     const props = JSON.parse(table.getAttribute("data-props") || "{}");
     expect(props.userProgramIds).toEqual([1, 2, 64]);
+  });
+
+  it("passes seat-derived programs as userProgramIds when explicit program_ids is empty", async () => {
+    // The seated-teacher case (pritamps@): explicit program_ids empty, but the
+    // resolved program context includes the seat's program — that effective set
+    // must reach StudentTable so the seated user can see/edit those students.
+    setupAdminDefaults();
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "teacher", program_ids: [] })
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [2], // derived purely from the centre seat
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    await renderPage();
+
+    const table = screen.getByTestId("student-table");
+    const props = JSON.parse(table.getAttribute("data-props") || "{}");
+    expect(props.userProgramIds).toEqual([2]);
   });
 
   it("passes null userProgramIds for passcode user", async () => {
@@ -1146,7 +1192,10 @@ describe("SchoolPage (server component)", () => {
 
     // First query is getSchoolByCode
     const firstCall = mockQuery.mock.calls[0];
-    expect(firstCall[0]).toContain("udise_code = $1 OR code = $1");
+    expect(firstCall[0]).toContain("s.udise_code = $1 OR s.code = $1");
+    // Visible schools = JNV OR linked to an active centre (centre rollout).
+    expect(firstCall[0]).toContain("af_school_category = 'JNV'");
+    expect(firstCall[0]).toContain("FROM centres c WHERE c.school_id = s.id AND c.is_active");
     expect(firstCall[1]).toEqual(["12345678901"]);
   });
 
@@ -1171,8 +1220,7 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     const batchQuery = mockQuery.mock.calls.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (call: any[]) =>
+      (call: unknown[]) =>
         typeof call[0] === "string" && call[0].includes("FROM batch b")
     );
     expect(batchQuery).toBeDefined();
@@ -1181,15 +1229,199 @@ describe("SchoolPage (server component)", () => {
 
   // --- Mentorship tab content ---
 
-  it("renders mentorship tab with coming soon message", async () => {
-    setupAdminDefaults();
+  it("renders Teacher current active Academic Mentorship Mentees as a flat list", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } })
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "teacher", email: "teacher@avantifellows.org" })
+    );
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([
+      {
+        studentPkId: 201,
+        name: "Anaya Student",
+        studentId: "STU002",
+        grade: 10,
+        assignedDate: "2026-07-02",
+      },
+      {
+        studentPkId: 202,
+        name: "Ravi Student",
+        studentId: "STU001",
+        grade: 11,
+        assignedDate: "2026-07-01",
+      },
+    ]);
 
     await renderPage();
 
     expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
+    expect(screen.getByText("Academic Mentorship")).toBeInTheDocument();
+    expect(screen.getByText("Anaya Student")).toBeInTheDocument();
+    expect(screen.getByText("Ravi Student")).toBeInTheDocument();
+    expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
+    expect(mockListAcademicMentorshipTeacherMentees).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      mentorUserId: 101,
+    });
+    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+  });
+
+  it("renders Admin read-only Academic Mentorship overview with a prefilled Manage mappings link", async () => {
+    setupAdminDefaults({ id: 20, code: "SCH001" });
+    mockListAcademicMentorshipMappings.mockResolvedValue([
+      {
+        mentor: {
+          userId: 101,
+          name: "Anita Mentor",
+          email: "anita@avantifellows.org",
+        },
+        menteeCount: 1,
+        mappings: [
+          {
+            id: 1,
+            mentee: {
+              studentPkId: 201,
+              name: "Meena Student",
+              studentId: "STU001",
+              grade: 11,
+            },
+            assignedDate: "2026-07-01",
+            endedDate: null,
+            status: "active",
+          },
+        ],
+      },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
+    expect(screen.getByText("Meena Student")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage mappings" })).toHaveAttribute(
+      "href",
+      "/admin/academic-mentorship?school_code=SCH001&academic_year=2026-2027"
+    );
+    expect(mockListAcademicMentorshipMappings).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      includeHistory: false,
+    });
+  });
+
+  it("renders Teacher empty state when no current active Mentees exist", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } })
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "teacher", email: "teacher@avantifellows.org" })
+    );
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+
+    await renderPage();
+
     expect(
-      screen.getByText("Mentorship data coming soon.")
+      screen.getByText("No mentees assigned for this academic year.")
     ).toBeInTheDocument();
+  });
+
+  it("renders Program Manager read-only overview without a Manage mappings link", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "program_manager" })
+    );
+    mockListAcademicMentorshipMappings.mockResolvedValue([
+      {
+        mentor: { userId: 101, name: "Anita Mentor", email: null },
+        menteeCount: 1,
+        mappings: [
+          {
+            id: 1,
+            mentee: {
+              studentPkId: 201,
+              name: "Meena Student",
+              studentId: "STU001",
+              grade: 11,
+            },
+            assignedDate: "2026-07-01",
+            endedDate: null,
+            status: "active",
+          },
+        ],
+      },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
+    expect(screen.getByText("Meena Student")).toBeInTheDocument();
+    expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Manage mappings link visible for read-only Program Admins", async () => {
+    setupAdminDefaults({ id: 20, code: "SCH001" });
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "program_admin", read_only: true })
+    );
+
+    await renderPage();
+
+    expect(
+      screen.getByText("No active Academic Mentor-Mentee Mappings for this academic year.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage mappings" })).toHaveAttribute(
+      "href",
+      "/admin/academic-mentorship?school_code=SCH001&academic_year=2026-2027"
+    );
+  });
+
+  it("does not render mapping history on the School page Mentorship tab", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockListAcademicMentorshipMappings.mockResolvedValue([
+      {
+        mentor: { userId: 101, name: "Anita Mentor", email: null },
+        menteeCount: 2,
+        mappings: [
+          {
+            id: 1,
+            mentee: {
+              studentPkId: 201,
+              name: "Meena Student",
+              studentId: "STU001",
+              grade: 11,
+            },
+            assignedDate: "2026-07-01",
+            endedDate: null,
+            status: "active",
+          },
+          {
+            id: 2,
+            mentee: {
+              studentPkId: 202,
+              name: "Historical Student",
+              studentId: "STU002",
+              grade: 12,
+            },
+            assignedDate: "2026-06-01",
+            endedDate: "2026-07-01",
+            status: "historical",
+          },
+        ],
+      },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByText("Meena Student")).toBeInTheDocument();
+    expect(screen.queryByText("Historical Student")).not.toBeInTheDocument();
+    expect(mockListAcademicMentorshipMappings).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      includeHistory: false,
+    });
   });
 
   // --- level 2 region check with null school region ---

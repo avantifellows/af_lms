@@ -37,6 +37,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   return {
     ...actual,
     getUserPermission: mockGetUserPermission,
+    getResolvedPermission: mockGetUserPermission,
     getFeatureAccess: mockGetFeatureAccess,
   };
 });
@@ -296,6 +297,15 @@ describe("VisitActionDetailPage", () => {
               teacher_on_time: { score: 1, remarks: "Observed" },
             },
             observer_summary_strengths: "Strong opening",
+            curriculum_id: 1,
+            curriculum_name: "JEE Mains",
+            chapter_id: 44,
+            chapter_name: "Units and Measurement",
+            chapter_topic_count: 2,
+            subject_id: 4,
+            subject_name: "Physics",
+            topic_id: 101,
+            topic_name: "Physical Quantities",
           },
         }),
       ]);
@@ -315,6 +325,15 @@ describe("VisitActionDetailPage", () => {
                     teacher_on_time: { score: 1, remarks: "Observed" },
                   },
                   observer_summary_strengths: "Strong opening",
+                  curriculum_id: 1,
+                  curriculum_name: "JEE Mains",
+                  chapter_id: 44,
+                  chapter_name: "Units and Measurement",
+                  chapter_topic_count: 2,
+                  subject_id: 4,
+                  subject_name: "Physics",
+                  topic_id: 101,
+                  topic_name: "Physical Quantities",
                 },
               }),
             }),
@@ -342,6 +361,17 @@ describe("VisitActionDetailPage", () => {
       teacher_on_time: { score: 1, remarks: "Observed" },
     });
     expect(body.data.observer_summary_strengths).toBe("Strong opening");
+    expect(body.data).toMatchObject({
+      curriculum_id: 1,
+      curriculum_name: "JEE Mains",
+      chapter_id: 44,
+      chapter_name: "Units and Measurement",
+      chapter_topic_count: 2,
+      subject_id: 4,
+      subject_name: "Physics",
+      topic_id: 101,
+      topic_name: "Physical Quantities",
+    });
     expect(body.data).not.toHaveProperty("class_details");
     expect(body.data).not.toHaveProperty("observations");
     expect(body.data).not.toHaveProperty("support_needed");
@@ -602,6 +632,10 @@ describe("VisitActionDetailPage", () => {
 
     // Click a radio button to change form data
     await user.click(screen.getByTestId("principal-interaction-ip_curriculum_progress-no"));
+    await user.type(
+      screen.getByTestId("action-additional-notes"),
+      "Principal asked for extra monthly context"
+    );
     await user.click(screen.getByRole("button", { name: "Save Now" }));
 
     await waitFor(() => {
@@ -612,8 +646,11 @@ describe("VisitActionDetailPage", () => {
     expect(url).toBe("/api/pm/visits/1/actions/101");
     expect(init.method).toBe("PATCH");
 
-    const parsedBody = JSON.parse(String(init.body)) as { data: { questions: Record<string, unknown> } };
+    const parsedBody = JSON.parse(String(init.body)) as {
+      data: { questions: Record<string, unknown>; additional_notes?: string };
+    };
     expect(parsedBody.data.questions).toBeDefined();
+    expect(parsedBody.data.additional_notes).toBe("Principal asked for extra monthly context");
   });
 
   it("ends an action via save-before-end + /end using GPS and updates UI to completed", async () => {
@@ -690,6 +727,7 @@ describe("VisitActionDetailPage", () => {
     render(jsx);
 
     expect(screen.getByText("Completed actions are read-only for your role.")).toBeInTheDocument();
+    expect(screen.getByTestId("action-additional-notes")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
   });

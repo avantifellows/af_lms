@@ -1,6 +1,6 @@
 import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curriculum-schema";
 import { query } from "./db";
-import { PROGRAM_IDS, type UserPermission } from "./permissions";
+import { getProgramContextSync, PROGRAM_IDS, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumSummarySortKey =
@@ -374,17 +374,30 @@ export async function getCurriculumSummary(
   };
 }
 
-function buildCommonQueryParams(
+export function buildCommonQueryParams(
   permission: UserPermission,
   filters: CurriculumSummaryFilters
 ): unknown[] {
+  // Scoped-universe SQL ($2) ORs a school-code match with the ($3) region match.
+  // Feed the resolved scope set into $2 so seat-derived schools are included:
+  // for level 1 it already unions explicit school_codes with seats; for level 2
+  // it carries seats (regions still flow through $3). Falls back to raw
+  // school_codes when scope isn't resolved, preserving pre-seat behaviour. This
+  // is what keeps seated staff in the summary once strict-exclusivity clears
+  // their explicit school_codes.
+  const scopeSchools =
+    permission.scope && permission.scope.schools !== "all"
+      ? [...permission.scope.schools]
+      : permission.level === 1
+        ? permission.school_codes ?? []
+        : null;
   return [
     permission.level === 3,
-    permission.level === 1 ? permission.school_codes ?? [] : null,
+    scopeSchools && scopeSchools.length > 0 ? scopeSchools : null,
     permission.level === 2 ? permission.regions ?? [] : null,
     CURRICULUM_PROGRAM_IDS,
     permission.role === "admin",
-    permission.program_ids ?? [],
+    getProgramContextSync(permission).programIds,
     filters.schools.length ? filters.schools : null,
     filters.programs.length ? filters.programs : null,
     filters.grades.length ? filters.grades : null,

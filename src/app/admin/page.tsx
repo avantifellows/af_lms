@@ -1,21 +1,14 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/admin-guard";
 import Link from "next/link";
 import { Card } from "@/components/ui";
 
 export default async function AdminPage() {
   const session = await getServerSession(authOptions);
-
-  if (!session?.user?.email) {
-    redirect("/");
-  }
-
-  const admin = await isAdmin(session.user.email);
-  if (!admin) {
-    redirect("/dashboard");
-  }
+  const access = await requireAdmin(session);
+  if (!access.ok) redirect(access.status === 401 ? "/" : "/dashboard");
 
   return (
     <div className="min-h-screen bg-bg">
@@ -29,7 +22,7 @@ export default async function AdminPage() {
             <Link href="/dashboard" className="text-sm font-bold text-accent hover:text-accent-hover uppercase">
               Dashboard
             </Link>
-            <span className="text-sm text-text-muted font-mono hidden sm:inline">{session.user.email}</span>
+            <span className="text-sm text-text-muted font-mono hidden sm:inline">{access.email}</span>
             <Link
               href="/api/auth/signout"
               className="text-sm font-bold text-danger hover:text-danger/80"
@@ -74,6 +67,15 @@ export default async function AdminPage() {
               <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Centre Management</h3>
               <p className="mt-2 text-sm text-text-muted">
                 Manage Centres, School links, streams, and active status.
+              </p>
+            </Card>
+          </Link>
+
+          <Link href="/admin/staff">
+            <Card className="block p-6">
+              <h3 className="text-lg font-bold text-text-primary uppercase tracking-wide">Staff Management</h3>
+              <p className="mt-2 text-sm text-text-muted">
+                Manage AF teachers, PMs, employee codes, and Centre seats.
               </p>
             </Card>
           </Link>

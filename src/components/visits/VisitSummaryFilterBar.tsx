@@ -224,7 +224,7 @@ export default function VisitSummaryFilterBar({
 
         <div>
           <label htmlFor="visit-summary-bucket" className="text-xs font-bold uppercase tracking-wide text-text-muted">
-            Action Completion
+            Required Completion
           </label>
           <select
             id="visit-summary-bucket"
@@ -235,11 +235,11 @@ export default function VisitSummaryFilterBar({
             }}
             className="mt-2 w-full border border-border bg-bg-card px-3 py-2 text-sm text-text-primary"
           >
-            <option value="">Any completion</option>
-            <option value="none">No actions</option>
+            <option value="">Any required completion</option>
+            <option value="none">No required actions</option>
             <option value="partial">Partially started</option>
-            <option value="all_present">All types present but incomplete</option>
-            <option value="all_complete">All 7 complete</option>
+            <option value="all_present">All required present but incomplete</option>
+            <option value="all_complete">All required complete</option>
           </select>
         </div>
 

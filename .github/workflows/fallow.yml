@@ -1,0 +1,39 @@
+name: Fallow
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: fallow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Fallow audit
+        uses: fallow-rs/fallow@v2
+        with:
+          command: audit
+          # Post ONE sticky summary comment (updates in place on re-runs) instead
+          # of dozens of inline review comments. `annotations` still surfaces
+          # findings on the Files Changed view without adding PR comments.
+          annotations: true
+          comment: true
+          review-comments: false
+          # Match the audit gate's changed-file scope. `added` can hide
+          # fail-level findings that anchor to existing/context lines.
+          diff-filter: file
+          artifacts-dir: .var/fallow

@@ -260,6 +260,7 @@ describe("ActionTypePickerModal", () => {
 
     const radio = screen.getByLabelText("School Staff Interaction");
     expect(radio).not.toBeDisabled();
+    expect(screen.getByText("Optional")).toBeInTheDocument();
   });
 
   it("submits school_staff_interaction when selected and Add clicked", async () => {

@@ -27,6 +27,10 @@ e2e/fixtures/db-dump.sql
 # coverage - unit tests (generated locally and in CI, never committed)
 /unit-coverage/
 
+# fallow
+/.fallow/
+/.var/fallow/
+
 # next.js
 /.next/
 /.next-test/
@@ -77,3 +81,6 @@ stop-discord-bot.sh
 centres-for-crud-ui/
 centre_name_table.csv
 centre_name_mapping_template.csv
+
+# Roster data (PII) — regenerated locally from the sheet/DB, never committed
+scripts/data/pm/

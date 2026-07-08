@@ -4,6 +4,12 @@ import {
   getFeatureAccess,
   ownsRecord,
   getProgramContextSync,
+  resolveScope,
+  getResolvedPermission,
+  canAccessSchoolSync,
+  canAccessCentreSync,
+  hasMultipleSchools,
+  getAccessibleSchoolCodes,
   PROGRAM_IDS,
   type UserPermission,
 } from "./permissions";
@@ -95,6 +101,60 @@ describe("getProgramContextSync", () => {
     );
     expect(ctx.hasAccess).toBe(false);
   });
+
+  it("grants access via seat-derived programs when program_ids is empty", () => {
+    // The pritamps@ case: a teacher whose explicit program_ids was cleared/empty
+    // but who holds a centre seat. The seat's program (Nodal) must grant access.
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [],
+        scope: { schools: new Set(), centres: new Set([5]), programs: new Set([PROGRAM_IDS.NODAL]) },
+      })
+    );
+    expect(ctx.hasAccess).toBe(true);
+    expect(ctx.programIds).toEqual([PROGRAM_IDS.NODAL]);
+    expect(ctx.hasCoEOrNodal).toBe(true);
+    expect(ctx.isNVSOnly).toBe(false);
+  });
+
+  it("unions explicit program_ids with seat-derived programs", () => {
+    // Explicit NVS + a seat at a CoE centre → reaches both, no longer NVS-only.
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [PROGRAM_IDS.NVS],
+        scope: { schools: new Set(), centres: new Set([5]), programs: new Set([PROGRAM_IDS.COE]) },
+      })
+    );
+    expect(ctx.hasAccess).toBe(true);
+    expect(new Set(ctx.programIds)).toEqual(new Set([PROGRAM_IDS.NVS, PROGRAM_IDS.COE]));
+    expect(ctx.isNVSOnly).toBe(false);
+    expect(ctx.hasCoEOrNodal).toBe(true);
+  });
+
+  it("scope.programs 'all' grants full program access", () => {
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [],
+        scope: { schools: "all", centres: "all", programs: "all" },
+      })
+    );
+    expect(ctx.hasAccess).toBe(true);
+    expect(ctx.hasCoEOrNodal).toBe(true);
+  });
+
+  it("still denies when both explicit and seat-derived programs are empty", () => {
+    const ctx = getProgramContextSync(
+      makePermission({
+        role: "teacher",
+        program_ids: [],
+        scope: { schools: new Set(["70705"]), centres: new Set(), programs: new Set() },
+      })
+    );
+    expect(ctx.hasAccess).toBe(false);
+  });
 });
 
 describe("getFeatureAccess", () => {
@@ -174,6 +234,14 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("view");
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
+    });
+
+    it("gives NVS-only program_admin edit on academic mentorship", () => {
+      const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.NVS] });
+      const result = getFeatureAccess(perm, "academic_mentorship");
+      expect(result.access).toBe("edit");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(true);
     });
 
     it("gives admin edit on visits", () => {
@@ -319,6 +387,7 @@ describe("getUserPermission", () => {
         regions: ["West"],
         program_ids: [1, 64],
         read_only: false,
+        user_id: "42",
       },
     ]);
 
@@ -331,7 +400,17 @@ describe("getUserPermission", () => {
       regions: ["West"],
       program_ids: [1, 64],
       read_only: false,
+      user_id: 42,
     });
+  });
+
+  it("excludes revoked (exited) rows via revoked_at IS NULL", async () => {
+    mockQuery.mockResolvedValueOnce([]); // revoked person -> no active row
+    const result = await getUserPermission("exited@avantifellows.org");
+    expect(result).toBeNull();
+
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("revoked_at IS NULL");
   });
 
   it("returns null when no rows found", async () => {
@@ -372,6 +451,179 @@ describe("getUserPermission", () => {
 
     const result = await getUserPermission("admin@avantifellows.org");
     expect(result!.level).toBe(3);
+  });
+});
+
+describe("resolveScope", () => {
+  it("returns all/all for level 3 (short-circuit, no DB)", async () => {
+    const scope = await resolveScope(makePermission({ level: 3, role: "admin" }));
+    expect(scope.schools).toBe("all");
+    expect(scope.centres).toBe("all");
+    expect(scope.programs).toBe("all");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("seeds level-1 school_codes and unions seat-derived schools + programs", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ centre_id: 5 }, { centre_id: 6 }]) // centresForUser
+      .mockResolvedValueOnce([{ code: "99999" }]) // schoolCodesForCentres
+      .mockResolvedValueOnce([{ program_id: 2 }]); // programsForCentres
+    const scope = await resolveScope(
+      makePermission({ level: 1, school_codes: ["70705"], user_id: 42 })
+    );
+    expect(scope.schools).toEqual(new Set(["70705", "99999"]));
+    expect(scope.centres).toEqual(new Set([5, 6]));
+    expect(scope.programs).toEqual(new Set([2]));
+  });
+
+  it("skips the seat lookup entirely when user_id is null", async () => {
+    const scope = await resolveScope(
+      makePermission({ level: 1, school_codes: ["70705"], user_id: null })
+    );
+    expect(scope.schools).toEqual(new Set(["70705"]));
+    expect(scope.centres).toEqual(new Set());
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("does not seed school_codes for level 2 (regions are the mechanism)", async () => {
+    const scope = await resolveScope(
+      makePermission({ level: 2, school_codes: ["70705"], regions: ["West"], user_id: null })
+    );
+    expect(scope.schools).toEqual(new Set());
+  });
+
+  it("degrades to explicit-only scope when the centre tables are missing", async () => {
+    // undefined_table (42P01): the seat migration hasn't run on this env.
+    const missingTable = Object.assign(
+      new Error("relation centre_positions does not exist"),
+      { code: "42P01" }
+    );
+    mockQuery.mockRejectedValueOnce(missingTable);
+    const scope = await resolveScope(
+      makePermission({ level: 1, school_codes: ["70705"], user_id: 42 })
+    );
+    expect(scope.schools).toEqual(new Set(["70705"]));
+    expect(scope.centres).toEqual(new Set());
+  });
+
+  it("propagates a transient centre-query error instead of silently emptying scope", async () => {
+    // A non-schema error (e.g. connection reset) must not be swallowed — doing
+    // so would hand a seated user an empty scope and lock them out silently.
+    mockQuery.mockRejectedValueOnce(new Error("connection terminated"));
+    await expect(
+      resolveScope(
+        makePermission({ level: 1, school_codes: ["70705"], user_id: 42 })
+      )
+    ).rejects.toThrow("connection terminated");
+  });
+});
+
+describe("getResolvedPermission", () => {
+  it("returns null when there is no active permission row", async () => {
+    mockQuery.mockResolvedValueOnce([]); // getUserPermission
+    expect(await getResolvedPermission("nobody@x.com")).toBeNull();
+  });
+
+  it("attaches resolved scope (explicit ∪ seats) to the permission", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          email: "t@x.com",
+          level: 1,
+          role: "teacher",
+          school_codes: ["70705"],
+          regions: null,
+          program_ids: [1],
+          read_only: false,
+          user_id: "42",
+        },
+      ]) // getUserPermission
+      .mockResolvedValueOnce([{ centre_id: 5 }]) // centresForUser
+      .mockResolvedValueOnce([{ code: "99999" }]) // schoolCodesForCentres
+      .mockResolvedValueOnce([{ program_id: 1 }]); // programsForCentres
+    const p = await getResolvedPermission("t@x.com");
+    expect(p?.scope?.schools).toEqual(new Set(["70705", "99999"]));
+    expect(p?.scope?.centres).toEqual(new Set([5]));
+    expect(p?.scope?.programs).toEqual(new Set([1]));
+  });
+});
+
+describe("canAccessSchoolSync (seat-derived scope)", () => {
+  it("grants a seat-derived school not in school_codes (level 1)", () => {
+    const p = makePermission({
+      level: 1,
+      school_codes: ["70705"],
+      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
+    });
+    expect(canAccessSchoolSync(p, "99999")).toBe(true); // seat school
+    expect(canAccessSchoolSync(p, "70705")).toBe(true); // explicit
+    expect(canAccessSchoolSync(p, "11111")).toBe(false); // neither
+  });
+
+  it("behaves exactly as before when scope is absent (bare permission)", () => {
+    const p = makePermission({ level: 1, school_codes: ["70705"] });
+    expect(canAccessSchoolSync(p, "70705")).toBe(true);
+    expect(canAccessSchoolSync(p, "99999")).toBe(false);
+  });
+
+  it("level-2 region check is unaffected by an empty seat set", () => {
+    const p = makePermission({
+      level: 2,
+      school_codes: null,
+      regions: ["West"],
+      scope: { schools: new Set(), centres: new Set(), programs: new Set() },
+    });
+    expect(canAccessSchoolSync(p, "70705", "West")).toBe(true);
+    expect(canAccessSchoolSync(p, "70705", "East")).toBe(false);
+  });
+});
+
+describe("canAccessCentreSync", () => {
+  it("grants held centres, denies others, and short-circuits level-3", () => {
+    const seated = makePermission({
+      scope: { schools: new Set(), centres: new Set([5, 6]), programs: new Set() },
+    });
+    expect(canAccessCentreSync(seated, 5)).toBe(true);
+    expect(canAccessCentreSync(seated, 7)).toBe(false);
+
+    const admin = makePermission({
+      level: 3,
+      role: "admin",
+      scope: { schools: "all", centres: "all", programs: "all" },
+    });
+    expect(canAccessCentreSync(admin, 999)).toBe(true);
+
+    expect(canAccessCentreSync(makePermission(), 5)).toBe(false); // no scope
+    expect(canAccessCentreSync(null, 5)).toBe(false);
+  });
+});
+
+describe("seat-derived scope in getAccessibleSchoolCodes / hasMultipleSchools", () => {
+  it("getAccessibleSchoolCodes unions seat schools for level 1 (scope present, no extra query)", async () => {
+    const perm = makePermission({
+      level: 1,
+      school_codes: ["70705"],
+      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
+    });
+    const result = await getAccessibleSchoolCodes("t@af.org", perm);
+    expect(new Set(result as string[])).toEqual(new Set(["70705", "99999"]));
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("hasMultipleSchools is true when the resolved scope spans >1 school", () => {
+    const single = makePermission({
+      level: 1,
+      school_codes: ["70705"],
+      scope: { schools: new Set(["70705"]), centres: new Set(), programs: new Set() },
+    });
+    expect(hasMultipleSchools(single)).toBe(false);
+
+    const seatedElsewhere = makePermission({
+      level: 1,
+      school_codes: ["70705"],
+      scope: { schools: new Set(["70705", "99999"]), centres: new Set([5]), programs: new Set([1]) },
+    });
+    expect(hasMultipleSchools(seatedElsewhere)).toBe(true);
   });
 });
 

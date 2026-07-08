@@ -62,9 +62,13 @@ describe("GET /api/students/search", () => {
       expect.stringContaining("af_school_category = 'JNV'"),
       ["%john%", CURRENT_ACADEMIC_YEAR],
     );
+    // Visibility scope mirrors the dashboard/school-page: JNV OR active-centre-
+    // linked, so students at the non-JNV centre schools (Punjab CoE / EMRS) are
+    // searchable too — not silently filtered by a JNV-only WHERE.
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("FROM centres c WHERE c.school_id = sch.id AND c.is_active");
     // Current-cohort rule shared with the canonical roster: results are
     // restricted to students enrolled for the current academic year.
-    const sql = mockQuery.mock.calls[0][0] as string;
     expect(sql).toContain("er.academic_year = $2");
     expect(sql).not.toContain("s.grade_id");
   });
@@ -83,5 +87,8 @@ describe("GET /api/students/search", () => {
     );
     const sql = mockQuery.mock.calls[0][0] as string;
     expect(sql).toContain("er.academic_year = $3");
+    // Scoped branch carries the same JNV-OR-active-centre visibility scope, so a
+    // user seated at a centre school can search its students within their codes.
+    expect(sql).toContain("FROM centres c WHERE c.school_id = sch.id AND c.is_active");
   });
 });

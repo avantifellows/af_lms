@@ -26,6 +26,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
+  getResolvedPermission: mockGetUserPermission,
   getFeatureAccess: mockGetFeatureAccess,
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
@@ -251,7 +252,7 @@ describe("SchoolVisitSummaryPage", () => {
       expect(sql).toContain("COALESCE(s.region, '') = ANY($3)");
       expect(params).toEqual([
         expect.any(Array),
-        7,
+        6,
         ["AHMEDABAD"],
       ]);
     });
@@ -266,7 +267,7 @@ describe("SchoolVisitSummaryPage", () => {
       expect(sql).toContain("v.school_code = ANY($3)");
       expect(params).toEqual([
         expect.any(Array),
-        7,
+        6,
         ["SC001"],
       ]);
     });
@@ -325,9 +326,9 @@ describe("SchoolVisitSummaryPage", () => {
       expect(params[0]).toEqual(expect.arrayContaining([
         "classroom_observation",
         "af_team_interaction",
-        "school_staff_interaction",
       ]));
-      expect(params[1]).toBe(7);
+      expect(params[0]).not.toContain("school_staff_interaction");
+      expect(params[1]).toBe(6);
     });
   });
 
@@ -345,7 +346,7 @@ describe("SchoolVisitSummaryPage", () => {
       expect(statsSql).toContain("v.status = $3");
       expect(statsParams).toEqual([
         expect.any(Array),
-        7,
+        6,
         "completed",
       ]);
       expect(visitsSql).toContain("v.status = $1");
@@ -456,10 +457,11 @@ describe("SchoolVisitSummaryPage", () => {
       expect(visitsSql).toContain("COUNT(DISTINCT CASE WHEN status = 'completed' AND action_type = ANY($1::text[]) THEN action_type END) AS completed_types");
       expect(visitsSql).toContain("COALESCE(action_agg.touched_types, 0) = 0");
       expect(visitsParams).toEqual([
-        expect.arrayContaining(["classroom_observation", "school_staff_interaction"]),
+        expect.arrayContaining(["classroom_observation", "af_team_interaction"]),
         20,
         0,
       ]);
+      expect(visitsParams[0]).not.toContain("school_staff_interaction");
     });
   });
 
@@ -575,11 +577,11 @@ describe("SchoolVisitSummaryPage", () => {
       expect(screen.getByText("Avg Completion")).toBeInTheDocument();
       expect(screen.getByText("43%")).toBeInTheDocument();
       expect(screen.getByText("4 total, 1 completed")).toBeInTheDocument();
-      expect(screen.getAllByText("14%").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("17%").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText("Classroom Observation: completed").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText("AF Team Interaction: pending").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText("Principal Interaction: in progress").length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("1/7 complete").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("1/6 required complete").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByRole("link", { name: "View visit" })[0]).toHaveAttribute(
         "href",
         "/school-visit-summary/101"
