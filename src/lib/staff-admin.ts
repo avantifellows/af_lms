@@ -704,6 +704,43 @@ async function rejectIfRegionLevelUser(
   return null;
 }
 
+// Validate a user about to be seated: the user must exist, must not be
+// region-level (see rejectIfRegionLevelUser), and must not already hold this
+// exact centre+role seat. Shared by createPosition (no seat yet) and
+// updatePosition (pass the edited row's id as `excludePositionId` so filling a
+// seat doesn't collide with itself). Returns a failure to surface, or null when
+// the occupant is allowed.
+async function validateSeatOccupant(
+  userId: number,
+  centreId: number,
+  role: SeatRole,
+  excludePositionId?: number
+): Promise<StaffValidationFailure | null> {
+  const users = await query<{ id: number }>(
+    `SELECT id FROM "user" WHERE id = $1`,
+    [userId]
+  );
+  if (users.length === 0) {
+    return { ok: false, status: 404, error: "User not found" };
+  }
+  const regionBlock = await rejectIfRegionLevelUser(userId);
+  if (regionBlock) return regionBlock;
+  const duplicate = await query<{ id: number }>(
+    `SELECT id FROM centre_positions
+     WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL
+       AND ($4::int IS NULL OR id <> $4)`,
+    [centreId, role, userId, excludePositionId ?? null]
+  );
+  if (duplicate.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: "This person already holds this seat",
+    };
+  }
+  return null;
+}
+
 // Whether `userId`'s only remaining active seat is `excludePositionId` — i.e.
 // removing/vacating that seat would leave them with no seat-derived scope.
 // Strict exclusivity already cleared their explicit school_codes, so this is a
@@ -1554,27 +1591,8 @@ export async function createPosition(params: {
   }
 
   if (userId !== null) {
-    const users = await query<{ id: number }>(
-      `SELECT id FROM "user" WHERE id = $1`,
-      [userId]
-    );
-    if (users.length === 0) {
-      return { ok: false, status: 404, error: "User not found" };
-    }
-    const regionBlock = await rejectIfRegionLevelUser(userId);
-    if (regionBlock) return regionBlock;
-    const duplicate = await query<{ id: number }>(
-      `SELECT id FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL`,
-      [centreId, role, userId]
-    );
-    if (duplicate.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This person already holds this seat",
-      };
-    }
+    const bad = await validateSeatOccupant(userId, centreId, role);
+    if (bad) return bad;
   }
 
   await withTransaction(async (client) => {
@@ -1639,28 +1657,13 @@ export async function updatePosition(params: {
         fields: { user_id: "user_id must be a positive integer or null" },
       };
     }
-    const users = await query<{ id: number }>(
-      `SELECT id FROM "user" WHERE id = $1`,
-      [userId]
+    const bad = await validateSeatOccupant(
+      userId,
+      position.centre_id,
+      position.role,
+      params.id
     );
-    if (users.length === 0) {
-      return { ok: false, status: 404, error: "User not found" };
-    }
-    const regionBlock = await rejectIfRegionLevelUser(userId);
-    if (regionBlock) return regionBlock;
-    const duplicate = await query<{ id: number }>(
-      `SELECT id FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3
-         AND deleted_at IS NULL AND id <> $4`,
-      [position.centre_id, position.role, userId, params.id]
-    );
-    if (duplicate.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This person already holds this seat",
-      };
-    }
+    if (bad) return bad;
   }
 
   // Vacating the seat: refuse if it's the occupant's only seat (would strand
