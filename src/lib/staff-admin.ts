@@ -1481,6 +1481,44 @@ async function syncTeacherSubjectFromRole(
   );
 }
 
+// Keep `user_permission.role` — the app-level role that gates the UI (Start
+// Visit button, PM dashboard; see getFeatureAccess) — in sync with the person's
+// centre seats. The seat is the source of truth: holding any PM-tier seat
+// (apm/pm/spm/ph) makes the person a program_manager; with no PM-tier seat left
+// they fall back to teacher. Both directions apply — gaining a PM seat promotes
+// teacher→program_manager, losing the last one demotes program_manager→teacher.
+//
+// Only ever moves WITHIN the {teacher, program_manager} band. A manually
+// elevated program_admin/admin is org-level (not seat-derived) and is left
+// untouched, so this never demotes a real admin who happens to hold a ph seat.
+// Only ever rewrites the live (revoked_at IS NULL) permission row — the same
+// row the gating read uses — so cleaning up an exited person's seats never
+// mutates their revoked row's role. No-ops when the user has no live
+// user_permission row (a seated person who can't yet log in) or when the role
+// already matches. Call after every seat write, once per affected user (both
+// the new and prior occupant on a move).
+async function syncAppRoleFromSeats(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  const pmSeat = await client.query(
+    `SELECT 1 FROM centre_positions
+     WHERE user_id = $1 AND deleted_at IS NULL AND role = ANY($2)
+     LIMIT 1`,
+    [userId, [...PM_SEAT_ROLES]]
+  );
+  const desired = pmSeat.rows.length > 0 ? "program_manager" : "teacher";
+  await client.query(
+    `UPDATE user_permission
+     SET role = $2, updated_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND role IN ('teacher', 'program_manager')
+       AND role <> $2`,
+    [userId, desired]
+  );
+}
+
 export async function createPosition(params: {
   body: CreatePositionBody;
 }): Promise<StaffMutationResult> {
@@ -1548,6 +1586,7 @@ export async function createPosition(params: {
     if (userId !== null) {
       await syncTeacherSubjectFromRole(client, userId, role);
       await clearExplicitSchoolScope(client, userId);
+      await syncAppRoleFromSeats(client, userId);
     }
   });
 
@@ -1642,6 +1681,12 @@ export async function updatePosition(params: {
     );
     if (userId !== null) {
       await clearExplicitSchoolScope(client, userId);
+      await syncAppRoleFromSeats(client, userId);
+    }
+    // The prior occupant just lost this seat — re-derive their app role too,
+    // in case this was their last PM-tier seat (program_manager → teacher).
+    if (position.user_id !== null && position.user_id !== userId) {
+      await syncAppRoleFromSeats(client, position.user_id);
     }
   });
 
@@ -1687,6 +1732,7 @@ export async function setUserRole(params: {
     updatedCount = updated.rows.length;
     if (updatedCount === 0) return;
     await syncTeacherSubjectFromRole(client, userId, role);
+    await syncAppRoleFromSeats(client, userId);
   });
   if (updatedCount === 0) {
     return {
@@ -1725,10 +1771,17 @@ export async function deletePosition(params: {
     return LAST_SEAT_BLOCK;
   }
 
-  await query(
-    `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
-    [params.id]
-  );
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
+      [params.id]
+    );
+    // The occupant just lost this seat — re-derive their app role in case it
+    // was their last PM-tier seat (program_manager → teacher).
+    if (position.user_id !== null) {
+      await syncAppRoleFromSeats(client, position.user_id);
+    }
+  });
 
   return { ok: true };
 }
