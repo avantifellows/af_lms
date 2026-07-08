@@ -851,18 +851,24 @@ export default function QuizSessionsTab({
 
             return (
               <>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!currentSession) return;
-                    setEditingSession(currentSession);
-                    setMenuState(null);
-                  }}
-                  disabled={sessionProcessing || busy}
-                  className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-                >
-                  Edit
-                </button>
+                {/* Edit is hidden for new-CMS sessions only: their edit path fires the
+                    legacy SNS patch, which KeyErrors on the absent meta_data.course and
+                    flips the session to "failed". Legacy sessions still edit normally.
+                    Re-enable for CMS once the CMS session-patch fix ships. */}
+                {!isCmsSession ? (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!currentSession) return;
+                      setEditingSession(currentSession);
+                      setMenuState(null);
+                    }}
+                    disabled={sessionProcessing || busy}
+                    className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                  >
+                    Edit
+                  </button>
+                ) : null}
                 <button
                   onClick={(event) => {
                     event.stopPropagation();
@@ -2363,6 +2369,9 @@ function QuizSessionDetailsModal({
   const classBatchNames = classBatchIds?.map(
     (batchId) => batchNameMap.get(batchId) || batchId
   );
+  // Edit is hidden for new-CMS sessions until the CMS session-patch fix ships (the legacy
+  // edit path KeyErrors on the absent meta_data.course). Legacy sessions edit normally.
+  const isCmsSession = getMetaString(session.meta_data, "cms_source") === CMS_SOURCE;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -2382,7 +2391,7 @@ function QuizSessionDetailsModal({
               </h2>
             </div>
             <div className="flex items-center gap-3">
-              {canEdit ? (
+              {canEdit && !isCmsSession ? (
                 <button
                   type="button"
                   onClick={onEdit}
