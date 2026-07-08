@@ -122,6 +122,30 @@ export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
   return EXAM_TRACK_CURRICULUM_IDS[examTrack];
 }
 
+// The batch stream (as produced by parseBatchStream: "engineering" | "medical") each exam
+// track targets. Used to reject mismatched pairings (e.g. a NEET test on an engineering
+// batch), which would otherwise put a wrong-subject test live for those students.
+const EXAM_TRACK_STREAMS: Record<ExamTrack, string> = {
+  jee_main: "engineering",
+  jee_advanced: "engineering",
+  neet: "medical",
+};
+
+export function streamForExamTrack(examTrack: ExamTrack): string {
+  return EXAM_TRACK_STREAMS[examTrack];
+}
+
+// CMS grade id from the grade table (grade number -> id). Both CMS routes resolve it via
+// the DB rather than a client-supplied map (which could drift), so the lookup lives here
+// once. Returns null when no grade row matches.
+export async function resolveGradeId(gradeNumber: number): Promise<number | null> {
+  const rows = await query<{ id: number }>(
+    `SELECT id FROM grade WHERE number = $1 LIMIT 1`,
+    [gradeNumber]
+  );
+  return rows[0]?.id ?? null;
+}
+
 function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; subject: SubjectName }>(
   rows: T[]
 ): T[] {
