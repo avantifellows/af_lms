@@ -136,6 +136,17 @@ describe("EnrollmentStatsCards", () => {
     expect(within(row).getByText("60%")).toBeInTheDocument(); // docs
   });
 
+  it("explains the admission metrics via the info hint", () => {
+    render(<Harness programs={[coeStats]} admission={admissionSummary} />);
+    const row = screen.getByTestId("admission-stats-row");
+    const hint = within(row).getByRole("button", {
+      name: /students with all profile details filled in/i,
+    });
+    expect(within(hint).getByRole("tooltip")).toHaveTextContent(
+      /required consent documents uploaded/i,
+    );
+  });
+
   it("dashes consent-derived metrics while consent is loading", () => {
     render(
       <Harness programs={[coeStats]} admission={admissionSummary} consentLoading />,
