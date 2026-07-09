@@ -55,7 +55,7 @@ Never commit real values — `.env.local` is gitignored; CI injects prod/preview
 - `npm run lint` — ESLint (`eslint-config-next`).
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.
-- Data scripts (one-off, via `ts-node`): `npm run centres:import`, `npm run staff:backfill`, `npm run pm:import`, `npm run db:setup-permissions`, etc. (see `scripts/`).
+- Data scripts (one-off, via `ts-node`): `npm run centres:import`, `npm run pm:import`, `npm run db:setup-permissions`, etc. (see `scripts/`).
 
 ## Common Issues
 - **Port 3000 in use:** `lsof -i :3000` then `kill -9 <PID>`.
