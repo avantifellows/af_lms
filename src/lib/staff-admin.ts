@@ -1556,6 +1556,45 @@ async function syncAppRoleFromSeats(
   );
 }
 
+// Keep `user_permission.program_ids` in sync with the person's centre seats:
+// each centre belongs to one program, and a seated person's program scope IS the
+// set of programs across their active centres. Recomputed as a full replace on
+// every seat write, so it always equals the union over CURRENT seats — removing
+// one of two Nodal seats keeps Nodal (the other seat still supplies it); a
+// program only drops when its last seat is gone. This is the write-back the
+// resolver (getProgramContextSync) reads live but never persisted, so raw
+// program_ids consumers (quiz-session batches, ownsRecord, the users page) were
+// stale for multi-program PMs.
+//
+// Only touches the live (revoked_at IS NULL) row, and skips admins — level-3
+// admins have full program access regardless, and their program_ids is a manual
+// set we must not shrink to whatever centres they happen to sit at. No-op when
+// the person has no active seat (don't strip a person mid-offboarding to an
+// empty program set) or when the value is already correct.
+async function syncProgramIdsFromSeats(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  const rows = await client.query<{ program_id: number }>(
+    `SELECT DISTINCT c.program_id
+     FROM centre_positions cp
+     JOIN centres c ON c.id = cp.centre_id
+     WHERE cp.user_id = $1 AND cp.deleted_at IS NULL AND c.program_id IS NOT NULL`,
+    [userId]
+  );
+  if (rows.rows.length === 0) return;
+  const programIds = rows.rows.map((r) => Number(r.program_id)).sort((a, b) => a - b);
+  await client.query(
+    `UPDATE user_permission
+     SET program_ids = $2, updated_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND role <> 'admin'
+       AND COALESCE(program_ids, '{}') <> $2`,
+    [userId, programIds]
+  );
+}
+
 export async function createPosition(params: {
   body: CreatePositionBody;
 }): Promise<StaffMutationResult> {
@@ -1605,6 +1644,7 @@ export async function createPosition(params: {
       await syncTeacherSubjectFromRole(client, userId, role);
       await clearExplicitSchoolScope(client, userId);
       await syncAppRoleFromSeats(client, userId);
+      await syncProgramIdsFromSeats(client, userId);
     }
   });
 
@@ -1685,11 +1725,13 @@ export async function updatePosition(params: {
     if (userId !== null) {
       await clearExplicitSchoolScope(client, userId);
       await syncAppRoleFromSeats(client, userId);
+      await syncProgramIdsFromSeats(client, userId);
     }
-    // The prior occupant just lost this seat — re-derive their app role too,
-    // in case this was their last PM-tier seat (program_manager → teacher).
+    // The prior occupant just lost this seat — re-derive their app role and
+    // program scope too (this may have been their last seat in a program).
     if (position.user_id !== null && position.user_id !== userId) {
       await syncAppRoleFromSeats(client, position.user_id);
+      await syncProgramIdsFromSeats(client, position.user_id);
     }
   });
 
@@ -1779,10 +1821,11 @@ export async function deletePosition(params: {
       `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
       [params.id]
     );
-    // The occupant just lost this seat — re-derive their app role in case it
-    // was their last PM-tier seat (program_manager → teacher).
+    // The occupant just lost this seat — re-derive their app role and program
+    // scope in case it was their last PM-tier seat / last seat in a program.
     if (position.user_id !== null) {
       await syncAppRoleFromSeats(client, position.user_id);
+      await syncProgramIdsFromSeats(client, position.user_id);
     }
   });
 
