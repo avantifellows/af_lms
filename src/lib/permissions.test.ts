@@ -95,6 +95,27 @@ describe("getProgramContextSync", () => {
     expect(ctx.isNVSOnly).toBe(false);
   });
 
+  it("treats a Punjab CoE teacher as having CoE/Nodal (not NVS-only)", () => {
+    const ctx = getProgramContextSync(
+      makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_COE] })
+    );
+    expect(ctx.hasCoEOrNodal).toBe(true);
+    expect(ctx.isNVSOnly).toBe(false);
+  });
+
+  it("treats Punjab Nodal and EMRS CoE as CoE/Nodal too", () => {
+    expect(
+      getProgramContextSync(
+        makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_NODAL] })
+      ).hasCoEOrNodal
+    ).toBe(true);
+    expect(
+      getProgramContextSync(
+        makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.EMRS_COE] })
+      ).hasCoEOrNodal
+    ).toBe(true);
+  });
+
   it("returns no access for non-admin with empty program_ids", () => {
     const ctx = getProgramContextSync(
       makePermission({ role: "teacher", program_ids: [] })
@@ -285,6 +306,15 @@ describe("getFeatureAccess", () => {
       });
       const result = getFeatureAccess(perm, "curriculum");
       expect(result.access).toBe("none");
+    });
+
+    it("does NOT gate a Punjab CoE teacher out of curriculum or quiz sessions", () => {
+      const perm = makePermission({
+        role: "teacher",
+        program_ids: [PROGRAM_IDS.PUNJAB_COE],
+      });
+      expect(getFeatureAccess(perm, "curriculum").canView).toBe(true);
+      expect(getFeatureAccess(perm, "quiz_sessions").canView).toBe(true);
     });
 
     it("allows CoE PM to access visits", () => {

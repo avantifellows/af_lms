@@ -20,6 +20,20 @@ export const PROGRAM_IDS = {
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
 export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
 
+// The CoE/Nodal ("academic intervention") program family: JNV CoE/Nodal plus the
+// state-centre programs (Punjab CoE/Nodal, EMRS CoE). These are the programs that
+// grant the CoE/Nodal feature set (curriculum, quiz sessions, visits, PM
+// dashboard, summary stats) and form the curriculum's program universe. NVS is
+// deliberately excluded — NVS-only users are gated out of those features. Add a
+// new non-JNV centre program here (as well as to PROGRAM_IDS) when it onboards.
+export const COE_NODAL_PROGRAM_IDS: number[] = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.NODAL,
+  PROGRAM_IDS.PUNJAB_COE,
+  PROGRAM_IDS.PUNJAB_NODAL,
+  PROGRAM_IDS.EMRS_COE,
+];
+
 // Maps program_ids to the BigQuery `student_program` label.
 // Keep in sync with AddUserModal's PROGRAMS list.
 export const PROGRAM_ID_TO_LABEL: Record<number, string> = {

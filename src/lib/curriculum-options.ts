@@ -1,7 +1,7 @@
 import { compareCurriculumCodes } from "./curriculum-code-sort";
 import { query } from "./db";
 import {
-  PROGRAM_IDS,
+  COE_NODAL_PROGRAM_IDS,
   canAccessSchoolSync,
   getProgramContextSync,
   type UserPermission,
@@ -17,7 +17,10 @@ import type {
 } from "@/types/curriculum";
 
 export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
-const CURRICULUM_PROGRAM_IDS: number[] = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
+// Curriculum applies to the whole CoE/Nodal program family (JNV + Punjab + EMRS),
+// not just JNV CoE/Nodal — otherwise a Punjab/EMRS teacher's programs intersect
+// to empty and their curriculum tab loads blank.
+const CURRICULUM_PROGRAM_IDS: number[] = COE_NODAL_PROGRAM_IDS;
 const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"];
 const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_main: 1,
