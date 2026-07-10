@@ -15,7 +15,7 @@ export const PROGRAM_IDS = {
   PUNJAB_COE: 74,
   PUNJAB_NODAL: 94,
   EMRS_COE: 78,
-  UTTARAKHAND_COE: 88, // RGNV (Rajkiya Gandhi Navodaya Vidyalaya) schools
+  UTTARAKHAND_COE: 88, // RGNV (Rajiv Gandhi Navodaya Vidyalaya) schools
 } as const;
 
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
