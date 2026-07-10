@@ -1,6 +1,6 @@
 import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curriculum-schema";
 import { query } from "./db";
-import { COE_NODAL_PROGRAM_IDS, getProgramContextSync, type UserPermission } from "./permissions";
+import { PHYSICAL_CENTRE_PROGRAM_IDS, getProgramContextSync, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumSummarySortKey =
@@ -222,9 +222,9 @@ interface GuardQueryRow {
   estimated_rows: string | number | null;
 }
 
-// The summary spans the whole CoE/Nodal program family (JNV + Punjab + EMRS), so
-// Punjab/EMRS curriculum rows appear rather than being restricted to JNV 1/2.
-const CURRICULUM_PROGRAM_IDS = COE_NODAL_PROGRAM_IDS;
+// The summary spans every physical-centre program (all non-NVS programs), so
+// Punjab/EMRS/RGNV curriculum rows appear rather than being restricted to JNV 1/2.
+const CURRICULUM_PROGRAM_IDS = PHYSICAL_CENTRE_PROGRAM_IDS;
 const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 const SORT_SQL: Record<CurriculumSummarySortKey, string> = {
   school: "school_name",

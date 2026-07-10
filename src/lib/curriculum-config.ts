@@ -3,7 +3,7 @@ import {
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
 import { query } from "./db";
-import { COE_NODAL_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
+import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumConfigSession = {
@@ -675,7 +675,7 @@ export async function getCurriculumConfigImpact(
   const rows = await query<ImpactQueryRow>(buildImpactSql(), [
     params.chapterId,
     params.examTrack,
-    COE_NODAL_PROGRAM_IDS,
+    PHYSICAL_CENTRE_PROGRAM_IDS,
     params.coverageSequence ?? null,
     params.configId ?? null,
   ]);
