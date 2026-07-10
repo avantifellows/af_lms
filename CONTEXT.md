@@ -146,6 +146,24 @@ _Avoid_: `acad_mentorship_teacher_feedback`, report-generation tables
 The School page umbrella surface for school mentorship workflows.
 _Avoid_: Academic Mentorship tab
 
+### Holistic Mentorship
+
+**Holistic Mentorship**:
+The LMS domain for phase-based, non-academic mentoring in which assigned staff prepare from Student Context and Phase Guidance, conduct an offline conversation, and submit Post-Session Notes.
+_Avoid_: Academic Mentorship, AI Mentorship, generic Mentorship
+
+**Holistic Mentor**:
+A staff User assigned responsibility for one or more Holistic Mentees.
+_Avoid_: Academic Mentor, counsellor
+
+**Holistic Mentee**:
+A Student assigned to a Holistic Mentor.
+_Avoid_: Academic Mentee, learner, advisee
+
+**Holistic Mentor-Mentee Mapping**:
+An assignment connecting one Holistic Mentor to one Holistic Mentee without implying an Academic Mentor-Mentee Mapping.
+_Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
+
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
@@ -231,6 +249,8 @@ _Avoid_: Academic Mentorship tab
 - An **Academic Mentor** can have many **Mentees** in an academic year
 - A **Mentee** has at most one active **Academic Mentor-Mentee Mapping** per school and academic year
 - A **Mentee** can have multiple historical **Academic Mentor-Mentee Mappings** in one academic year when they are removed from mentorship and later selected again, or when they are reassigned from one Academic Mentor to another
+- **Holistic Mentorship** and **Academic Mentorship** are independent domains; assignment in one does not imply assignment in the other
+- **Holistic Mentorship** uses the canonical LMS Student, User, School, and Program identities without reusing Academic Mentorship-owned records
 - The db-service table for **Academic Mentor-Mentee Mappings** is `academic_mentorship_mentor_mentee_mappings`
 - The **Academic Mentorship Mentor-Mentee Mapping Table** stores `id`, `school_id`, nullable `program_id`, `academic_year`, `mentor_user_id`, `student_id`, `assigned_at`, `assigned_by_user_id`, `ended_at`, `ended_by_user_id`, optional `end_reason`, and normal timestamps
 - `assigned_by_user_id` and `ended_by_user_id` on the **Academic Mentorship Mentor-Mentee Mapping Table** reference `user.id`, not `user_permission.id`, because mappings audit the person taking the action rather than the person's mutable permission row
