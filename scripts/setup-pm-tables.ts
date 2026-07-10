@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-02-11 (4aab81e). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Setup script for Program Manager feature
  *
  * This script:

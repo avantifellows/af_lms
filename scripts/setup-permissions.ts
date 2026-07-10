@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-02-16 (e1ee7ea). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Setup script for user_permission table
  *
  * This script is idempotent - safe to run multiple times.

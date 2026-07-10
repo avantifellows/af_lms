@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-30 (8bc1326). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Faithful MIRROR of staging's centre seating into another environment (prod),
  * by BUSINESS KEY — the promotion step for the centre-seat model.
  *
