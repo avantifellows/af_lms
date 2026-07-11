@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-07-07 (6dd457e). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Backfill teacher.teacher_id (the AF code) for teaching centre_positions
  * seats that have a linked user but no AF code yet, by matching the user's
  * email against the HR "Employee Master" (HR tab) email -> AF code map.
