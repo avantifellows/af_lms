@@ -837,6 +837,103 @@ export async function updateCentre(params: {
   return { ok: true, centre: mapCentreListRow(rows[0]) };
 }
 
+// ---- centre ↔ batch links (centre_batch) ------------------------------------
+// Written direct-to-Postgres, like centres / centre_positions. A link is a
+// centre association, not a batch mutation, so it does not go through the DB
+// Service. Soft-deletable; the partial unique index (centre_id, batch_id) WHERE
+// deleted_at IS NULL means a link can be removed and re-created.
+
+export interface CentreBatchLink {
+  id: number;
+  batch_pk: number;
+  batch_id: string;
+  name: string;
+}
+
+export type CentreBatchMutationResult =
+  | { ok: true }
+  | CentreSchemaUnavailable
+  | { ok: false; status: 404 | 422; error: string };
+
+/** Batches actively linked to a centre, ordered by name. */
+export async function listCentreBatches(centreId: number): Promise<CentreBatchLink[]> {
+  return query<CentreBatchLink>(
+    `SELECT cb.id, b.id AS batch_pk, b.batch_id, b.name
+     FROM centre_batch cb
+     JOIN batch b ON b.id = cb.batch_id
+     WHERE cb.centre_id = $1 AND cb.deleted_at IS NULL
+     ORDER BY b.name`,
+    [centreId]
+  );
+}
+
+/**
+ * Link a batch (by external batch_id) to a centre. Revives a soft-deleted link
+ * if one exists, else inserts. Idempotent: re-linking an already-active pair is
+ * a no-op success.
+ */
+export async function linkBatchToCentre(params: {
+  centreId: number;
+  batchId: string;
+}): Promise<CentreBatchMutationResult> {
+  const schema = await checkCentreManagementSchema();
+  if (!schema.ok) return schema;
+
+  const centre = await getCentreById(params.centreId);
+  if (!centre) return { ok: false, status: 404, error: "Centre not found" };
+
+  const batchRows = await query<{ id: number }>(
+    `SELECT id FROM batch WHERE batch_id = $1`,
+    [params.batchId]
+  );
+  const batchPk = batchRows[0]?.id;
+  if (!batchPk) return { ok: false, status: 422, error: "Batch not found" };
+
+  // Revive a soft-deleted link if present…
+  const revived = await query<{ id: number }>(
+    `UPDATE centre_batch
+     SET deleted_at = NULL, updated_at = now()
+     WHERE centre_id = $1 AND batch_id = $2 AND deleted_at IS NOT NULL
+     RETURNING id`,
+    [params.centreId, batchPk]
+  );
+  if (revived.length > 0) return { ok: true };
+
+  // …otherwise insert, ignoring a race where an active link already exists
+  // (the partial unique index guards it).
+  await query(
+    `INSERT INTO centre_batch (centre_id, batch_id, inserted_at, updated_at)
+     VALUES ($1, $2, now(), now())
+     ON CONFLICT (centre_id, batch_id) WHERE deleted_at IS NULL DO NOTHING`,
+    [params.centreId, batchPk]
+  );
+  return { ok: true };
+}
+
+/** Soft-delete a centre↔batch link. Idempotent. */
+export async function unlinkBatchFromCentre(params: {
+  centreId: number;
+  batchId: string;
+}): Promise<CentreBatchMutationResult> {
+  const schema = await checkCentreManagementSchema();
+  if (!schema.ok) return schema;
+
+  const batchRows = await query<{ id: number }>(
+    `SELECT id FROM batch WHERE batch_id = $1`,
+    [params.batchId]
+  );
+  const batchPk = batchRows[0]?.id;
+  if (!batchPk) return { ok: false, status: 422, error: "Batch not found" };
+
+  await query(
+    `UPDATE centre_batch
+     SET deleted_at = now(), updated_at = now()
+     WHERE centre_id = $1 AND batch_id = $2 AND deleted_at IS NULL`,
+    [params.centreId, batchPk]
+  );
+  return { ok: true };
+}
+
 export async function createCentreOption(params: {
   body: unknown;
 }): Promise<CentreOptionMutationResult> {
