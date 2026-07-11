@@ -11,9 +11,10 @@ const mocks = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
   mockRequireQuizSessionAccess: vi.fn(),
-  mockCanAccessQuizSessionSchool: vi.fn(),
   mockCanAccessQuizSessionBatches: vi.fn(),
   mockResolveBatchGroups: vi.fn(),
+  mockBatchesForCentre: vi.fn(),
+  mockUserCanAccessCentre: vi.fn(),
   mockQuery: vi.fn(),
   mockPublishMessage: vi.fn(),
   mockFetch: vi.fn(),
@@ -29,9 +30,12 @@ vi.mock("@/lib/permissions", () => ({
 }));
 vi.mock("@/lib/quiz-session-access", () => ({
   requireQuizSessionAccess: mocks.mockRequireQuizSessionAccess,
-  canAccessQuizSessionSchool: mocks.mockCanAccessQuizSessionSchool,
   canAccessQuizSessionBatches: mocks.mockCanAccessQuizSessionBatches,
   resolveBatchGroups: mocks.mockResolveBatchGroups,
+}));
+vi.mock("@/lib/centre-batch", () => ({
+  batchesForCentre: mocks.mockBatchesForCentre,
+  userCanAccessCentre: mocks.mockUserCanAccessCentre,
 }));
 vi.mock("@/lib/db", () => ({
   query: mocks.mockQuery,
@@ -61,18 +65,20 @@ beforeEach(() => {
   mocks.mockGetServerSession.mockReset();
   mocks.mockGetUserPermission.mockReset();
   mocks.mockRequireQuizSessionAccess.mockReset();
-  mocks.mockCanAccessQuizSessionSchool.mockReset();
   mocks.mockCanAccessQuizSessionBatches.mockReset();
   mocks.mockQuery.mockReset();
   mocks.mockPublishMessage.mockReset();
   mocks.mockFetch.mockReset();
+  mocks.mockBatchesForCentre.mockReset();
+  mocks.mockUserCanAccessCentre.mockReset();
   vi.stubGlobal("fetch", mocks.mockFetch);
   mocks.mockRequireQuizSessionAccess.mockResolvedValue({
     ok: true,
-    permission: { program_ids: [1, 64] },
+    permission: { program_ids: [1, 64], scope: { centres: "all" } },
   });
-  mocks.mockCanAccessQuizSessionSchool.mockResolvedValue(true);
   mocks.mockCanAccessQuizSessionBatches.mockResolvedValue(true);
+  mocks.mockUserCanAccessCentre.mockReturnValue(true);
+  mocks.mockBatchesForCentre.mockResolvedValue([]);
   // Default: the test class batch resolves to EnableStudents / ID,DOB.
   mocks.mockResolveBatchGroups.mockResolvedValue(
     new Map([["EnableStudents_11_Engg_A", { group: "EnableStudents", authType: "ID,DOB" }]])
@@ -91,44 +97,45 @@ describe("GET /api/quiz-sessions", () => {
     mocks.mockGetServerSession.mockResolvedValue(NO_SESSION);
 
     const res = await GET(
-      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42")
+      new NextRequest("http://localhost/api/quiz-sessions?centreId=42")
     );
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
-  it("returns paginated quiz sessions scoped to the school's class batches", async () => {
+  it("returns paginated quiz sessions scoped to the centre's class batches", async () => {
     const { GET } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
-    mocks.mockQuery
-      .mockResolvedValueOnce([
-        {
-          id: 11,
-          name: "Class 11 Engg A",
+    // Batches now come from centre_batch via batchesForCentre.
+    mocks.mockBatchesForCentre.mockResolvedValue([
+      {
+        id: 11,
+        name: "Class 11 Engg A",
+        batch_id: "EnableStudents_11_Engg_A",
+        parent_id: 5,
+        program_id: 1,
+      },
+    ]);
+    // The only query() call left in GET is the session fetch.
+    mocks.mockQuery.mockResolvedValueOnce([
+      {
+        id: 99,
+        name: "[LMS] Part Test 1",
+        start_time: "2026-04-15 15:00:00",
+        end_time: "2026-04-15 19:00:00",
+        is_active: true,
+        portal_link: "https://quiz.example/session/99",
+        platform: "quiz",
+        meta_data: {
           batch_id: "EnableStudents_11_Engg_A",
-          parent_id: 5,
-          program_id: 1,
+          date_created: "2026-04-15T13:30:00.000Z",
         },
-      ])
-      .mockResolvedValueOnce([
-        {
-          id: 99,
-          name: "[LMS] Part Test 1",
-          start_time: "2026-04-15 15:00:00",
-          end_time: "2026-04-15 19:00:00",
-          is_active: true,
-          portal_link: "https://quiz.example/session/99",
-          platform: "quiz",
-          meta_data: {
-            batch_id: "EnableStudents_11_Engg_A",
-            date_created: "2026-04-15T13:30:00.000Z",
-          },
-        },
-      ]);
+      },
+    ]);
 
     const res = await GET(
-      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&page=0&per_page=10")
+      new NextRequest("http://localhost/api/quiz-sessions?centreId=42&page=0&per_page=10")
     );
 
     expect(res.status).toBe(200);
@@ -148,8 +155,9 @@ describe("GET /api/quiz-sessions", () => {
       ],
     });
 
+    expect(mocks.mockBatchesForCentre).toHaveBeenCalledWith(42);
     expect(mocks.mockQuery).toHaveBeenNthCalledWith(
-      2,
+      1,
       expect.stringContaining("FROM session s"),
       // groups (derived from the class batch prefix), then class batch ids, limit, offset
       [["EnableStudents"], ["EnableStudents_11_Engg_A"], 11, 0]
@@ -169,7 +177,7 @@ describe("GET /api/quiz-sessions", () => {
     });
 
     const res = await GET(
-      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42")
+      new NextRequest("http://localhost/api/quiz-sessions?centreId=42")
     );
 
     expect(res.status).toBe(403);
@@ -177,18 +185,18 @@ describe("GET /api/quiz-sessions", () => {
     expect(mocks.mockQuery).not.toHaveBeenCalled();
   });
 
-  it("returns 403 when the user cannot access the requested school", async () => {
+  it("returns 403 when the user holds no seat at the centre", async () => {
     const { GET } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
-    mocks.mockCanAccessQuizSessionSchool.mockResolvedValue(false);
+    mocks.mockUserCanAccessCentre.mockReturnValue(false);
 
     const res = await GET(
-      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42")
+      new NextRequest("http://localhost/api/quiz-sessions?centreId=42")
     );
 
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mocks.mockQuery).not.toHaveBeenCalled();
+    expect(mocks.mockBatchesForCentre).not.toHaveBeenCalled();
   });
 });
 

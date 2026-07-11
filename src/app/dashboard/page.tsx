@@ -288,6 +288,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   const hasPMAccess = getFeatureAccess(permission, "pm_dashboard").canView;
+  // "My Centres" is shown to anyone holding centre seats (scope.centres),
+  // and to admins (scope.centres === "all") who can reach every centre.
+  const hasCentres =
+    permission.scope?.centres === "all" ||
+    (permission.scope?.centres instanceof Set && permission.scope.centres.size > 0);
   const canViewVisitSummary =
     (permission.role === "admin" || permission.role === "program_admin") &&
     getFeatureAccess(permission, "visits").canView;
@@ -344,7 +349,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                       : `${totalCount} school(s)`}
               </p>
             </div>
-            {(hasPMAccess || canViewVisitSummary || showCurriculumSummary) && (
+            {(hasPMAccess || canViewVisitSummary || showCurriculumSummary || hasCentres) && (
               <nav className="flex gap-3 sm:gap-4">
                 <Link
                   href="/dashboard"
@@ -352,6 +357,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 >
                   Schools
                 </Link>
+                {hasCentres && (
+                  <Link
+                    href="/centres"
+                    className="text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-1"
+                  >
+                    My Centres
+                  </Link>
+                )}
                 {canViewVisitSummary && (
                   <Link
                     href="/school-visit-summary"

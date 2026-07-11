@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import {
-  canAccessSchoolSync,
   getFeatureAccess,
   getResolvedPermission,
   type UserPermission,
@@ -45,25 +44,6 @@ export async function requireQuizSessionAccess(
   return { ok: true, permission };
 }
 
-export async function canAccessQuizSessionSchool(
-  permission: UserPermission,
-  schoolId: number
-): Promise<boolean> {
-  const rows = await query<{ code: string; region: string | null }>(
-    `
-    SELECT code, region
-    FROM school
-    WHERE id = $1
-    LIMIT 1
-    `,
-    [schoolId]
-  );
-
-  const school = rows[0];
-  if (!school) return false;
-  return canAccessSchoolSync(permission, school.code, school.region || undefined);
-}
-
 export interface BatchGroupInfo {
   /** auth_group.name — the program tag stamped as meta_data.group (Gurukul matches on it). */
   group: string;
@@ -98,24 +78,50 @@ export async function resolveBatchGroups(
   return byBatch;
 }
 
+/**
+ * Pure teacher→centre batch access: the user may act on a set of batches iff
+ * EVERY batch is linked (via centre_batch) to a centre they hold a seat at.
+ * School permission is not consulted. Admins (scope.centres === "all") pass.
+ *
+ * "Every" (not "some") because these batchIds are the batches a mutation will
+ * touch — a single batch outside the user's centres must block the whole op.
+ */
 export async function canAccessQuizSessionBatches(
   permission: UserPermission,
   batchIds: string[]
 ): Promise<boolean> {
   if (batchIds.length === 0) return false;
 
-  const rows = await query<{ code: string; region: string | null }>(
+  const centres = permission.scope?.centres;
+  if (!centres) return false;
+  if (centres === "all") return true;
+
+  // Centre ids each batch is actively linked to. A batch with no link can never
+  // be reachable by a seated user, so its absence here correctly denies.
+  const rows = await query<{ batch_id: string; centre_id: number | string }>(
     `
-    SELECT DISTINCT s.code, s.region
+    SELECT b.batch_id, cb.centre_id
     FROM batch b
-    JOIN school_batch sb ON sb.batch_id = b.id
-    JOIN school s ON s.id = sb.school_id
+    JOIN centre_batch cb ON cb.batch_id = b.id AND cb.deleted_at IS NULL
     WHERE b.batch_id = ANY($1::text[])
     `,
     [batchIds]
   );
 
-  return rows.some((school) =>
-    canAccessSchoolSync(permission, school.code, school.region || undefined)
-  );
+  const centresByBatch = new Map<string, Set<number>>();
+  for (const r of rows) {
+    const set = centresByBatch.get(r.batch_id) ?? new Set<number>();
+    set.add(Number(r.centre_id));
+    centresByBatch.set(r.batch_id, set);
+  }
+
+  // Every requested batch must resolve to at least one of the user's centres.
+  return batchIds.every((batchId) => {
+    const linked = centresByBatch.get(batchId);
+    if (!linked) return false;
+    for (const centreId of linked) {
+      if (centres.has(centreId)) return true;
+    }
+    return false;
+  });
 }
