@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-07-07 (0223070). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Merge duplicate teacher accounts: an OLD emailless account holds the AF code
  * while the person's real, actively-seated @avantifellows.org account has no
  * code. Per decision (2026-07-07): the new seated account survives.

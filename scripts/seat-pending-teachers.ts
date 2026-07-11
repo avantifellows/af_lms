@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-15 (53bbb14). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Seat "pending" teachers (level-1 user_permission teacher grants with no centre
  * seat) onto their centre, so they show under the centre in the staff UI instead
  * of "No Centre assigned".
