@@ -156,6 +156,10 @@ _Avoid_: Academic Mentorship, AI Mentorship, generic Mentorship
 A staff User assigned responsibility for one or more Holistic Mentees.
 _Avoid_: Academic Mentor, counsellor
 
+**Holistic Mentorship Admin**:
+A staff User assigned the dedicated Holistic Mentorship Admin LMS role. This is the User's single LMS role; the role's feature permissions may include Holistic Mentorship and other LMS surfaces.
+_Avoid_: Mentor Admin, Centre designation, additive feature-only grant
+
 **Holistic Mentee**:
 A Student assigned to a Holistic Mentor.
 _Avoid_: Academic Mentee, learner, advisee
@@ -251,6 +255,21 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
 - A **Mentee** can have multiple historical **Academic Mentor-Mentee Mappings** in one academic year when they are removed from mentorship and later selected again, or when they are reassigned from one Academic Mentor to another
 - **Holistic Mentorship** and **Academic Mentorship** are independent domains; assignment in one does not imply assignment in the other
 - **Holistic Mentorship** uses the canonical LMS Student, User, School, and Program identities without reusing Academic Mentorship-owned records
+- Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
+- Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees
+- An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
+- An eligible Teacher can assign an unmapped Student to themselves, reassign another Mentor's Mentee to themselves, and remove their own Mentee assignment from the Mentorship Tab
+- A Holistic Mentee has at most one active **Holistic Mentor-Mentee Mapping** at a time
+- Only a Holistic Mentee's currently assigned **Holistic Mentor** can draft and submit that Mentee's Post-Session Notes
+- A Holistic Mentee's currently assigned **Holistic Mentor** may read prior submitted Post-Session Notes for that Mentee but may edit only Notes they authored; a former Mentor loses access after reassignment, Admins remain read-only, and no reopen workflow is required
+- Program Managers, Program Admins, and passcode users have no Holistic Mentorship access in v1
+- **Holistic Mentorship Admin** is a dedicated LMS role, not an additive capability combined with another LMS role or a Centre designation
+- An **Admin** automatically receives the same Holistic Mentorship feature access without becoming a **Holistic Mentorship Admin**
+- In v1, the **Holistic Mentorship Admin** role grants access only to Holistic Mentorship; access to other LMS features is deferred
+- A **Holistic Mentorship Admin** can view the School and staff context needed for Holistic Mentorship across all launch Schools, but can edit only Holistic Mentorship records
+- A **Holistic Mentorship Admin** can view all eligible Students across the launch Program, including Students who are not yet mapped to a Holistic Mentor
+- A **Holistic Mentorship Admin** can read every Holistic Mentee's Student Context and Post-Session Notes across the launch Program
+- **Holistic Mentorship Admins** and **Admins** can view Mapping status but cannot assign, reassign, or remove Holistic Mentees in v1
 - The db-service table for **Academic Mentor-Mentee Mappings** is `academic_mentorship_mentor_mentee_mappings`
 - The **Academic Mentorship Mentor-Mentee Mapping Table** stores `id`, `school_id`, nullable `program_id`, `academic_year`, `mentor_user_id`, `student_id`, `assigned_at`, `assigned_by_user_id`, `ended_at`, `ended_by_user_id`, optional `end_reason`, and normal timestamps
 - `assigned_by_user_id` and `ended_by_user_id` on the **Academic Mentorship Mentor-Mentee Mapping Table** reference `user.id`, not `user_permission.id`, because mappings audit the person taking the action rather than the person's mutable permission row
