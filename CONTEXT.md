@@ -168,6 +168,10 @@ _Avoid_: Evergreen phase configuration, separate mentorship cycle
 A stable item in a Holistic Phase Plan, assigned to Grade 11 or Grade 12, given a required short title, and placed in the Program's full phase sequence. Its displayed `Phase N` number is derived from that order rather than stored as identity.
 _Avoid_: Session, fixed phase number
 
+**Holistic Student Profile Questionnaire**:
+The Grade-specific Quiz Form whose raw responses are source material for the Holistic Student Profile.
+_Avoid_: legacy reporting record, Academic profile
+
 **Holistic Mentee**:
 A Student assigned to a Holistic Mentor.
 _Avoid_: Academic Mentee, learner, advisee
@@ -263,6 +267,9 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
 - A **Mentee** can have multiple historical **Academic Mentor-Mentee Mappings** in one academic year when they are removed from mentorship and later selected again, or when they are reassigned from one Academic Mentor to another
 - **Holistic Mentorship** and **Academic Mentorship** are independent domains; assignment in one does not imply assignment in the other
 - **Holistic Mentorship** uses the canonical LMS Student, User, School, and Program identities without reusing Academic Mentorship-owned records
+- The live 2026 **Holistic Student Profile Questionnaires** are the Grade 11 Quiz Form `6a44a83d1184e717b920c499` and Grade 12 Quiz Form `6a4deca8e030ebe34669fb0f`; Quiz MongoDB is the operational source and the current BigQuery form-response tables are a derived projection
+- For inspected 2026 production responses, Quiz `user_id` equals canonical `user.id` as a string; resolve it through `student.user_id`, require exactly one match, and reference canonical `student.id` from Holistic Mentorship records rather than joining to business `student.student_id`
+- Legacy Student Profile data may use a different identifier contract, so historical migration must map its source identifiers explicitly and must not silently fall back from canonical User ID to business Student ID
 - The v1 Holistic Mentorship launch allowlist contains canonical Main DB Program ID `1` (`JNV CoE`) only and covers every School in that Program; it does not hard-code the current School IDs or count
 - Each Program has one **Holistic Phase Plan** per academic year; when creating a new Plan, an Admin can start blank or copy the prior Plan's Grade, title, order, Guidance, and Questions into new Phase records that are all Locked with none Active, while student work and Phase state are never copied and the prior Plan stays read-only
 - Each **Holistic Phase** keeps a stable internal identity and required short title; LMS derives its displayed `Phase N` number from its position in the Plan's full ordered sequence
