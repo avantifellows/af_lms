@@ -255,6 +255,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
 - A **Mentee** can have multiple historical **Academic Mentor-Mentee Mappings** in one academic year when they are removed from mentorship and later selected again, or when they are reassigned from one Academic Mentor to another
 - **Holistic Mentorship** and **Academic Mentorship** are independent domains; assignment in one does not imply assignment in the other
 - **Holistic Mentorship** uses the canonical LMS Student, User, School, and Program identities without reusing Academic Mentorship-owned records
+- The v1 Holistic Mentorship launch allowlist contains canonical Main DB Program ID `1` (`JNV CoE`) only and covers every School in that Program; it does not hard-code the current School IDs or count
 - Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
 - Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
