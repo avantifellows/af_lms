@@ -160,6 +160,14 @@ _Avoid_: Academic Mentor, counsellor
 A staff User assigned the dedicated Holistic Mentorship Admin LMS role. This is the User's single LMS role; the role's feature permissions may include Holistic Mentorship and other LMS surfaces.
 _Avoid_: Mentor Admin, Centre designation, additive feature-only grant
 
+**Holistic Phase Plan**:
+The academic-year version of one Program's full ordered Holistic Phase sequence across Grades 11 and 12.
+_Avoid_: Evergreen phase configuration, separate mentorship cycle
+
+**Holistic Phase**:
+A stable item in a Holistic Phase Plan, assigned to Grade 11 or Grade 12, given a required short title, and placed in the Program's full phase sequence. Its displayed `Phase N` number is derived from that order rather than stored as identity.
+_Avoid_: Session, fixed phase number
+
 **Holistic Mentee**:
 A Student assigned to a Holistic Mentor.
 _Avoid_: Academic Mentee, learner, advisee
@@ -256,6 +264,20 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
 - **Holistic Mentorship** and **Academic Mentorship** are independent domains; assignment in one does not imply assignment in the other
 - **Holistic Mentorship** uses the canonical LMS Student, User, School, and Program identities without reusing Academic Mentorship-owned records
 - The v1 Holistic Mentorship launch allowlist contains canonical Main DB Program ID `1` (`JNV CoE`) only and covers every School in that Program; it does not hard-code the current School IDs or count
+- Each Program has one **Holistic Phase Plan** per academic year; when creating a new Plan, an Admin can start blank or copy the prior Plan's Grade, title, order, Guidance, and Questions into new Phase records that are all Locked with none Active, while student work and Phase state are never copied and the prior Plan stays read-only
+- Each **Holistic Phase** keeps a stable internal identity and required short title; LMS derives its displayed `Phase N` number from its position in the Plan's full ordered sequence
+- Opening a **Holistic Phase** makes it available for the selected Program, academic year, and Grade; the current Phase is both Open and Active, earlier Phases remain Open but are no longer Active, and future Phases are Locked
+- A Program, academic year, and Grade has no Active Phase before any Phase is Open; once any Phase is Open, exactly one Open Phase is Active, opening a Locked Phase makes it Active, and an Admin may move Active to any other Open Phase
+- A **Holistic Mentorship Admin** may open Phases out of sequence and change which Open Phase is Active at any time; LMS does not enforce sequential Phase transitions
+- Changing which **Holistic Phase** is Active never closes another Phase; every already Open Phase stays Open
+- A **Holistic Mentorship Admin** may move an Open Phase back to Locked only while no Mentor has saved a draft or submitted Post-Session Notes for that Phase; after student work exists, the Phase may lose Active status but must stay Open
+- A **Holistic Mentorship Admin** may permanently delete only a Locked Phase that has never had Mentor work; once a Phase has been opened or used it and its history are retained, and no separate per-Phase Archive action exists in v1
+- A **Holistic Mentorship Admin** may reorder or insert Phases only among Locked future Phases that have never had Mentor work; once a Phase has been opened or used, its position in the Plan is fixed, although Admins may still open or activate Phases out of sequence
+- A **Holistic Phase** does not store an Admin-controlled first-Phase flag; LMS derives the first Phase as the earliest ordered Phase assigned to each Grade, while per-Student context source and fallback rules are decided separately
+- A **Holistic Phase** has one Open/Active state per Program, academic year, and Grade that applies to every School in that Program; v1 has no School-specific Phase state
+- A **Holistic Phase** cannot be opened until it has a Grade, required short title, valid Phase Guidance, and at least one valid Post-Session Question; the Guidance and Notes lifecycles define their detailed validation
+- In v1, the first persisted Post-Session Notes data for any Mentee marks a **Holistic Phase** as started and freezes its Grade, title, sequence position, Phase Guidance, and Post-Session Questions; Open and Active state changes remain available to Admins
+- V1 Phase opening and state changes are immediate manual Admin actions with confirmation and actor/time audit; scheduled Phase opening is out of scope
 - Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
 - Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
