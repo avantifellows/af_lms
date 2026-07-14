@@ -168,6 +168,10 @@ _Avoid_: Evergreen phase configuration, separate mentorship cycle
 A stable item in a Holistic Phase Plan, assigned to Grade 11 or Grade 12, given a required short title, and placed in the Program's full phase sequence. Its displayed `Phase N` number is derived from that order rather than stored as identity.
 _Avoid_: Session, fixed phase number
 
+**Phase Guidance**:
+The single Mentorship Admin-authored Markdown body attached to a Holistic Phase and shown to Mentors beside Student Context.
+_Avoid_: Guidance file, embedded PDF, separate Conversation Guide
+
 **Holistic Student Profile Questionnaire**:
 The Grade-specific Quiz Form whose raw responses are source material for the Holistic Student Profile.
 _Avoid_: legacy reporting record, Academic profile
@@ -294,6 +298,14 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - A **Holistic Phase** cannot be opened until it has a Grade, required short title, valid Phase Guidance, and at least one valid Post-Session Question; the Guidance and Notes lifecycles define their detailed validation
 - In v1, the first persisted Post-Session Notes data for any Mentee marks a **Holistic Phase** as started and freezes its Grade, title, sequence position, Phase Guidance, and Post-Session Questions; Open and Active state changes remain available to Admins
 - V1 Phase opening and state changes are immediate manual Admin actions with confirmation and actor/time audit; scheduled Phase opening is out of scope
+- V1 stores one complete **Phase Guidance** Markdown body per Phase; it has no separate Phase Overview fields or top-of-page Overview section
+- Mentorship Admins author **Phase Guidance** directly in LMS; v1 has no Markdown-file upload, PDF path, rich-text editor, fixed content template, or runtime placeholder substitution
+- The **Phase Guidance** editor and live preview appear side by side on wide screens and switch through an Edit/Preview control on narrow screens; preview shows unsaved text, while persistence requires explicit Save
+- **Phase Guidance** supports safe headings, paragraphs, emphasis, lists, blockquotes, separators, and web links; raw HTML, scripts, images, video, iframes, and embedded content are not rendered
+- A Locked Phase may have empty **Phase Guidance**, but it cannot Open without non-empty valid Guidance; an Open but unstarted Phase may replace Guidance but cannot clear it
+- **Phase Guidance** has no separate Publish action: Opening the Phase exposes saved Guidance to Mentors, and saving an Open but unstarted Phase warns the Admin and updates the Mentor view immediately
+- Each **Phase Guidance** Save records mutation actor/time and rejects stale concurrent edits without discarding the second Admin's unsaved text
+- V1 does not retain or expose pre-freeze **Phase Guidance** revisions; each Save replaces current content, the first persisted Notes data freezes the final content with the historical Phase, and Copy Previous Year creates an independent editable copy
 - Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
 - Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
