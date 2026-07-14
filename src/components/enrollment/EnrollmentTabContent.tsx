@@ -3,11 +3,18 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Upload } from "lucide-react";
-import StudentTable, { type Grade, type Student } from "@/components/StudentTable";
+import StudentTable, {
+  type Grade,
+  type Student,
+} from "@/components/StudentTable";
 import EnrollmentStatsCards, {
   type ProgramStats,
 } from "./EnrollmentStatsCards";
-import { buildProgramStats } from "@/lib/enrollment-stats";
+import {
+  buildProgramStats,
+  studentDroppedFromProgram,
+  studentHasCurrentProgram,
+} from "@/lib/enrollment-stats";
 import type { Batch } from "@/components/EditStudentModal";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { Button, Modal } from "@/components/ui";
@@ -20,6 +27,8 @@ interface Props {
   dropoutStudents: Student[];
   canEdit: boolean;
   canEditStudent: boolean;
+  canDropoutStudent?: boolean;
+  dropoutProgramIds?: number[];
   canAddStudent: boolean;
   userProgramIds: number[] | null;
   isPasscodeUser: boolean;
@@ -38,6 +47,8 @@ export default function EnrollmentTabContent({
   dropoutStudents,
   canEdit,
   canEditStudent,
+  canDropoutStudent = false,
+  dropoutProgramIds,
   canAddStudent,
   userProgramIds,
   isPasscodeUser,
@@ -50,25 +61,31 @@ export default function EnrollmentTabContent({
 }: Props) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(
-    programs[0]?.id ?? null
+    programs[0]?.id ?? null,
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [createdStudentId, setCreatedStudentId] = useState<string | null>(null);
   const [createdOpen, setCreatedOpen] = useState(false);
-  const selectedProgramId = programs.some((program) => program.id === selectedId)
+  const selectedProgramId = programs.some(
+    (program) => program.id === selectedId,
+  )
     ? selectedId
-    : programs[0]?.id ?? null;
+    : (programs[0]?.id ?? null);
 
   const filteredActive = useMemo(() => {
     if (selectedProgramId == null) return [];
-    return activeStudents.filter((s) => Number(s.program_id) === selectedProgramId);
+    return activeStudents.filter((s) =>
+      studentHasCurrentProgram(s, selectedProgramId),
+    );
   }, [activeStudents, selectedProgramId]);
 
   const filteredDropouts = useMemo(() => {
     if (selectedProgramId == null) return [];
-    return dropoutStudents.filter((s) => Number(s.program_id) === selectedProgramId);
+    return dropoutStudents.filter((s) =>
+      studentDroppedFromProgram(s, selectedProgramId),
+    );
   }, [dropoutStudents, selectedProgramId]);
 
   // Grades present in the selected program's active students, for the filter
@@ -124,7 +141,9 @@ export default function EnrollmentTabContent({
     <>
       <Modal open={createdOpen} onClose={closeCreatedModal} className="p-0">
         <div className="border-b border-border px-5 py-4">
-          <h2 className="text-lg font-semibold text-text-primary">Student added</h2>
+          <h2 className="text-lg font-semibold text-text-primary">
+            Student added
+          </h2>
         </div>
         <div className="space-y-3 px-5 py-4">
           {createdStudentId ? (
@@ -190,11 +209,7 @@ export default function EnrollmentTabContent({
               <Upload className="h-4 w-4" aria-hidden="true" />
               Bulk Upload
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => setAddOpen(true)}
-            >
+            <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" aria-hidden="true" />
               Add Student
             </Button>
@@ -218,6 +233,9 @@ export default function EnrollmentTabContent({
         dropoutStudents={filteredDropouts}
         canEdit={canEdit}
         canEditStudent={canEditStudent}
+        canDropoutStudent={canDropoutStudent}
+        selectedProgramId={selectedProgramId}
+        dropoutProgramIds={dropoutProgramIds}
         userProgramIds={userProgramIds}
         isPasscodeUser={isPasscodeUser}
         isAdmin={isAdmin}

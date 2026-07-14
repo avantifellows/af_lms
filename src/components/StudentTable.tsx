@@ -3,9 +3,16 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
-import { Card, Badge, Button, Modal, DetailField, DetailGroup } from "@/components/ui";
+import {
+  Card,
+  Badge,
+  Button,
+  Modal,
+  DetailField,
+  DetailGroup,
+} from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
-import { PROGRAM_IDS } from "@/lib/constants";
+import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 export interface Student {
   group_user_id: string;
@@ -52,6 +59,7 @@ export interface Student {
   program_name: string | null;
   program_id: number | null;
   student_program_ids?: Array<number | string> | null;
+  dropout_program_ids?: Array<number | string> | null;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
@@ -67,9 +75,12 @@ export interface Grade {
 interface StudentTableProps {
   students: Student[];
   dropoutStudents?: Student[];
-  canEdit?: boolean;                   // feature-level edit (from matrix)
-  canEditStudent?: boolean;            // student-addition edit gate
-  userProgramIds?: number[] | null;    // null = owns all (admin/passcode)
+  canEdit?: boolean; // feature-level edit (from matrix)
+  canEditStudent?: boolean; // student-addition edit gate
+  canDropoutStudent?: boolean;
+  selectedProgramId?: number | null;
+  dropoutProgramIds?: number[] | null;
+  userProgramIds?: number[] | null; // null = owns all (admin/passcode)
   isPasscodeUser?: boolean;
   isAdmin?: boolean;
   grades: Grade[];
@@ -87,7 +98,20 @@ interface StudentTableProps {
 function formatDate(dateString: string | null): string {
   if (!dateString) return "—";
   const d = new Date(dateString);
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   return `${String(d.getDate()).padStart(2, "0")} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
@@ -112,6 +136,7 @@ interface StudentCardProps {
   canDropout: boolean;
   onEdit: () => void;
   onDropout: () => void;
+  isDropoutView?: boolean;
   /**
    * Bumped by the parent when something outside this card may have changed
    * the student's documents (e.g. an upload via EditStudentModal). Forwarded
@@ -137,10 +162,11 @@ function StudentCard({
   canDropout,
   onEdit,
   onDropout,
+  isDropoutView = false,
   documentsRefreshNonce,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const isDropout = student.status === "dropout";
+  const isDropout = isDropoutView || student.status === "dropout";
   const studentPkId = parseStudentPkId(student.student_pk_id);
 
   return (
@@ -152,18 +178,14 @@ function StudentCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base font-semibold text-gray-900">
-                {[student.first_name, student.last_name].filter(Boolean).join(" ") || "—"}
+                {[student.first_name, student.last_name]
+                  .filter(Boolean)
+                  .join(" ") || "—"}
               </h3>
               {student.grade && (
-                <Badge variant="info">
-                  Grade {student.grade}
-                </Badge>
+                <Badge variant="info">Grade {student.grade}</Badge>
               )}
-              {isDropout && (
-                <Badge variant="danger">
-                  Dropout
-                </Badge>
-              )}
+              {isDropout && <Badge variant="danger">Dropout</Badge>}
             </div>
           </div>
           <Button
@@ -178,7 +200,12 @@ function StudentCard({
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </Button>
         </div>
@@ -187,15 +214,21 @@ function StudentCard({
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
           <div>
             <span className="text-gray-400 text-xs">ID: </span>
-            <span className="font-medium text-gray-700">{student.student_id || "—"}</span>
+            <span className="font-medium text-gray-700">
+              {student.student_id || "—"}
+            </span>
           </div>
           <div>
             <span className="text-gray-400 text-xs">APAAR: </span>
-            <span className="font-medium text-gray-700">{student.apaar_id || "—"}</span>
+            <span className="font-medium text-gray-700">
+              {student.apaar_id || "—"}
+            </span>
           </div>
           <div>
             <span className="text-gray-400 text-xs">DOB: </span>
-            <span className="text-gray-700">{formatDate(student.date_of_birth)}</span>
+            <span className="text-gray-700">
+              {formatDate(student.date_of_birth)}
+            </span>
           </div>
         </div>
 
@@ -220,16 +253,30 @@ function StudentCard({
       {expanded && (
         <div className="space-y-3 border-t border-border bg-bg-card-alt px-4 pb-4 pt-4">
           <DetailGroup title="Personal">
-            <DetailField label="Phone" value={student.phone} className="font-medium" />
+            <DetailField
+              label="Phone"
+              value={student.phone}
+              className="font-medium"
+            />
             <DetailField label="Gender" value={student.gender} />
             <DetailField label="Category">
-              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}>
+              <span
+                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(student.category)}`}
+              >
                 {student.category || "—"}
               </span>
             </DetailField>
-            <DetailField label="Stream" value={student.stream} className="capitalize" />
+            <DetailField
+              label="Stream"
+              value={student.stream}
+              className="capitalize"
+            />
             <DetailField label="Program" value={student.program_name} />
-            <DetailField label="Email" value={student.email} className="truncate" />
+            <DetailField
+              label="Email"
+              value={student.email}
+              className="truncate"
+            />
           </DetailGroup>
 
           <DetailGroup title="Academic">
@@ -250,27 +297,45 @@ function StudentCard({
             <DetailField label="Name" value={student.father_name} />
             <DetailField label="Phone" value={student.father_phone} />
             <DetailField label="Profession" value={student.father_profession} />
-            <DetailField label="Education Level" value={student.father_education_level} />
+            <DetailField
+              label="Education Level"
+              value={student.father_education_level}
+            />
           </DetailGroup>
 
           <DetailGroup title="Mother">
             <DetailField label="Name" value={student.mother_name} />
             <DetailField label="Phone" value={student.mother_phone} />
             <DetailField label="Profession" value={student.mother_profession} />
-            <DetailField label="Education Level" value={student.mother_education_level} />
+            <DetailField
+              label="Education Level"
+              value={student.mother_education_level}
+            />
           </DetailGroup>
 
           <DetailGroup title="Guardian">
             <DetailField label="Name" value={student.guardian_name} />
             <DetailField label="Relation" value={student.guardian_relation} />
             <DetailField label="Phone" value={student.guardian_phone} />
-            <DetailField label="Profession" value={student.guardian_profession} />
-            <DetailField label="Education Level" value={student.guardian_education_level} />
+            <DetailField
+              label="Profession"
+              value={student.guardian_profession}
+            />
+            <DetailField
+              label="Education Level"
+              value={student.guardian_education_level}
+            />
           </DetailGroup>
 
           <DetailGroup title="Socio-economic">
-            <DetailField label="Annual Family Income" value={student.annual_family_income} />
-            <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
+            <DetailField
+              label="Annual Family Income"
+              value={student.annual_family_income}
+            />
+            <DetailField
+              label="Monthly Family Income"
+              value={student.monthly_family_income}
+            />
           </DetailGroup>
 
           {studentPkId !== null && (
@@ -296,9 +361,18 @@ interface DropoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  programId: number;
+  programLabel: string;
 }
 
-function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps) {
+function DropoutModal({
+  student,
+  isOpen,
+  onClose,
+  onConfirm,
+  programId,
+  programLabel,
+}: DropoutModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -312,6 +386,7 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           student_pk_id: student.student_pk_id,
+          program_id: programId,
         }),
       });
 
@@ -329,7 +404,9 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
     }
   };
 
-  const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ") || "this student";
+  const studentName =
+    [student.first_name, student.last_name].filter(Boolean).join(" ") ||
+    "this student";
 
   return (
     <Modal open={isOpen} onClose={onClose} className="max-w-md p-6">
@@ -344,23 +421,15 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
       )}
 
       <p className="text-sm text-gray-900 mb-4">
-        Are you sure you want to mark <strong>{studentName}</strong> as a dropout?
-        This action cannot be undone.
+        Are you sure you want to mark <strong>{studentName}</strong> as a
+        dropout from {programLabel}? This action cannot be undone.
       </p>
 
       <div className="flex justify-end gap-3">
-        <Button
-          variant="secondary"
-          onClick={onClose}
-          disabled={loading}
-        >
+        <Button variant="secondary" onClick={onClose} disabled={loading}>
           Cancel
         </Button>
-        <Button
-          variant="danger"
-          onClick={handleSubmit}
-          disabled={loading}
-        >
+        <Button variant="danger" onClick={handleSubmit} disabled={loading}>
           {loading ? "Processing..." : "Confirm Dropout"}
         </Button>
       </div>
@@ -373,6 +442,9 @@ export default function StudentTable({
   dropoutStudents = [],
   canEdit = true,
   canEditStudent: canEditStudentEntry = canEdit,
+  canDropoutStudent = canEditStudentEntry,
+  selectedProgramId = null,
+  dropoutProgramIds = null,
   userProgramIds = null,
   isPasscodeUser = false,
   isAdmin = false,
@@ -397,22 +469,39 @@ export default function StudentTable({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTabState] = useState<"active" | "dropout">(
-    searchParams.get("students") === "dropout" ? "dropout" : "active"
+    searchParams.get("students") === "dropout" ? "dropout" : "active",
   );
+  const effectiveProgramId =
+    selectedProgramId ??
+    (students[0]?.program_id == null ? null : Number(students[0].program_id));
 
   // Per-row ownership check: combines feature-level canEdit with program ownership
   // fallow-ignore-next-line complexity
-  const canMutateStudent = (student: Student): boolean => {
+  const canEditNvsStudent = (student: Student): boolean => {
     if (!canEdit) return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
-    const programId = student.program_id == null ? null : Number(student.program_id);
+    const programId =
+      student.program_id == null ? null : Number(student.program_id);
     const hasNvsBatch = (student.student_program_ids ?? [])
       .map(Number)
       .includes(PROGRAM_IDS.NVS);
-    if (!hasNvsBatch && programId !== null && programId !== PROGRAM_IDS.NVS) return false;
+    if (!hasNvsBatch && programId !== null && programId !== PROGRAM_IDS.NVS)
+      return false;
     if (isAdmin) return true;
     if (!userProgramIds || userProgramIds.length === 0) return false;
     return userProgramIds.includes(PROGRAM_IDS.NVS);
+  };
+
+  const canDropoutFromSelectedProgram = (student: Student): boolean => {
+    if (!canDropoutStudent || effectiveProgramId == null) return false;
+    if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
+      return false;
+    if (isPasscodeUser || !student.student_pk_id) return false;
+    const belongsToProgram = Array.isArray(student.student_program_ids)
+      ? student.student_program_ids.map(Number).includes(effectiveProgramId)
+      : Number(student.program_id) === effectiveProgramId;
+    if (!belongsToProgram) return false;
+    return isAdmin || Boolean(userProgramIds?.includes(effectiveProgramId));
   };
 
   // Determine which students to show based on tab
@@ -421,7 +510,9 @@ export default function StudentTable({
   // Get unique grades from current students for filtering
   const studentGrades = [
     ...new Set(
-      currentStudents.map((s) => s.grade).filter((g): g is number => g !== null),
+      currentStudents
+        .map((s) => s.grade)
+        .filter((g): g is number => g !== null),
     ),
   ].sort((a, b) => a - b);
 
@@ -441,8 +532,17 @@ export default function StudentTable({
     router.replace(qs ? `?${qs}` : "?", { scroll: false });
 
     const targetStudents = tab === "active" ? students : dropoutStudents;
-    const targetGrades = [...new Set(targetStudents.map((s) => s.grade).filter((g): g is number => g !== null))];
-    if (selectedGrade !== "all" && !targetGrades.includes(parseInt(selectedGrade))) {
+    const targetGrades = [
+      ...new Set(
+        targetStudents
+          .map((s) => s.grade)
+          .filter((g): g is number => g !== null),
+      ),
+    ];
+    if (
+      selectedGrade !== "all" &&
+      !targetGrades.includes(parseInt(selectedGrade))
+    ) {
       setSelectedGrade("all");
     }
   };
@@ -503,13 +603,15 @@ export default function StudentTable({
             <option value="all">All Grades ({currentStudents.length})</option>
             {studentGrades.map((grade) => (
               <option key={grade} value={grade}>
-                Grade {grade} ({currentStudents.filter((s) => s.grade === grade).length})
+                Grade {grade} (
+                {currentStudents.filter((s) => s.grade === grade).length})
               </option>
             ))}
           </select>
           {selectedGrade !== "all" && (
             <span className="text-sm text-gray-500">
-              Showing {filteredStudents.length} of {currentStudents.length} students
+              Showing {filteredStudents.length} of {currentStudents.length}{" "}
+              students
             </span>
           )}
         </div>
@@ -518,7 +620,10 @@ export default function StudentTable({
       {/* Student cards */}
       <div className="max-w-3xl mx-auto space-y-3">
         {filteredStudents.length === 0 ? (
-          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500">
+          <Card
+            elevation="sm"
+            className="p-8 text-center text-sm text-gray-500"
+          >
             {currentStudents.length === 0
               ? activeTab === "active"
                 ? "No active students enrolled in this school"
@@ -530,10 +635,17 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
-              canEditStudent={canEditStudentEntry && canMutateStudent(student)}
-              canDropout={canEditStudentEntry && canMutateStudent(student)}
+              canEditStudent={
+                activeTab === "active" &&
+                canEditStudentEntry &&
+                canEditNvsStudent(student)
+              }
+              canDropout={
+                activeTab === "active" && canDropoutFromSelectedProgram(student)
+              }
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
+              isDropoutView={activeTab === "dropout"}
               documentsRefreshNonce={documentsRefresh}
             />
           ))
@@ -560,6 +672,11 @@ export default function StudentTable({
           isOpen={!!dropoutStudent}
           onClose={() => setDropoutStudent(null)}
           onConfirm={handleSave}
+          programId={effectiveProgramId!}
+          programLabel={
+            PROGRAM_ID_TO_LABEL[effectiveProgramId!] ||
+            `Program ${effectiveProgramId}`
+          }
         />
       )}
     </>

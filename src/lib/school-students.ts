@@ -68,6 +68,7 @@ export async function getSchoolRoster(
       p.program_name,
       p.program_id,
       sp.student_program_ids,
+      dp.dropout_program_ids,
       GREATEST(s.updated_at, u.updated_at) as updated_at
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
@@ -128,6 +129,16 @@ export async function getSchoolRoster(
         AND er_batch.group_type = 'batch'
         AND er_batch.is_current = true
     ) sp ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        ARRAY_AGG(DISTINCT audit.program_id) FILTER (WHERE audit.program_id IS NOT NULL),
+        ARRAY[]::int[]
+      ) AS dropout_program_ids
+      FROM lms_student_write_audits audit
+      WHERE audit.action = 'student_program_dropout'
+        AND (audit.affected_identifiers ->> 'student_pk_id')::bigint = s.id
+        AND NOT (audit.program_id = ANY(sp.student_program_ids))
+    ) dp ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
     [schoolId, CURRENT_ACADEMIC_YEAR],

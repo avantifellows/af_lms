@@ -29,6 +29,7 @@ import { PROGRAM_IDS } from "./constants";
 import {
   requireStudentAdditionAccess,
   requireStudentAdditionStudentAccess,
+  requireStudentProgramDropoutAccess,
 } from "./student-addition-access";
 import type { UserPermission } from "./permissions";
 
@@ -62,7 +63,11 @@ beforeEach(() => {
   vi.resetAllMocks();
   mockCanAccessSchool.mockResolvedValue(true);
   mockCanAccessSchoolSync.mockReturnValue(true);
-  mockGetFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+  mockGetFeatureAccess.mockReturnValue({
+    access: "edit",
+    canView: true,
+    canEdit: true,
+  });
   mockGetProgramContextSync.mockReturnValue({
     hasAccess: true,
     programIds: [PROGRAM_IDS.NVS],
@@ -75,7 +80,7 @@ beforeEach(() => {
       udise_code: "12345678901",
       region: "South",
       centre_program_ids: [PROGRAM_IDS.NVS],
-      has_nvs_enrollment: true,
+      has_program_enrollment: true,
     },
   ]);
 });
@@ -108,16 +113,21 @@ describe("requireStudentAdditionAccess", () => {
       student_program_ids: [PROGRAM_IDS.NVS],
     };
 
-    const result = await requireStudentAdditionAccess(session, legacySchoolContext);
+    const result = await requireStudentAdditionAccess(
+      session,
+      legacySchoolContext,
+    );
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
   it("allows admins even when explicit program_ids do not include NVS", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({
-      role: "admin",
-      program_ids: [PROGRAM_IDS.COE],
-    }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({
+        role: "admin",
+        program_ids: [PROGRAM_IDS.COE],
+      }),
+    );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: true,
       programIds: [PROGRAM_IDS.COE],
@@ -136,7 +146,11 @@ describe("requireStudentAdditionAccess", () => {
   ])("blocks %s", async (_label, userPermission) => {
     mockGetResolvedPermission.mockResolvedValue(userPermission);
     if (userPermission.read_only) {
-      mockGetFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+      mockGetFeatureAccess.mockReturnValue({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
     }
 
     const result = await requireStudentAdditionAccess(session, school);
@@ -159,7 +173,9 @@ describe("requireStudentAdditionAccess", () => {
     [
       "wrong program",
       () => {
-        mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+        mockGetResolvedPermission.mockResolvedValue(
+          permission({ role: "program_manager" }),
+        );
         mockGetProgramContextSync.mockReturnValue({
           hasAccess: true,
           programIds: [PROGRAM_IDS.COE],
@@ -168,17 +184,16 @@ describe("requireStudentAdditionAccess", () => {
         });
       },
     ],
-    [
-      "non-NVS school",
-      () => undefined,
-    ],
+    ["non-NVS school", () => undefined],
   ])("blocks %s", async (label, arrange) => {
     mockGetResolvedPermission.mockResolvedValue(permission());
     arrange();
 
     const result = await requireStudentAdditionAccess(
       session,
-      label === "non-NVS school" ? { ...school, centre_program_ids: [PROGRAM_IDS.COE] } : school,
+      label === "non-NVS school"
+        ? { ...school, centre_program_ids: [PROGRAM_IDS.COE] }
+        : school,
     );
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
@@ -187,7 +202,9 @@ describe("requireStudentAdditionAccess", () => {
 
 describe("requireStudentAdditionStudentAccess", () => {
   it("allows an allowed Google actor for an accessible NVS student", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
@@ -216,8 +233,17 @@ describe("requireStudentAdditionStudentAccess", () => {
   });
 
   it.each([
-    ["school scope denied", () => mockCanAccessSchoolSync.mockReturnValue(false)],
-    ["teacher role", () => mockGetResolvedPermission.mockResolvedValue(permission({ role: "teacher" }))],
+    [
+      "school scope denied",
+      () => mockCanAccessSchoolSync.mockReturnValue(false),
+    ],
+    [
+      "teacher role",
+      () =>
+        mockGetResolvedPermission.mockResolvedValue(
+          permission({ role: "teacher" }),
+        ),
+    ],
     [
       "non-NVS student",
       () =>
@@ -227,12 +253,14 @@ describe("requireStudentAdditionStudentAccess", () => {
             udise_code: "12345678901",
             region: "South",
             centre_program_ids: [PROGRAM_IDS.COE],
-            has_nvs_enrollment: true,
+            has_program_enrollment: true,
           },
         ]),
     ],
   ])("blocks %s", async (_label, arrange) => {
-    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
     arrange();
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
@@ -241,14 +269,16 @@ describe("requireStudentAdditionStudentAccess", () => {
   });
 
   it("allows a student when the school has an active NVS centre", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
     mockQuery.mockResolvedValue([
       {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [PROGRAM_IDS.NVS],
-        has_nvs_enrollment: true,
+        has_program_enrollment: true,
       },
     ]);
 
@@ -258,10 +288,12 @@ describe("requireStudentAdditionStudentAccess", () => {
   });
 
   it("allows admins to edit/dropout NVS students without explicit NVS program ids", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({
-      role: "admin",
-      program_ids: [PROGRAM_IDS.COE],
-    }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({
+        role: "admin",
+        program_ids: [PROGRAM_IDS.COE],
+      }),
+    );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: true,
       programIds: [PROGRAM_IDS.COE],
@@ -275,14 +307,16 @@ describe("requireStudentAdditionStudentAccess", () => {
   });
 
   it("blocks a student without an active NVS centre even when legacy program fields include NVS", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
     mockQuery.mockResolvedValue([
       {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [],
-        has_nvs_enrollment: true,
+        has_program_enrollment: true,
         program_ids: [PROGRAM_IDS.NVS],
         student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
       },
@@ -294,14 +328,16 @@ describe("requireStudentAdditionStudentAccess", () => {
   });
 
   it("blocks a current-batch NVS student when the centre mapping is missing", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
     mockQuery.mockResolvedValue([
       {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [],
-        has_nvs_enrollment: true,
+        has_program_enrollment: true,
         student_program_ids: [PROGRAM_IDS.NVS],
       },
     ]);
@@ -312,18 +348,70 @@ describe("requireStudentAdditionStudentAccess", () => {
   });
 
   it("blocks a non-NVS student at a school with an active NVS centre", async () => {
-    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
     mockQuery.mockResolvedValue([
       {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [PROGRAM_IDS.NVS],
-        has_nvs_enrollment: false,
+        has_program_enrollment: false,
       },
     ]);
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+});
+
+describe("requireStudentProgramDropoutAccess", () => {
+  it("allows a program manager to drop from a current program they own", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.COE],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockQuery.mockResolvedValue([
+      {
+        code: "JNV001",
+        udise_code: "12345678901",
+        region: "South",
+        centre_program_ids: [PROGRAM_IDS.COE],
+        has_program_enrollment: true,
+      },
+    ]);
+
+    const result = await requireStudentProgramDropoutAccess(
+      session,
+      "100",
+      PROGRAM_IDS.COE,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.programId).toBe(PROGRAM_IDS.COE);
+    expect(mockQuery).toHaveBeenCalledWith(expect.any(String), [
+      "100",
+      PROGRAM_IDS.COE,
+    ]);
+  });
+
+  it("blocks dropout from a program the actor does not own", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager", program_ids: [PROGRAM_IDS.NVS] }),
+    );
+
+    const result = await requireStudentProgramDropoutAccess(
+      session,
+      "100",
+      PROGRAM_IDS.COE,
+    );
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });

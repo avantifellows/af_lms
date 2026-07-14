@@ -9,19 +9,17 @@ const mockRefresh = vi.fn();
 const mockPush = vi.fn();
 const mockReplace = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: vi.fn(() => ({ push: mockPush, refresh: mockRefresh, replace: mockReplace })),
+  useRouter: vi.fn(() => ({
+    push: mockPush,
+    refresh: mockRefresh,
+    replace: mockReplace,
+  })),
   useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
 vi.mock("./EditStudentModal", () => ({
   default: vi.fn(
-    ({
-      isOpen,
-      onClose,
-    }: {
-      isOpen: boolean;
-      onClose: () => void;
-    }) =>
+    ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
       isOpen ? (
         <div data-testid="edit-modal">
           <button onClick={onClose}>close-edit</button>
@@ -77,7 +75,9 @@ function makeStudent(overrides: StudentOverrides = {}) {
     gender: has("gender") ? overrides.gender! : "Male",
     program_name: has("program_name") ? overrides.program_name! : "JNV NVS",
     program_id: has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS,
-    student_program_ids: has("student_program_ids") ? overrides.student_program_ids! : null,
+    student_program_ids: has("student_program_ids")
+      ? overrides.student_program_ids!
+      : null,
     grade: has("grade") ? overrides.grade! : 10,
     grade_id: has("grade_id") ? overrides.grade_id! : "g-10",
     status: has("status") ? overrides.status! : "active",
@@ -131,9 +131,7 @@ describe("StudentTable - rendering", () => {
       date_of_birth: "2011-03-20",
     });
 
-    render(
-      <StudentTable students={[student]} grades={defaultGrades} />,
-    );
+    render(<StudentTable students={[student]} grades={defaultGrades} />);
 
     expect(screen.getByText("Priya Patel")).toBeInTheDocument();
     expect(screen.getByText("Grade 9")).toBeInTheDocument();
@@ -145,9 +143,7 @@ describe("StudentTable - rendering", () => {
 
   it("shows em-dash for missing name parts", () => {
     const student = makeStudent({ first_name: null, last_name: null });
-    render(
-      <StudentTable students={[student]} grades={defaultGrades} />,
-    );
+    render(<StudentTable students={[student]} grades={defaultGrades} />);
     // The name cell should render "—"
     const heading = screen.getByRole("heading", { level: 3 });
     expect(heading).toHaveTextContent("—");
@@ -159,9 +155,7 @@ describe("StudentTable - rendering", () => {
       apaar_id: null,
       date_of_birth: null,
     });
-    render(
-      <StudentTable students={[student]} grades={defaultGrades} />,
-    );
+    render(<StudentTable students={[student]} grades={defaultGrades} />);
     // 3 em-dashes: student_id, apaar_id, DOB
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(3);
@@ -253,9 +247,7 @@ describe("StudentTable - tabs", () => {
   });
 
   it("does NOT show tabs when dropoutStudents is omitted", () => {
-    render(
-      <StudentTable students={[makeStudent()]} grades={defaultGrades} />,
-    );
+    render(<StudentTable students={[makeStudent()]} grades={defaultGrades} />);
     expect(screen.queryByText(/Active/)).not.toBeInTheDocument();
   });
 
@@ -505,8 +497,12 @@ describe("StudentTable - Edit button hidden", () => {
         isAdmin={true}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Dropout" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dropout" }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides Edit and Dropout buttons for dropout-status students even if canEdit is true", () => {
@@ -519,8 +515,12 @@ describe("StudentTable - Edit button hidden", () => {
         isAdmin={true}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Dropout" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dropout" }),
+    ).not.toBeInTheDocument();
     // The "Dropout" badge IS shown though
     expect(screen.getByText("Dropout")).toBeInTheDocument();
   });
@@ -796,9 +796,7 @@ describe("StudentTable - empty states", () => {
       makeStudent({ group_user_id: "a1", first_name: "Nine", grade: 9 }),
       makeStudent({ group_user_id: "a2", first_name: "Ten", grade: 10 }),
     ];
-    render(
-      <StudentTable students={multi} grades={defaultGrades} />,
-    );
+    render(<StudentTable students={multi} grades={defaultGrades} />);
 
     await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "9");
     expect(screen.getByText("Showing 1 of 2 students")).toBeInTheDocument();
@@ -852,7 +850,9 @@ describe("StudentTable - grade filter reset on tab switch", () => {
     await user.click(screen.getByText(/Dropout/));
 
     // Grade filter should have reset to "all"
-    const select = screen.getByLabelText("Filter by Grade:") as HTMLSelectElement;
+    const select = screen.getByLabelText(
+      "Filter by Grade:",
+    ) as HTMLSelectElement;
     expect(select.value).toBe("all");
     expect(screen.getByText("DropTen Sharma")).toBeInTheDocument();
   });
@@ -887,7 +887,9 @@ describe("StudentTable - grade filter reset on tab switch", () => {
     // Switch to dropout tab - grade 10 exists there
     await user.click(screen.getByText(/Dropout/));
 
-    const select = screen.getByLabelText("Filter by Grade:") as HTMLSelectElement;
+    const select = screen.getByLabelText(
+      "Filter by Grade:",
+    ) as HTMLSelectElement;
     expect(select.value).toBe("10");
     expect(screen.getByText("D10 Sharma")).toBeInTheDocument();
   });
@@ -1036,7 +1038,11 @@ describe("StudentTable - Dropout modal", () => {
     render(
       <StudentTable
         students={[
-          makeStudent({ student_pk_id: "123", student_id: null, apaar_id: "APAAR-FALLBACK" }),
+          makeStudent({
+            student_pk_id: "123",
+            student_id: null,
+            apaar_id: "APAAR-FALLBACK",
+          }),
         ]}
         grades={defaultGrades}
         isAdmin={true}
@@ -1055,6 +1061,7 @@ describe("StudentTable - Dropout modal", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body).toHaveProperty("student_pk_id", "123");
+    expect(body).toHaveProperty("program_id", PROGRAM_IDS.NVS);
     expect(body).not.toHaveProperty("apaar_id");
     expect(body).not.toHaveProperty("student_id");
   });
@@ -1136,7 +1143,9 @@ describe("StudentTable - helper function behaviors", () => {
       // inside the expanded (.bg-bg-card-alt) area. A null category renders "—",
       // which now also appears in other empty fields, and the grade badge in
       // the header is also pill-shaped — so both need to be excluded.
-      const badge = document.querySelector(".bg-bg-card-alt span.inline-flex.rounded-full");
+      const badge = document.querySelector(
+        ".bg-bg-card-alt span.inline-flex.rounded-full",
+      );
       expect(badge?.textContent).toBe(categories[i] || "—");
       expect(badge?.className).toContain(expectedClasses[i]);
       unmount();
@@ -1152,9 +1161,8 @@ describe("StudentTable - helper function behaviors", () => {
     );
     // DOB area should show "—"
     const dobLabel = screen.getByText("DOB:");
-    const dobValue = dobLabel.parentElement?.querySelector(
-      "span.text-gray-700",
-    );
+    const dobValue =
+      dobLabel.parentElement?.querySelector("span.text-gray-700");
     expect(dobValue?.textContent).toBe("—");
   });
 });
@@ -1243,7 +1251,9 @@ describe("StudentTable - Dropout modal error edge cases", () => {
     await user.click(screen.getByText("Confirm Dropout"));
 
     await vi.waitFor(() => {
-      expect(screen.getByText("Failed to mark student as dropout")).toBeInTheDocument();
+      expect(
+        screen.getByText("Failed to mark student as dropout"),
+      ).toBeInTheDocument();
     });
   });
 });

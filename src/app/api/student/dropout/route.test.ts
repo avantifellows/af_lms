@@ -4,7 +4,7 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/student-addition-access", () => ({
-  requireStudentAdditionStudentAccess: vi.fn(),
+  requireStudentProgramDropoutAccess: vi.fn(),
 }));
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: vi.fn(),
@@ -12,14 +12,20 @@ vi.mock("@/lib/lms-enrollment-date", () => ({
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
-import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
+import { requireStudentProgramDropoutAccess } from "@/lib/student-addition-access";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import { POST } from "./route";
-import { jsonRequest, NO_SESSION, ADMIN_SESSION } from "../../__test-utils__/api-test-helpers";
+import {
+  jsonRequest,
+  NO_SESSION,
+  ADMIN_SESSION,
+} from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
-const mockRequireStudentAdditionStudentAccess = vi.mocked(requireStudentAdditionStudentAccess);
+const mockRequireStudentProgramDropoutAccess = vi.mocked(
+  requireStudentProgramDropoutAccess,
+);
 const mockDeriveLmsEnrollmentPeriod = vi.mocked(deriveLmsEnrollmentPeriod);
 const mockFetch = vi.fn();
 
@@ -36,7 +42,7 @@ beforeEach(() => {
       status: "enrolled",
     },
   ]);
-  mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+  mockRequireStudentProgramDropoutAccess.mockResolvedValue({
     ok: true,
     programId: 64,
     actor: {
@@ -55,6 +61,7 @@ beforeEach(() => {
 
 const validBody = {
   student_pk_id: 100,
+  program_id: 64,
 };
 
 describe("POST /api/student/dropout", () => {
@@ -80,6 +87,20 @@ describe("POST /api/student/dropout", () => {
     expect(json.error).toContain("student_pk_id");
   });
 
+  it("returns 400 when program_id is missing", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    const req = jsonRequest("http://localhost/api/student/dropout", {
+      method: "POST",
+      body: { student_pk_id: 100 },
+    });
+
+    const res = await POST(req as never);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("program_id");
+    expect(mockRequireStudentProgramDropoutAccess).not.toHaveBeenCalled();
+  });
+
   it("marks student as dropout successfully", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockFetch.mockResolvedValue(new Response("", { status: 200 }));
@@ -102,6 +123,7 @@ describe("POST /api/student/dropout", () => {
       method: "POST",
       body: {
         student_pk_id: 100,
+        program_id: 64,
         student_id: "CLIENT-SHOULD-NOT-WIN",
         apaar_id: "CLIENT-SHOULD-NOT-WIN",
         start_date: "2020-01-01",
@@ -116,7 +138,11 @@ describe("POST /api/student/dropout", () => {
       expect.stringContaining("FROM student"),
       [100],
     );
-    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, 100);
+    expect(mockRequireStudentProgramDropoutAccess).toHaveBeenCalledWith(
+      ADMIN_SESSION,
+      100,
+      64,
+    );
     expect(mockFetch).toHaveBeenCalledWith(
       "https://db.example.test/api/dropout",
       expect.objectContaining({ method: "PATCH" }),
@@ -139,7 +165,7 @@ describe("POST /api/student/dropout", () => {
 
   it("returns 403 and does not proxy when the shared student gate denies", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+    mockRequireStudentProgramDropoutAccess.mockResolvedValue({
       ok: false,
       status: 403,
       error: "Forbidden",
@@ -170,8 +196,14 @@ describe("POST /api/student/dropout", () => {
     const res = await POST(req as never);
 
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "Student not found with the provided identifier" });
-    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, 100);
+    expect(await res.json()).toEqual({
+      error: "Student not found with the provided identifier",
+    });
+    expect(mockRequireStudentProgramDropoutAccess).toHaveBeenCalledWith(
+      ADMIN_SESSION,
+      100,
+      64,
+    );
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -189,8 +221,14 @@ describe("POST /api/student/dropout", () => {
     const res = await POST(req as never);
 
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "Student has no dropout identifier" });
-    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, 100);
+    expect(await res.json()).toEqual({
+      error: "Student has no dropout identifier",
+    });
+    expect(mockRequireStudentProgramDropoutAccess).toHaveBeenCalledWith(
+      ADMIN_SESSION,
+      100,
+      64,
+    );
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -208,8 +246,14 @@ describe("POST /api/student/dropout", () => {
     const res = await POST(req as never);
 
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "Student is already marked as dropout" });
-    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, 100);
+    expect(await res.json()).toEqual({
+      error: "Student is already marked as dropout",
+    });
+    expect(mockRequireStudentProgramDropoutAccess).toHaveBeenCalledWith(
+      ADMIN_SESSION,
+      100,
+      64,
+    );
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -240,10 +284,13 @@ describe("POST /api/student/dropout", () => {
   it("returns 400 when student is already dropout", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockFetch.mockResolvedValue(
-      new Response(JSON.stringify({ errors: "Student is already marked as dropout" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      })
+      new Response(
+        JSON.stringify({ errors: "Student is already marked as dropout" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     );
 
     const req = jsonRequest("http://localhost/api/student/dropout", {
@@ -262,7 +309,7 @@ describe("POST /api/student/dropout", () => {
       new Response(JSON.stringify({ errors: "Some validation error" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
-      })
+      }),
     );
 
     const req = jsonRequest("http://localhost/api/student/dropout", {
@@ -276,7 +323,7 @@ describe("POST /api/student/dropout", () => {
   it("returns 400 with duplicate student error", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockFetch.mockResolvedValue(
-      new Response("expected at most one result but got 2", { status: 500 })
+      new Response("expected at most one result but got 2", { status: 500 }),
     );
 
     const req = jsonRequest("http://localhost/api/student/dropout", {

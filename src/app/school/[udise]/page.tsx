@@ -21,7 +21,12 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
+import {
+  buildProgramStats,
+  studentDroppedFromProgram,
+  studentHasCurrentProgram,
+  type ProgramStats,
+} from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 import { getStudentAdditionAccessFromPermission } from "@/lib/student-addition-access";
 
@@ -72,7 +77,7 @@ async function getGrades(): Promise<Grade[]> {
      FROM grade gr
      JOIN "group" g ON g.child_id = gr.id AND g.type = 'grade'
      ORDER BY gr.number`,
-    []
+    [],
   );
 }
 
@@ -91,7 +96,7 @@ async function getBatchesWithMetadata(): Promise<Batch[]> {
      JOIN "group" g ON g.child_id = b.id AND g.type = 'batch'
      WHERE b.metadata IS NOT NULL AND b.program_id = $1
      ORDER BY b.name`,
-    [PROGRAM_IDS.NVS]
+    [PROGRAM_IDS.NVS],
   );
   return batches;
 }
@@ -151,9 +156,10 @@ export default async function SchoolPage({ params }: PageProps) {
   }
 
   // Single DB call for permission — reuse everywhere
-  const permission = !isPasscodeUser && session.user?.email
-    ? await getResolvedPermission(session.user.email)
-    : null;
+  const permission =
+    !isPasscodeUser && session.user?.email
+      ? await getResolvedPermission(session.user.email)
+      : null;
 
   // For Google users, check school access
   if (!isPasscodeUser) {
@@ -178,7 +184,9 @@ export default async function SchoolPage({ params }: PageProps) {
       );
     }
 
-    if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
+    if (
+      !canAccessSchoolSync(permission, school.code, school.region || undefined)
+    ) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <Card elevation="xl" className="p-8 max-w-md text-center">
@@ -211,7 +219,8 @@ export default async function SchoolPage({ params }: PageProps) {
             No Program Access
           </h1>
           <p className="text-gray-600 mb-4">
-            You are not assigned to any programs. Please contact an administrator.
+            You are not assigned to any programs. Please contact an
+            administrator.
           </p>
           <Link
             href="/dashboard"
@@ -231,8 +240,16 @@ export default async function SchoolPage({ params }: PageProps) {
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
   const mentorshipAccess = getFeatureAccess(permission, "mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
-  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
-  const canAddStudent = getStudentAdditionAccessFromPermission(session, school, permission).ok;
+  const quizSessionsAccess = getFeatureAccess(
+    permission,
+    "quiz_sessions",
+    opts,
+  );
+  const canAddStudent = getStudentAdditionAccessFromPermission(
+    session,
+    school,
+    permission,
+  ).ok;
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
@@ -245,17 +262,29 @@ export default async function SchoolPage({ params }: PageProps) {
     ]);
 
   // Separate active and dropout students (all students visible; editability is per-row)
-  const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
-  const dropoutStudents = dedupedStudents.filter((s) => s.status === "dropout");
+  const activeStudents = dedupedStudents.filter(
+    (s) =>
+      s.status !== "dropout" &&
+      PROGRAM_IDS_ORDERED.some((programId) =>
+        studentHasCurrentProgram(s, programId),
+      ),
+  );
+  const dropoutStudents = dedupedStudents.filter(
+    (s) => s.status === "dropout" || (s.dropout_program_ids?.length ?? 0) > 0,
+  );
 
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
 
   // Programs that have at least one active student at this school
   const programsWithStudents = new Set(
-    activeStudents
-      .map((s) => (s.program_id != null ? Number(s.program_id) : null))
-      .filter((v): v is number => v != null)
+    PROGRAM_IDS_ORDERED.filter((programId) =>
+      dedupedStudents.some(
+        (student) =>
+          studentHasCurrentProgram(student, programId) ||
+          studentDroppedFromProgram(student, programId),
+      ),
+    ),
   );
 
   // Programs the user is allowed to see for the enrollment cards.
@@ -265,17 +294,21 @@ export default async function SchoolPage({ params }: PageProps) {
   // so a teacher seated at a centre sees that centre's program even when their
   // explicit program_ids is empty.
   const isAdmin = permission?.role === "admin";
-  const visibleProgramSet = new Set((isPasscodeUser || isAdmin
-    ? PROGRAM_IDS_ORDERED
-    : programContext.programIds
-  ).filter((id) => programsWithStudents.has(id)));
+  const visibleProgramSet = new Set(
+    (isPasscodeUser || isAdmin
+      ? PROGRAM_IDS_ORDERED
+      : programContext.programIds
+    ).filter((id) => programsWithStudents.has(id)),
+  );
 
   if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
 
-  const visibleProgramIds = PROGRAM_IDS_ORDERED.filter((id) => visibleProgramSet.has(id));
+  const visibleProgramIds = PROGRAM_IDS_ORDERED.filter((id) =>
+    visibleProgramSet.has(id),
+  );
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
-    buildProgramStats(activeStudents, id)
+    buildProgramStats(activeStudents, id),
   );
 
   // Check if user has access to multiple schools (to show/hide back arrow)
@@ -294,17 +327,28 @@ export default async function SchoolPage({ params }: PageProps) {
         <div className="max-w-3xl mx-auto mb-4">
           <details className="bg-amber-50 border border-amber-200 rounded-lg">
             <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
-              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
+              {dataIssues.length} data{" "}
+              {dataIssues.length === 1 ? "issue" : "issues"} found
             </summary>
             <div className="px-4 pb-3 space-y-2">
               {dataIssues.map((issue) => (
-                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
+                <div
+                  key={issue.groupUserId}
+                  className="flex items-start gap-2 text-sm text-amber-700"
+                >
                   <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+                      />
                     </svg>
                   </span>
-                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
+                  <span>
+                    <strong>{issue.studentName}</strong>: {issue.details}
+                  </span>
                 </div>
               ))}
             </div>
@@ -319,6 +363,14 @@ export default async function SchoolPage({ params }: PageProps) {
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
         canEditStudent={canAddStudent}
+        canDropoutStudent={
+          studentsAccess.canEdit &&
+          !isPasscodeUser &&
+          ["admin", "program_manager", "program_admin"].includes(
+            permission?.role ?? "",
+          )
+        }
+        dropoutProgramIds={(school.centre_program_ids ?? []).map(Number)}
         canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}
@@ -347,7 +399,10 @@ export default async function SchoolPage({ params }: PageProps) {
   );
 
   const quizSessionsContent = (
-    <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />
+    <QuizSessionsTab
+      schoolId={school.id}
+      canEdit={quizSessionsAccess.canEdit}
+    />
   );
 
   const curriculumContent = (
@@ -361,11 +416,33 @@ export default async function SchoolPage({ params }: PageProps) {
   // Tab visibility driven by feature permission matrix
   const tabs = [
     { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-    ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
-    ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
-    ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
-    ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
+    ...(curriculumAccess.canView
+      ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }]
+      : []),
+    ...(performanceAccess.canView
+      ? [
+          {
+            id: "performance",
+            label: "Performance",
+            content: performanceContent,
+          },
+        ]
+      : []),
+    ...(quizSessionsAccess.canView
+      ? [
+          {
+            id: "quiz_sessions",
+            label: "Quiz Sessions",
+            content: quizSessionsContent,
+          },
+        ]
+      : []),
+    ...(mentorshipAccess.canView
+      ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }]
+      : []),
+    ...(visitsAccess.canView
+      ? [{ id: "visits", label: "School Visits", content: visitsContent }]
+      : []),
   ];
 
   return (
@@ -374,7 +451,11 @@ export default async function SchoolPage({ params }: PageProps) {
         title={school.name}
         subtitle={subtitle}
         backHref={backHref}
-        userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
+        userEmail={
+          isPasscodeUser
+            ? `School ${passcodeSchoolCode}`
+            : session.user?.email || undefined
+        }
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">

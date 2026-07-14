@@ -3,10 +3,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
-import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
+import { requireStudentProgramDropoutAccess } from "@/lib/student-addition-access";
+import { PROGRAM_IDS_ORDERED } from "@/lib/constants";
 
 interface DropoutPayload {
   student_pk_id?: string | number;
+  program_id?: string | number;
 }
 
 interface DropoutStudentRow {
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
   try {
     const body: DropoutPayload = await request.json();
     const studentPkId = Number(body.student_pk_id);
+    const programId = Number(body.program_id);
 
     if (!Number.isInteger(studentPkId) || studentPkId <= 0) {
       return NextResponse.json(
@@ -50,9 +53,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const access = await requireStudentAdditionStudentAccess(session, studentPkId);
+    if (
+      !Number.isInteger(programId) ||
+      !PROGRAM_IDS_ORDERED.includes(programId)
+    ) {
+      return NextResponse.json(
+        { error: "program_id is required" },
+        { status: 400 },
+      );
+    }
+
+    const access = await requireStudentProgramDropoutAccess(
+      session,
+      studentPkId,
+      programId,
+    );
     if (!access.ok) {
-      return NextResponse.json({ error: access.error }, { status: access.status });
+      return NextResponse.json(
+        { error: access.error },
+        { status: access.status },
+      );
     }
 
     const matches = await resolveDropoutStudent(studentPkId);
@@ -79,7 +99,10 @@ export async function POST(request: NextRequest) {
     const dbServiceUrl = process.env.DB_SERVICE_URL?.replace(/\/+$/, "");
     const dbServiceToken = process.env.DB_SERVICE_TOKEN;
     if (!dbServiceUrl || !dbServiceToken) {
-      return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
+      return NextResponse.json(
+        { error: "DB Service is not configured" },
+        { status: 500 },
+      );
     }
 
     const requestBody: Record<string, string> = deriveLmsEnrollmentPeriod();
@@ -129,7 +152,10 @@ export async function POST(request: NextRequest) {
     if (errorText.includes("expected at most one result but got")) {
       return NextResponse.json(
         {
-          error: identifierError(student.student_id ?? undefined, student.apaar_id ?? undefined),
+          error: identifierError(
+            student.student_id ?? undefined,
+            student.apaar_id ?? undefined,
+          ),
         },
         { status: 400 },
       );
