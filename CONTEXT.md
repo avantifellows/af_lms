@@ -177,8 +177,8 @@ A Student assigned to a Holistic Mentor.
 _Avoid_: Academic Mentee, learner, advisee
 
 **Holistic Mentor-Mentee Mapping**:
-An assignment connecting one Holistic Mentor to one Holistic Mentee without implying an Academic Mentor-Mentee Mapping.
-_Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
+An academic-year assignment connecting one eligible Holistic Mentor to one eligible Holistic Mentee at one launch School and Program, with prior assignments retained as history.
+_Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen assignment
 
 ## Relationships
 
@@ -297,8 +297,17 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping
 - Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
 - Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
-- An eligible Teacher can assign an unmapped Student to themselves, reassign another Mentor's Mentee to themselves, and remove their own Mentee assignment from the Mentorship Tab
-- A Holistic Mentee has at most one active **Holistic Mentor-Mentee Mapping** at a time
+- A Student is eligible to be a **Holistic Mentee** when they are a non-dropout current Grade 11 or 12 Student, roster-attributed to Program 1, at the same launch School as the eligible Teacher; Student Profile completion, historical-note availability, and Phase state do not affect Mapping eligibility
+- Holistic Mentor eligibility is not Grade-scoped, and v1 places no maximum on a Mentor's active Mentee count
+- An eligible Teacher can bulk-assign unmapped Students to themselves, reassign another Mentor's Mentees to themselves, and remove their own Mentee assignments from the Mentorship Tab
+- V1 has no Mapping CSV import or Admin assignment path, and historical source Mentor details do not create live **Holistic Mentor-Mentee Mappings**
+- A Holistic Mentee has at most one active **Holistic Mentor-Mentee Mapping** per academic year
+- Reassignment and removal require confirmation but no approval, notification, or entered reason; a stale concurrent action fails and reloads current state, and a bulk mutation changes every selected Student or none
+- **Holistic Mentor-Mentee Mappings** retain their School, Program, academic year, Mentor, Student, start/end times, action actor or system source, and end reason as history; v1 has no separate Mapping-history view or export
+- At academic-year rollover, an active **Holistic Mentor-Mentee Mapping** creates a new-year Mapping only when both Mentor and Mentee remain eligible at the same School; the prior-year Mapping remains as history
+- Losing Mentor eligibility automatically ends affected active Mappings, makes those Students unassigned, and removes the former Mentor's access without blocking the staff change
+- A Mentee becoming ineligible automatically ends the active Mapping while preserving Mapping and Notes history; v1 has no cross-School transfer workflow
+- Hard-deleting a User is blocked when Holistic Mapping or authored-Notes history exists
 - Only a Holistic Mentee's currently assigned **Holistic Mentor** can draft and submit that Mentee's Post-Session Notes
 - A Holistic Mentee's currently assigned **Holistic Mentor** may read prior submitted Post-Session Notes for that Mentee but may edit only Notes they authored; a former Mentor loses access after reassignment, Admins remain read-only, and no reopen workflow is required
 - Program Managers, Program Admins, and passcode users have no Holistic Mentorship access in v1
