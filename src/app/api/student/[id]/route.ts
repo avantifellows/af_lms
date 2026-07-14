@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
+import { STUDENT_DOB_MAX, STUDENT_DOB_MIN } from "@/lib/student-addition-fields";
 
 interface StudentUpdatePayload {
   // user-table fields
@@ -45,6 +46,25 @@ function editablePayload(body: Record<string, unknown>): StudentUpdatePayload {
     }
     return payload;
   }, {});
+}
+
+function validateEditablePayload(fields: StudentUpdatePayload) {
+  if (fields.phone !== undefined && (typeof fields.phone !== "string" || !/^\d{10}$/.test(fields.phone))) {
+    return { error: "Parents Phone Number must be exactly 10 digits", field_errors: { phone: "Parents Phone Number must be exactly 10 digits" } };
+  }
+  if (
+    fields.date_of_birth !== undefined &&
+    (typeof fields.date_of_birth !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(fields.date_of_birth) ||
+      fields.date_of_birth < STUDENT_DOB_MIN ||
+      fields.date_of_birth > STUDENT_DOB_MAX)
+  ) {
+    return { error: "Date of Birth must be between 2000 and 2015", field_errors: { date_of_birth: "Date of Birth must be between 2000 and 2015" } };
+  }
+  if (fields.grade !== undefined && ![11, 12].includes(fields.grade)) {
+    return { error: "Grade must be 11 or 12", field_errors: { grade: "Grade must be 11 or 12" } };
+  }
+  return null;
 }
 
 // fallow-ignore-next-line complexity
@@ -119,10 +139,17 @@ export async function PATCH(
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
     }
 
-    const body = await request.json();
-    const fields = editablePayload(body);
+    const body: unknown = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
+    }
+    const fields = editablePayload(body as Record<string, unknown>);
     if (Object.keys(fields).length === 0) {
       return NextResponse.json({ error: "No editable fields provided" }, { status: 400 });
+    }
+    const validationError = validateEditablePayload(fields);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 422 });
     }
 
     const response = await fetch(

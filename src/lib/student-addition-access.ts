@@ -62,6 +62,7 @@ interface StudentWriteScopeRow {
   udise_code: string | null;
   region: string | null;
   centre_program_ids: Array<number | string> | null;
+  has_nvs_enrollment: boolean;
 }
 
 function deny(status: 401 | 403, error = "Forbidden"): { ok: false; status: 401 | 403; error: string } {
@@ -138,18 +139,27 @@ async function getStudentWriteScope(studentPkId: number | string) {
        COALESCE(
          ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
          ARRAY[]::int[]
-       ) AS centre_program_ids
+       ) AS centre_program_ids,
+       EXISTS (
+         SELECT 1
+         FROM enrollment_record er_batch
+         JOIN batch b ON b.id = er_batch.group_id
+         WHERE er_batch.user_id = s.user_id
+           AND er_batch.group_type = 'batch'
+           AND er_batch.is_current = true
+           AND b.program_id = $2
+       ) AS has_nvs_enrollment
      FROM student s
-     JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
-     JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
-     JOIN school sch ON sch.id = g_sch.child_id
+     JOIN enrollment_record er_school ON er_school.user_id = s.user_id
+       AND er_school.group_type = 'school'
+       AND er_school.is_current = true
+     JOIN school sch ON sch.id = er_school.group_id
      LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
      WHERE s.id = $1
-     GROUP BY sch.code, sch.udise_code, sch.region
-     LIMIT 1`,
-    [studentPkId],
+     GROUP BY sch.code, sch.udise_code, sch.region, s.user_id`,
+    [studentPkId, PROGRAM_IDS.NVS],
   );
-  return rows[0] ?? null;
+  return rows.length === 1 ? rows[0] : null;
 }
 
 // fallow-ignore-next-line complexity
@@ -175,6 +185,7 @@ export async function requireStudentAdditionStudentAccess(
   }
 
   if (!hasNvsCentreContext(scope)) return deny(403);
+  if (!scope.has_nvs_enrollment) return deny(403);
   if (!actorHasNvsProgramAccess(permission)) return deny(403);
 
   return {

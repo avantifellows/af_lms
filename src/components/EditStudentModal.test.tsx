@@ -151,16 +151,9 @@ describe("EditStudentModal", () => {
     expect(body).toEqual({
       first_name: "Ravi Updated",
       last_name: "",
-      phone: "9876543210",
       gender: "Others",
-      date_of_birth: "2008-05-15",
-      category: "OBC",
       physically_handicapped: true,
       stream: "medical",
-      board_stream: "PCM",
-      father_name: "Suresh Kumar",
-      annual_family_income: "Less than Rs. 1,00,000",
-      g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
       grade: 12,
     });
     expect(body).not.toHaveProperty("student_id");
@@ -182,6 +175,40 @@ describe("EditStudentModal", () => {
     await user.click(screen.getByText("Save Changes"));
 
     expect(await screen.findByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("sends only the changed profile field", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "9999999999");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ phone: "9999999999" });
+  });
+
+  it("does not submit when nothing changed", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(await screen.findByText("No changes to save")).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("enforces the student DOB range", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    fireEvent.change(getByName("date_of_birth"), { target: { value: "2016-01-01" } });
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(await screen.findByText("Date of Birth must be between 2000 and 2015")).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -227,6 +254,8 @@ describe("EditStudentModal", () => {
       json: async () => ({ error: "Student not found" }),
     });
 
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "9999999999");
     await user.click(screen.getByText("Save Changes"));
 
     expect(await screen.findByText("Student not found")).toBeInTheDocument();

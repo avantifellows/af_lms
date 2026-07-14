@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-07
+last_updated: 2026-07-14
 ---
 
 # Student Addition
@@ -92,7 +92,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes, the selected program is `PROGRAM_IDS.NVS`, and the school has an active NVS centre mapping; the modals live in `src/components/enrollment/AddStudentModal.tsx` and `src/components/enrollment/BulkStudentUploadModal.tsx`.
 - `AddStudentModal` reuses the shared validation helper and shows touched-field errors inline, including APAAR ID, G10 roll length, parent phone length, DOB range, required dropdowns, and the APAAR-or-G10 identity requirement. The one-by-one form groups fields into Student Details, Grade 10 Info, Stream, and Family Details; marks required fields with `*`; marks APAAR/G10 roll with `#` plus a bottom note that one of them is compulsory; uses a searchable G10 board datalist; caps parent phone at 10 digits, APAAR at 12 digits, CBSE G10 roll at 8 digits, and other-board G10 roll at 10 characters; and resets whenever the modal closes. Successful creation closes the modal and shows a Student ID popup with an option to add another student before refreshing the roster.
-- Existing-student edit now uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The edit modal uses the PRD field contract, initializes the name input from existing `first_name + last_name`, filters parent phone to 10 digits and Father Name to letters/spaces while typing, forwards `last_name` as empty so stale split names are cleared, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service G10-board conflicts next to the G10 board field.
+- Existing-student edit uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The gate requires one current school and a current NVS batch in addition to active-centre, actor-program, role, feature, and school scope checks. The edit modal sends only changed fields, forwards `last_name` as empty only when the name changes, validates changed phone/DOB values, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service field conflicts inline.
 - Dropout now accepts only `student_pk_id` from the UI, authorizes with the shared Student Addition existing-student gate before route-level lookup, derives `start_date` and `academic_year` server-side, and proxies LMS `POST /api/student/dropout` to DB Service `PATCH /api/dropout`.
 - DB Service dropout ends current grade/batch enrollments but leaves the group memberships. `getSchoolRoster` therefore keeps same-academic-year dropout rows by using their latest historical grade/batch enrollment for display/program attribution.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
@@ -118,6 +118,8 @@ Final PRD decision:
 - Existing matches never update records. APAAR match or generated Student ID match returns `already_exists`; if those identifiers point to different students, return `rejected`.
 - Each created row is transactional across user, student, auth-group enrolment, school enrolment, batch enrolment, and grade enrolment.
 - Re-upload is idempotent: already-created rows return `already_exists`, with no duplicate and no overwrite.
+
+Existing-student edit is atomic and program-scoped: DB Service uses active `centres` eligibility, requires exactly one current batch for the requested program, replaces only that program's batch enrollment/group membership, and leaves other programs untouched. It compares submitted grade/stream values to current values before planning enrollment changes, derives the graduating year from `academic_year`, and rejects invalid phone/DOB values at the service boundary.
 
 DB Service work still needed:
 - Add `g10_board` and `g10_roll_no` columns to `student`, cast them in `Dbservice.Users.Student`, and include them in JSON/swagger if the API returns them.

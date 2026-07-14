@@ -11,6 +11,8 @@ import {
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
   GENDER_OPTIONS,
+  STUDENT_DOB_MAX,
+  STUDENT_DOB_MIN,
 } from "@/lib/student-addition-fields";
 
 export interface Batch {
@@ -63,6 +65,24 @@ function fullName(student: Student) {
   return [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
 }
 
+function initialFormData(student: Student) {
+  const legacyCategory = legacyPwdCategory(student.category);
+  return {
+    first_name: fullName(student),
+    phone: student.phone || "",
+    gender: student.gender || "",
+    date_of_birth: formatDateForInput(student.date_of_birth),
+    category: legacyCategory.category,
+    physically_handicapped: Boolean(student.physically_handicapped ?? legacyCategory.pwd),
+    stream: student.stream || "",
+    board_stream: student.board_stream || "",
+    father_name: student.father_name || "",
+    annual_family_income: student.annual_family_income || "",
+    g10_board: student.g10_board || "",
+    grade: student.grade ? String(student.grade) : "",
+  };
+}
+
 const inputClassName =
   "mt-1 block w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted transition-colors";
 const labelClassName = "block text-sm font-medium text-text-secondary";
@@ -85,21 +105,8 @@ export default function EditStudentModal({
   onSave,
   grades,
 }: EditStudentModalProps) {
-  const legacyCategory = legacyPwdCategory(student.category);
-  const [formData, setFormData] = useState({
-    first_name: fullName(student),
-    phone: student.phone || "",
-    gender: student.gender || "",
-    date_of_birth: formatDateForInput(student.date_of_birth),
-    category: legacyCategory.category,
-    physically_handicapped: Boolean(student.physically_handicapped ?? legacyCategory.pwd),
-    stream: student.stream || "",
-    board_stream: student.board_stream || "",
-    father_name: student.father_name || "",
-    annual_family_income: student.annual_family_income || "",
-    g10_board: student.g10_board || "",
-    grade: student.grade ? String(student.grade) : "",
-  });
+  const initialData = initialFormData(student);
+  const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -127,31 +134,48 @@ export default function EditStudentModal({
       return;
     }
 
-    if (formData.phone && !/^\d{10}$/.test(formData.phone.replace(/\s/g, ""))) {
+    const changed = Object.fromEntries(
+      Object.entries(formData).filter(([field, value]) =>
+        value !== initialData[field as keyof typeof initialData]
+      ),
+    );
+
+    if (Object.keys(changed).length === 0) {
+      setError("No changes to save");
+      setLoading(false);
+      return;
+    }
+
+    if ("phone" in changed && !/^\d{10}$/.test(formData.phone)) {
       setError("Parents Phone Number must be exactly 10 digits");
       setLoading(false);
       return;
     }
 
+    if (
+      "date_of_birth" in changed &&
+      (formData.date_of_birth < STUDENT_DOB_MIN || formData.date_of_birth > STUDENT_DOB_MAX)
+    ) {
+      setFieldErrors({ date_of_birth: "Date of Birth must be between 2000 and 2015" });
+      setLoading(false);
+      return;
+    }
+
+    if ("grade" in changed && !["11", "12"].includes(formData.grade)) {
+      setFieldErrors({ grade: "Grade must be 11 or 12" });
+      setLoading(false);
+      return;
+    }
+
+    const payload: Record<string, unknown> = { ...changed };
+    if ("first_name" in changed) payload.last_name = "";
+    if ("grade" in changed) payload.grade = formData.grade ? Number(formData.grade) : undefined;
+
     try {
       const response = await fetch(`/api/student/${student.student_pk_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          first_name: formData.first_name,
-          last_name: "",
-          phone: formData.phone,
-          gender: formData.gender,
-          date_of_birth: formData.date_of_birth,
-          category: formData.category,
-          physically_handicapped: formData.physically_handicapped,
-          stream: formData.stream,
-          board_stream: formData.board_stream,
-          father_name: formData.father_name,
-          annual_family_income: formData.annual_family_income,
-          g10_board: formData.g10_board,
-          grade: formData.grade ? Number(formData.grade) : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -326,7 +350,7 @@ export default function EditStudentModal({
           </div>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {error && (
               <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
@@ -343,6 +367,8 @@ export default function EditStudentModal({
                   <input
                     type="date"
                     name="date_of_birth"
+                    min={STUDENT_DOB_MIN}
+                    max={STUDENT_DOB_MAX}
                     value={formData.date_of_birth}
                     onChange={handleChange}
                     className={inputClassName}

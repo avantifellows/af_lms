@@ -75,6 +75,7 @@ beforeEach(() => {
       udise_code: "12345678901",
       region: "South",
       centre_program_ids: [PROGRAM_IDS.NVS],
+      has_nvs_enrollment: true,
     },
   ]);
 });
@@ -226,6 +227,7 @@ describe("requireStudentAdditionStudentAccess", () => {
             udise_code: "12345678901",
             region: "South",
             centre_program_ids: [PROGRAM_IDS.COE],
+            has_nvs_enrollment: true,
           },
         ]),
     ],
@@ -246,6 +248,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [PROGRAM_IDS.NVS],
+        has_nvs_enrollment: true,
       },
     ]);
 
@@ -279,6 +282,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [],
+        has_nvs_enrollment: true,
         program_ids: [PROGRAM_IDS.NVS],
         student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
       },
@@ -297,7 +301,25 @@ describe("requireStudentAdditionStudentAccess", () => {
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [],
+        has_nvs_enrollment: true,
         student_program_ids: [PROGRAM_IDS.NVS],
+      },
+    ]);
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+
+  it("blocks a non-NVS student at a school with an active NVS centre", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockQuery.mockResolvedValue([
+      {
+        code: "JNV001",
+        udise_code: "12345678901",
+        region: "South",
+        centre_program_ids: [PROGRAM_IDS.NVS],
+        has_nvs_enrollment: false,
       },
     ]);
 

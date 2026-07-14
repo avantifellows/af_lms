@@ -153,6 +153,21 @@ describe("PATCH /api/student/[id]", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [{ phone: "123" }, "Parents Phone Number must be exactly 10 digits"],
+    [{ date_of_birth: "2016-01-01" }, "Date of Birth must be between 2000 and 2015"],
+    [{ grade: 10 }, "Grade must be 11 or 12"],
+  ])("rejects invalid editable values", async (body, message) => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    const req = jsonRequest("http://localhost/api/student/100", { method: "PATCH", body });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe(message);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when id param is empty", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     const req = jsonRequest("http://localhost/api/student/", {
