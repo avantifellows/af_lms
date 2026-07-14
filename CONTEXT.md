@@ -172,6 +172,14 @@ _Avoid_: Session, fixed phase number
 The single Mentorship Admin-authored Markdown body attached to a Holistic Phase and shown to Mentors beside Student Context.
 _Avoid_: Guidance file, embedded PDF, separate Conversation Guide
 
+**Post-Session Question**:
+An ordered free-text prompt configured on one Holistic Phase and answered through Post-Session Notes.
+_Avoid_: Quiz Question, questionnaire item, rating field
+
+**Post-Session Notes**:
+The single draft-to-submitted answer set authored for one Holistic Mentee and Holistic Phase after the offline mentoring conversation.
+_Avoid_: Session log, multiple interaction entries, Academic Mentorship feedback
+
 **Holistic Student Profile Questionnaire**:
 The Grade-specific Quiz Form whose raw responses are source material for the Holistic Student Profile.
 _Avoid_: legacy reporting record, Academic profile
@@ -296,7 +304,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - A **Holistic Phase** does not store an Admin-controlled first-Phase flag; LMS derives the first Phase as the earliest ordered Phase assigned to each Grade, while per-Student context source and fallback rules are decided separately
 - A **Holistic Phase** has one Open/Active state per Program, academic year, and Grade that applies to every School in that Program; v1 has no School-specific Phase state
 - A **Holistic Phase** cannot be opened until it has a Grade, required short title, valid Phase Guidance, and at least one valid Post-Session Question; the Guidance and Notes lifecycles define their detailed validation
-- In v1, the first persisted Post-Session Notes data for any Mentee marks a **Holistic Phase** as started and freezes its Grade, title, sequence position, Phase Guidance, and Post-Session Questions; Open and Active state changes remain available to Admins
+- In v1, the first successful Post-Session Notes autosave containing a non-empty answer marks a **Holistic Phase** as started and freezes its Grade, title, sequence position, Phase Guidance, and Post-Session Questions; Open and Active state changes remain available to Admins
 - V1 Phase opening and state changes are immediate manual Admin actions with confirmation and actor/time audit; scheduled Phase opening is out of scope
 - V1 stores one complete **Phase Guidance** Markdown body per Phase; it has no separate Phase Overview fields or top-of-page Overview section
 - Mentorship Admins author **Phase Guidance** directly in LMS; v1 has no Markdown-file upload, PDF path, rich-text editor, fixed content template, or runtime placeholder substitution
@@ -306,6 +314,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Phase Guidance** has no separate Publish action: Opening the Phase exposes saved Guidance to Mentors, and saving an Open but unstarted Phase warns the Admin and updates the Mentor view immediately
 - Each **Phase Guidance** Save records mutation actor/time and rejects stale concurrent edits without discarding the second Admin's unsaved text
 - V1 does not retain or expose pre-freeze **Phase Guidance** revisions; each Save replaces current content, the first persisted Notes data freezes the final content with the historical Phase, and Copy Previous Year creates an independent editable copy
+- Each **Holistic Phase** has 1-4 ordered, stable-ID **Post-Session Questions**, all free-text in v1; Admins explicitly Save the current set, and v1 has no question-version browser
+- Before the Phase starts, Admins may add, edit, remove, and reorder **Post-Session Questions**; after the first non-empty Notes draft autosaves, the question set is read-only
 - Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
 - Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
@@ -322,6 +332,15 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Hard-deleting a User is blocked when Holistic Mapping or authored-Notes history exists
 - Only a Holistic Mentee's currently assigned **Holistic Mentor** can draft and submit that Mentee's Post-Session Notes
 - A Holistic Mentee's currently assigned **Holistic Mentor** may read prior submitted Post-Session Notes for that Mentee but may edit only Notes they authored; a former Mentor loses access after reassignment, Admins remain read-only, and no reopen workflow is required
+- V1 has one **Post-Session Notes** answer set per Mentee and Phase; multiple offline conversations update the same set rather than creating separate session records
+- Draft **Post-Session Notes** allow partial answers and autosave with visible state, but opening or viewing a blank form does not persist data or freeze the Phase
+- An unfinished Notes draft is readable only by its author while they remain the current Mentor; Admins see Pending status but not draft content
+- If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form
+- Submitting **Post-Session Notes** requires every configured answer and confirmation, records submitter/time, marks the Mentee's Phase Completed, and exposes the answers to authorized Admins and future assigned Mentors
+- Submitted **Post-Session Notes** are read-only by default; their author while currently assigned may explicitly Edit notes and Save changes with confirmation, without autosave, reopen, resubmit, or changing Completed status
+- **Post-Session Notes** store system-generated first-draft, first-submitted, and last-edited timestamps but no manually entered conversation date
+- V1 stores only the latest official Notes content plus content-free mutation audit events; it has no old-answer snapshots, content-revision browser, or per-read audit
+- Notes writes use first-successful-write concurrency; a stale tab preserves local text but must reload, and stale Submit cannot complete or overwrite newer content
 - Program Managers, Program Admins, and passcode users have no Holistic Mentorship access in v1
 - **Holistic Mentorship Admin** is a dedicated LMS role, not an additive capability combined with another LMS role or a Centre designation
 - An **Admin** automatically receives the same Holistic Mentorship feature access without becoming a **Holistic Mentorship Admin**
