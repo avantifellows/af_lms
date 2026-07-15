@@ -907,16 +907,13 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
   });
 
   test("program-admin-manages-their-own-in-progress-visit", async ({ programAdminPage }) => {
-    const createVisitResponse = await programAdminPage.request.post("/api/pm/visits", {
-      data: {
-        school_code: schoolCode,
-        start_lat: 23.0225,
-        start_lng: 72.5714,
-        start_accuracy: 10,
-      },
-    });
-    expect(createVisitResponse.status()).toBe(201);
-    const { id: visitId } = await createVisitResponse.json();
+    await setGoodGps(programAdminPage);
+    await programAdminPage.goto(`/school/${schoolCode}/visit/new`);
+    const startVisitButton = programAdminPage.getByRole("button", { name: "Start Visit" });
+    await expect(startVisitButton).toBeEnabled();
+    await startVisitButton.click();
+    await expect(programAdminPage).toHaveURL(/\/visits\/\d+$/);
+    const visitId = Number(programAdminPage.url().split("/").pop());
 
     const owner = await pool.query<{ pm_email: string }>(
       "SELECT pm_email FROM lms_pm_school_visits WHERE id = $1",
@@ -934,6 +931,12 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     );
     expect(createActionResponse.status()).toBe(201);
     const { action } = await createActionResponse.json();
+
+    await programAdminPage.goto(`/visits/${visitId}/actions/${action.id}`);
+    await expect(programAdminPage.getByRole("button", { name: "Save Now" })).toBeVisible();
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(programAdminPage.getByRole("button", { name: "Start", exact: true })).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
 
     const saveResponse = await programAdminPage.request.patch(
       `/api/pm/visits/${visitId}/actions/${action.id}`,
