@@ -327,6 +327,17 @@ export default function AddStudentModal({
         body: JSON.stringify(form),
       });
       const body = await response.json();
+      const result = body.results?.[0];
+      if (result?.status === "already_exists") {
+        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
+        return;
+      }
+      if (result?.status === "rejected") {
+        const fieldErrors = result.field_errors ?? {};
+        setServiceFieldErrors(fieldErrors);
+        setError([...(result.row_errors ?? []), ...Object.values(fieldErrors)][0] || "Student was rejected");
+        return;
+      }
       if (!response.ok) {
         const rejected = body.results?.[0];
         const fieldErrors = body.field_errors ?? rejected?.field_errors ?? {};
@@ -340,14 +351,9 @@ export default function AddStudentModal({
         );
       }
 
-      const result = body.results?.[0];
       if (result?.status === "created") {
         onCreated(result.generated_student_id ?? result.normalized?.student_id ?? null);
         onClose();
-      } else if (result?.status === "already_exists") {
-        setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
-      } else if (result?.status === "rejected") {
-        setError([...(result.row_errors ?? []), ...Object.values(result.field_errors ?? {})][0] || "Student was rejected");
       } else {
         setError("Student was not created");
       }

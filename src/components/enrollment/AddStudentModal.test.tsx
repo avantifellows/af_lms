@@ -92,7 +92,7 @@ describe("AddStudentModal", () => {
             },
           ],
         }),
-        { status: 200 },
+        { status: 409 },
       ),
     );
     render(<AddStudentModal {...baseProps} />);
