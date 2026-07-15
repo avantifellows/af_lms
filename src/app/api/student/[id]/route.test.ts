@@ -69,8 +69,9 @@ describe("PATCH /api/student/[id]", () => {
     const req = jsonRequest("http://localhost/api/student/100", {
       method: "PATCH",
       body: {
-        first_name: "Ravi Kumar",
+        first_name: "  ravi..  KUMAR ",
         last_name: "",
+        father_name: " suresh. KUMAR ",
         gender: "Others",
         category: "Gen-EWS",
         physically_handicapped: true,
@@ -115,6 +116,7 @@ describe("PATCH /api/student/[id]", () => {
       academic_year: "2026-2027",
       first_name: "Ravi Kumar",
       last_name: "",
+      father_name: "Suresh Kumar",
       gender: "Other",
       category: "PWD-EWS",
       physically_handicapped: true,
@@ -172,6 +174,7 @@ describe("PATCH /api/student/[id]", () => {
     [{ board_stream: "Science" }, "Board Stream is not valid"],
     [{ category: "Invalid", physically_handicapped: false }, "Category is not valid"],
     [{ physically_handicapped: "Yes" }, "CWSN must be true or false"],
+    [{ annual_family_income: "A lot" }, "Annual Family Income is not valid"],
   ])("rejects invalid editable values", async (body, message) => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     const req = jsonRequest("http://localhost/api/student/100", { method: "PATCH", body });

@@ -487,13 +487,10 @@ export default function StudentTable({
   const canEditNvsStudent = (student: Student): boolean => {
     if (!canEdit) return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
-    const programId =
-      student.program_id == null ? null : Number(student.program_id);
     const hasNvsBatch = (student.student_program_ids ?? [])
       .map(Number)
       .includes(PROGRAM_IDS.NVS);
-    if (!hasNvsBatch && programId !== null && programId !== PROGRAM_IDS.NVS)
-      return false;
+    if (!hasNvsBatch) return false;
     if (isAdmin) return true;
     if (!userProgramIds || userProgramIds.length === 0) return false;
     return userProgramIds.includes(PROGRAM_IDS.NVS);

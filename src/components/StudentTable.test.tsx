@@ -79,7 +79,9 @@ function makeStudent(overrides: StudentOverrides = {}) {
     program_id: has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS,
     student_program_ids: has("student_program_ids")
       ? overrides.student_program_ids!
-      : null,
+      : [has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS].filter(
+          (programId): programId is number => programId !== null,
+        ),
     grade: has("grade") ? overrides.grade! : 10,
     grade_id: has("grade_id") ? overrides.grade_id! : "g-10",
     status: has("status") ? overrides.status! : "active",
@@ -632,8 +634,8 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("non-admin can edit student with null program_id", () => {
-    const student = makeStudent({ program_id: null });
+  it("hides Edit when the roster has no current NVS Batch", () => {
+    const student = makeStudent({ program_id: null, student_program_ids: [] });
     render(
       <StudentTable
         students={[student]}
@@ -644,7 +646,7 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("non-admin with NVS program access can edit NVS students", () => {

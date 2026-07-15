@@ -2,10 +2,45 @@ import { describe, expect, it } from "vitest";
 
 import {
   CBSE_BOARD,
+  canonicalizeStudentEditPayload,
   formatStudentAdditionExistingMatch,
   generateStudentId,
   validateStudentAdditionInput,
 } from "./student-addition-fields";
+
+describe("canonicalizeStudentEditPayload", () => {
+  it("normalizes partial edit fields with the canonical student contract", () => {
+    expect(canonicalizeStudentEditPayload({
+      first_name: "  ravi..  KUMAR ",
+      father_name: " suresh. KUMAR ",
+      gender: "Others",
+      category: "Gen-EWS",
+      physically_handicapped: true,
+      g10_board: "Others",
+    })).toEqual({
+      ok: true,
+      fields: {
+        first_name: "Ravi Kumar",
+        father_name: "Suresh Kumar",
+        gender: "Other",
+        category: "PWD-EWS",
+        physically_handicapped: true,
+        g10_board: null,
+      },
+    });
+  });
+
+  it("rejects incomplete CWSN/category edits", () => {
+    expect(canonicalizeStudentEditPayload({ physically_handicapped: true })).toEqual({
+      ok: false,
+      error: "CWSN and Category must be updated together",
+      field_errors: {
+        physically_handicapped: "CWSN and Category must be updated together",
+        category: "CWSN and Category must be updated together",
+      },
+    });
+  });
+});
 
 const validInput = {
   grade: "11",
