@@ -64,8 +64,8 @@ const uploadHeaders = [
   "Date of Birth",
   "Gender",
   "Category",
-  "Physical Handicapped / Vikalang",
-  "APAAR ID",
+  "CWSN",
+  "PEN Number",
   "G10 board",
   "Grade 10 Roll no",
   "Board Stream",
@@ -82,7 +82,7 @@ const validUploadRow = [
   "Female",
   "Gen",
   "No",
-  "123456789012",
+  "12345678901",
   "CBSE",
   "12345678",
   "PCM",
@@ -99,7 +99,7 @@ function csvLine(values: string[]) {
 function multipartUploadRequest(
   filename: string,
   contents: string,
-  grade = "11",
+  grade: string | null = "11",
   size = Buffer.from(contents).byteLength,
 ) {
   const bytes = Buffer.from(contents);
@@ -437,6 +437,32 @@ describe("POST /api/school/[udise]/students", () => {
     ]);
   });
 
+  it("proxies mixed-grade rows without multipart Grade metadata", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        totals: { total: 2, created: 2, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+        results: [
+          { row_number: 2, status: "created" },
+          { row_number: 3, status: "created" },
+        ],
+      }), { status: 200 }),
+    );
+    const grade12Row = ["12", ...validUploadRow.slice(1, 6), "12345678902", ...validUploadRow.slice(7)];
+    const csv = [csvLine(uploadHeaders), csvLine(validUploadRow), csvLine(grade12Row)].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv, null) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.rows.map((row: { grade: number; pen_number: string }) => [row.grade, row.pen_number])).toEqual([
+      [11, "12345678901"],
+      [12, "12345678902"],
+    ]);
+  });
+
   it("rejects oversized bulk uploads before buffering the file", async () => {
     const response = await POST(
       multipartUploadRequest(
@@ -501,7 +527,7 @@ describe("GET /api/school/[udise]/students template", () => {
     });
   });
 
-  it("returns a gated xlsx template with the canonical upload columns", async () => {
+  it("returns the gated official workbook unchanged except for Field details", async () => {
     const response = await GET(
       new Request("http://localhost/api/school/12345678901/students") as never,
       routeParams({ udise: "12345678901" }),
@@ -511,12 +537,53 @@ describe("GET /api/school/[udise]/students template", () => {
     expect(response.headers.get("content-type")).toBe(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="nvs-student-addition-template.xlsx"',
+    );
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
     const template = workbook.getWorksheet("Template");
-    expect((template?.getRow(1).values as unknown[]).slice(1)).toEqual(uploadHeaders);
-    expect(template?.getColumn(7).numFmt).toBe("@");
-    expect(template?.getColumn(9).numFmt).toBe("@");
-    expect(workbook.getWorksheet("Options")).toBeDefined();
+    expect((template?.getRow(1).values as unknown[]).slice(1)).toEqual([
+      "Grade",
+      "Student Name",
+      "Date of Birth",
+      "Gender",
+      "Category",
+      "CWSN",
+      "PEN Number",
+      "G10 board",
+      "Grade 10 Roll no",
+      "Board Stream",
+      "Primary Exam preparing for",
+      "Father Name",
+      "Parents Phone Number",
+      "Yearly / Annual Family Income",
+    ]);
+    expect(template?.rowCount).toBe(200);
+    expect(template?.getColumn(1).width).toBe(9);
+    expect(template?.getCell("A1").fill).toEqual(
+      expect.objectContaining({ type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } }),
+    );
+    expect(template?.getCell("A2").dataValidation).toEqual(
+      expect.objectContaining({
+        type: "list",
+        formulae: ["'Dropdown values'!$A$2:$A200"],
+      }),
+    );
+    expect(template?.getCell("G2").dataValidation).toEqual(
+      expect.objectContaining({
+        type: "decimal",
+        operator: "between",
+        formulae: [10000000000, 99999999999],
+      }),
+    );
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      "Template",
+      "Dropdown values",
+    ]);
+    const dropdowns = workbook.getWorksheet("Dropdown values");
+    expect(dropdowns?.getCell("A2").value).toBe(11);
+    expect(dropdowns?.getCell("B4").value).toBe("Other");
+    expect(dropdowns?.getCell("G6").value).toBe("NDA");
   });
 });

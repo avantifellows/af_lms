@@ -1,3 +1,6 @@
+import { readFile } from "fs/promises";
+import path from "path";
+
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
@@ -5,7 +8,6 @@ import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
-  buildStudentAdditionTemplateWorkbook,
   parseStudentAdditionUpload,
   type StudentAdditionUploadRowResult,
 } from "@/lib/student-addition-bulk";
@@ -223,10 +225,6 @@ async function bulkUploadResponse(
 ) {
   const form = await request.formData();
   const file = form.get("file");
-  const selectedGrade = Number(form.get("grade"));
-  if (selectedGrade !== 11 && selectedGrade !== 12) {
-    return NextResponse.json({ error: "Select Grade 11 or 12 before upload" }, { status: 400 });
-  }
   if (!isUploadFile(file)) {
     return NextResponse.json({ error: "Upload a .xlsx or rejected-row .csv file" }, { status: 400 });
   }
@@ -238,7 +236,6 @@ async function bulkUploadResponse(
   const parsed = await parseStudentAdditionUpload({
     filename: uploadFilename(file),
     data: Buffer.from(await file.arrayBuffer()),
-    selectedGrade,
     academicYear: period.academic_year,
   });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -320,11 +317,11 @@ export async function GET(
   const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
 
-  const workbook = await buildStudentAdditionTemplateWorkbook();
+  const workbook = await readFile(path.join(process.cwd(), "src", "assets", "nvs-student-addition-template.xlsx"));
   return new NextResponse(new Uint8Array(workbook), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": 'attachment; filename="lms-student-addition-template.xlsx"',
+      "Content-Disposition": 'attachment; filename="nvs-student-addition-template.xlsx"',
     },
   });
 }

@@ -24,7 +24,12 @@ describe("BulkStudentUploadModal", () => {
         JSON.stringify({
           totals: { total: 2, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
           results: [
-            { row_number: 2, status: "created", generated_student_id: "202812345678" },
+            {
+              row_number: 2,
+              status: "created",
+              generated_student_id: "202712345678",
+              original: { "Student Name": "Created Student", Grade: "12" },
+            },
             {
               row_number: 3,
               status: "rejected",
@@ -46,11 +51,11 @@ describe("BulkStudentUploadModal", () => {
       "href",
       "/api/school/12345678901/students",
     );
-    expect(screen.getByText(/Student ID is generated as/)).toHaveTextContent(
-      "other boards need 4 to 10 characters",
+    expect(screen.getByText(/Each row supplies Grade 11 or 12/)).toHaveTextContent(
+      "PEN or Grade 10 Roll no is required",
     );
 
-    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
+    expect(screen.queryByLabelText("Upload grade")).not.toBeInTheDocument();
     await user.upload(
       screen.getByLabelText("Student upload file"),
       new File(["fake"], "students.xlsx", {
@@ -64,7 +69,12 @@ describe("BulkStudentUploadModal", () => {
       "/api/school/12345678901/students",
       expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
     );
+    const form = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
+    expect(Array.from(form.keys())).toEqual(["file"]);
     expect(screen.getByText("1 done, 1 to go")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Grade" })).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("11")).toBeInTheDocument();
     expect(screen.getByText("Bad Student")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toHaveAttribute(
       "href",
@@ -105,7 +115,6 @@ describe("BulkStudentUploadModal", () => {
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} />);
 
-    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
     await user.upload(
       screen.getByLabelText("Student upload file"),
       new File(["fake"], "students.xlsx", {
@@ -145,7 +154,6 @@ describe("BulkStudentUploadModal", () => {
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} />);
 
-    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
     await user.upload(
       screen.getByLabelText("Student upload file"),
       new File(["fake"], "students.xlsx", {
@@ -163,19 +171,16 @@ describe("BulkStudentUploadModal", () => {
     const { rerender } = render(<BulkStudentUploadModal {...baseProps} />);
     const user = userEvent.setup();
 
-    await user.selectOptions(screen.getByLabelText("Upload grade"), "11");
     await user.upload(
       screen.getByLabelText("Student upload file"),
       new File(["fake"], "students.csv", { type: "text/csv" }),
     );
 
-    expect(screen.getByLabelText("Upload grade")).toHaveValue("11");
     expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 1 }));
 
     rerender(<BulkStudentUploadModal {...baseProps} open={false} />);
     rerender(<BulkStudentUploadModal {...baseProps} open />);
 
-    expect(screen.getByLabelText("Upload grade")).toHaveValue("");
     expect(screen.getByLabelText("Student upload file")).toHaveProperty("files", expect.objectContaining({ length: 0 }));
   });
 });

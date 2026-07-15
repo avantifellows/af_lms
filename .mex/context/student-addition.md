@@ -75,7 +75,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
 - G10 roll normalisation: CBSE preserves an exact eight-digit text value. Others removes non-alphanumerics, uppercases, removes leading zeroes, then requires 4-10 characters.
 - Name normalisation: collapse spaces, remove full stops, proper-case words. Show the normalised value back before commit.
-- The file grade must match the upload context grade.
+- Bulk upload has no separate Grade selector; each nonblank row supplies Grade 11 or 12 and mixed-grade files are valid.
 - Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
 - Auth group is the constant `EnableStudents`.
 
@@ -88,8 +88,9 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - For create/bulk there is no existing student to resolve, so gate by resolved school: Google session -> resolved permission -> allowed role -> `students` `canEdit` -> School/region scope -> actor NVS scope. The create gate does not query or require a Centre and ignores `school.program_ids`; passcode users remain blocked.
 - Slice #157 adds the shared LMS create gate in `src/lib/student-addition-access.ts`, client-safe field/identity helpers in `src/lib/student-addition-fields.ts`, and the IST enrollment date helper in `src/lib/lms-enrollment-date.ts`.
 - One-by-one creation now uses `POST /api/school/[udise]/students`, which validates one canonical row, derives actor/school/program/start-date/academic-year server-side, and proxies DB Service `POST /api/lms/students/bulk-create-with-enrollments` with a single-row payload.
-- Bulk creation also uses `POST /api/school/[udise]/students` with multipart `.xlsx`/`.csv` upload. LMS parses `.xlsx` files with ExcelJS from the first sheet or `Template` sheet, normalises real Excel date cells, validates up to 200 non-blank rows locally, sends accepted rows to the same DB Service endpoint, merges local rejects with DB Service statuses, and returns rejected-row CSV data from the UI.
-- The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
+- Bulk creation also uses `POST /api/school/[udise]/students` with only a multipart `.xlsx`/`.csv` file. LMS parses only the `Template` sheet, normalises real Excel date cells, validates mixed Grade 11/12 files with up to 200 nonblank rows locally, sends accepted rows to the same DB Service endpoint, and merges local rejects with DB Service statuses.
+- `GET /api/school/[udise]/students` serves the checked-in official `src/assets/nvs-student-addition-template.xlsx` after authorization. The asset retains `Template`, `Dropdown values`, formatting, validations, and prepared rows; `Field details` is removed and no runtime workbook is generated.
+- Rejected-row CSV contains only rejected rows, retains original row numbers and canonical PEN inputs, includes safe Student ID/PEN/historical APAAR match context, escapes spreadsheet formulas, and can be uploaded directly through the same parser.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and NVS is selected; the gate is Centre-free.
 - `AddStudentModal` reuses the canonical validator and exposes PEN, CWSN, CBSE/Others, `Other`, and NDA. It shows local and safe upstream field errors inline, previews the generated Student ID, and refreshes the roster after creation.
 - Existing-student edit uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The gate requires one current school and a current NVS batch in addition to active-centre, actor-program, role, feature, and school scope checks. The edit modal sends only changed fields, forwards `last_name` as empty only when the name changes, validates changed phone/DOB values, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service field conflicts inline.
@@ -97,7 +98,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Dropout accepts `student_pk_id` plus the selected `program_id`, authorizes against that exact program, school, role, feature, and active-centre mapping, derives `start_date` and `academic_year` server-side, and proxies LMS `POST /api/student/dropout` to DB Service `PATCH /api/dropout`.
 - LMS-audited DB Service dropout closes only the selected program batch and its group membership. It preserves other program batches, grade, school, and global status; when no current batch remains it applies the existing global dropout flow. Generic non-LMS `/api/dropout` callers retain the existing global behavior.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
-- `csv-parse` and `exceljs` are installed in af_lms for upload parsing/template generation. Do not reintroduce the direct `xlsx` dependency; it was removed during PR review hardening. Rejected-row retry is CSV and should include only `rejected` rows, not skipped/already-existing rows.
+- `csv-parse` and `exceljs` are installed in af_lms for upload parsing. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes only `rejected` rows, not skipped/already-existing rows.
 
 ## DB Service Context
 Repo: `/Users/deepanshmathur/Documents/AF/db-service`.
