@@ -1,1 +1,2 @@
 {"timestamp":"2026-07-15T17:23:36.709Z","kind":"decision","message":"Program Admin Visit edits reuse the existing feature-access resolver and shared ownership policy so read_only, school scope, and every Visit/Action mutation stay consistent.","files":[],"cwd":"."}
+{"timestamp":"2026-07-15T17:43:58.290Z","kind":"decision","message":"Visit completion applies mandatory Action checks only to Program Managers; Admin and Program Admin completion keeps GPS, in-progress Action, atomic race, and idempotency safeguards.","files":[],"cwd":"."}

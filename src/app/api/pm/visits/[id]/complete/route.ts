@@ -125,6 +125,7 @@ export async function POST(
     return apiError(422, "All in-progress action points must be ended before completing visit");
   }
 
+  if (actor.role === "program_manager") {
   const completedClassroomActions = await query<CompletedClassroomActionRow>(
     `SELECT a.id, a.data
      FROM lms_pm_school_visit_actions a
@@ -260,6 +261,8 @@ export async function POST(
       "At least one completed Individual Student Interaction is required to complete visit",
       ["No completed individual_student_discussion action found for this visit"]
     );
+  }
+
   }
 
   const updatedVisit = await query<Pick<VisitAccessRow, "id" | "status" | "completed_at">>(

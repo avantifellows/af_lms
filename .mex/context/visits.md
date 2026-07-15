@@ -27,6 +27,12 @@ A Program Manager (PM) or Program Admin opens a visit at an in-scope school, per
 one or more typed "actions" (interactions/observations), then completes the visit. GPS is captured at start/end.
 Visit rows are LMS-owned and written **directly to Postgres** (not the DB Service).
 
+Completion requirements are role-aware: PMs need completed Actions for all six mandatory Action Types
+(all except School Staff Interaction), including a rubric-valid Classroom Observation. Admins may complete
+any in-scope Visit and Program Admins may complete their own Visit with zero Actions. Every role still needs
+valid end GPS and cannot complete while a non-deleted Action is in progress; repeat completion returns the
+stored completion state without changing its GPS or timestamp.
+
 ## DB tables
 - **`lms_pm_school_visits`** — 2-state lifecycle: `in_progress` → `completed` (`completed_at`). Holds `school_code`, `pm_email`, `visit_date` (derived server-side as IST date), start/end GPS columns, `deleted_at` soft delete. No `data` column, no `ended_at`. Ecto timestamps.
 - **`lms_pm_school_visit_actions`** — one row per action: `action_type`, `status` (`pending`/`in_progress`/`completed`), start/end GPS+timestamps, `data` JSONB (the type-specific payload), `deleted_at`.

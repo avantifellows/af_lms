@@ -573,6 +573,11 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
+    await expect(
+      pmPage.getByText(
+        "Complete all required Action Types before completing this Visit. School Staff Interaction is optional."
+      )
+    ).toBeVisible();
     await pmPage.getByRole("button", { name: "Complete Visit" }).click();
 
     await expect(
@@ -794,54 +799,14 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     expect(completePayload.error).toContain("GPS accuracy too low");
   });
 
-  test("admin-can-complete-other-pm-visit-with-same-rules", async ({ adminPage }) => {
+  test("admin-can-complete-other-pm-zero-action-visit", async ({ adminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
-    await seedVisitAction(pool, visitId, {
-      actionType: "principal_interaction",
-      status: "completed",
-      data: buildCompletePrincipalInteractionData(),
-    });
 
     await setGoodGps(adminPage);
     await adminPage.goto(`/visits/${visitId}`);
-    await adminPage.getByRole("button", { name: "Complete Visit" }).click();
-
     await expect(
-      adminPage.getByText("At least one completed classroom observation is required to complete visit")
+      adminPage.getByText("Actions are optional for this Visit. End any in-progress Action before completing.")
     ).toBeVisible();
-
-    await seedVisitAction(pool, visitId, {
-      actionType: "classroom_observation",
-      status: "completed",
-      data: buildCompleteClassroomObservationData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "af_team_interaction",
-      status: "completed",
-      data: buildCompleteAFTeamInteractionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "individual_af_teacher_interaction",
-      status: "completed",
-      data: buildCompleteIndividualTeacherInteractionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "group_student_discussion",
-      status: "completed",
-      data: buildCompleteGroupStudentDiscussionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "individual_student_discussion",
-      status: "completed",
-      data: buildCompleteIndividualStudentDiscussionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "school_staff_interaction",
-      status: "completed",
-      data: buildCompleteSchoolStaffInteractionData(),
-    });
-
-    await adminPage.reload();
     await adminPage.getByRole("button", { name: "Complete Visit" }).click();
     await expect(adminPage.getByText("This visit is completed and read-only.")).toBeVisible();
   });
@@ -965,6 +930,30 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       `/api/pm/visits/${visitId}`
     );
     expect(deleteVisitResponse.status()).toBe(200);
+  });
+
+  test("program-admin-completes-their-own-zero-action-visit", async ({ programAdminPage }) => {
+    const createResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const { id: visitId } = await createResponse.json();
+
+    await setGoodGps(programAdminPage);
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(
+      programAdminPage.getByText(
+        "Actions are optional for this Visit. End any in-progress Action before completing."
+      )
+    ).toBeVisible();
+    await programAdminPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(programAdminPage.getByText("This visit is completed and read-only.")).toBeVisible();
   });
 
   test("program-admin-owned-completed-visit-is-read-only", async ({ programAdminPage }) => {

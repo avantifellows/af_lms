@@ -213,6 +213,9 @@ describe("VisitDetailPage", () => {
 
     expect(screen.getByText("Test School")).toBeInTheDocument();
     expect(screen.getByText("Action Points")).toBeInTheDocument();
+    expect(
+      screen.getByText("Actions are optional for this Visit. End any in-progress Action before completing.")
+    ).toBeInTheDocument();
   });
 
   it("renders action cards and progress", async () => {
@@ -236,6 +239,11 @@ describe("VisitDetailPage", () => {
     expect(screen.getByTestId("delete-visit-button")).toHaveAttribute("data-mode", "detail");
     expect(screen.queryByText("Ended")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Visit" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Complete all required Action Types before completing this Visit. School Staff Interaction is optional."
+      )
+    ).toBeInTheDocument();
   });
 
   it("renders empty action state", async () => {
@@ -285,6 +293,9 @@ describe("VisitDetailPage", () => {
     expect(screen.getByTestId("complete-visit-button")).toBeInTheDocument();
     expect(screen.getByTestId("delete-visit-button")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Action Point" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Actions are optional for this Visit. End any in-progress Action before completing.")
+    ).toBeInTheDocument();
   });
 
   it("keeps another user's visit read-only for program_admin", async () => {
