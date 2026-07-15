@@ -168,6 +168,10 @@ _Avoid_: Evergreen phase configuration, separate mentorship cycle
 A stable item in a Holistic Phase Plan, assigned to Grade 11 or Grade 12, given a required short title, and placed in the Program's full phase sequence. Its displayed `Phase N` number is derived from that order rather than stored as identity.
 _Avoid_: Session, fixed phase number
 
+**Student Context**:
+The live preparation content resolved for one Holistic Mentee and Phase from the Student Profile, earlier submitted Post-Session Notes, or Historical Holistic Notes.
+_Avoid_: Copied context field, raw questionnaire answers, current Phase Notes
+
 **Phase Guidance**:
 The single Mentorship Admin-authored Markdown body attached to a Holistic Phase and shown to Mentors beside Student Context.
 _Avoid_: Guidance file, embedded PDF, separate Conversation Guide
@@ -179,6 +183,10 @@ _Avoid_: Quiz Question, questionnaire item, rating field
 **Post-Session Notes**:
 The single draft-to-submitted answer set authored for one Holistic Mentee and Holistic Phase after the offline mentoring conversation.
 _Avoid_: Session log, multiple interaction entries, Academic Mentorship feedback
+
+**Historical Holistic Notes**:
+Prior-year questionnaire answers migrated from the returning-school Sheet for safely matched current Grade 12 Students. They are legacy Student Context, not canonical Post-Session Notes or evidence of a completed Holistic Phase.
+_Avoid_: Migrated Post-Session Notes, Phase 4 Notes
 
 **Holistic Student Profile Questionnaire**:
 The Grade-specific Quiz Form whose raw responses are source material for the Holistic Student Profile.
@@ -293,7 +301,12 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - V1 does not create a per-read audit trail for Student Profile summaries or Post-Session Notes; it records actor and time for important Holistic mutations without copying sensitive content into audit records
 - A generated Student Profile summary is never edited directly; an assigned Mentor may flag it, a Mentorship Admin or global Admin may request regeneration, and incorrect source answers must be corrected through the source-data process first
 - A Student has one logical **Holistic Student Profile** for their Holistic journey, tied to the exact source Quiz Session; it is available as context at the Student's first real Phase subject to the context-resolution rules, and a Grade 11 entrant keeps that Profile when moving to Grade 12 while the Grade 12 Profile Form is used only for a Student first entering Holistic Mentorship in Grade 12
+- A Student's Profile context remains attached to the earliest ordered Phase assigned to their Holistic entry Grade; joining or first Mapping later in that Grade does not move the Profile to the current Active Phase, and the Mentor may open the earlier Skipped Phase to read it
 - A later Grade 12 Profile Form response never creates or replaces a second logical Profile for a Student who already has a Grade 11 Profile
+- Profile-based Student Context is live: it always renders the output selected by the current Active prompt/model configuration, including after regeneration or an Active configuration change, without storing a Phase snapshot
+- Profile-based Student Context shows each ordered Question Set title with its Active generated summary, including the fixed `No response available` state where applicable; it never shows raw questionnaire answers
+- Student Context identifies its resolved source in the Mentor UI as `Student Profile`, `From Phase N - <Phase title>`, or `Historical notes`
+- Student Context is system-resolved and read-only; Mentors and Admins cannot select, replace, or manually author its source, and v1 has no first-Phase or School override control
 - The generation flow processes any real Program 1 Student who submitted either configured Profile Form without requiring a Mentor-Mentee Mapping; test, unmatched, ambiguous, and out-of-scope identities are excluded before AI processing and reported with a safe reason
 - When more than one submitted source Quiz Session exists for the same Student and configured Profile Form, the flow uses the latest source Session and never merges attempts
 - A **Holistic Student Profile** contains one stored summary per ordered Quiz `question_set`; a Question's priority does not affect inclusion, and a Question Set with no answered Questions gets the fixed `No response available` state without an AI call
@@ -365,6 +378,15 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - If a Mapping ends before Notes submission, LMS warns when applicable, discards the draft content, records a content-free actor/time/reason audit event, and gives the replacement Mentor a blank form
 - Submitting **Post-Session Notes** requires every configured answer and confirmation, records submitter/time, marks the Mentee's Phase Completed, and exposes the answers to authorized Admins and future assigned Mentors
 - Submitted **Post-Session Notes** are read-only by default; their author while currently assigned may explicitly Edit notes and Save changes with confirmation, without autosave, reopen, resubmit, or changing Completed status
+- When Student Context comes from earlier **Post-Session Notes**, LMS uses the latest earlier Phase in Plan order that has submitted Notes, regardless of opening or submission order; intervening Phases without submitted Notes are skipped, drafts never qualify, and a later ordered Phase can never supply context to an earlier one
+- For a continuing Grade 12 Student, that backward search crosses the academic-year boundary into the Student's real Grade 11 history; if Phase 4 has no submitted Notes but Phase 3 does, Phase 5 uses Phase 3 Notes
+- Notes-based Student Context is live: an authorized edit to submitted **Post-Session Notes** immediately updates every later Phase that resolves to those Notes, without storing a separate context snapshot
+- Notes-based Student Context shows every source Phase Question and its latest submitted answer in source order plus the last-updated date; it does not show the authoring Mentor's name in v1
+- If a later Phase has no earlier submitted **Post-Session Notes**, its Student Context shows that no previous session notes are available; the Student Profile is not reused as a later fallback, and missing context never blocks Notes work
+- For the current launch Grade 12 cohort's first real Phase, non-empty **Historical Holistic Notes** take precedence over the Student Profile; Students without any substantive migrated answer see their Profile instead of an empty historical record
+- For those current Grade 12 Students, **Historical Holistic Notes** remain the fallback context in later Phases until a newer applicable Phase has submitted Post-Session Notes
+- Historical Notes-based Student Context shows all four source Questions in their original order; a missing source answer is shown as `No response recorded` rather than omitted or synthesized
+- Historical Notes-based Student Context does not display a legacy Mentor or session date because the source cannot verify those consistently; uncertain source attribution and timestamps remain migration provenance only
 - **Post-Session Notes** store system-generated first-draft, first-submitted, and last-edited timestamps but no manually entered conversation date
 - V1 stores only the latest official Notes content plus content-free mutation audit events; it has no old-answer snapshots, content-revision browser, or per-read audit
 - Notes writes use first-successful-write concurrency; a stale tab preserves local text but must reload, and stale Submit cannot complete or overwrite newer content
