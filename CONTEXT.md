@@ -336,7 +336,7 @@ _Avoid_: Academic Mentorship tab
 > **Domain expert:** "Yes — cascade **soft delete** all child **Actions** in the same transaction. A dangling action with no parent visit makes no sense."
 
 > **Dev:** "Can a **Program Admin** delete a **Visit**?"
-> **Domain expert:** "No — **Program Admins** are read-only. Only the **PM** owner and **Admins** can delete."
+> **Domain expert:** "Yes, but only their own in-progress Visit. Visits started by another user and completed Visits remain read-only to a **Program Admin**."
 
 > **Dev:** "Can a completed **Visit** be deleted?"
 > **Domain expert:** "No — completed visits are auditable records. Only `in_progress` visits can be deleted."
@@ -348,7 +348,7 @@ _Avoid_: Academic Mentorship tab
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
 - The source `program` column maps to **Centre Stream**, not **Program** or **Exam Track**; it should be stored as an array, not a comma-separated string.
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
-- "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
+- "admin" vs "program_admin": These are distinct roles. An `admin` may manage any scoped Visit; a `program_admin` may manage only their own in-progress Visits and otherwise has scoped read access. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
 - "mentorship" as a UI label vs permission key: the School page tab stays **Mentorship Tab** as an umbrella, while the internal feature key and domain term are **Academic Mentorship** / `academic_mentorship`.
 - "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.
