@@ -205,6 +205,7 @@ const makeSchool = (overrides = {}) => ({
   district: "Bhavnagar",
   state: "Gujarat",
   region: "West",
+  af_school_category: "JNV",
   centre_program_ids: [64],
   ...overrides,
 });

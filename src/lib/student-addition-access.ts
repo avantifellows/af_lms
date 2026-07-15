@@ -20,6 +20,7 @@ export interface StudentAdditionSchool {
   code: string;
   udise_code: string | null;
   region: string | null;
+  af_school_category: string | null;
   centre_program_ids?: Array<number | string> | null;
 }
 
@@ -71,6 +72,7 @@ interface StudentWriteScopeRow {
   code: string;
   udise_code: string | null;
   region: string | null;
+  af_school_category: string | null;
   has_program_enrollment: boolean;
   centre_program_ids?: Array<number | string> | null;
 }
@@ -112,6 +114,7 @@ async function getStudentProgramDropoutScope(
        sch.code,
        sch.udise_code,
        sch.region,
+       sch.af_school_category,
        COALESCE(
          ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
          ARRAY[]::int[]
@@ -130,7 +133,7 @@ async function getStudentProgramDropoutScope(
      JOIN school sch ON sch.id = er_school.group_id
      LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
      WHERE s.id = $1
-     GROUP BY sch.code, sch.udise_code, sch.region, s.user_id`,
+     GROUP BY sch.code, sch.udise_code, sch.region, sch.af_school_category, s.user_id`,
     [studentPkId, programId],
   );
   return rows.length === 1 ? rows[0] : null;
@@ -181,6 +184,7 @@ export function getStudentAdditionAccessFromPermission(
 
   const email = session.user?.email;
   if (!email || !permission) return deny(403);
+  if (school.af_school_category !== "JNV") return deny(403);
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined))
     return deny(403);
@@ -216,6 +220,7 @@ async function getStudentEditScope(
        sch.code,
        sch.udise_code,
        sch.region,
+       sch.af_school_category,
        EXISTS (
          SELECT 1
          FROM enrollment_record er_batch
@@ -252,6 +257,7 @@ export async function requireStudentAdditionStudentAccess(
 
   const scope = await getStudentEditScope(studentPkId, PROGRAM_IDS.NVS);
   if (!scope) return deny(403);
+  if (scope.af_school_category !== "JNV") return deny(403);
   if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
     if (
       permission.level !== 2 ||

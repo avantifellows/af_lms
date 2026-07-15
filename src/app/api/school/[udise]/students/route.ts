@@ -23,6 +23,7 @@ interface RouteSchool {
   code: string;
   udise_code: string | null;
   region: string | null;
+  af_school_category: string | null;
 }
 
 interface StudentAdditionAccess {
@@ -128,7 +129,8 @@ async function resolveSchoolAndAccess(
        sch.id,
        sch.code,
        sch.udise_code,
-       sch.region
+       sch.region,
+       sch.af_school_category
      FROM school sch
      WHERE sch.udise_code = $1 OR sch.code = $1
      LIMIT 1`,

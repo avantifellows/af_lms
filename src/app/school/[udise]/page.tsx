@@ -38,6 +38,7 @@ interface School {
   district: string;
   state: string;
   region: string | null;
+  af_school_category: string | null;
   centre_program_ids: Array<number | string> | null;
 }
 
@@ -54,6 +55,7 @@ async function getSchoolByCode(code: string): Promise<School | null> {
        s.district,
        s.state,
        s.region,
+       s.af_school_category,
        COALESCE(
          ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
          ARRAY[]::int[]
@@ -65,7 +67,7 @@ async function getSchoolByCode(code: string): Promise<School | null> {
          OR c.id IS NOT NULL
        )
        AND (s.udise_code = $1 OR s.code = $1)
-     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region`,
+     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region, s.af_school_category`,
     [code],
   );
   return schools[0] || null;

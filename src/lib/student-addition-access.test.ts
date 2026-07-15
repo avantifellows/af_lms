@@ -41,6 +41,7 @@ const school = {
   code: "JNV001",
   udise_code: "12345678901",
   region: "South",
+  af_school_category: "JNV",
   centre_program_ids: [PROGRAM_IDS.NVS],
 };
 
@@ -78,6 +79,7 @@ beforeEach(() => {
       code: "JNV001",
       udise_code: "12345678901",
       region: "South",
+      af_school_category: "JNV",
       centre_program_ids: [PROGRAM_IDS.NVS],
       has_program_enrollment: true,
     },
@@ -116,6 +118,17 @@ describe("requireStudentAdditionAccess", () => {
     );
 
     expect(result.ok).toBe(true);
+  });
+
+  it("blocks NVS student addition for a non-JNV school", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission());
+
+    expect(
+      await requireStudentAdditionAccess(session, {
+        ...school,
+        af_school_category: "Other",
+      }),
+    ).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
   it.each(["program_manager", "program_admin"] as const)(
@@ -265,6 +278,7 @@ describe("requireStudentAdditionStudentAccess", () => {
             code: "JNV001",
             udise_code: "12345678901",
             region: "South",
+            af_school_category: "JNV",
             centre_program_ids: [PROGRAM_IDS.COE],
             has_program_enrollment: false,
           },
@@ -321,6 +335,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
+        af_school_category: "JNV",
         centre_program_ids: [PROGRAM_IDS.NVS],
         has_program_enrollment: true,
       },
@@ -329,6 +344,28 @@ describe("requireStudentAdditionStudentAccess", () => {
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
     expect(result.ok).toBe(true);
+  });
+
+  it("blocks editing an NVS student at a non-JNV school", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
+    mockQuery.mockResolvedValue([
+      {
+        code: "SCHOOL001",
+        udise_code: "12345678901",
+        region: "South",
+        af_school_category: "Other",
+        centre_program_ids: [PROGRAM_IDS.NVS],
+        has_program_enrollment: true,
+      },
+    ]);
+
+    expect(await requireStudentAdditionStudentAccess(session, "100")).toEqual({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
   });
 
   it("blocks admins without explicit NVS program scope", async () => {
@@ -359,6 +396,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
+        af_school_category: "JNV",
         centre_program_ids: [],
         has_program_enrollment: false,
         program_ids: [PROGRAM_IDS.NVS],
@@ -380,6 +418,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
+        af_school_category: "JNV",
         centre_program_ids: [],
         has_program_enrollment: true,
         student_program_ids: [PROGRAM_IDS.NVS],
@@ -401,6 +440,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         code: "JNV001",
         udise_code: "12345678901",
         region: "South",
+        af_school_category: "JNV",
         centre_program_ids: [PROGRAM_IDS.NVS],
         has_program_enrollment: false,
       },
