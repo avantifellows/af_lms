@@ -131,8 +131,8 @@ export function getStudentAdditionAccessFromPermission(
   if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined))
     return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
-  if (!hasNvsCentreContext(school)) return deny(403);
-  if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
+  if (!getProgramContextSync(permission).programIds.includes(PROGRAM_IDS.NVS))
+    return deny(403);
 
   return {
     ok: true,

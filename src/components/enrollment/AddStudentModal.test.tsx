@@ -20,9 +20,9 @@ async function fillValidForm() {
   await user.type(screen.getByLabelText("Date of Birth"), "2010-01-02");
   await user.selectOptions(screen.getByLabelText("Gender"), "Female");
   await user.selectOptions(screen.getByLabelText("Category"), "Gen");
-  await user.selectOptions(screen.getByLabelText("Physical Handicapped"), "No");
-  await user.type(screen.getByLabelText("APAAR ID"), "123456789012");
-  await user.type(screen.getByLabelText("G10 board"), CBSE_BOARD);
+  await user.selectOptions(screen.getByLabelText("CWSN"), "No");
+  await user.type(screen.getByLabelText("PEN"), "12345678901");
+  await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
   await user.type(screen.getByLabelText("Grade 10 Roll no"), "1234 5678");
   await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
   await user.selectOptions(screen.getByLabelText("Primary Exam preparing for"), "Engineering");
@@ -39,6 +39,18 @@ describe("AddStudentModal", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubGlobal("fetch", vi.fn());
+  });
+
+  it("shows the revised NVS identity, CWSN, board, gender, and stream controls", () => {
+    render(<AddStudentModal {...baseProps} />);
+
+    expect(screen.getByLabelText("PEN")).toBeInTheDocument();
+    expect(screen.queryByLabelText("APAAR ID")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("CWSN")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "CBSE" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option", { name: "Others" })).toHaveLength(1);
+    expect(screen.getByRole("option", { name: "Other" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "NDA" })).toBeInTheDocument();
   });
 
   it("keeps submit disabled until required fields are valid, previews generated ID, and refreshes after create", async () => {
@@ -94,29 +106,51 @@ describe("AddStudentModal", () => {
     expect(baseProps.onCreated).not.toHaveBeenCalled();
   });
 
-  it("shows APAAR-only rows do not generate Student ID", async () => {
+  it("shows safe upstream field errors", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "Student could not be created",
+          results: [{ field_errors: { pen_number: "PEN already belongs to another Student" } }],
+        }),
+        { status: 409 },
+      ),
+    );
+    render(<AddStudentModal {...baseProps} />);
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("PEN")).toHaveAccessibleDescription(
+        "PEN already belongs to another Student",
+      ),
+    );
+  });
+
+  it("shows PEN-only rows do not generate Student ID", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
     await user.selectOptions(screen.getByLabelText("Grade"), "11");
-    await user.type(screen.getByLabelText("APAAR ID"), "123456789012");
+    await user.type(screen.getByLabelText("PEN"), "12345678901");
 
-    expect(screen.getByText("APAAR-only: no Student ID will be generated.")).toBeInTheDocument();
+    expect(screen.getByText("PEN-only: no Student ID will be generated.")).toBeInTheDocument();
   });
 
   it("filters restricted fields and caps fixed-length numeric inputs", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("APAAR ID"), "abc1234567890123");
-    expect(screen.getByLabelText("APAAR ID")).toHaveValue("123456789012");
+    await user.type(screen.getByLabelText("PEN"), "abc1234567890123");
+    expect(screen.getByLabelText("PEN")).toHaveValue("12345678901");
 
     const rollInput = screen.getByLabelText("Grade 10 Roll no");
     await user.type(screen.getByLabelText("Grade 10 Roll no"), "abc12345678901");
     expect(rollInput).toHaveValue("ABC1234567");
 
     await user.clear(rollInput);
-    await user.type(screen.getByLabelText("G10 board"), CBSE_BOARD);
+    await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
     await user.type(rollInput, "abc123456789");
     expect(rollInput).toHaveValue("12345678");
 
@@ -127,12 +161,11 @@ describe("AddStudentModal", () => {
     expect(screen.getByLabelText("Father Name")).toHaveValue("Ravi ");
   });
 
-  it("shows G10 roll length errors and allows typing in the board field", async () => {
+  it("shows G10 roll length errors for Others", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("G10 board"), "CENTRAL");
-    expect(screen.getByLabelText("G10 board")).toHaveValue("CENTRAL");
+    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
 
     await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC");
     expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("ABC");
@@ -144,7 +177,7 @@ describe("AddStudentModal", () => {
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC123");
-    await user.type(screen.getByLabelText("G10 board"), CBSE_BOARD);
+    await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
 
     expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("123");
     expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
@@ -154,8 +187,8 @@ describe("AddStudentModal", () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("APAAR ID"), "123");
-    expect(screen.getByText("APAAR ID must be exactly 12 digits")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("PEN"), "123");
+    expect(screen.getByText("PEN must be exactly 11 digits and cannot start with zero")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
     expect(screen.getByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
@@ -166,7 +199,7 @@ describe("AddStudentModal", () => {
 
     expect(screen.queryByText("Optional")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Yearly / Annual Family Income")).toBeInTheDocument();
-    expect(screen.getByText(/Either APAAR ID or Grade 10 Roll no is compulsory/)).toBeInTheDocument();
+    expect(screen.getByText(/Either PEN or Grade 10 Roll no is compulsory/)).toBeInTheDocument();
   });
 
   it("resets the form when reopened", async () => {

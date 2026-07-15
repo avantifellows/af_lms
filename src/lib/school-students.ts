@@ -39,6 +39,7 @@ export async function getSchoolRoster(
       u.state,
       u.pincode,
       s.student_id,
+      s.pen_number,
       s.apaar_id,
       s.category,
       s.physically_handicapped,

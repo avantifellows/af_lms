@@ -24,6 +24,7 @@ export interface Student {
   email: string | null;
   date_of_birth: string | null;
   student_id: string | null;
+  pen_number?: string | null;
   apaar_id: string | null;
   category: string | null;
   physically_handicapped?: boolean | null;
@@ -216,6 +217,12 @@ function StudentCard({
             <span className="text-gray-400 text-xs">ID: </span>
             <span className="font-medium text-gray-700">
               {student.student_id || "—"}
+            </span>
+          </div>
+          <div>
+            <span className="text-gray-400 text-xs">PEN: </span>
+            <span className="font-medium text-gray-700">
+              {student.pen_number || "—"}
             </span>
           </div>
           <div>

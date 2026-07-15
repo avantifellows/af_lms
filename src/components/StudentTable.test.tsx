@@ -40,6 +40,7 @@ interface StudentOverrides {
   email?: string | null;
   date_of_birth?: string | null;
   student_id?: string | null;
+  pen_number?: string | null;
   apaar_id?: string | null;
   category?: string | null;
   stream?: string | null;
@@ -69,6 +70,7 @@ function makeStudent(overrides: StudentOverrides = {}) {
       ? overrides.date_of_birth!
       : "2010-05-15",
     student_id: has("student_id") ? overrides.student_id! : "STU001",
+    pen_number: has("pen_number") ? overrides.pen_number! : "12345678901",
     apaar_id: has("apaar_id") ? overrides.apaar_id! : "APAAR001",
     category: has("category") ? overrides.category! : "Gen",
     stream: has("stream") ? overrides.stream! : "science",
@@ -92,6 +94,7 @@ function makeStudent(overrides: StudentOverrides = {}) {
     email: string | null;
     date_of_birth: string | null;
     student_id: string | null;
+    pen_number: string | null;
     apaar_id: string | null;
     category: string | null;
     stream: string | null;
@@ -121,12 +124,13 @@ beforeEach(() => {
 // ─── 1. Renders student cards with correct info ──────────────────────────────
 
 describe("StudentTable - rendering", () => {
-  it("renders student name, grade badge, student_id, apaar_id, and DOB", () => {
+  it("renders Student ID, PEN, historical APAAR, and DOB", () => {
     const student = makeStudent({
       first_name: "Priya",
       last_name: "Patel",
       grade: 9,
       student_id: "S100",
+      pen_number: "12345678901",
       apaar_id: "AP100",
       date_of_birth: "2011-03-20",
     });
@@ -136,6 +140,7 @@ describe("StudentTable - rendering", () => {
     expect(screen.getByText("Priya Patel")).toBeInTheDocument();
     expect(screen.getByText("Grade 9")).toBeInTheDocument();
     expect(screen.getByText("S100")).toBeInTheDocument();
+    expect(screen.getByText("12345678901")).toBeInTheDocument();
     expect(screen.getByText("AP100")).toBeInTheDocument();
     // en-IN format: "20 Mar 2011"
     expect(screen.getByText("20 Mar 2011")).toBeInTheDocument();

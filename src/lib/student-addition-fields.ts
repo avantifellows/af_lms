@@ -1,77 +1,10 @@
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
-export const CBSE_BOARD = "CENTRAL BOARD OF SECONDARY EDUCATION";
-
-export const G10_BOARD_OPTIONS = [
-  "A LEVEL OF GENERAL CERTIFICATE OF EDUCATION, CAMBRIDGE UNIVERSITY (IGSE)",
-  "ALIGARH MUSLIM UNIVERSITY, ALIGARH",
-  "ANDHRA PRADESH BOARD OF INTERMEDIATE EDUCATION",
-  "ANDHRA PRADESH OPEN SCHOOL SOCIETY",
-  "ASSAM HIGHER SECONDARY EDUCATION COUNCIL",
-  "BANASTHALI VIDYAPEETH, RAJASTHAN",
-  "BHARTIYA SHIKSHA BOARD, NOIDA",
-  "BHUTAN HIGHER SECONDARY EDUCATION CERTIFICATE",
-  "BIHAR BOARD OF OPEN SCHOOLING EXAMINATION",
-  "BIHAR INTERMEDIATE EDUCATION COUNCIL (BIHAR SCHOOL EXAMINATION BOARD)",
-  "Board of Open Schooling and Skill Education, Sikkim",
-  "BOARD OF SECONDARY EDUCATION ANDHRA PRADESH",
-  "BOARD OF SECONDARY EDUCATION ASSAM",
-  "BOARD OF SECONDARY EDUCATION, TELANGANA STATE",
-  "CBSE i (CBSE international)",
-  CBSE_BOARD,
-  "CENTRAL INSTITUTE OF BUDDHIST STUDIES (DEEMED UNIVERSITY)",
-  "CHATTISGARH MADHYAMIK SHIKSHA MANDAL (CHHATTISGARH BOARD OF SECONDARY EDUCATION)",
-  "CHHATTISGARH STATE OPEN SCHOOL",
-  "COUNCIL FOR THE INDIAN SCHOOL CERTIFICATE EXAMINATIONS",
-  "Dayalbagh Educational Institute, Agra",
-  "DELHI BOARD OF SCHOOL EDUCATION",
-  "EDEXCEL, LONDON (UK)",
-  "FOREIGN",
-  "GOA BOARD OF SECONDARY AND HIGHER SECONDARY EDUCATION",
-  "GUJARAT SECONDARY AND HIGHER SECONDARY EDUCATION BOARD",
-  "GURUKULA KANGRI VISWAVIDYALAYA",
-  "H P BOARD OF SCHOOL EDUCATION",
-  "HARYANA BOARD OF EDUCATION",
-  "HARYANA OPEN SCHOOL, BHIWANI",
-  "HIGHER SECONDARY EDUCATION BOARD, NEPAL",
-  "INTERNATIONAL BACCALAUREATE",
-  "INTERNATIONAL GENERAL CERTIFICATE OF SECONDARY EDUCATION",
-  "J AND K STATE BOARD OF SCHOOL EDUCATION",
-  "JAMIA MILIA ISLAMIA, NEW DELHI",
-  "JHARKHAND ACADEMIC COUNCIL",
-  "JHARKHAND STATE OPEN SCHOOL",
-  "KARNATAKA BOARD OF PRE UNIVERSITY EDUCATION (KAR SEC EDU EXAM BOARD)",
-  "KERALA BOARD OF HIGHER SECONDARY EDUCATION",
-  "KERALA BOARD OF PUBLIC EXAMINATIONS",
-  "M P STATE OPEN SCHOOL, BHOPAL",
-  "MADHYA PRADESH BOARD OF SECONDARY EDUCATION",
-  "MAHARASTRA STATE BOARD OF SECONDARY AND HIGHER SECONDARY EDUCATION",
-  "MANIPUR COUNCIL OF HIGHER SECONDARY EDUCATION",
-  "MEGHALAYA BOARD OF SECONDARY EDUCATION",
-  "MIZORAM BOARD OF SCHOOL EDUCATION",
-  "NAGALAND BOARD OF SCHOOL EDUCATION",
-  "NATIONAL INSTITUTE OF OPEN SCHOOLING",
-  "ODISHA COUNCIL OF HIGHER SECONDARY EDUCATION (BOARD OF SEC EDU ODISHA)",
-  "PUNJAB SCHOOL EDUCATION BOARD",
-  "RAJASTHAN BOARD OF SECONDARY EDUCATION",
-  "RAJASTHAN STATE OPEN SCHOOL, JAIPUR",
-  "RAJIV GANDHI UNIVERSITY OF KNOWLEDGE TECHNOLOGIES ( RGUKT)",
-  "RASHTRIYA SANSKRIT SANSTHAN NEW DELHI (DEEMED UNIVERSITY)",
-  "TAMIL NADU BOARD OF HIGHER SECONDARY EDUCATION",
-  "TELANGANA OPEN SCHOOL SOCIETY",
-  "TELANGANA STATE BOARD OF INTERMEDIATE EDUCATION",
-  "TRIPURA BOARD OF SECONDARY EDUCATION",
-  "U P BOARD OF HIGH SCHOOL AND INTERMEDIATE EDUCATION",
-  "UP BOARD OF MADRASA EDUCATION LUCKNOW",
-  "URDU EDUCATION BOARD DELHI",
-  "UTTARAKHAND BOARD SECONDARY EDUCATION",
-  "UTTARANCHAL SHIKSHA EVAM PARIKSHA PARISHAD",
-  "WEST BENGAL BOARD OF SECONDARY EDUCATION",
-  "WEST BENGAL COUNCIL OF HIGHER SECONDARY EDUCATION",
-  "WEST BENGAL COUNCIL OF RABINDRA OPEN SCHOOLING",
-] as const;
+export const CBSE_BOARD = "CBSE";
+export const G10_BOARD_OPTIONS = [CBSE_BOARD, "Others"] as const;
 
 export const GENDER_OPTIONS = ["Female", "Male", "Others"] as const;
+export const STUDENT_ADDITION_GENDER_OPTIONS = ["Female", "Male", "Other"] as const;
 export const CATEGORY_OPTIONS = ["Gen", "Gen-EWS", "OBC", "SC", "ST"] as const;
 export const BOARD_STREAM_OPTIONS = [
   "PCM",
@@ -81,7 +14,7 @@ export const BOARD_STREAM_OPTIONS = [
   "Commerce (Without Math)",
   "Arts/Humanities",
 ] as const;
-export const STREAM_OPTIONS = ["Engineering", "Medical", "CA", "CLAT"] as const;
+export const STREAM_OPTIONS = ["Engineering", "Medical", "CA", "CLAT", "NDA"] as const;
 export const STUDENT_DOB_MIN = "2000-01-01";
 export const STUDENT_DOB_MAX = "2015-12-31";
 export const G10_ROLL_MIN_LENGTH = 4;
@@ -99,7 +32,7 @@ export const ANNUAL_FAMILY_INCOME_OPTIONS = [
 ] as const;
 
 const BOARD_SET = new Set<string>(G10_BOARD_OPTIONS);
-const GENDER_SET = new Set<string>(GENDER_OPTIONS);
+const GENDER_SET = new Set<string>(STUDENT_ADDITION_GENDER_OPTIONS);
 const CATEGORY_SET = new Set<string>(CATEGORY_OPTIONS);
 const BOARD_STREAM_SET = new Set<string>(BOARD_STREAM_OPTIONS);
 const INCOME_SET = new Set<string>(ANNUAL_FAMILY_INCOME_OPTIONS);
@@ -108,9 +41,10 @@ const STREAM_MAP: Record<string, LmsStudentStream> = {
   medical: "medical",
   ca: "ca",
   clat: "clat",
+  nda: "nda",
 };
 
-export type LmsStudentStream = "engineering" | "medical" | "ca" | "clat";
+export type LmsStudentStream = "engineering" | "medical" | "ca" | "clat" | "nda";
 
 export interface StudentAdditionInput {
   grade?: unknown;
@@ -120,6 +54,7 @@ export interface StudentAdditionInput {
   category?: unknown;
   physically_handicapped?: unknown;
   apaar_id?: unknown;
+  pen_number?: unknown;
   g10_board?: unknown;
   g10_roll_no?: unknown;
   board_stream?: unknown;
@@ -182,20 +117,24 @@ export function formatStudentAdditionExistingMatch(
   const match = existing ?? {};
   const studentId = matchText(match.student_id) || "blank";
   const matchSchoolCode = matchText(match.school_code);
+  const identities = [
+    `Student ID: ${studentId}`,
+    matchText(match.pen_number) ? `PEN: ${matchText(match.pen_number)}` : "",
+    matchText(match.apaar_id) ? `APAAR: ${matchText(match.apaar_id)}` : "",
+  ].filter(Boolean).join(" | ");
 
   if (schoolCode && (!matchSchoolCode || matchSchoolCode === schoolCode)) {
-    return `This student is already part of this school. Student ID: ${studentId}.`;
+    return `This student is already part of this school. ${identities}.`;
   }
   if (!matchSchoolCode) {
-    return `This student already exists. Student ID: ${studentId}.`;
+    return `This student already exists. ${identities}.`;
   }
 
   const schoolName = matchText(match.school_name) || "another school";
   const udise = matchText(match.udise_code);
   const location = [matchText(match.district), matchText(match.state)].filter(Boolean).join(", ");
   const identifiers = [
-    `Student ID: ${studentId}`,
-    matchText(match.apaar_id) ? `APAAR: ${matchText(match.apaar_id)}` : "",
+    identities,
     matchText(match.grade) ? `Grade ${matchText(match.grade)}` : "",
     matchText(match.program),
     matchText(match.stream),
@@ -271,8 +210,8 @@ export interface LmsStudentAdditionRow {
   gender: string;
   category: string;
   physically_handicapped: boolean;
-  apaar_id: string;
-  g10_board: string;
+  pen_number: string;
+  g10_board: string | null;
   g10_roll_no: string;
   board_stream: string;
   stream: LmsStudentStream;
@@ -310,8 +249,9 @@ function normalizeName(value: unknown): string {
     .join(" ");
 }
 
-function normalizeG10RollNo(value: unknown): string {
-  return stringValue(value).replace(/\s+/g, "").toUpperCase();
+function normalizeG10RollNo(value: unknown, board: string): string {
+  const normalized = stringValue(value).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  return board === CBSE_BOARD ? normalized : normalized.replace(/^0+/, "");
 }
 
 export function generateStudentId(
@@ -330,9 +270,12 @@ function parseGrade(value: unknown): 11 | 12 | null {
 }
 
 function parseDate(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
   const raw = stringValue(value);
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const dmy = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const dmy = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
   const parts = iso
     ? { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) }
     : dmy
@@ -393,31 +336,37 @@ export function validateStudentAdditionInput(
     addError(fieldErrors, "date_of_birth", "Date of Birth must be between 2000 and 2015");
   }
 
-  const gender = stringValue(input.gender);
-  if (!GENDER_SET.has(gender)) addError(fieldErrors, "gender", "Gender must be Female, Male, or Others");
+  const genderInput = stringValue(input.gender);
+  const gender = genderInput === "Others" ? "Other" : genderInput;
+  if (!GENDER_SET.has(gender)) addError(fieldErrors, "gender", "Gender must be Female, Male, or Other");
 
-  const category = stringValue(input.category);
-  if (!CATEGORY_SET.has(category)) addError(fieldErrors, "category", "Category is not valid");
+  const categoryInput = stringValue(input.category);
+  if (!CATEGORY_SET.has(categoryInput)) addError(fieldErrors, "category", "Category is not valid");
 
   const physically_handicapped = parsePhysicallyHandicapped(input.physically_handicapped);
   if (physically_handicapped === null) {
-    addError(fieldErrors, "physically_handicapped", "Physical Handicapped must be Yes or No");
+    addError(fieldErrors, "physically_handicapped", "CWSN must be Yes or No");
+  }
+  const category = physically_handicapped
+    ? categoryInput === "Gen-EWS" ? "PWD-EWS" : `PWD-${categoryInput}`
+    : categoryInput;
+
+  const pen_number = stringValue(input.pen_number);
+  if (pen_number && !/^[1-9]\d{10}$/.test(pen_number)) {
+    addError(fieldErrors, "pen_number", "PEN must be exactly 11 digits and cannot start with zero");
   }
 
-  const apaar_id = stringValue(input.apaar_id);
-  if (apaar_id && !/^\d{12}$/.test(apaar_id)) {
-    addError(fieldErrors, "apaar_id", "APAAR ID must be exactly 12 digits");
-  }
+  const g10BoardInput = stringValue(input.g10_board);
+  if (!BOARD_SET.has(g10BoardInput)) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
+  const g10_board = g10BoardInput === "Others" ? null : g10BoardInput;
 
-  const g10_board = stringValue(input.g10_board);
-  if (!BOARD_SET.has(g10_board)) addError(fieldErrors, "g10_board", "G10 board is not valid");
-
-  const g10_roll_no = normalizeG10RollNo(input.g10_roll_no);
-  if (!apaar_id && !g10_roll_no) rowErrors.push("APAAR ID or Grade 10 Roll no is required");
-  if (g10_roll_no) {
-    if (g10_board === CBSE_BOARD && !/^\d{8}$/.test(g10_roll_no)) {
+  const g10RollInput = stringValue(input.g10_roll_no);
+  const g10_roll_no = normalizeG10RollNo(g10RollInput, g10BoardInput);
+  if (!pen_number && !g10_roll_no) rowErrors.push("PEN or Grade 10 Roll no is required");
+  if (g10RollInput) {
+    if (g10BoardInput === CBSE_BOARD && !/^\d{8}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "CBSE Grade 10 Roll no must be exactly 8 digits");
-    } else if (g10_board !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
+    } else if (g10BoardInput !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
     }
   }
@@ -455,7 +404,7 @@ export function validateStudentAdditionInput(
     gender,
     category,
     ...(physically_handicapped !== null ? { physically_handicapped } : {}),
-    apaar_id,
+    pen_number,
     g10_board,
     g10_roll_no,
     board_stream,

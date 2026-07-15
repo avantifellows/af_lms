@@ -104,24 +104,41 @@ describe("requireStudentAdditionAccess", () => {
     });
   });
 
-  it("blocks when NVS exists only in legacy program fields without an active centre", async () => {
+  it("allows an NVS-scoped writer when the school has no Centre mapping", async () => {
     mockGetResolvedPermission.mockResolvedValue(permission());
-    const legacySchoolContext = {
+    const centreFreeSchool = {
       ...school,
       centre_program_ids: [],
-      program_ids: [PROGRAM_IDS.NVS],
-      student_program_ids: [PROGRAM_IDS.NVS],
     };
 
     const result = await requireStudentAdditionAccess(
       session,
-      legacySchoolContext,
+      centreFreeSchool,
     );
 
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+    expect(result.ok).toBe(true);
   });
 
-  it("allows admins even when explicit program_ids do not include NVS", async () => {
+  it.each(["program_manager", "program_admin"] as const)(
+    "allows an NVS-scoped %s",
+    async (role) => {
+      mockGetResolvedPermission.mockResolvedValue(permission({ role }));
+
+      expect((await requireStudentAdditionAccess(session, school)).ok).toBe(true);
+    },
+  );
+
+  it("blocks missing or revoked permissions", async () => {
+    mockGetResolvedPermission.mockResolvedValue(null);
+
+    expect(await requireStudentAdditionAccess(session, school)).toEqual({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
+  });
+
+  it("blocks admins without NVS program scope", async () => {
     mockGetResolvedPermission.mockResolvedValue(
       permission({
         role: "admin",
@@ -137,7 +154,7 @@ describe("requireStudentAdditionAccess", () => {
 
     const result = await requireStudentAdditionAccess(session, school);
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
   it.each([
@@ -184,16 +201,13 @@ describe("requireStudentAdditionAccess", () => {
         });
       },
     ],
-    ["non-NVS school", () => undefined],
   ])("blocks %s", async (label, arrange) => {
     mockGetResolvedPermission.mockResolvedValue(permission());
     arrange();
 
     const result = await requireStudentAdditionAccess(
       session,
-      label === "non-NVS school"
-        ? { ...school, centre_program_ids: [PROGRAM_IDS.COE] }
-        : school,
+      school,
     );
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });

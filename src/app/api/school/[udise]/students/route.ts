@@ -21,7 +21,6 @@ interface RouteSchool {
   code: string;
   udise_code: string | null;
   region: string | null;
-  centre_program_ids: Array<number | string> | null;
 }
 
 interface StudentAdditionAccess {
@@ -48,6 +47,34 @@ const EMPTY_TOTALS = {
   rejected: 0,
 };
 const MAX_STUDENT_ADDITION_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+function safeFields(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(keys.filter((key) => key in record).map((key) => [key, record[key]]));
+}
+
+function safeUpstreamResults(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((result) => {
+    const safe = safeFields(result, [
+      "row_number", "status", "generated_student_id", "field_errors", "row_errors",
+    ]) ?? {};
+    const record = result as Record<string, unknown>;
+    const normalized = safeFields(record.normalized, [
+      "student_id", "pen_number", "student_name", "g10_roll_no",
+    ]);
+    const existingMatch = safeFields(record.existing_match, [
+      "matched_identifier", "student_id", "pen_number", "apaar_id", "student_name",
+      "school_name", "school_code", "udise_code", "district", "state", "grade", "program", "stream",
+    ]);
+    return {
+      ...safe,
+      ...(normalized ? { normalized } : {}),
+      ...(existingMatch ? { existing_match: existingMatch } : {}),
+    };
+  });
+}
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
   return typeof value === "object" &&
@@ -99,15 +126,9 @@ async function resolveSchoolAndAccess(
        sch.id,
        sch.code,
        sch.udise_code,
-       sch.region,
-       COALESCE(
-         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
-         ARRAY[]::int[]
-       ) AS centre_program_ids
+       sch.region
      FROM school sch
-     LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
      WHERE sch.udise_code = $1 OR sch.code = $1
-     GROUP BY sch.id, sch.code, sch.udise_code, sch.region
      LIMIT 1`,
     [udise],
   );
@@ -177,9 +198,16 @@ async function proxyRowsToDbService({
   });
 
   if (!response.ok) {
-    const details = await response.text();
+    const upstream = response.headers.get("content-type")?.includes("application/json")
+      ? await response.json().catch(() => null) as Record<string, unknown> | null
+      : null;
     return NextResponse.json(
-      { error: details || "Failed to create student", details },
+      {
+        error: "Student could not be created",
+        ...(upstream?.field_errors ? { field_errors: upstream.field_errors } : {}),
+        ...(upstream?.row_errors ? { row_errors: upstream.row_errors } : {}),
+        ...(upstream?.results ? { results: safeUpstreamResults(upstream.results) } : {}),
+      },
       { status: response.status },
     );
   }

@@ -42,8 +42,8 @@ const validBody = {
   gender: "Female",
   category: "Gen",
   physically_handicapped: "No",
-  apaar_id: "123456789012",
-  g10_board: "CENTRAL BOARD OF SECONDARY EDUCATION",
+  pen_number: "12345678901",
+  g10_board: "CBSE",
   g10_roll_no: "1234 5678",
   board_stream: "PCM",
   stream: "Engineering",
@@ -53,6 +53,9 @@ const validBody = {
   school_code: "CLIENT-SCHOOL",
   program_id: 1,
   batch_id: "CLIENT-BATCH",
+  student_id: "CLIENT-STUDENT-ID",
+  apaar_id: "CLIENT-APAAR",
+  actor: { email: "attacker@example.com" },
 };
 
 const uploadHeaders = [
@@ -80,7 +83,7 @@ const validUploadRow = [
   "Gen",
   "No",
   "123456789012",
-  "CENTRAL BOARD OF SECONDARY EDUCATION",
+  "CBSE",
   "1234 5678",
   "PCM",
   "Engineering",
@@ -158,6 +161,7 @@ describe("POST /api/school/[udise]/students", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(dbResponse);
     expect(mockRequireStudentAdditionAccess).toHaveBeenCalledWith(ADMIN_SESSION, school);
+    expect(mockQuery.mock.calls[0][0]).not.toContain("centres");
     expect(fetch).toHaveBeenCalledWith(
       "https://db.example.test/api/lms/students/bulk-create-with-enrollments",
       expect.objectContaining({ method: "POST" }),
@@ -180,6 +184,7 @@ describe("POST /api/school/[udise]/students", () => {
           row_number: 1,
           grade: 11,
           student_name: "Asha K Kumar",
+          pen_number: "12345678901",
           g10_roll_no: "12345678",
           stream: "engineering",
         },
@@ -188,6 +193,42 @@ describe("POST /api/school/[udise]/students", () => {
     expect(payload.rows[0]).not.toHaveProperty("school_code");
     expect(payload.rows[0]).not.toHaveProperty("program_id");
     expect(payload.rows[0]).not.toHaveProperty("batch_id");
+    expect(payload.rows[0]).not.toHaveProperty("student_id");
+    expect(payload.rows[0]).not.toHaveProperty("apaar_id");
+    expect(payload.rows[0]).not.toHaveProperty("actor");
+  });
+
+  it("proxies revised NVS values in the canonical row", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ status: "created" }] }), { status: 200 }),
+    );
+
+    await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: {
+          ...validBody,
+          gender: "Others",
+          category: "ST",
+          physically_handicapped: "Yes",
+          g10_board: "Others",
+          g10_roll_no: "00-ab12",
+          stream: "NDA",
+        },
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.rows[0]).toMatchObject({
+      pen_number: "12345678901",
+      gender: "Other",
+      category: "PWD-ST",
+      physically_handicapped: true,
+      g10_board: null,
+      g10_roll_no: "AB12",
+      stream: "nda",
+    });
   });
 
   it("returns 401 before resolving schools when unauthenticated", async () => {
@@ -230,7 +271,7 @@ describe("POST /api/school/[udise]/students", () => {
     const response = await POST(
       jsonRequest("http://localhost/api/school/12345678901/students", {
         method: "POST",
-        body: { ...validBody, apaar_id: "", g10_roll_no: "" },
+        body: { ...validBody, pen_number: "", g10_roll_no: "" },
       }) as never,
       routeParams({ udise: "12345678901" }),
     );
@@ -241,15 +282,15 @@ describe("POST /api/school/[udise]/students", () => {
       results: [
         {
           status: "rejected",
-          row_errors: ["APAAR ID or Grade 10 Roll no is required"],
+          row_errors: ["PEN or Grade 10 Roll no is required"],
         },
       ],
     });
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("surfaces DB Service errors without swallowing details", async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response("No matching batch found", { status: 422 }));
+  it("does not expose raw DB Service response bodies", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response("internal stack trace", { status: 422 }));
 
     const response = await POST(
       jsonRequest("http://localhost/api/school/12345678901/students", {
@@ -261,9 +302,82 @@ describe("POST /api/school/[udise]/students", () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({
-      error: "No matching batch found",
-      details: "No matching batch found",
+      error: "Student could not be created",
     });
+  });
+
+  it("preserves safe structured DB Service field errors", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({ field_errors: { pen_number: "PEN already exists" } }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: validBody,
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Student could not be created",
+      field_errors: { pen_number: "PEN already exists" },
+    });
+  });
+
+  it("filters unsafe fields from structured DB Service results", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [{
+            status: "already_exists",
+            private_token: "must-not-leak",
+            existing_match: {
+              student_id: "2028AB12Z",
+              pen_number: "12345678901",
+              internal_note: "must-not-leak",
+            },
+          }],
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: validBody,
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(await response.json()).toEqual({
+      error: "Student could not be created",
+      results: [{
+        status: "already_exists",
+        existing_match: { student_id: "2028AB12Z", pen_number: "12345678901" },
+      }],
+    });
+  });
+
+  it("fails safely when DB Service configuration is missing", async () => {
+    delete process.env.DB_SERVICE_URL;
+
+    const response = await POST(
+      jsonRequest("http://localhost/api/school/12345678901/students", {
+        method: "POST",
+        body: validBody,
+      }) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "DB Service is not configured" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("validates the full upload before sending accepted rows to DB Service", async () => {

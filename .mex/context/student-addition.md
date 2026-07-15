@@ -18,12 +18,12 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-14
+last_updated: 2026-07-15
 ---
 
 # Student Addition
 
-Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/155 is the current Ralph-formatted implementation PRD. Issue #144 remains the source/reference PRD for comparison only. The local `lms-user-addition-discord-thread/` folder remains source evidence only; treat the Discord transcript, template CSV exports, and `Board_Values.numbers` preview as source evidence only when auditing whether the PRD is missing context.
+Source context: GitHub issue https://github.com/avantifellows/af_lms/issues/197 is the current revised implementation PRD. Issue #155 describes the prior implementation and issue #144 remains reference context only.
 
 ## Settled Product Shape
 - v1 is JNV PMU / JNV NVS only. In current LMS code this is `PROGRAM_IDS.NVS` (`64`, label `JNV NVS`) from `src/lib/constants.ts`.
@@ -40,11 +40,11 @@ Current v1 fields:
 - Grade -> `g12_graduating_year` context and grade enrollment
 - Student Name -> `user.first_name` contains the full name in v1
 - Date of Birth -> `user.date_of_birth`
-- Gender -> `user.gender` (`Female`, `Male`, `Others`)
+- Gender -> `user.gender` (`Female`, `Male`, `Other`; legacy `Others` input normalizes to `Other`)
 - Category -> `student.category`
-- Physical Handicapped / Vikalang -> `student.physically_handicapped`
-- APAAR ID -> `student.apaar_id`
-- G10 board -> new DB Service field needed
+- CWSN -> `student.physically_handicapped`, with Yes mapping the base category to its `PWD-*` value
+- PEN -> `student.pen_number`; historical APAAR remains read-only identity context
+- G10 board -> `CBSE` or `Others`; persist `CBSE` and map `Others` to `null`
 - Grade 10 Roll no -> new DB Service field `student.g10_roll_no`; also used to compose `student.student_id` when present
 - Board Stream -> `student.board_stream`
 - Primary Exam preparing for -> `student.stream`
@@ -69,11 +69,11 @@ Edit/dropout scope is decided: the PM/staff rollout uses the same school-scoped 
 Enrollment date handling is decided: LMS supplies DB Service `start_date` and `academic_year`; schools do not enter them. For creates, `start_date` is the successful creation date in Asia/Kolkata as `YYYY-MM-DD`. `academic_year` is derived from that date using an April-March year: April 1 or later -> `YYYY-YYYY+1`, January-March -> `YYYY-1-YYYY`. Keep this in one shared LMS backend helper for one-by-one and bulk create, with tests around March 31 / April 1. Do not use the hardcoded `CURRENT_ACADEMIC_YEAR` constant or the client-only `StudentTable.tsx` dropout helper for create flows.
 
 ## Validation And Normalisation
-- APAAR ID or G10 Roll Number: at least one is required; both are allowed.
-- Duplicate APAAR and duplicate generated Student ID are blocked. Policy is first-registrant-wins.
-- Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. APAAR-only rows store `student.apaar_id` and leave `student.student_id` null.
+- PEN or G10 Roll Number: at least one is required; both are allowed. PEN is exactly 11 digits and cannot start with zero pending rollout confirmation.
+- Duplicate PEN and duplicate generated Student ID are blocked. Historical APAAR is display-only for this NVS flow.
+- Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. PEN-only rows leave `student.student_id` null.
 - G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
-- G10 roll normalisation: remove spaces, uppercase letters, then validate. CBSE must be exactly 8 digits; other boards must be 4 to 10 alphanumeric characters. Do not left-pad short rolls. Store the normalised Grade 10 Roll no separately from generated Student ID because Student ID is not equivalent to Grade 10 Roll no across programs.
+- G10 roll normalisation: CBSE preserves an exact eight-digit text value. Others removes non-alphanumerics, uppercases, removes leading zeroes, then requires 4-10 characters.
 - Name normalisation: collapse spaces, remove full stops, proper-case words. Show the normalised value back before commit.
 - The file grade must match the upload context grade.
 - Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
@@ -85,13 +85,13 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - `students` feature access currently grants edit to all roles, passcode users get students edit, and `read_only` downgrades edit to view in `getFeatureAccess`.
 - Existing `NVS_GATED_FEATURES` does not include `students`, so Student Addition needs its own explicit `PROGRAM_IDS.NVS` allowlist check.
 - `canAccessStudent(session, id, { requireEdit: true })` is the right pattern for generic existing-student writes. Student Addition existing-student writes use `requireStudentAdditionStudentAccess(session, studentPkId)`, which starts from the opaque student PK, gates before route-level row lookup, checks school scope, `students` edit, actor NVS access, and an active `centres` row for the school's NVS program.
-- For create/bulk there is no existing student to resolve, so gate by resolved school: session -> route `[udise]` -> school code -> `canAccessSchool` -> allowed role -> `students` `canEdit` -> not `read_only` -> actor NVS access -> active `centres` row for NVS. Ignore `school.program_ids` and existing-student batch history for this allow decision. Passcode users can view their school roster but are explicitly blocked from Student Addition writes in this build.
+- For create/bulk there is no existing student to resolve, so gate by resolved school: Google session -> resolved permission -> allowed role -> `students` `canEdit` -> School/region scope -> actor NVS scope. The create gate does not query or require a Centre and ignores `school.program_ids`; passcode users remain blocked.
 - Slice #157 adds the shared LMS create gate in `src/lib/student-addition-access.ts`, client-safe field/identity helpers in `src/lib/student-addition-fields.ts`, and the IST enrollment date helper in `src/lib/lms-enrollment-date.ts`.
 - One-by-one creation now uses `POST /api/school/[udise]/students`, which validates one canonical row, derives actor/school/program/start-date/academic-year server-side, and proxies DB Service `POST /api/lms/students/bulk-create-with-enrollments` with a single-row payload.
 - Bulk creation also uses `POST /api/school/[udise]/students` with multipart `.xlsx`/`.csv` upload. LMS parses `.xlsx` files with ExcelJS from the first sheet or `Template` sheet, normalises real Excel date cells, validates up to 200 non-blank rows locally, sends accepted rows to the same DB Service endpoint, merges local rejects with DB Service statuses, and returns rejected-row CSV data from the UI.
 - The same route serves the downloadable `.xlsx` template through `GET /api/school/[udise]/students`.
-- The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes, the selected program is `PROGRAM_IDS.NVS`, and the school has an active NVS centre mapping; the modals live in `src/components/enrollment/AddStudentModal.tsx` and `src/components/enrollment/BulkStudentUploadModal.tsx`.
-- `AddStudentModal` reuses the shared validation helper and shows touched-field errors inline, including APAAR ID, G10 roll length, parent phone length, DOB range, required dropdowns, and the APAAR-or-G10 identity requirement. The one-by-one form groups fields into Student Details, Grade 10 Info, Stream, and Family Details; marks required fields with `*`; marks APAAR/G10 roll with `#` plus a bottom note that one of them is compulsory; uses a searchable G10 board datalist; caps parent phone at 10 digits, APAAR at 12 digits, CBSE G10 roll at 8 digits, and other-board G10 roll at 10 characters; and resets whenever the modal closes. Successful creation closes the modal and shows a Student ID popup with an option to add another student before refreshing the roster.
+- The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and NVS is selected; the gate is Centre-free.
+- `AddStudentModal` reuses the canonical validator and exposes PEN, CWSN, CBSE/Others, `Other`, and NDA. It shows local and safe upstream field errors inline, previews the generated Student ID, and refreshes the roster after creation.
 - Existing-student edit uses the shared Student Addition existing-student gate before proxying PRD-safe fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The gate requires one current school and a current NVS batch in addition to active-centre, actor-program, role, feature, and school scope checks. The edit modal sends only changed fields, forwards `last_name` as empty only when the name changes, validates changed phone/DOB values, keeps APAAR/G10 roll/direct Student ID locked, does not expose manual batch selection, and displays DB Service field conflicts inline.
 - The enrollment tab uses all current batch program IDs, so a student enrolled in CoE and NVS appears in both program views and counts. Program-dropout audits provide `dropout_program_ids`, allowing the same student to appear as CoE Dropout and NVS Active at the same time.
 - Dropout accepts `student_pk_id` plus the selected `program_id`, authorizes against that exact program, school, role, feature, and active-centre mapping, derives `start_date` and `academic_year` server-side, and proxies LMS `POST /api/student/dropout` to DB Service `PATCH /api/dropout`.
@@ -116,7 +116,7 @@ Final PRD decision:
 - Add a dedicated create-only LMS bulk endpoint: `POST /api/lms/students/bulk-create-with-enrollments`.
 - The one-by-one form sends a single-row payload to the same endpoint.
 - Final row statuses are `created`, `duplicate_in_file`, `already_exists`, and `rejected`.
-- Existing matches never update records. APAAR match or generated Student ID match returns `already_exists`; if those identifiers point to different students, return `rejected`.
+- Existing matches never update records. PEN or generated Student ID matches return `already_exists`; safe match context can include Student ID, PEN, and historical APAAR.
 - Each created row is transactional across user, student, auth-group enrolment, school enrolment, batch enrolment, and grade enrolment.
 - Re-upload is idempotent: already-created rows return `already_exists`, with no duplicate and no overwrite.
 
