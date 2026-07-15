@@ -7,7 +7,12 @@ import Link from "next/link";
 import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
 import DeleteVisitButton from "@/components/visits/DeleteVisitButton";
 import ActionPointList from "@/components/visits/ActionPointList";
-import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
+import {
+  buildVisitsActor,
+  canEditVisit,
+  canViewVisit,
+  requiresVisitActionsForCompletion,
+} from "@/lib/visits-policy";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
 
@@ -231,7 +236,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
         ) : canEdit ? (
           <div className="space-y-4">
             <p className="text-sm text-text-secondary">
-              {actor.role === "program_manager"
+              {requiresVisitActionsForCompletion(actor)
                 ? "Complete all required Action Types before completing this Visit. School Staff Interaction is optional."
                 : "Actions are optional for this Visit. End any in-progress Action before completing."}
             </p>

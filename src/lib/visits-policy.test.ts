@@ -7,6 +7,7 @@ import {
   canAccessVisitSchoolScope,
   canEditCompletedActionData,
   canEditVisit,
+  requiresVisitActionsForCompletion,
   canViewVisit,
   enforceVisitWriteLock,
   isScopedVisitsRole,
@@ -26,6 +27,15 @@ function makePermission(overrides: Partial<UserPermission> = {}): UserPermission
 }
 
 describe("visits-policy", () => {
+  it("requires completed actions only for program managers", () => {
+    const actor = (role: "program_manager" | "program_admin" | "admin") =>
+      buildVisitsActor(`${role}@avantifellows.org`, makePermission({ role }));
+
+    expect(requiresVisitActionsForCompletion(actor("program_manager"))).toBe(true);
+    expect(requiresVisitActionsForCompletion(actor("program_admin"))).toBe(false);
+    expect(requiresVisitActionsForCompletion(actor("admin"))).toBe(false);
+  });
+
   it("allows owner PM to view and edit own visit", () => {
     const permission = makePermission({
       email: "pm@avantifellows.org",

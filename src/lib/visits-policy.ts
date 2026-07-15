@@ -234,6 +234,10 @@ export function isScopedVisitsRole(actor: VisitsActor): boolean {
   return actor.role === "admin" || actor.role === "program_admin";
 }
 
+export function requiresVisitActionsForCompletion(actor: VisitsActor): boolean {
+  return actor.role === "program_manager";
+}
+
 export function canAccessVisitSchoolScope(
   actor: VisitsActor,
   schoolCode: string,
