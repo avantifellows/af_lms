@@ -163,7 +163,8 @@ export async function requireStudentProgramDropoutAccess(
   }
   if (!(scope.centre_program_ids ?? []).map(Number).includes(programId)) return deny(403);
   if (!scope.has_program_enrollment) return deny(403);
-  if (!actorHasProgramAccess(permission, programId)) return deny(403);
+  if (permission.role !== "admin" && !actorHasProgramAccess(permission, programId))
+    return deny(403);
 
   return {
     ok: true,

@@ -29,6 +29,7 @@ import { PROGRAM_IDS } from "./constants";
 import {
   requireStudentAdditionAccess,
   requireStudentAdditionStudentAccess,
+  requireStudentProgramDropoutAccess,
 } from "./student-addition-access";
 import type { UserPermission } from "./permissions";
 
@@ -449,5 +450,48 @@ describe("requireStudentAdditionStudentAccess", () => {
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+});
+
+describe("requireStudentProgramDropoutAccess", () => {
+  const nonJnvProgramId = 74;
+
+  beforeEach(() => {
+    mockQuery.mockResolvedValue([
+      {
+        code: "RSMS001",
+        udise_code: "12345678901",
+        region: "Punjab",
+        af_school_category: "RSMS",
+        centre_program_ids: [nonJnvProgramId],
+        has_program_enrollment: true,
+      },
+    ]);
+  });
+
+  it("preserves global admin dropout access for newer centre programs", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "admin", program_ids: null }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL, PROGRAM_IDS.NVS],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    expect(
+      (await requireStudentProgramDropoutAccess(session, "100", nonJnvProgramId)).ok,
+    ).toBe(true);
+  });
+
+  it("still requires non-admin actors to have the target program", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager", program_ids: [PROGRAM_IDS.NVS] }),
+    );
+
+    expect(
+      await requireStudentProgramDropoutAccess(session, "100", nonJnvProgramId),
+    ).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 });
