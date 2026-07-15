@@ -114,6 +114,10 @@ export default function AddStudentModal({
 
   const touchField = (name: keyof StudentAdditionInput) => {
     setTouched((prev) => ({ ...prev, [name]: true }));
+    const normalizedName = validation.row.student_name;
+    if (name === "student_name" && normalizedName) {
+      setForm((prev) => ({ ...prev, student_name: normalizedName }));
+    }
   };
 
   const fieldError = (name: keyof StudentAdditionInput) =>

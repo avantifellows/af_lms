@@ -138,6 +138,17 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("PEN-only: no Student ID will be generated.")).toBeInTheDocument();
   });
 
+  it("shows the normalized Student Name back on blur", async () => {
+    render(<AddStudentModal {...baseProps} />);
+    const user = userEvent.setup();
+    const name = screen.getByLabelText("Student Name");
+
+    await user.type(name, "aSHA. k  KUMAR");
+    await user.tab();
+
+    expect(name).toHaveValue("Asha K Kumar");
+  });
+
   it("filters restricted fields and caps fixed-length numeric inputs", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();

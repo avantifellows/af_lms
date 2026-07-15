@@ -34,7 +34,7 @@ const validRowValues: unknown[] = [
   "No",
   "123456789012",
   CBSE_BOARD,
-  "1234 5678",
+  "12345678",
   "PCM",
   "Engineering",
   "ravi kumar",

@@ -250,8 +250,10 @@ function normalizeName(value: unknown): string {
 }
 
 function normalizeG10RollNo(value: unknown, board: string): string {
-  const normalized = stringValue(value).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  return board === CBSE_BOARD ? normalized : normalized.replace(/^0+/, "");
+  const raw = stringValue(value);
+  return board === CBSE_BOARD
+    ? raw
+    : raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase().replace(/^0+/, "");
 }
 
 export function generateStudentId(

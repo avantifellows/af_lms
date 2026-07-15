@@ -1,4 +1,5 @@
 ALTER TABLE public.student
+  ADD COLUMN IF NOT EXISTS pen_number character varying(255),
   ADD COLUMN IF NOT EXISTS g10_board character varying(255),
   ADD COLUMN IF NOT EXISTS g10_roll_no character varying(255);
 

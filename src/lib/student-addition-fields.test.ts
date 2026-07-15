@@ -16,7 +16,7 @@ const validInput = {
   physically_handicapped: "No",
   pen_number: "12345678901",
   g10_board: CBSE_BOARD,
-  g10_roll_no: "1234 5678",
+  g10_roll_no: "12345678",
   board_stream: "PCM",
   stream: "Engineering",
   father_name: " ravi  kumar ",
@@ -174,6 +174,19 @@ describe("validateStudentAdditionInput", () => {
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors.g10_roll_no).toBe(
       "Grade 10 Roll no must be 4 to 10 characters",
+    );
+  });
+
+  it("rejects CBSE rolls that are not already exactly eight digits", () => {
+    const result = validateStudentAdditionInput({
+      ...validInput,
+      g10_roll_no: "1234-5678",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.g10_roll_no).toBe(
+      "CBSE Grade 10 Roll no must be exactly 8 digits",
     );
   });
 
