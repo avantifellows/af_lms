@@ -399,7 +399,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An **Admin** automatically receives the same Holistic Mentorship feature access without becoming a **Holistic Mentorship Admin**
 - In v1, the **Holistic Mentorship Admin** role grants access only to Holistic Mentorship; access to other LMS features is deferred
 - A **Holistic Mentorship Admin** can view the School and staff context needed for Holistic Mentorship across all launch Schools, but can edit only Holistic Mentorship records
-- A **Holistic Mentorship Admin** can view all eligible Students across the launch Program, including Students who are not yet mapped to a Holistic Mentor
+- A **Holistic Mentorship Admin** can view mapped Holistic Mentees and their current Mapping status across the launch Program; eligible Students without an active Mapping do not appear in the Admin **Students & Progress** view
 - A **Holistic Mentorship Admin** can read every Holistic Mentee's Student Context and Post-Session Notes across the launch Program
 - **Holistic Mentorship Admins** and **Admins** can view Mapping status but cannot assign, reassign, or remove Holistic Mentees in v1
 - The db-service table for **Academic Mentor-Mentee Mappings** is `academic_mentorship_mentor_mentee_mappings`
