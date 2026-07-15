@@ -16,13 +16,15 @@ Next.js 16 (App Router) · React 19 · TypeScript · PostgreSQL + external DB Se
    you're about to do, follow it.
 
 Don't go spelunking through source to rebuild context that's already written down.
-The `.mex/` scaffold is the source of truth for *how* this project works.
+The `.mex/` scaffold is the source of truth for _how_ this project works.
 
 ## The five non-negotiables (full list in `.mex/AGENTS.md`)
 
 - Reads go through `query()` in `src/lib/db.ts` with `$1` placeholders — never string-interpolate SQL.
 - Student/batch/quiz-session/document **writes** go to the external DB Service over HTTP, never direct to Postgres.
 - Never bypass the permission layer (`src/lib/permissions.ts`) — gate before you act.
+- When role permissions change, keep the permission matrix, domain policy, route guards,
+  visible controls, and Admin user-management role descriptions in sync.
 - Never import server-only modules (`@/lib/db`, `@/lib/permissions`) into client components.
 - Never log GPS lat/lng; never commit secrets.
 
