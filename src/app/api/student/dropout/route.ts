@@ -3,8 +3,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
-import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
-import { PROGRAM_IDS } from "@/lib/constants";
+import {
+  requireStudentAdditionStudentAccess,
+  requireStudentProgramDropoutAccess,
+} from "@/lib/student-addition-access";
+import { PROGRAM_IDS, PROGRAM_IDS_ORDERED } from "@/lib/constants";
 
 interface DropoutPayload {
   student_pk_id?: string | number;
@@ -15,6 +18,7 @@ interface DropoutStudentRow {
   id: number;
   student_id: string | null;
   pen_number: string | null;
+  apaar_id: string | null;
   status: string | null;
 }
 
@@ -31,7 +35,11 @@ const SAFE_DROPOUT_ERRORS = new Set([
   "Student is not enrolled in this school",
 ]);
 
-async function dbServiceError(response: Response, student: DropoutStudentRow) {
+async function dbServiceError(
+  response: Response,
+  student: DropoutStudentRow,
+  isNvs: boolean,
+) {
   const text = await response.text();
   let message: unknown;
   try {
@@ -46,7 +54,7 @@ async function dbServiceError(response: Response, student: DropoutStudentRow) {
       {
         error: identifierError(
           student.student_id ?? undefined,
-          student.pen_number ?? undefined,
+          (isNvs ? student.pen_number : student.apaar_id) ?? undefined,
         ),
       },
       { status: 400 },
@@ -56,9 +64,11 @@ async function dbServiceError(response: Response, student: DropoutStudentRow) {
   return NextResponse.json(
     {
       error:
-        typeof message === "string" && SAFE_DROPOUT_ERRORS.has(message)
+        typeof message === "string" && (!isNvs || SAFE_DROPOUT_ERRORS.has(message))
           ? message
-          : "Failed to drop student from JNV NVS",
+          : isNvs
+            ? "Failed to drop student from JNV NVS"
+            : "Failed to mark student as dropout",
     },
     { status: response.status },
   );
@@ -66,7 +76,7 @@ async function dbServiceError(response: Response, student: DropoutStudentRow) {
 
 async function resolveDropoutStudent(studentPkId: number) {
   return query<DropoutStudentRow>(
-    `SELECT id, student_id, pen_number, status
+    `SELECT id, student_id, pen_number, apaar_id, status
      FROM student
      WHERE id = $1
      LIMIT 1`,
@@ -96,23 +106,20 @@ export async function POST(request: NextRequest) {
 
     if (
       !Number.isInteger(programId) ||
-      programId !== PROGRAM_IDS.NVS
+      !PROGRAM_IDS_ORDERED.includes(programId)
     ) {
       return NextResponse.json(
         {
-          error:
-            body.program_id == null
-              ? "program_id is required"
-              : "program_id must be JNV NVS",
+          error: "program_id is required",
         },
         { status: 400 },
       );
     }
 
-    const access = await requireStudentAdditionStudentAccess(
-      session,
-      studentPkId,
-    );
+    const isNvs = programId === PROGRAM_IDS.NVS;
+    const access = isNvs
+      ? await requireStudentAdditionStudentAccess(session, studentPkId)
+      : await requireStudentProgramDropoutAccess(session, studentPkId, programId);
     if (!access.ok) {
       return NextResponse.json(
         { error: access.error },
@@ -134,7 +141,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    if (!student.student_id && !student.pen_number) {
+    if (!student.student_id && !(isNvs ? student.pen_number : student.apaar_id)) {
       return NextResponse.json(
         { error: "Student has no dropout identifier" },
         { status: 400 },
@@ -154,8 +161,10 @@ export async function POST(request: NextRequest) {
 
     if (student.student_id) {
       requestBody.student_id = student.student_id;
-    } else if (student.pen_number) {
+    } else if (isNvs && student.pen_number) {
       requestBody.pen_number = student.pen_number;
+    } else if (student.apaar_id) {
+      requestBody.apaar_id = student.apaar_id;
     }
 
     const response = await fetch(`${dbServiceUrl}/dropout`, {
@@ -176,7 +185,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    return dbServiceError(response, student);
+    return dbServiceError(response, student, isNvs);
   } catch (error) {
     console.error("Error marking student as dropout:", error);
     return NextResponse.json(

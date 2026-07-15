@@ -5,6 +5,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 vi.mock("@/lib/student-addition-access", () => ({
   requireStudentAdditionStudentAccess: vi.fn(),
+  requireStudentProgramDropoutAccess: vi.fn(),
 }));
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: vi.fn(),
@@ -12,7 +13,10 @@ vi.mock("@/lib/lms-enrollment-date", () => ({
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
-import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
+import {
+  requireStudentAdditionStudentAccess,
+  requireStudentProgramDropoutAccess,
+} from "@/lib/student-addition-access";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { POST } from "./route";
@@ -26,6 +30,9 @@ const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
 const mockRequireStudentAdditionStudentAccess = vi.mocked(
   requireStudentAdditionStudentAccess,
+);
+const mockRequireStudentProgramDropoutAccess = vi.mocked(
+  requireStudentProgramDropoutAccess,
 );
 const mockDeriveLmsEnrollmentPeriod = vi.mocked(deriveLmsEnrollmentPeriod);
 const mockFetch = vi.fn();
@@ -46,6 +53,17 @@ beforeEach(() => {
   mockRequireStudentAdditionStudentAccess.mockResolvedValue({
     ok: true,
     programId: 64,
+    actor: {
+      user_id: 501,
+      email: "pm@example.org",
+      login_type: "google",
+      role: "program_manager",
+    },
+    school: { code: "JNV001", udise_code: "12345678901" },
+  });
+  mockRequireStudentProgramDropoutAccess.mockResolvedValue({
+    ok: true,
+    programId: PROGRAM_IDS.COE,
     actor: {
       user_id: 501,
       email: "pm@example.org",
@@ -102,8 +120,9 @@ describe("POST /api/student/dropout", () => {
     expect(mockRequireStudentAdditionStudentAccess).not.toHaveBeenCalled();
   });
 
-  it("rejects non-NVS program intent before authorization or proxying", async () => {
+  it("proxies a permitted non-NVS program dropout", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(new Response("", { status: 200 }));
     const req = jsonRequest("http://localhost/api/student/dropout", {
       method: "POST",
       body: { student_pk_id: 100, program_id: 1 },
@@ -111,11 +130,15 @@ describe("POST /api/student/dropout", () => {
 
     const res = await POST(req as never);
 
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "program_id must be JNV NVS" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
     expect(mockRequireStudentAdditionStudentAccess).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockRequireStudentProgramDropoutAccess).toHaveBeenCalledWith(
+      ADMIN_SESSION,
+      100,
+      PROGRAM_IDS.COE,
+    );
+    expect(mockFetch).toHaveBeenCalled();
   });
 
   it("marks student as dropout successfully", async () => {

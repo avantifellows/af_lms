@@ -331,7 +331,7 @@ describe("requireStudentAdditionStudentAccess", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("allows admins to edit/dropout NVS students without explicit NVS program ids", async () => {
+  it("blocks admins without explicit NVS program scope", async () => {
     mockGetResolvedPermission.mockResolvedValue(
       permission({
         role: "admin",
@@ -347,7 +347,7 @@ describe("requireStudentAdditionStudentAccess", () => {
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
-    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ ok: false, status: 403 });
   });
 
   it("ignores legacy program fields when the Student has no current NVS Batch", async () => {

@@ -463,6 +463,7 @@ describe("StudentTable - Edit button visibility", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
@@ -502,6 +503,7 @@ describe("StudentTable - Edit button hidden", () => {
         canEdit={true}
         canEditStudent={false}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(
@@ -520,6 +522,7 @@ describe("StudentTable - Edit button hidden", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(
@@ -536,7 +539,7 @@ describe("StudentTable - Edit button hidden", () => {
 // ─── 8. Dropout button for active editable students ─────────────────────────
 
 describe("StudentTable - Dropout button", () => {
-  it("hides dropout outside the explicit NVS program view", () => {
+  it("supports dropout in a permitted non-NVS program view", () => {
     render(
       <StudentTable
         students={[
@@ -549,12 +552,11 @@ describe("StudentTable - Dropout button", () => {
         grades={defaultGrades}
         canDropoutStudent
         isAdmin
+        userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
 
-    expect(
-      screen.queryByRole("button", { name: "Dropout" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
   });
 
   it("shows Dropout button for active editable student", () => {
@@ -563,6 +565,7 @@ describe("StudentTable - Dropout button", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Dropout")).toBeInTheDocument();
@@ -586,6 +589,7 @@ describe("StudentTable - Dropout button", () => {
         students={[makeStudent({ first_name: "TestDrop" })]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -612,7 +616,7 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("admin can edit NVS students", () => {
+  it("admin without NVS scope cannot edit NVS students", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
@@ -622,7 +626,7 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("admin cannot edit non-NVS students through the Student Addition gate", () => {
@@ -638,7 +642,7 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("admin can edit a mixed-program row with an NVS current batch", () => {
+  it("admin without NVS scope cannot edit a mixed-program row", () => {
     const student = makeStudent({
       program_id: PROGRAM_IDS.COE,
       student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
@@ -652,7 +656,7 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("hides Edit when the roster has no current NVS Batch", () => {
@@ -933,6 +937,7 @@ describe("StudentTable - Edit modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -947,6 +952,7 @@ describe("StudentTable - Edit modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -968,6 +974,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent({ first_name: "Ravi", last_name: "Kumar" })]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -988,6 +995,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1016,6 +1024,7 @@ describe("StudentTable - Dropout modal", () => {
         ]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1055,6 +1064,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1095,6 +1105,7 @@ describe("StudentTable - Dropout modal", () => {
         ]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1122,6 +1133,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent({ first_name: null, last_name: null })]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1269,6 +1281,7 @@ describe("StudentTable - Dropout modal error edge cases", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1293,6 +1306,7 @@ describe("StudentTable - Dropout modal error edge cases", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 

@@ -20,6 +20,7 @@ import {
   validateStudentAdditionInput,
   type StudentAdditionInput,
 } from "@/lib/student-addition-fields";
+import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 
 interface AddStudentModalProps {
   open: boolean;
@@ -74,7 +75,12 @@ export default function AddStudentModal({
   const [error, setError] = useState<string | null>(null);
   const [serviceFieldErrors, setServiceFieldErrors] = useState<Record<string, string>>({});
 
-  const validation = useMemo(() => validateStudentAdditionInput(form), [form]);
+  const validation = useMemo(
+    () => validateStudentAdditionInput(form, {
+      academicYear: deriveLmsEnrollmentPeriod().academic_year,
+    }),
+    [form],
+  );
   const canSubmit = validation.ok && !submitting;
 
   useEffect(() => {

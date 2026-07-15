@@ -454,7 +454,6 @@ export default function StudentTable({
   dropoutProgramIds = null,
   userProgramIds = null,
   isPasscodeUser = false,
-  isAdmin = false,
   grades,
   batches = [],
   nvsStreams = [],
@@ -491,14 +490,12 @@ export default function StudentTable({
       .map(Number)
       .includes(PROGRAM_IDS.NVS);
     if (!hasNvsBatch) return false;
-    if (isAdmin) return true;
     if (!userProgramIds || userProgramIds.length === 0) return false;
     return userProgramIds.includes(PROGRAM_IDS.NVS);
   };
 
   const canDropoutFromSelectedProgram = (student: Student): boolean => {
-    if (!canDropoutStudent || effectiveProgramId !== PROGRAM_IDS.NVS)
-      return false;
+    if (!canDropoutStudent || effectiveProgramId == null) return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
@@ -506,7 +503,7 @@ export default function StudentTable({
       ? student.student_program_ids.map(Number).includes(effectiveProgramId)
       : Number(student.program_id) === effectiveProgramId;
     if (!belongsToProgram) return false;
-    return isAdmin || Boolean(userProgramIds?.includes(effectiveProgramId));
+    return Boolean(userProgramIds?.includes(effectiveProgramId));
   };
 
   // Determine which students to show based on tab

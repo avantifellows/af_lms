@@ -364,10 +364,18 @@ export default async function SchoolPage({ params }: PageProps) {
         canEdit={studentsAccess.canEdit}
         canEditStudent={canAddStudent}
         canDropoutStudent={
-          canAddStudent ||
-          (isAdmin && studentsAccess.canEdit && !isPasscodeUser)
+          studentsAccess.canEdit &&
+          !isPasscodeUser &&
+          ["admin", "program_manager", "program_admin"].includes(
+            permission?.role ?? "",
+          )
         }
-        dropoutProgramIds={[PROGRAM_IDS.NVS]}
+        dropoutProgramIds={[
+          ...new Set([
+            ...(school.centre_program_ids ?? []).map(Number),
+            ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
+          ]),
+        ]}
         canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}

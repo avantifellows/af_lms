@@ -57,11 +57,22 @@ export type StudentAdditionStudentAccessResult =
     }
   | { ok: false; status: 401 | 403; error: string };
 
+export type StudentProgramDropoutAccessResult =
+  | {
+      ok: true;
+      permission: UserPermission;
+      programId: number;
+      school: { code: string; udise_code: string | null };
+      actor: ReturnType<typeof studentAdditionActor>;
+    }
+  | { ok: false; status: 401 | 403; error: string };
+
 interface StudentWriteScopeRow {
   code: string;
   udise_code: string | null;
   region: string | null;
   has_program_enrollment: boolean;
+  centre_program_ids?: Array<number | string> | null;
 }
 
 function deny(
@@ -89,10 +100,75 @@ function studentAdditionActor(permission: UserPermission, email: string) {
 }
 
 function actorHasProgramAccess(permission: UserPermission, programId: number) {
-  return (
-    permission.role === "admin" ||
-    getProgramContextSync(permission).programIds.includes(programId)
+  return getProgramContextSync(permission).programIds.includes(programId);
+}
+
+async function getStudentProgramDropoutScope(
+  studentPkId: number | string,
+  programId: number,
+) {
+  const rows = await query<StudentWriteScopeRow>(
+    `SELECT
+       sch.code,
+       sch.udise_code,
+       sch.region,
+       COALESCE(
+         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
+         ARRAY[]::int[]
+       ) AS centre_program_ids,
+       EXISTS (
+         SELECT 1 FROM enrollment_record er_batch
+         JOIN batch b ON b.id = er_batch.group_id
+         WHERE er_batch.user_id = s.user_id
+           AND er_batch.group_type = 'batch'
+           AND er_batch.is_current = true
+           AND b.program_id = $2
+       ) AS has_program_enrollment
+     FROM student s
+     JOIN enrollment_record er_school ON er_school.user_id = s.user_id
+       AND er_school.group_type = 'school' AND er_school.is_current = true
+     JOIN school sch ON sch.id = er_school.group_id
+     LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
+     WHERE s.id = $1
+     GROUP BY sch.code, sch.udise_code, sch.region, s.user_id`,
+    [studentPkId, programId],
   );
+  return rows.length === 1 ? rows[0] : null;
+}
+
+export async function requireStudentProgramDropoutAccess(
+  session: StudentAdditionSession | null,
+  studentPkId: number | string,
+  programId: number,
+): Promise<StudentProgramDropoutAccessResult> {
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
+
+  const { email } = sessionEmail;
+  const permission = await getResolvedPermission(email);
+  if (!permission) return deny(403);
+  if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
+  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+
+  const scope = await getStudentProgramDropoutScope(studentPkId, programId);
+  if (!scope) return deny(403);
+  if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
+    if (
+      permission.level !== 2 ||
+      !(await canAccessSchool(email, scope.code, scope.region ?? undefined))
+    ) return deny(403);
+  }
+  if (!(scope.centre_program_ids ?? []).map(Number).includes(programId)) return deny(403);
+  if (!scope.has_program_enrollment) return deny(403);
+  if (!actorHasProgramAccess(permission, programId)) return deny(403);
+
+  return {
+    ok: true,
+    permission,
+    programId,
+    school: { code: scope.code, udise_code: scope.udise_code },
+    actor: studentAdditionActor(permission, email),
+  };
 }
 
 export function getStudentAdditionAccessFromPermission(
