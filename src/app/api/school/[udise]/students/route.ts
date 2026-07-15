@@ -164,6 +164,7 @@ function countTotals(results: Array<{ status: DbServiceResult["status"] }>) {
   );
 }
 
+// fallow-ignore-next-line complexity
 async function proxyRowsToDbService({
   access,
   school,

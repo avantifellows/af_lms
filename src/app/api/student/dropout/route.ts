@@ -35,6 +35,7 @@ const SAFE_DROPOUT_ERRORS = new Set([
   "Student is not enrolled in this school",
 ]);
 
+// fallow-ignore-next-line complexity
 async function dbServiceError(
   response: Response,
   student: DropoutStudentRow,

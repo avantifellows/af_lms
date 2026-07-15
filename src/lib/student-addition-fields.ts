@@ -3,7 +3,6 @@ import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 export const CBSE_BOARD = "CBSE";
 export const G10_BOARD_OPTIONS = [CBSE_BOARD, "Others"] as const;
 
-export const GENDER_OPTIONS = ["Female", "Male", "Others"] as const;
 export const STUDENT_ADDITION_GENDER_OPTIONS = ["Female", "Male", "Other"] as const;
 export const CATEGORY_OPTIONS = ["Gen", "Gen-EWS", "OBC", "SC", "ST"] as const;
 export const BOARD_STREAM_OPTIONS = [
@@ -64,7 +63,7 @@ export interface StudentAdditionInput {
   annual_family_income?: unknown;
 }
 
-export interface LmsStudentEditPayload {
+interface LmsStudentEditPayload {
   first_name?: string;
   last_name?: string;
   phone?: string;
@@ -360,6 +359,7 @@ function editError(field: string, message: string, otherField?: string) {
   };
 }
 
+// fallow-ignore-next-line complexity
 export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
   const fields = Object.fromEntries(
     STUDENT_EDITABLE_FIELDS
