@@ -20,7 +20,7 @@ edges:
     condition: when working on PM school visits or visit action types
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-07-02
+last_updated: 2026-07-15
 ---
 
 # Session Bootstrap
@@ -45,7 +45,7 @@ Then read this file fully before doing anything else in this session.
 
 **Known issues:**
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
-- The `graphify-out/` knowledge graph is not committed (regenerated locally); rebuild with `/graphify --update` after significant changes.
+- The Graphify knowledge graph is generated locally and not committed; rebuild it with `/graphify --update` after significant changes.
 - Deploy is CI-only via `.github/workflows/deploy-amplify.yml` (main → prod, PRs → shared staging URL). There is no local deploy script.
 
 ## Routing Table

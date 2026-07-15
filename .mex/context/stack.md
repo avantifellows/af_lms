@@ -16,7 +16,7 @@ edges:
     condition: when choosing which data backend a library talks to
   - target: context/setup.md
     condition: when installing or configuring these tools locally
-last_updated: 2026-06-25
+last_updated: 2026-07-15
 ---
 
 # Stack
@@ -38,7 +38,7 @@ last_updated: 2026-06-25
 - **`@aws-sdk/client-sns`** — session-creation messages (`src/lib/sns.ts`).
 - **`recharts`** — performance/analytics charts; **`lucide-react`** — icons; **`csv-parse`** — centre/staff CSV imports.
 - **`vitest` 4 + `@testing-library/react`** (not Jest) — unit/component tests, jsdom env. **`@playwright/test`** — E2E.
-- **`fallow`** — static codebase health/dead-code/risk analysis (`npm run fallow:*`).
+- **`fallow`** — static codebase health/dead-code/risk analysis (`npm run fallow`, `npm run fallow:audit`, `npm run fallow:dead-code`, and `npm run fallow:health`).
 
 ## What We Deliberately Do NOT Use
 - **No ORM** — raw `pg` with `$1` placeholders. Keeps the schema shared with the DB Service unambiguous.
