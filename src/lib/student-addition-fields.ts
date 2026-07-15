@@ -427,7 +427,6 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
     }
   }
   if (fields.gender === "Others") fields.gender = "Other";
-  if (fields.g10_board === "Others") fields.g10_board = null;
   if (fields.physically_handicapped && fields.category) {
     fields.category = fields.category === "Gen-EWS" ? "PWD-EWS" : `PWD-${fields.category}`;
   }
@@ -479,7 +478,7 @@ export function validateStudentAdditionInput(
 
   const g10BoardInput = stringValue(input.g10_board);
   if (!BOARD_SET.has(g10BoardInput)) addError(fieldErrors, "g10_board", "G10 board must be CBSE or Others");
-  const g10_board = g10BoardInput === "Others" ? null : g10BoardInput;
+  const g10_board = g10BoardInput;
 
   const g10RollInput = stringValue(input.g10_roll_no);
   const g10_roll_no = normalizeG10RollNo(g10RollInput, g10BoardInput);

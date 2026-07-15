@@ -122,7 +122,7 @@ describe("PATCH /api/student/[id]", () => {
       physically_handicapped: true,
       grade: 12,
       stream: "nda",
-      g10_board: null,
+      g10_board: "Others",
     });
   });
 

@@ -25,7 +25,7 @@ describe("canonicalizeStudentEditPayload", () => {
         gender: "Other",
         category: "PWD-EWS",
         physically_handicapped: true,
-        g10_board: null,
+        g10_board: "Others",
       },
     });
   });
@@ -96,7 +96,7 @@ describe("validateStudentAdditionInput", () => {
       gender: "Other",
       category: "PWD-EWS",
       physically_handicapped: true,
-      g10_board: null,
+      g10_board: "Others",
       g10_roll_no: "AB12Z",
       stream: "nda",
     });

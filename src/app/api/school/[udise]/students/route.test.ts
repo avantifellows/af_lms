@@ -225,7 +225,7 @@ describe("POST /api/school/[udise]/students", () => {
       gender: "Other",
       category: "PWD-ST",
       physically_handicapped: true,
-      g10_board: null,
+      g10_board: "Others",
       g10_roll_no: "AB12",
       stream: "nda",
     });

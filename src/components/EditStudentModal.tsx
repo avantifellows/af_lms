@@ -48,9 +48,17 @@ function formatDateForInput(dateString: string | null): string {
   try {
     const date = new Date(dateString);
     if (Number.isNaN(date.getTime())) return "";
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(date.getUTCDate()).padStart(2, "0");
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+        .formatToParts(date)
+        .map(({ type, value }) => [type, value]),
+    );
+    const { year, month, day } = parts;
     return `${year}-${month}-${day}`;
   } catch {
     return "";

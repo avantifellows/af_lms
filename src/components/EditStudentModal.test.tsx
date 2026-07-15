@@ -122,6 +122,17 @@ describe("EditStudentModal", () => {
     expect(document.querySelector('[name="batch_group_id"]')).toBeNull();
   });
 
+  it("keeps the local database date when serialization uses the prior UTC day", () => {
+    renderModal({
+      student: {
+        ...baseStudent,
+        date_of_birth: "2008-05-14T18:30:00.000Z",
+      },
+    });
+
+    expect(getByName("date_of_birth")).toHaveValue("2008-05-15");
+  });
+
   it("initializes the name field with the full existing student name", () => {
     renderModal({
       student: { ...baseStudent, first_name: "Ravi", last_name: "Kumar" },
