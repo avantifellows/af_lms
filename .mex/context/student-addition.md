@@ -123,9 +123,21 @@ Final PRD decision:
 
 Existing-student NVS edit is atomic and program-scoped without a Centre requirement: DB Service requires current Program 64 and exactly one current NVS batch, replaces only that program's batch enrollment/group membership, and leaves other programs untouched. It compares submitted grade/stream values to current values before planning enrollment changes, derives the graduating year from `academic_year`, and rejects invalid phone/DOB values at the service boundary.
 
-DB Service work still needed:
-- Add `g10_board` and `g10_roll_no` columns to `student`, cast them in `Dbservice.Users.Student`, and include them in JSON/swagger if the API returns them.
-- Add the dedicated create-only bulk endpoint above. Desired v1 behavior from the PRD: LMS validates first, DB Service enforces uniqueness/no-overwrite/ownership, commits good rows, and reports duplicate/existing/rejected rows.
+DB Service implementation now includes the PEN/G10 fields, the dedicated create-only bulk endpoint, atomic existing-student edit, and program-specific LMS dropout described above. LMS validates first; DB Service enforces uniqueness, no-overwrite ownership, per-row transactions, and structured duplicate/existing/rejected results.
+
+## Manual QA Evidence
+On 2026-07-16, the stacked LMS and DB Service PRs were exercised together in Playwright against an isolated clone of the local database. The clone was migrated before startup; the source database was not changed.
+
+Passed browser checks covered:
+- Admin and Program Manager NVS add/bulk/edit/dropout access on a Centre-free JNV school; Teacher and read-only users could view but had no write controls.
+- Grade 11 and Grade 12 creation, PEN-only creation, CBSE and Others roll handling, `Other` gender, CWSN `PWD-*` mapping, NDA selection, and DOB normalisation for slash and dash inputs.
+- Exact template download bytes and sheet names, old APAAR-template rejection, mixed-grade bulk results, duplicate handling, rejected-row CSV availability, and preservation of original rejected values.
+- Locked Student ID, PEN, G10 roll, and historical APAAR in Edit; grade/stream edits re-derived only the NVS batch.
+- Program-specific dropout ended NVS while leaving a second CoE enrollment current.
+- Non-JNV schools did not expose NVS add/edit controls and retained existing centre-program admin dropout controls.
+- Desktop and 390px mobile layouts had no horizontal overflow; key pages and modals produced no browser console or page errors.
+
+NDA batch metadata is an operational prerequisite. The isolated QA database used one Grade 11 and one Grade 12 NDA batch fixture because the shared local snapshot did not yet contain the planned NDA batches.
 
 ## Batch Mapping
 Initial prod check showed `batch.metadata.grade + batch.metadata.stream` was ambiguous for NVS because both old `EnableStudents_11_25` / `EnableStudents_12_25` batches and new Lakshya `2027` / `2028` batches carried the same metadata. The team cleared conflicting metadata on the old batches; prod recheck on 2026-06-30 showed exactly one matching NVS batch for each v1 Grade x Primary Stream pair.
