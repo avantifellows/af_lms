@@ -15,7 +15,6 @@ interface DropoutStudentRow {
   id: number;
   student_id: string | null;
   pen_number: string | null;
-  apaar_id: string | null;
   status: string | null;
 }
 
@@ -67,7 +66,7 @@ async function dbServiceError(response: Response, student: DropoutStudentRow) {
 
 async function resolveDropoutStudent(studentPkId: number) {
   return query<DropoutStudentRow>(
-    `SELECT id, student_id, pen_number, apaar_id, status
+    `SELECT id, student_id, pen_number, status
      FROM student
      WHERE id = $1
      LIMIT 1`,

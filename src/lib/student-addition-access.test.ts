@@ -281,6 +281,37 @@ describe("requireStudentAdditionStudentAccess", () => {
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
+  it.each([
+    [
+      "read-only actors",
+      () =>
+        mockGetFeatureAccess.mockReturnValue({
+          access: "view",
+          canView: true,
+          canEdit: false,
+        }),
+    ],
+    [
+      "actors without NVS program scope",
+      () =>
+        mockGetProgramContextSync.mockReturnValue({
+          hasAccess: true,
+          programIds: [PROGRAM_IDS.COE],
+          isNVSOnly: false,
+          hasCoEOrNodal: true,
+        }),
+    ],
+  ])("blocks %s before returning mutation context", async (_label, arrange) => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "program_manager" }),
+    );
+    arrange();
+
+    const result = await requireStudentAdditionStudentAccess(session, "100");
+
+    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+
   it("allows a student when the school has an active NVS centre", async () => {
     mockGetResolvedPermission.mockResolvedValue(
       permission({ role: "program_manager" }),
