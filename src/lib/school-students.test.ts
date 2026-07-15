@@ -10,7 +10,11 @@ vi.mock("@/lib/db", () => ({
   query: mocks.mockQuery,
 }));
 
-import { getSchoolRoster, filterActiveRosterStudents } from "./school-students";
+import {
+  getSchoolRoster,
+  getCentreStudents,
+  filterActiveRosterStudents,
+} from "./school-students";
 
 function makeStudent(overrides: Partial<Student> = {}): Student {
   const user_id = overrides.user_id ?? "u-1";
@@ -71,6 +75,60 @@ describe("getSchoolRoster", () => {
 
     expect(students).toHaveLength(1);
     expect(students[0].grade).toBe(12); // keeps the highest grade
+    expect(issues).toHaveLength(1);
+    expect(issues[0].type).toBe("duplicate_grade");
+  });
+});
+
+describe("getCentreStudents", () => {
+  it("queries the centre_students view scoped to the centre + current academic year", async () => {
+    mocks.mockQuery.mockResolvedValueOnce([]);
+
+    await getCentreStudents("centre-8");
+
+    expect(mocks.mockQuery).toHaveBeenCalledTimes(1);
+    const [sql, params] = mocks.mockQuery.mock.calls[0];
+    // Membership is authoritative from the view, not re-derived.
+    expect(sql).toContain("FROM centre_students cs");
+    expect(sql).toContain("cs.centre_id = $1");
+    expect(sql).toContain("cs.academic_year = $2");
+    // Hydration joins the current-year grade enrollment (for grade_id).
+    expect(sql).toContain("JOIN enrollment_record er_grade");
+    expect(params).toEqual(["centre-8", CURRENT_ACADEMIC_YEAR]);
+  });
+
+  it("hydrates via the shared column list, identical to the school roster", async () => {
+    // Both functions select the shared STUDENT_COLUMNS block, so their row
+    // shapes cannot drift. Assert the block's first + last columns appear in
+    // each query's SQL.
+    const first = "gu.id as group_user_id";
+    const last = "GREATEST(s.updated_at, u.updated_at) as updated_at";
+
+    mocks.mockQuery.mockResolvedValueOnce([]);
+    await getCentreStudents("centre-8");
+    const [centreSql] = mocks.mockQuery.mock.calls[0];
+
+    mocks.mockQuery.mockResolvedValueOnce([]);
+    await getSchoolRoster("school-1");
+    const [rosterSql] = mocks.mockQuery.mock.calls[1];
+
+    expect(centreSql).toContain(first);
+    expect(centreSql).toContain(last);
+    expect(rosterSql).toContain(first);
+    expect(rosterSql).toContain(last);
+  });
+
+  it("returns deduplicated students plus data issues via processStudents", async () => {
+    // A student with two current grade enrollments yields duplicate view rows.
+    mocks.mockQuery.mockResolvedValueOnce([
+      makeStudent({ group_user_id: "gu-dup", grade: 11 }),
+      makeStudent({ group_user_id: "gu-dup", grade: 12 }),
+    ]);
+
+    const { students, issues } = await getCentreStudents("centre-8");
+
+    expect(students).toHaveLength(1);
+    expect(students[0].grade).toBe(12);
     expect(issues).toHaveLength(1);
     expect(issues[0].type).toBe("duplicate_grade");
   });

@@ -20,6 +20,18 @@ export const PROGRAM_IDS = {
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
 export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
 
+// Priority for attributing a student to ONE program when they sit in multiple
+// program batches: JNV CoE → Nodal → NVS. Used by the roster and dashboard
+// attribution LATERALs (array_position tiebreak). NOTE: intentionally the three
+// JNV programs only — non-JNV centre programs aren't part of this tiebreak yet
+// (see the attribution single-source follow-up). Keep in sync with the
+// centre_students view's tiebreak until that lands.
+export const PROGRAM_ATTRIBUTION_ORDER: number[] = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.NODAL,
+  PROGRAM_IDS.NVS,
+];
+
 // Maps program_ids to the BigQuery `student_program` label.
 // Keep in sync with AddUserModal's PROGRAMS list.
 export const PROGRAM_ID_TO_LABEL: Record<number, string> = {

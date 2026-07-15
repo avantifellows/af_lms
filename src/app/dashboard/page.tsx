@@ -8,11 +8,17 @@ import {
   getFeatureAccess,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
 import SchoolCard, { School, GradeCount } from "@/components/SchoolCard";
+import CentreCard from "@/components/CentreCard";
+import {
+  getAccessibleCentresWithCounts,
+  getNvsGradeCounts,
+  resolveCentreAccess,
+  type Centre,
+} from "@/lib/dashboard-groupings";
 import Pagination from "@/components/Pagination";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
@@ -144,65 +150,6 @@ async function getSchools(
   return { schools, totalCount: parseInt(countResult[0]?.total || "0", 10) };
 }
 
-// Get grade-wise student counts for the loaded school cards.
-// Scoped to the current academic year so the dashboard summary cards match
-// the school roster, which is also restricted to CURRENT_ACADEMIC_YEAR.
-//
-// Cohort rule (matches the school-page roster, which attributes each student a
-// program via their batch):
-//  - JNV schools: the school *is* the cohort — count every current-year member
-//    (historical behaviour, unchanged).
-//  - Non-JNV centre-linked schools sit inside a much larger host school (e.g.
-//    RSMS Bathinda has ~341 current-year members but only ~99 CoE+Nodal cohort),
-//    so count only students enrolled in a batch of one of the school's
-//    active-centre programs. Otherwise the card over-counts the whole host
-//    school (incl. unrelated programmes like the STP Test Series group).
-async function getSchoolGradeCounts(schoolIds: string[]): Promise<Map<string, GradeCount[]>> {
-  if (schoolIds.length === 0) return new Map();
-
-  const results = await query<{ school_id: string; grade: number; count: string }>(
-    `SELECT
-       s.id as school_id,
-       gr.number as grade,
-       COUNT(DISTINCT gu_school.user_id) as count
-     FROM school s
-     JOIN "group" g_school ON g_school.type = 'school' AND g_school.child_id = s.id
-     JOIN group_user gu_school ON gu_school.group_id = g_school.id
-     LEFT JOIN enrollment_record er ON er.user_id = gu_school.user_id
-       AND er.group_type = 'grade' AND er.is_current = true
-       AND er.academic_year = $2
-     LEFT JOIN grade gr ON er.group_id = gr.id
-     WHERE s.id = ANY($1) AND gr.number IS NOT NULL
-       AND (
-         s.af_school_category = 'JNV'
-         OR EXISTS (
-           SELECT 1
-           FROM group_user gu_batch
-           JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-           JOIN batch b ON g_batch.child_id = b.id
-           JOIN centres c ON c.school_id = s.id AND c.is_active
-             AND c.program_id = b.program_id
-           WHERE gu_batch.user_id = gu_school.user_id
-         )
-       )
-     GROUP BY s.id, gr.number
-     ORDER BY gr.number`,
-    [schoolIds, CURRENT_ACADEMIC_YEAR]
-  );
-
-  const gradeMap = new Map<string, GradeCount[]>();
-  results.forEach((row) => {
-    if (!gradeMap.has(row.school_id)) {
-      gradeMap.set(row.school_id, []);
-    }
-    gradeMap.get(row.school_id)!.push({
-      grade: row.grade,
-      count: parseInt(row.count, 10),
-    });
-  });
-  return gradeMap;
-}
-
 async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visit[]> {
   return query<Visit>(
     `SELECT v.id, v.school_code, v.visit_date, v.status, v.inserted_at,
@@ -217,14 +164,19 @@ async function getRecentVisits(pmEmail: string, limit: number = 5): Promise<Visi
   );
 }
 
+// Dashboard groupings, rendered as tabs. A student belongs to exactly one
+// (partitioned by attributed program), so tab counts never double-count.
+type DashboardView = "jnv-nvs" | "centres";
+
 interface PageProps {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; page?: string; view?: string }>;
 }
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
-  const { q: searchQuery, page: pageParam } = await searchParams;
+  const { q: searchQuery, page: pageParam, view: viewParam } = await searchParams;
   const currentPage = Math.max(1, parseInt(pageParam || "1", 10));
+  const view: DashboardView = viewParam === "centres" ? "centres" : "jnv-nvs";
 
   if (!session?.user?.email) {
     redirect("/");
@@ -300,31 +252,56 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
-  // If user has access to only one school and no search, redirect directly (skip heavy queries)
-  if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery) {
+  // If user has access to only one school and no search, redirect directly
+  // (skip heavy queries) — but not when they're explicitly viewing the Centres
+  // tab, which the single school may host.
+  if (
+    schoolCodes !== "all" &&
+    schoolCodes.length === 1 &&
+    !searchQuery &&
+    view === "jnv-nvs"
+  ) {
     redirect(`/school/${schoolCodes[0]}`);
   }
 
-  const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
+  // Fetch per tab so neither pays for the other's queries. getSchools runs on
+  // both tabs — it drives the schools grid on jnv-nvs and the header's scope
+  // count everywhere — but recent visits (jnv-nvs only) and the centre list
+  // (centres only) are fetched only where they're rendered.
+  let totalCount = 0;
+  let recentVisits: Visit[] = [];
+  // JNV NVS tab: schools with NVS-attributed grade counts (disjoint from centres).
+  let schoolsWithGrades: (School & { grade_counts: GradeCount[]; student_count: number })[] = [];
+  // Physical Centres tab: active centres the user can access, with counts.
+  let centres: Centre[] = [];
+
+  if (view === "centres") {
+    // Centre list + the header's school count, in parallel. No visits query and
+    // no school grid on this tab.
+    const [centreList, { totalCount: schoolCount }] = await Promise.all([
+      getAccessibleCentresWithCounts(resolveCentreAccess(permission, schoolCodes)),
+      getSchools(schoolCodes, searchQuery, currentPage),
+    ]);
+    centres = centreList;
+    totalCount = schoolCount;
+  } else {
+    const [{ schools, totalCount: schoolCount }, visits] = await Promise.all([
+      getSchools(schoolCodes, searchQuery, currentPage),
+      hasPMAccess ? getRecentVisits(session.user.email) : Promise.resolve([] as Visit[]),
+    ]);
+    totalCount = schoolCount;
+    recentVisits = visits;
+    const nvsCounts = await getNvsGradeCounts(schools.map((s) => s.id));
+    schoolsWithGrades = schools.map((school) => {
+      const counts = nvsCounts.get(school.id) || [];
+      return {
+        ...school,
+        grade_counts: counts,
+        student_count: counts.reduce((sum, gc) => sum + gc.count, 0),
+      };
+    });
+  }
   const totalPages = Math.ceil(totalCount / SCHOOLS_PER_PAGE);
-
-  const schoolIds = schools.map((s) => s.id);
-
-  const [gradeCounts, recentVisits] = await Promise.all([
-    getSchoolGradeCounts(schoolIds),
-    hasPMAccess ? getRecentVisits(session.user.email) : Promise.resolve([] as Visit[]),
-  ]);
-
-  // Merge grade counts into schools and derive total from grade counts
-  const schoolsWithGrades = schools.map((school) => {
-    const counts = gradeCounts.get(school.id) || [];
-    const total = counts.reduce((sum, gc) => sum + gc.count, 0);
-    return {
-      ...school,
-      grade_counts: counts,
-      student_count: total,
-    };
-  });
 
   return (
     <div className="min-h-screen bg-bg">
@@ -350,7 +327,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   href="/dashboard"
                   className="text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-1"
                 >
-                  Schools
+                  Home
                 </Link>
                 {canViewVisitSummary && (
                   <Link
@@ -392,6 +369,28 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {/* Grouping tabs — disjoint scopes, so counts never double-count. */}
+        <div className="mb-6 flex gap-6 border-b border-border">
+          {(
+            [
+              { key: "centres", label: "Physical Centres" },
+              { key: "jnv-nvs", label: "JNV NVS Schools" },
+            ] as const
+          ).map((tab) => (
+            <Link
+              key={tab.key}
+              href={`/dashboard?view=${tab.key}`}
+              className={
+                view === tab.key
+                  ? "text-sm font-bold text-text-primary uppercase tracking-wide border-b-2 border-accent pb-2 -mb-px"
+                  : "text-sm font-medium text-text-muted uppercase tracking-wide hover:text-text-primary pb-2 -mb-px"
+              }
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+
         {/* Stats - only show for PM users */}
         {hasPMAccess && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
@@ -410,24 +409,26 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </div>
         )}
 
-        {/* Search */}
-        <div className="mb-6">
-          <div className="mb-4">
-            <label className="block text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
-              Search Students
-            </label>
-            <StudentSearch />
+        {/* Search — schools tab only for now (centre search is a follow-up) */}
+        {view === "jnv-nvs" && (
+          <div className="mb-6">
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
+                Search Students
+              </label>
+              <StudentSearch />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
+                Search Schools
+              </label>
+              <SchoolSearch defaultValue={searchQuery} />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-bold text-text-muted uppercase tracking-wide mb-2">
-              Search Schools
-            </label>
-            <SchoolSearch defaultValue={searchQuery} />
-          </div>
-        </div>
+        )}
 
-        {/* Recent Visits - only show for PM users */}
-        {hasPMAccess && recentVisits.length > 0 && (
+        {/* Recent Visits - only show for PM users, on the schools tab */}
+        {view === "jnv-nvs" && hasPMAccess && recentVisits.length > 0 && (
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4 border-b-2 border-brand-amber pb-3">
               <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Recent Visits</h2>
@@ -493,11 +494,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </div>
         )}
 
-        {/* Schools Grid */}
+        {/* Schools Grid — JNV NVS tab */}
+        {view === "jnv-nvs" && (
         <div>
           {hasPMAccess && (
             <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
-              <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">My Schools</h2>
+              <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">JNV NVS Schools</h2>
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -538,6 +540,42 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             searchParams={searchQuery ? { q: searchQuery } : {}}
           />
         </div>
+        )}
+
+        {/* Physical Centres grid */}
+        {view === "centres" && (
+          <div>
+            {hasPMAccess && (
+              <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
+                <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">Physical Centres</h2>
+              </div>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {centres.map((centre) => (
+                <CentreCard
+                  key={centre.id}
+                  centre={centre}
+                  showRegion={hasPMAccess}
+                  actions={
+                    hasPMAccess && centre.school_code ? (
+                      <Link
+                        href={`/school/${centre.school_code}/visit/new`}
+                        className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors"
+                      >
+                        Start Visit
+                      </Link>
+                    ) : undefined
+                  }
+                />
+              ))}
+            </div>
+            {centres.length === 0 && (
+              <div className="text-center py-12 text-text-muted">
+                No physical centres found
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

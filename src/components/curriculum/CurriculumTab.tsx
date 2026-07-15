@@ -21,6 +21,10 @@ interface CurriculumTabProps {
   schoolCode: string;
   schoolName: string;
   canEdit: boolean;
+  // When set (centre pages), locks curriculum to this program and hides the
+  // program selector. Falls back to the school default if the program isn't
+  // available for this school.
+  programId?: number;
 }
 
 function examTrackLabel(track: ExamTrack | null): string {
@@ -51,6 +55,7 @@ export default function CurriculumTab({
   schoolCode,
   schoolName,
   canEdit,
+  programId,
 }: CurriculumTabProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -117,7 +122,13 @@ export default function CurriculumTab({
         if (isCancelled) return;
 
         setOptions(data);
-        setSelectedProgramId(data.defaults.programId);
+        // Centre pages lock to their own program when it's available here;
+        // otherwise fall back to the school's default program.
+        const lockedProgramId =
+          programId != null && data.programs.some((p) => p.id === programId)
+            ? programId
+            : data.defaults.programId;
+        setSelectedProgramId(lockedProgramId);
         setSelectedExamTrack(data.defaults.examTrack);
         setSelectedGrade(data.defaults.grade);
         setSelectedSubject(data.defaults.subject);
@@ -136,7 +147,7 @@ export default function CurriculumTab({
     return () => {
       isCancelled = true;
     };
-  }, [schoolCode]);
+  }, [schoolCode, programId]);
 
   useEffect(() => {
     if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
@@ -474,7 +485,7 @@ export default function CurriculumTab({
 
       <div className="bg-gray-50 rounded-lg p-4 mb-6">
         <div className="flex flex-wrap gap-4 items-center">
-          {options && options.programs.length > 1 && (
+          {!programId && options && options.programs.length > 1 && (
             <div>
               <label
                 htmlFor="curriculum-program"
