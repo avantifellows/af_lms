@@ -1,5 +1,6 @@
 import { query } from "./db";
 import {
+  PHYSICAL_CENTRE_PROGRAM_IDS,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
   PROGRAM_ID_TO_LABEL,
@@ -7,7 +8,7 @@ import {
 
 // Re-exported from constants so existing `@/lib/permissions` imports keep
 // working while the definitions live in a client-safe module.
-export { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
+export { PHYSICAL_CENTRE_PROGRAM_IDS, PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
 
 // Permission levels (school scope only)
 export type AccessLevel = 1 | 2 | 3;
@@ -597,9 +598,14 @@ export function getProgramContextSync(
   }
 
   const hasNVS = programIds.includes(PROGRAM_IDS.NVS);
-  const hasCoE = programIds.includes(PROGRAM_IDS.COE);
-  const hasNodal = programIds.includes(PROGRAM_IDS.NODAL);
-  const hasCoEOrNodal = hasCoE || hasNodal;
+  // The full LMS feature set (curriculum, quiz sessions, visits, PM dashboard,
+  // summary stats) is granted by ANY non-NVS program — JNV CoE/Nodal plus every
+  // physical-centre program (Punjab CoE/Nodal, EMRS CoE, Uttarakhand CoE, …).
+  // Only NVS-only users are gated out. A Punjab/EMRS/RGNV teacher must not be
+  // treated as NVS-only.
+  const hasCoEOrNodal = programIds.some((id) =>
+    PHYSICAL_CENTRE_PROGRAM_IDS.includes(id)
+  );
   const isNVSOnly = hasNVS && !hasCoEOrNodal;
 
   return {

@@ -31,6 +31,14 @@ frontend:
           echo "S3_DOCS_REGION=$S3_DOCS_REGION" >> .env.production
           echo "S3_DOCS_ACCESS_KEY_ID=$S3_DOCS_ACCESS_KEY_ID" >> .env.production
           echo "S3_DOCS_SECRET_ACCESS_KEY=$S3_DOCS_SECRET_ACCESS_KEY" >> .env.production
+          echo "CMS_SERVICE_URL=$CMS_SERVICE_URL" >> .env.production
+          echo "CMS_SERVICE_TOKEN=$CMS_SERVICE_TOKEN" >> .env.production
+          echo "QUIZ_BACKEND_URL=$QUIZ_BACKEND_URL" >> .env.production
+          echo "SESSION_PORTAL_URL=$SESSION_PORTAL_URL" >> .env.production
+          echo "QUIZ_FRONTEND_URL=$QUIZ_FRONTEND_URL" >> .env.production
+          echo "QUIZ_AF_API_KEY=$QUIZ_AF_API_KEY" >> .env.production
+          echo "AF_SHORTENER_URL=$AF_SHORTENER_URL" >> .env.production
+          echo "AF_SHORTENER_AUTH_TOKEN=$AF_SHORTENER_AUTH_TOKEN" >> .env.production
     build:
       commands:
         - npm run build

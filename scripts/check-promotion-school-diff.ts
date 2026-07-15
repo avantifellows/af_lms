@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-07-01 (d15c9de). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Read-only PRE-PROMOTION diff: for teachers & staff in JNV CoE (program 1) and
  * JNV Nodal (program 2), how will the set of schools each person can access
  * CHANGE when we promote the staging centre-seat model to prod?

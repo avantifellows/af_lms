@@ -16,6 +16,7 @@ import ChapterAccordion from "./ChapterAccordion";
 import LogSessionModal from "./LogSessionModal";
 import ProgressSummary from "./ProgressSummary";
 import SessionHistory from "./SessionHistory";
+import { calculateStats } from "@/lib/curriculum-helpers";
 
 interface CurriculumTabProps {
   schoolCode: string;
@@ -483,8 +484,8 @@ export default function CurriculumTab({
         </div>
       </div>
 
-      <div className="bg-gray-50 rounded-lg p-4 mb-6">
-        <div className="flex flex-wrap gap-4 items-center">
+      <div className="mb-6">
+        <div className="flex flex-wrap gap-4 items-start">
           {!programId && options && options.programs.length > 1 && (
             <div>
               <label
@@ -585,17 +586,27 @@ export default function CurriculumTab({
           <div className="flex-1" />
 
           {canEdit && (
-            <button
-              disabled={!selectedProgramId || isDataLoading || chapters.length === 0}
-              onClick={() => {
-                setLogError(null);
-                setEditingLog(null);
-                setIsLogSessionModalOpen(true);
-              }}
-              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent-hover disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
-            >
-              + Add Log
-            </button>
+            <div className="flex flex-col items-end">
+              {/* invisible spacer matching the filter labels so the button lines
+                  up with the select boxes, not the labels above them */}
+              <span aria-hidden="true" className="block text-xs font-medium mb-1 invisible">
+                Log
+              </span>
+              <button
+                disabled={!selectedProgramId || isDataLoading || chapters.length === 0}
+                onClick={() => {
+                  setLogError(null);
+                  setEditingLog(null);
+                  setIsLogSessionModalOpen(true);
+                }}
+                className="px-5 py-2.5 bg-accent text-white text-base font-bold rounded-md shadow-sm hover:bg-accent-hover disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
+              >
+                + Log a class
+              </button>
+              <p className="mt-1 max-w-[13rem] text-right text-xs text-gray-500">
+                Record a class after it&rsquo;s taught.
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -607,11 +618,11 @@ export default function CurriculumTab({
       ) : error ? (
         <div className="bg-red-50 text-red-700 p-4 rounded-lg">{error}</div>
       ) : hasNoPrograms ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
           No curriculum-enabled Programs are available for this school.
         </div>
       ) : hasEmptyConfig ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
           No Curriculum configuration is available for this school.
         </div>
       ) : (
@@ -657,6 +668,21 @@ export default function CurriculumTab({
                   {completionError}
                 </div>
               )}
+              {canEdit &&
+                chapters.length > 0 &&
+                (() => {
+                  const stats = calculateStats(chapters, progress);
+                  return stats.chaptersCompleted === 0 && stats.topicsCovered === 0;
+                })() && (
+                  <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-hover-bg px-4 py-3 text-sm text-gray-600">
+                    <span aria-hidden="true" className="text-accent">ⓘ</span>
+                    <span>
+                      Nothing logged{selectedSubject ? ` for ${selectedSubject}` : ""} yet.
+                      After each class, use <b>+ Log a class</b> to record what you taught —
+                      the chapters below fill in automatically.
+                    </span>
+                  </div>
+                )}
               <ProgressSummary
                 chapters={chapters}
                 progress={progress}
@@ -691,6 +717,13 @@ export default function CurriculumTab({
             <LogSessionModal
               chapters={chapters}
               progress={progress}
+              scopeLabel={[
+                examTrackLabel(selectedExamTrack),
+                selectedGrade ? `Grade ${selectedGrade}` : null,
+                selectedSubject,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
               onClose={() => {
                 setIsLogSessionModalOpen(false);
                 setEditingLog(null);
