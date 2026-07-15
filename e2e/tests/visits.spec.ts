@@ -397,7 +397,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(pmPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
   });
 
-  test("program-admin-does-not-see-delete-button", async ({ programAdminPage }) => {
+  test("program-admin-does-not-see-delete-button-for-another-users-visit", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
 
     await programAdminPage.goto(`/visits/${visitId}`);
@@ -846,7 +846,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(adminPage.getByText("This visit is completed and read-only.")).toBeVisible();
   });
 
-  test("program-admin-read-only", async ({ programAdminPage }) => {
+  test("program-admin-cannot-manage-another-users-visit", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "principal_interaction",
@@ -904,6 +904,138 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       }
     );
     expect(completeResponse.status()).toBe(403);
+  });
+
+  test("program-admin-manages-their-own-in-progress-visit", async ({ programAdminPage }) => {
+    const createVisitResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createVisitResponse.status()).toBe(201);
+    const { id: visitId } = await createVisitResponse.json();
+
+    const owner = await pool.query<{ pm_email: string }>(
+      "SELECT pm_email FROM lms_pm_school_visits WHERE id = $1",
+      [visitId]
+    );
+    expect(owner.rows[0]?.pm_email).toBe("e2e-program-admin@test.local");
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toBeVisible();
+
+    const createActionResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions`,
+      { data: { action_type: "principal_interaction" } }
+    );
+    expect(createActionResponse.status()).toBe(201);
+    const { action } = await createActionResponse.json();
+
+    const saveResponse = await programAdminPage.request.patch(
+      `/api/pm/visits/${visitId}/actions/${action.id}`,
+      { data: { data: buildCompletePrincipalInteractionData() } }
+    );
+    expect(saveResponse.status()).toBe(200);
+
+    const startResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${action.id}/start`,
+      { data: { start_lat: 23.0225, start_lng: 72.5714, start_accuracy: 10 } }
+    );
+    expect(startResponse.status()).toBe(200);
+
+    const endResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${action.id}/end`,
+      { data: { end_lat: 23.0225, end_lng: 72.5714, end_accuracy: 10 } }
+    );
+    expect(endResponse.status()).toBe(200);
+
+    const deleteActionResponse = await programAdminPage.request.delete(
+      `/api/pm/visits/${visitId}/actions/${action.id}`
+    );
+    expect(deleteActionResponse.status()).toBe(200);
+
+    const deleteVisitResponse = await programAdminPage.request.delete(
+      `/api/pm/visits/${visitId}`
+    );
+    expect(deleteVisitResponse.status()).toBe(200);
+  });
+
+  test("program-admin-owned-completed-visit-is-read-only", async ({ programAdminPage }) => {
+    const createResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const { id: visitId } = await createResponse.json();
+    await markVisitCompleted(visitId);
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(programAdminPage.getByText("This visit is completed and read-only.")).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+    await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
+
+    const deleteResponse = await programAdminPage.request.delete(`/api/pm/visits/${visitId}`);
+    expect(deleteResponse.status()).toBe(409);
+  });
+
+  test("read-only-program-admin-has-no-mutation-access", async ({ programAdminPage }) => {
+    const createResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const { id: visitId } = await createResponse.json();
+
+    await pool.query(
+      "UPDATE user_permission SET read_only = true WHERE email = $1",
+      ["e2e-program-admin@test.local"]
+    );
+
+    try {
+      await programAdminPage.goto(`/visits/${visitId}`);
+      await expect(programAdminPage.getByText("This visit is read-only for your role.")).toBeVisible();
+      await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+      await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
+
+      await programAdminPage.goto(`/school/${schoolCode}/visit/new`);
+      await expect(programAdminPage.getByRole("button", { name: "Start Visit" })).toHaveCount(0);
+
+      const createVisitResponse = await programAdminPage.request.post("/api/pm/visits", {
+        data: {
+          school_code: schoolCode,
+          start_lat: 23.0225,
+          start_lng: 72.5714,
+          start_accuracy: 10,
+        },
+      });
+      expect(createVisitResponse.status()).toBe(403);
+
+      const createActionResponse = await programAdminPage.request.post(
+        `/api/pm/visits/${visitId}/actions`,
+        { data: { action_type: "principal_interaction" } }
+      );
+      expect(createActionResponse.status()).toBe(403);
+
+      const deleteVisitResponse = await programAdminPage.request.delete(`/api/pm/visits/${visitId}`);
+      expect(deleteVisitResponse.status()).toBe(403);
+    } finally {
+      await pool.query(
+        "UPDATE user_permission SET read_only = false WHERE email = $1",
+        ["e2e-program-admin@test.local"]
+      );
+    }
   });
 
   test("legacy-routes-are-gone", async ({ pmPage }) => {

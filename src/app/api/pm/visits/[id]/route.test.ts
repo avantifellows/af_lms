@@ -331,22 +331,42 @@ describe("DELETE /api/pm/visits/[id]", () => {
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
-  it("returns 403 for program admins and passcode users", async () => {
-    mockSession.mockResolvedValueOnce(PROGRAM_ADMIN_SESSION as never);
-    mockGetPermission.mockResolvedValueOnce(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValueOnce({ access: "view", canView: true, canEdit: false });
-
-    const programAdminRes = await DELETE(deleteRequest() as never, params);
-    expect(programAdminRes.status).toBe(403);
-    await expect(programAdminRes.json()).resolves.toEqual({ error: "Forbidden" });
-
-    mockSession.mockResolvedValueOnce(PASSCODE_SESSION as never);
+  it("returns 403 for passcode users", async () => {
+    mockSession.mockResolvedValue(PASSCODE_SESSION as never);
 
     const passcodeRes = await DELETE(deleteRequest() as never, params);
     expect(passcodeRes.status).toBe(403);
     await expect(passcodeRes.json()).resolves.toEqual({
       error: "Passcode users cannot access visit routes",
     });
+  });
+
+  it("soft-deletes an owned in-progress visit for a program admin", async () => {
+    mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
+    mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_DETAIL, pm_email: "PA@AVANTIFELLOWS.ORG" }])
+      .mockResolvedValueOnce([{ id: 10 }]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
+  });
+
+  it("rejects a program admin deleting another user's visit", async () => {
+    mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
+    mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery.mockResolvedValueOnce([
+      { ...VISIT_DETAIL, pm_email: "other@avantifellows.org" },
+    ]);
+
+    const res = await DELETE(deleteRequest() as never, params);
+
+    expect(res.status).toBe(403);
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
   it("returns 404 when the active visit does not exist", async () => {

@@ -87,6 +87,16 @@ const adminPermission = {
   read_only: false,
 };
 
+const programAdminPermission = {
+  level: 2,
+  role: "program_admin",
+  email: "program-admin@avantifellows.org",
+  school_codes: null,
+  regions: ["North"],
+  program_ids: [1],
+  read_only: true,
+};
+
 function makeVisit(overrides: Record<string, unknown> = {}) {
   return {
     id: 1,
@@ -728,6 +738,25 @@ describe("VisitActionDetailPage", () => {
 
     expect(screen.getByText("Completed actions are read-only for your role.")).toBeInTheDocument();
     expect(screen.getByTestId("action-additional-notes")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a read-only program admin's owned action read-only", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "program-admin@avantifellows.org" },
+    });
+    mockGetUserPermission.mockResolvedValue(programAdminPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
+    mockQuery
+      .mockResolvedValueOnce([
+        makeVisit({ pm_email: "program-admin@avantifellows.org" }),
+      ])
+      .mockResolvedValueOnce([makeAction()]);
+
+    const jsx = await VisitActionDetailPage(pageProps());
+    render(jsx);
+
     expect(screen.queryByRole("button", { name: "Save Now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Action" })).not.toBeInTheDocument();
   });

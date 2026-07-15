@@ -113,7 +113,8 @@ export default async function VisitDetailPage({ params }: PageProps) {
   }
 
   const permission = await getResolvedPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canView) {
+  const visitsAccess = getFeatureAccess(permission, "visits");
+  if (!visitsAccess.canView) {
     redirect("/dashboard");
   }
 
@@ -153,7 +154,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
   const progressPercent = actions.length === 0
     ? 0
     : Math.round((completedCount / actions.length) * 100);
-  const canEdit = canEditVisit(actor, {
+  const canEdit = visitsAccess.canEdit && canEditVisit(actor, {
     pmEmail: visit.pm_email,
     schoolCode: visit.school_code,
     schoolRegion: visit.school_region,

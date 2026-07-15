@@ -18,13 +18,13 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-06-30
+last_updated: 2026-07-15
 ---
 
 # PM School Visits
 
-A Program Manager (PM) opens a visit at a school, performs one or more typed "actions"
-(interactions/observations), then completes the visit. GPS is captured at start/end.
+A Program Manager (PM) or Program Admin opens a visit at an in-scope school, performs
+one or more typed "actions" (interactions/observations), then completes the visit. GPS is captured at start/end.
 Visit rows are LMS-owned and written **directly to Postgres** (not the DB Service).
 
 ## DB tables
@@ -35,12 +35,12 @@ Visit rows are LMS-owned and written **directly to Postgres** (not the DB Servic
 ## Access layer — `src/lib/visits-policy.ts` (NOT raw permissions)
 Visit routes do **not** call `canAccessSchool` directly. They use:
 - `requireVisitsAccess(session, "view"|"edit")` → `{ ok, actor }` or `{ ok:false, response }`. Blocks passcode users, resolves the permission, checks the `visits` feature.
-- `enforceVisitReadAccess` / `enforceVisitWriteAccess(actor, target)` — per-visit ownership: a **program_manager** sees/edits only their own visits (`pm_email` match); **admin** has scoped read/write; **program_admin** has scoped **read-only**.
+- `enforceVisitReadAccess` / `enforceVisitWriteAccess(actor, target)` — per-visit ownership: a **program_manager** sees/edits only their own visits (`pm_email` match); **admin** has scoped read/write; **program_admin** has scoped read access and edits only their own in-progress visits.
 - `enforceVisitWriteLock(status)` — returns 409 if the visit is `completed` (completed visits are read-only; only `admin` may edit completed action *data*, via `canEditCompletedActionData`).
 - `buildVisitScopePredicate(actor, opts)` — SQL `WHERE` fragment to scope list queries (handles level 1/2/3 + seat schools).
 - `apiError(status, error, details?)` — the standard structured error response for these routes.
 
-Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **program_admin** = scoped read-only; **passcode** = blocked.
+Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **program_admin** = scoped read plus write on owned in-progress Visits; **passcode** = blocked. `read_only` downgrades every role to view-only, and Visit/Action pages combine feature-level `canEdit` with the ownership policy before rendering mutation controls.
 
 ## GPS — `src/lib/geo-validation.ts`
 `validateGpsReading(body, "start"|"end")` reads `${prefix}_lat/_lng/_accuracy`. Rejects (422) accuracy > 500m or out-of-range lat/lng; warns (still accepts) between 100–500m. **Never log lat/lng.** Routes that need GPS: create visit, action start, action end, complete visit.
@@ -67,7 +67,7 @@ Most types follow the **binary-question checklist** shape (`RadioPair` yes/no + 
 Pages: `src/app/visits/[id]/...` and `src/app/school/[udise]/visit/...`; read-only summary under `src/app/school-visit-summary/[id]`.
 
 ## Gotchas
-- Use **`visits-policy` helpers**, not `permissions.ts` directly, in visit routes — they encode PM-owner vs admin vs program_admin semantics.
+- Use **`visits-policy` helpers**, not `permissions.ts` directly, in visit routes — they encode PM and Program Admin ownership plus Admin scope semantics.
 - **Save vs complete** validation are different functions — a draft can save with gaps; complete demands full data.
 - Completed visits are write-locked (`enforceVisitWriteLock`); only `admin` edits completed action data.
 - Adding a type means touching ~8 files in lockstep — follow `patterns/add-visit-action-type.md`, and note `school_staff_interaction` is optional so completeness/aggregate code must tolerate its absence.

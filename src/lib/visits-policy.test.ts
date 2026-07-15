@@ -83,6 +83,39 @@ describe("visits-policy", () => {
     expect(canAccessVisitSchoolScope(admin, "70705", "South")).toBe(false);
   });
 
+  it("allows program_admin to edit only their own in-scope visit", () => {
+    const actor = buildVisitsActor(
+      " PA@AvantiFellows.org ",
+      makePermission({
+        role: "program_admin",
+        level: 2,
+        regions: ["North"],
+      })
+    );
+
+    expect(
+      canEditVisit(actor, {
+        pmEmail: "pa@avantifellows.org",
+        schoolCode: "70705",
+        schoolRegion: "North",
+      })
+    ).toBe(true);
+    expect(
+      canEditVisit(actor, {
+        pmEmail: "other@avantifellows.org",
+        schoolCode: "70705",
+        schoolRegion: "North",
+      })
+    ).toBe(false);
+    expect(
+      canEditVisit(actor, {
+        pmEmail: "pa@avantifellows.org",
+        schoolCode: "70705",
+        schoolRegion: "South",
+      })
+    ).toBe(false);
+  });
+
   it("does not mark PM as scoped-role reader", () => {
     const pm = buildVisitsActor(
       "pm@avantifellows.org",

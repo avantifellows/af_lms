@@ -241,12 +241,12 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(false);
     });
 
-    it("gives program_admin view on visits", () => {
+    it("gives program_admin edit on visits", () => {
       const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "visits");
-      expect(result.access).toBe("view");
+      expect(result.access).toBe("edit");
       expect(result.canView).toBe(true);
-      expect(result.canEdit).toBe(false);
+      expect(result.canEdit).toBe(true);
     });
 
     it("gives program_admin view on quiz sessions", () => {
@@ -351,6 +351,19 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("view");
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
+    });
+
+    it("downgrades program_admin visit access to view", () => {
+      const perm = makePermission({
+        role: "program_admin",
+        read_only: true,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(perm, "visits")).toEqual({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
     });
 
     it("does not affect view-only features", () => {

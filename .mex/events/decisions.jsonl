@@ -1,0 +1,1 @@
+{"timestamp":"2026-07-15T17:23:36.709Z","kind":"decision","message":"Program Admin Visit edits reuse the existing feature-access resolver and shared ownership policy so read_only, school scope, and every Visit/Action mutation stay consistent.","files":[],"cwd":"."}
