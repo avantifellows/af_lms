@@ -50,6 +50,11 @@ const EMPTY_TOTALS = {
   rejected: 0,
 };
 const MAX_STUDENT_ADDITION_UPLOAD_BYTES = 5 * 1024 * 1024;
+const STUDENT_ADDITION_TEMPLATE = path.join(
+  process.cwd(),
+  process.env.NODE_ENV === "production" ? ".next/server/assets" : "src/assets",
+  "nvs-student-addition-template.xlsx",
+);
 
 function safeFields(value: unknown, keys: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -263,9 +268,11 @@ async function bulkUploadResponse(
     },
     period,
   });
-  if (response.status !== 200) return response;
-
+  const status = response.status;
   const body = await response.json();
+  if (!Array.isArray(body.results)) {
+    return NextResponse.json(body, { status });
+  }
   const dbResults = (body.results ?? []).map((result: DbServiceResult) => ({
     ...result,
     original: parsed.originalRows.get(result.row_number) ?? {},
@@ -278,7 +285,7 @@ async function bulkUploadResponse(
     ...body,
     totals: countTotals(results),
     results,
-  });
+  }, { status });
 }
 
 export async function POST(
@@ -320,7 +327,7 @@ export async function GET(
   const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
 
-  const workbook = await readFile(path.join(process.cwd(), "src", "assets", "nvs-student-addition-template.xlsx"));
+  const workbook = await readFile(STUDENT_ADDITION_TEMPLATE);
   return new NextResponse(new Uint8Array(workbook), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

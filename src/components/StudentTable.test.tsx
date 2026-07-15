@@ -539,7 +539,7 @@ describe("StudentTable - Edit button hidden", () => {
 // ─── 8. Dropout button for active editable students ─────────────────────────
 
 describe("StudentTable - Dropout button", () => {
-  it("supports dropout in a permitted non-NVS program view", () => {
+  it("keeps non-NVS centre-program dropout visible for global admins", () => {
     render(
       <StudentTable
         students={[
@@ -552,7 +552,7 @@ describe("StudentTable - Dropout button", () => {
         grades={defaultGrades}
         canDropoutStudent
         isAdmin
-        userProgramIds={[PROGRAM_IDS.COE]}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 

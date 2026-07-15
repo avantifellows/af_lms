@@ -453,6 +453,7 @@ export default function StudentTable({
   selectedProgramId = null,
   dropoutProgramIds = null,
   userProgramIds = null,
+  isAdmin = false,
   isPasscodeUser = false,
   grades,
   batches = [],
@@ -503,7 +504,7 @@ export default function StudentTable({
       ? student.student_program_ids.map(Number).includes(effectiveProgramId)
       : Number(student.program_id) === effectiveProgramId;
     if (!belongsToProgram) return false;
-    return Boolean(userProgramIds?.includes(effectiveProgramId));
+    return isAdmin || Boolean(userProgramIds?.includes(effectiveProgramId));
   };
 
   // Determine which students to show based on tab

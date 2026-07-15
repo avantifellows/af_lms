@@ -437,6 +437,44 @@ describe("POST /api/school/[udise]/students", () => {
     ]);
   });
 
+  it("merges structured DB Service rejects into a non-200 bulk response", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [{
+            row_number: 2,
+            status: "rejected",
+            field_errors: { pen_number: "PEN already exists" },
+          }],
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const csv = [csvLine(uploadHeaders), csvLine(validUploadRow)].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Student could not be created",
+      totals: {
+        total: 1,
+        created: 0,
+        duplicate_in_file: 0,
+        already_exists: 0,
+        rejected: 1,
+      },
+      results: [expect.objectContaining({
+        row_number: 2,
+        status: "rejected",
+        original: expect.objectContaining({ "Student Name": "asha  k. kumar" }),
+      })],
+    });
+  });
+
   it("proxies mixed-grade rows without multipart Grade metadata", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({
