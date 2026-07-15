@@ -29,6 +29,8 @@ Read-only production LMS and Quiz API inspection found these active forms:
 | 11 | `17391` | `EnableStudents_6a44a83d1184e717b920c499` | `6a44a83d1184e717b920c499` | Student Profile Grade 11 |
 | 12 | `17459` | `EnableStudents_6a4deca8e030ebe34669fb0f` | `6a4deca8e030ebe34669fb0f` | Student Profile Grade 12 |
 
+Product sign-off on 2026-07-15 confirmed these two AF Sessions and Quiz IDs as the v1 Student Profile inputs. The separately supplied `Student Mentoring Baseline G11` (`6a4f2714271be5caf8cf4ccd`) and `Student Mentoring Baseline G12` (`6a4f2ba6e4ee4031d40231db`) forms are explicitly excluded from Profile generation.
+
 Both forms are open from July through August 2026 and were created from Google Sheet `1F_W58M6Uw2U-XsGgK3ocAfnH2ifPcZRCfaNCt9i_c1E`, tab `Student Profile Questions`. The live payloads are the primary questionnaire evidence: [Grade 11 form](https://quiz-backend.avantifellows.org/form/6a44a83d1184e717b920c499?single_page_mode=true) and [Grade 12 form](https://quiz-backend.avantifellows.org/form/6a4deca8e030ebe34669fb0f?single_page_mode=true).
 
 The two forms currently have the same shape:
@@ -111,7 +113,7 @@ The current reporting app is not a usable 2026 source:
 - Reporting includes only themes with at least one `high` priority question and generates the AI summary on every HTML or PDF request: [theme filtering and request-time generation](https://github.com/avantifellows/reporting/blob/459b6dbb90566622481ab67a3e8ffaff3c0287f2/app/routers/form_responses.py#L138-L204).
 - It sends up to eight answered high-priority responses and the raw User ID to OpenRouter, without storing the result: [LLM request](https://github.com/avantifellows/reporting/blob/459b6dbb90566622481ab67a3e8ffaff3c0287f2/app/utils/llm_summary.py#L35-L93).
 
-Because every current 2026 question is `low`, current reporting would render no response themes or AI summaries even if the rows existed in DynamoDB. Question selection, durable generation, privacy, and correction behavior remain decisions for [Define Holistic Student Profile generation and lifecycle](https://github.com/avantifellows/af_lms/issues/186) and [Define Holistic Mentorship privacy and AI-processing rules](https://github.com/avantifellows/af_lms/issues/179).
+Because every current 2026 question is `low`, current reporting would render no response themes or AI summaries even if the rows existed in DynamoDB. The later lifecycle decision therefore ignores Quiz priority, uses every answered Question, generates one durable summary per ordered Question Set, and retains outputs by prompt version and model.
 
 ## Environment Status
 
@@ -125,12 +127,4 @@ Identity is therefore proven for the inspected production records, not across ev
 
 ## Decision Boundary
 
-This research settles the source and current identity interpretation. It does not decide:
-
-- which raw questions/themes feed the generated profile;
-- whether an incomplete or later-edited response triggers generation or regeneration;
-- prompt, model, durable storage, idempotency, failure, and correction rules;
-- whether the maintained ingestion reads Quiz MongoDB directly or consumes BigQuery;
-- privacy, retention, provider approval, or external-AI payload rules.
-
-Those questions remain in the existing dependent Wayfinder tickets; this investigation does not create a new implementation ticket.
+This research settled the source and current identity interpretation. Subsequent Wayfinder decisions settled privacy in [#179](https://github.com/avantifellows/af_lms/issues/179) and generation lifecycle in [#186](https://github.com/avantifellows/af_lms/issues/186). The maintained BigQuery reader, durable writer, table ownership, and cross-repo execution contract remain for [#192](https://github.com/avantifellows/af_lms/issues/192); this investigation does not create a separate implementation ticket.
