@@ -105,6 +105,33 @@ function actorHasProgramAccess(permission: UserPermission, programId: number) {
   return getProgramContextSync(permission).programIds.includes(programId);
 }
 
+async function requireStudentWriteActor(session: StudentAdditionSession | null) {
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
+
+  const permission = await getResolvedPermission(sessionEmail.email);
+  if (!permission) return deny(403);
+  if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
+  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+
+  return { ok: true as const, email: sessionEmail.email, permission };
+}
+
+async function hasSchoolAccess(
+  permission: UserPermission,
+  email: string,
+  school: Pick<StudentWriteScopeRow, "code" | "region">,
+) {
+  if (canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
+    return true;
+  }
+
+  return (
+    permission.level === 2 &&
+    (await canAccessSchool(email, school.code, school.region ?? undefined))
+  );
+}
+
 async function getStudentProgramDropoutScope(
   studentPkId: number | string,
   programId: number,
@@ -144,23 +171,14 @@ export async function requireStudentProgramDropoutAccess(
   studentPkId: number | string,
   programId: number,
 ): Promise<StudentProgramDropoutAccessResult> {
-  const sessionEmail = requireGoogleSessionEmail(session);
-  if (!sessionEmail.ok) return sessionEmail;
+  const actor = await requireStudentWriteActor(session);
+  if (!actor.ok) return actor;
 
-  const { email } = sessionEmail;
-  const permission = await getResolvedPermission(email);
-  if (!permission) return deny(403);
-  if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
-  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+  const { email, permission } = actor;
 
   const scope = await getStudentProgramDropoutScope(studentPkId, programId);
   if (!scope) return deny(403);
-  if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
-    if (
-      permission.level !== 2 ||
-      !(await canAccessSchool(email, scope.code, scope.region ?? undefined))
-    ) return deny(403);
-  }
+  if (!(await hasSchoolAccess(permission, email, scope))) return deny(403);
   if (!(scope.centre_program_ids ?? []).map(Number).includes(programId)) return deny(403);
   if (!scope.has_program_enrollment) return deny(403);
   if (permission.role !== "admin" && !actorHasProgramAccess(permission, programId))
@@ -247,26 +265,15 @@ export async function requireStudentAdditionStudentAccess(
   session: StudentAdditionSession | null,
   studentPkId: number | string,
 ): Promise<StudentAdditionStudentAccessResult> {
-  const sessionEmail = requireGoogleSessionEmail(session);
-  if (!sessionEmail.ok) return sessionEmail;
+  const actor = await requireStudentWriteActor(session);
+  if (!actor.ok) return actor;
 
-  const { email } = sessionEmail;
-  const permission = await getResolvedPermission(email);
-  if (!permission) return deny(403);
-  if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
-  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+  const { email, permission } = actor;
 
   const scope = await getStudentEditScope(studentPkId, PROGRAM_IDS.NVS);
   if (!scope) return deny(403);
   if (scope.af_school_category !== "JNV") return deny(403);
-  if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
-    if (
-      permission.level !== 2 ||
-      !(await canAccessSchool(email, scope.code, scope.region ?? undefined))
-    ) {
-      return deny(403);
-    }
-  }
+  if (!(await hasSchoolAccess(permission, email, scope))) return deny(403);
 
   if (!scope.has_program_enrollment) return deny(403);
   if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
