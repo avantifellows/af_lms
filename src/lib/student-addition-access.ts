@@ -87,12 +87,6 @@ function deny(
   return { ok: false, status, error };
 }
 
-function hasNvsCentreContext(school: StudentAdditionSchool) {
-  return (school.centre_program_ids ?? [])
-    .map(Number)
-    .includes(PROGRAM_IDS.NVS);
-}
-
 function requireGoogleSessionEmail(session: StudentAdditionSession | null) {
   if (!session) return deny(401, "Unauthorized");
   if (session.isPasscodeUser) return deny(403);
@@ -153,7 +147,36 @@ export async function requireStudentAdditionAccess(
   return getStudentAdditionAccessFromPermission(session, school, permission);
 }
 
-async function getStudentWriteScope(
+async function getStudentEditScope(
+  studentPkId: number | string,
+  programId: number,
+) {
+  const rows = await query<Omit<StudentWriteScopeRow, "centre_program_ids">>(
+    `SELECT
+       sch.code,
+       sch.udise_code,
+       sch.region,
+       EXISTS (
+         SELECT 1
+         FROM enrollment_record er_batch
+         JOIN batch b ON b.id = er_batch.group_id
+         WHERE er_batch.user_id = s.user_id
+           AND er_batch.group_type = 'batch'
+           AND er_batch.is_current = true
+           AND b.program_id = $2
+       ) AS has_program_enrollment
+     FROM student s
+     JOIN enrollment_record er_school ON er_school.user_id = s.user_id
+       AND er_school.group_type = 'school'
+       AND er_school.is_current = true
+     JOIN school sch ON sch.id = er_school.group_id
+     WHERE s.id = $1`,
+    [studentPkId, programId],
+  );
+  return rows.length === 1 ? rows[0] : null;
+}
+
+async function getStudentDropoutScope(
   studentPkId: number | string,
   programId: number,
 ) {
@@ -202,7 +225,7 @@ export async function requireStudentAdditionStudentAccess(
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
 
-  const scope = await getStudentWriteScope(studentPkId, PROGRAM_IDS.NVS);
+  const scope = await getStudentEditScope(studentPkId, PROGRAM_IDS.NVS);
   if (!scope) return deny(403);
   if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
     if (
@@ -213,7 +236,6 @@ export async function requireStudentAdditionStudentAccess(
     }
   }
 
-  if (!hasNvsCentreContext(scope)) return deny(403);
   if (!scope.has_program_enrollment) return deny(403);
   if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
 
@@ -240,7 +262,7 @@ export async function requireStudentProgramDropoutAccess(
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
 
-  const scope = await getStudentWriteScope(studentPkId, programId);
+  const scope = await getStudentDropoutScope(studentPkId, programId);
   if (!scope) return deny(403);
   if (!canAccessSchoolSync(permission, scope.code, scope.region ?? undefined)) {
     if (

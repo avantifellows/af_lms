@@ -267,7 +267,7 @@ describe("requireStudentAdditionStudentAccess", () => {
             udise_code: "12345678901",
             region: "South",
             centre_program_ids: [PROGRAM_IDS.COE],
-            has_program_enrollment: true,
+            has_program_enrollment: false,
           },
         ]),
     ],
@@ -320,7 +320,7 @@ describe("requireStudentAdditionStudentAccess", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("blocks a student without an active NVS centre even when legacy program fields include NVS", async () => {
+  it("ignores legacy program fields when the Student has no current NVS Batch", async () => {
     mockGetResolvedPermission.mockResolvedValue(
       permission({ role: "program_manager" }),
     );
@@ -330,7 +330,7 @@ describe("requireStudentAdditionStudentAccess", () => {
         udise_code: "12345678901",
         region: "South",
         centre_program_ids: [],
-        has_program_enrollment: true,
+        has_program_enrollment: false,
         program_ids: [PROGRAM_IDS.NVS],
         student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
       },
@@ -341,7 +341,7 @@ describe("requireStudentAdditionStudentAccess", () => {
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
-  it("blocks a current-batch NVS student when the centre mapping is missing", async () => {
+  it("allows a current-batch NVS student when the centre mapping is missing", async () => {
     mockGetResolvedPermission.mockResolvedValue(
       permission({ role: "program_manager" }),
     );
@@ -358,7 +358,8 @@ describe("requireStudentAdditionStudentAccess", () => {
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+    expect(result.ok).toBe(true);
+    expect(mockQuery.mock.calls[0][0]).not.toContain("centres");
   });
 
   it("blocks a non-NVS student at a school with an active NVS centre", async () => {

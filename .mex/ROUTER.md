@@ -43,7 +43,7 @@ Then read this file fully before doing anything else in this session.
 
 **Not yet built / in progress:**
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
-- Student Addition #197 revision is in progress. One-by-one and mixed-grade bulk NVS addition now use PEN and the revised canonical fields, permit scoped writers without a Centre mapping, serve the approved static workbook, and support rejected-row CSV retry; Edit and dropout revisions remain separate slices.
+- Student Addition #197 revision is in progress. One-by-one, mixed-grade bulk, and existing-Student Edit now use the revised canonical fields and Centre-free NVS authorization; add/bulk serve the approved static workbook and support rejected-row CSV retry. Dropout remains a separate slice.
 
 **Known issues:**
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
