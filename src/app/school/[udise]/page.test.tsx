@@ -722,6 +722,38 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByRole("button", { name: /Bulk Upload/ })).toBeInTheDocument();
   });
 
+  it("enables only NVS dropout at a Centre-free School for the shared writer gate", async () => {
+    setupAdminDefaults({ centre_program_ids: [] });
+
+    await renderPage();
+
+    const props = JSON.parse(
+      screen.getByTestId("student-table").dataset.props || "{}",
+    );
+    expect(props.canDropoutStudent).toBe(true);
+    expect(props.dropoutProgramIds).toEqual([64]);
+  });
+
+  it("keeps NVS dropout visible to global admins without explicit Program ids", async () => {
+    setupAdminDefaults({ centre_program_ids: [] });
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "admin", program_ids: [1] }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [1],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    await renderPage();
+
+    const props = JSON.parse(
+      screen.getByTestId("student-table").dataset.props || "{}",
+    );
+    expect(props.canDropoutStudent).toBe(true);
+  });
+
   it("passes correct defaultTab to SchoolTabs", async () => {
     setupAdminDefaults();
 

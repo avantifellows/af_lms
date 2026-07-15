@@ -497,7 +497,8 @@ export default function StudentTable({
   };
 
   const canDropoutFromSelectedProgram = (student: Student): boolean => {
-    if (!canDropoutStudent || effectiveProgramId == null) return false;
+    if (!canDropoutStudent || effectiveProgramId !== PROGRAM_IDS.NVS)
+      return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
     if (isPasscodeUser || !student.student_pk_id) return false;

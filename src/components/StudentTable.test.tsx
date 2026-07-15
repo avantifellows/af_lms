@@ -536,6 +536,27 @@ describe("StudentTable - Edit button hidden", () => {
 // ─── 8. Dropout button for active editable students ─────────────────────────
 
 describe("StudentTable - Dropout button", () => {
+  it("hides dropout outside the explicit NVS program view", () => {
+    render(
+      <StudentTable
+        students={[
+          makeStudent({
+            program_id: PROGRAM_IDS.COE,
+            student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+          }),
+        ]}
+        selectedProgramId={PROGRAM_IDS.COE}
+        grades={defaultGrades}
+        canDropoutStudent
+        isAdmin
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Dropout" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows Dropout button for active editable student", () => {
     render(
       <StudentTable
@@ -956,6 +977,7 @@ describe("StudentTable - Dropout modal", () => {
     expect(
       screen.getByText(/Are you sure you want to mark/),
     ).toBeInTheDocument();
+    expect(screen.getByText(/dropout from JNV NVS/)).toBeInTheDocument();
     expect(screen.getByText("Confirm Dropout")).toBeInTheDocument();
   });
 
@@ -976,7 +998,7 @@ describe("StudentTable - Dropout modal", () => {
     expect(screen.queryByText("Mark as Dropout")).not.toBeInTheDocument();
   });
 
-  it("submits dropout and calls router.refresh on success", async () => {
+  it("refreshes after NVS dropout without locally hiding a multi-Program Student", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -986,7 +1008,12 @@ describe("StudentTable - Dropout modal", () => {
 
     render(
       <StudentTable
-        students={[makeStudent({ student_id: "STU-DROP" })]}
+        students={[
+          makeStudent({
+            student_id: "STU-DROP",
+            student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+          }),
+        ]}
         grades={defaultGrades}
         isAdmin={true}
       />,
@@ -1006,14 +1033,21 @@ describe("StudentTable - Dropout modal", () => {
       expect(screen.queryByText("Mark as Dropout")).not.toBeInTheDocument();
     });
     expect(mockRefresh).toHaveBeenCalled();
+    expect(screen.getByText("Aarav Sharma")).toBeInTheDocument();
   });
 
-  it("shows error when dropout API fails", async () => {
+  it("keeps the modal retryable after repeated dropout failures", async () => {
     const user = userEvent.setup();
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      json: async () => ({ error: "Student not found" }),
-    });
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Student not found" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Student is no longer in JNV NVS" }),
+      });
     vi.stubGlobal("fetch", mockFetch);
 
     render(
@@ -1032,6 +1066,14 @@ describe("StudentTable - Dropout modal", () => {
     });
     // Modal should remain open
     expect(screen.getByText("Mark as Dropout")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Confirm Dropout"));
+    await vi.waitFor(() => {
+      expect(
+        screen.getByText("Student is no longer in JNV NVS"),
+      ).toBeInTheDocument();
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it("uses student_pk_id as the dropout identifier", async () => {

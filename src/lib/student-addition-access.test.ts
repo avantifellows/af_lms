@@ -29,7 +29,6 @@ import { PROGRAM_IDS } from "./constants";
 import {
   requireStudentAdditionAccess,
   requireStudentAdditionStudentAccess,
-  requireStudentProgramDropoutAccess,
 } from "./student-addition-access";
 import type { UserPermission } from "./permissions";
 
@@ -377,56 +376,6 @@ describe("requireStudentAdditionStudentAccess", () => {
     ]);
 
     const result = await requireStudentAdditionStudentAccess(session, "100");
-
-    expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
-  });
-});
-
-describe("requireStudentProgramDropoutAccess", () => {
-  it("allows a program manager to drop from a current program they own", async () => {
-    mockGetResolvedPermission.mockResolvedValue(
-      permission({ role: "program_manager", program_ids: [PROGRAM_IDS.COE] }),
-    );
-    mockGetProgramContextSync.mockReturnValue({
-      hasAccess: true,
-      programIds: [PROGRAM_IDS.COE],
-      isNVSOnly: false,
-      hasCoEOrNodal: true,
-    });
-    mockQuery.mockResolvedValue([
-      {
-        code: "JNV001",
-        udise_code: "12345678901",
-        region: "South",
-        centre_program_ids: [PROGRAM_IDS.COE],
-        has_program_enrollment: true,
-      },
-    ]);
-
-    const result = await requireStudentProgramDropoutAccess(
-      session,
-      "100",
-      PROGRAM_IDS.COE,
-    );
-
-    expect(result.ok).toBe(true);
-    expect(result.ok && result.programId).toBe(PROGRAM_IDS.COE);
-    expect(mockQuery).toHaveBeenCalledWith(expect.any(String), [
-      "100",
-      PROGRAM_IDS.COE,
-    ]);
-  });
-
-  it("blocks dropout from a program the actor does not own", async () => {
-    mockGetResolvedPermission.mockResolvedValue(
-      permission({ role: "program_manager", program_ids: [PROGRAM_IDS.NVS] }),
-    );
-
-    const result = await requireStudentProgramDropoutAccess(
-      session,
-      "100",
-      PROGRAM_IDS.COE,
-    );
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
