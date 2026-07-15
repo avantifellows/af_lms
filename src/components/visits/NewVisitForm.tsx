@@ -246,7 +246,7 @@ export default function NewVisitForm({ udise }: NewVisitFormProps) {
           <li>Start an action to capture start GPS and timestamp.</li>
           <li>Open in-progress actions to fill details and save updates.</li>
           <li>End each action to capture end GPS and mark it completed.</li>
-          <li>Complete the visit after all required action types are completed and no action is in progress.</li>
+          <li>Complete the visit when no action is in progress. Any role-based action requirements are checked at completion.</li>
         </ol>
       </div>
     </main>
