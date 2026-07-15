@@ -142,15 +142,19 @@ _Avoid_: Pairing, link row, live assignment only
 The database table `academic_mentorship_mentor_mentee_mappings`, storing Academic Mentor-Mentee Mapping history.
 _Avoid_: `acad_mentorship_teacher_feedback`, report-generation tables
 
-**Mentorship Tab**:
-The School page umbrella surface for school mentorship workflows.
-_Avoid_: Academic Mentorship tab
+**Academic Mentorship Tab**:
+The School page top-level surface for Academic Mentorship workflows.
+_Avoid_: Mentorship Tab, Holistic Mentorship Tab
 
 ### Holistic Mentorship
 
 **Holistic Mentorship**:
 The LMS domain for phase-based, non-academic mentoring in which assigned staff prepare from Student Context and Phase Guidance, conduct an offline conversation, and submit Post-Session Notes.
 _Avoid_: Academic Mentorship, AI Mentorship, generic Mentorship
+
+**Holistic Mentorship Tab**:
+The School page top-level Teacher workspace for Holistic Mentor-Mentee Mapping and Holistic Mentee work.
+_Avoid_: Mentorship Tab, Academic Mentorship Tab
 
 **Holistic Mentor**:
 A staff User assigned responsibility for one or more Holistic Mentees.
@@ -272,7 +276,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Curriculum chapter order follows **LMS Chapter Exam Config** coverage order before falling back to chapter code
 - Deleting an **LMS Curriculum Log** means soft deletion, so covered-topic and teaching-time progress ignores it without losing audit history
 - **Academic Mentorship** uses the `academic_mentorship` permission key and is part of the same mentorship product language as AI Mentorship Guide, not a separate generic "mentorship" feature
-- The School page **Mentorship Tab** remains labelled `Mentorship`; **Academic Mentorship** is one workflow inside that tab
+- The School page exposes separate top-level **Academic Mentorship Tab** and **Holistic Mentorship Tab** surfaces; neither domain is nested under a generic Mentorship Tab
 - An **Academic Mentor** must be a completed Staff Management Teacher: active LMS permission with teacher role, a real AF `teacher` record, a non-exited Staff Management state, and effective access to the selected School
 - The Academic Mentor dropdown includes eligible Academic Mentors even if they already have active Mentees
 - Academic Mentorship mentor selectors are searchable by mentor name and email
@@ -361,7 +365,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An eligible Teacher retains their normal access outside Holistic Mentorship; inside Holistic Mentorship they can see the School's mapping roster but can read full Holistic data only for their assigned Holistic Mentees
 - A Student is eligible to be a **Holistic Mentee** when they are a non-dropout current Grade 11 or 12 Student, roster-attributed to Program 1, at the same launch School as the eligible Teacher; Student Profile completion, historical-note availability, and Phase state do not affect Mapping eligibility
 - Holistic Mentor eligibility is not Grade-scoped, and v1 places no maximum on a Mentor's active Mentee count
-- An eligible Teacher can bulk-assign unmapped Students to themselves, reassign another Mentor's Mentees to themselves, and remove their own Mentee assignments from the Mentorship Tab
+- An eligible Teacher can bulk-assign unmapped Students to themselves, reassign another Mentor's Mentees to themselves, and remove their own Mentee assignments from the **Holistic Mentorship Tab**
 - V1 has no Mapping CSV import or Admin assignment path, and historical source Mentor details do not create live **Holistic Mentor-Mentee Mappings**
 - A Holistic Mentee has at most one active **Holistic Mentor-Mentee Mapping** per academic year
 - Reassignment and removal require confirmation but no approval, notification, or entered reason; a stale concurrent action fails and reloads current state, and a bulk mutation changes every selected Student or none
@@ -424,13 +428,13 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Reassignment excludes the current active Academic Mentor from the replacement Academic Mentor options
 - The Academic Mentorship admin table can include historical mappings via a Show history toggle that extends the same view
 - Academic Mentorship grouped overview only shows Academic Mentors who have mappings in the selected view and academic year
-- The `/admin/academic-mentorship` page is accessible only to Admins and Program Admins; Teachers use only the School page Mentorship Tab
-- Admins and Program Admins see a read-only overview on the School page Mentorship Tab, with management actions kept on `/admin/academic-mentorship`
-- Admins and Program Admins see a Manage mappings link from the School page Mentorship Tab to `/admin/academic-mentorship`; read-only Program Admins land there in view-only mode
+- The `/admin/academic-mentorship` page is accessible only to Admins and Program Admins; Teachers use only the School page **Academic Mentorship Tab**
+- Admins and Program Admins see a read-only overview on the School page **Academic Mentorship Tab**, with management actions kept on `/admin/academic-mentorship`
+- Admins and Program Admins see a Manage mappings link from the School page **Academic Mentorship Tab** to `/admin/academic-mentorship`; read-only Program Admins land there in view-only mode
 - The Manage mappings link preselects the current School and current academic year on `/admin/academic-mentorship` via query params
-- The School page Mentorship Tab shows the current academic year only, with no academic year picker
-- Passcode users do not see the School page Mentorship Tab; Academic Mentorship is for Google-login staff governed by Staff Management permissions
-- Program Managers do not get an admin page link for Academic Mentorship; they use only the School page Mentorship Tab read-only view
+- The School page **Academic Mentorship Tab** shows the current academic year only, with no academic year picker
+- Passcode users do not see the School page **Academic Mentorship Tab**; Academic Mentorship is for Google-login staff governed by Staff Management permissions
+- Program Managers do not get an admin page link for Academic Mentorship; they use only the School page **Academic Mentorship Tab** read-only view
 - Academic Mentorship APIs live under `/api/academic-mentorship/*`, with route handlers checking role, School scope, Program allowlist, and requested action
 - Academic Mentorship route handlers use a shared server-side access helper for role, School scope, Program allowlist, `read_only`, and requested action checks
 - The `/admin/academic-mentorship` School picker auto-selects when the user has exactly one accessible School; otherwise it starts empty and asks the user to pick a School
@@ -438,9 +442,9 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - The `/admin/academic-mentorship` page allows manual add, remove, and reassign only for the current academic year; assignment and end timestamps use the actual action time
 - Academic Mentorship CSV import allows only the current plus two prior academic years shown in the picker; unsupported years are rejected server-side even if a user crafts a direct API request
 - The `/admin/academic-mentorship` selected School and academic year are reflected in URL query params such as `school_code` and `academic_year`
-- Teachers see only their current active Mentees on the School page Mentorship Tab as a flat list sorted by grade, then name
-- Teacher empty state for the School page Mentorship Tab is "No mentees assigned for this academic year."
-- Program Managers see active Academic Mentor-Mentee Mappings only on the School page Mentorship Tab in v1; history stays on the admin management page
+- Teachers see only their current active Mentees on the School page **Academic Mentorship Tab** as a flat list sorted by grade, then name
+- Teacher empty state for the School page **Academic Mentorship Tab** is "No mentees assigned for this academic year."
+- Program Managers see active Academic Mentor-Mentee Mappings only on the School page **Academic Mentorship Tab** in v1; history stays on the admin management page
 - Ending an **Academic Mentor-Mentee Mapping** does not ask for a reason in v1; `end_reason` stays optional in the table for later use
 - In v1, **Academic Mentor-Mentee Mapping** assignment and end timestamps are system-recorded when the action happens; admins do not backdate assignment or removal dates
 - Academic Mentorship CSV upload identifies mentors by email and mentees by external `student.student_id`; stored mappings still use internal Main DB ids
@@ -464,7 +468,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Academic Mentorship mentee selection uses the same active-student rules as the School page roster for the selected School and academic year, excluding dropouts and students who already have an active mapping
 - Academic Mentorship access in v1 is controlled by role, school scope, `read_only`, and the Academic Mentorship Program allowlist
 - Academic Mentorship data model supports all programs, including NVS and PMU schools
-- `/admin` does not show an Academic Mentorship card; Academic Mentorship management entry comes from the School page **Mentorship Tab** Manage mappings link
+- `/admin` does not show an Academic Mentorship card; Academic Mentorship management entry comes from the School page **Academic Mentorship Tab** Manage mappings link
 - `read_only` downgrades Academic Mentorship management to view-only
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
@@ -509,5 +513,5 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. `admin` has write access; `program_admin` is read-only. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
-- "mentorship" as a UI label vs permission key: the School page tab stays **Mentorship Tab** as an umbrella, while the internal feature key and domain term are **Academic Mentorship** / `academic_mentorship`.
+- "mentorship" as a UI label vs domain terms: the School page has separate **Academic Mentorship Tab** and **Holistic Mentorship Tab** surfaces; do not use a generic Mentorship Tab as their umbrella.
 - "teacher" in School Visit forms means **Visit Teacher**, not every `user_permission.role = "teacher"` account.
