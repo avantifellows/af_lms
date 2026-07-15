@@ -46,6 +46,10 @@ Visit routes do **not** call `canAccessSchool` directly. They use:
 - `buildVisitScopePredicate(actor, opts)` — SQL `WHERE` fragment to scope list queries (handles level 1/2/3 + seat schools).
 - `apiError(status, error, details?)` — the standard structured error response for these routes.
 
+Visit pages that gate entry before calling an API must also use `getResolvedPermission`; a bare
+`getUserPermission` omits Centre-seat-derived schools and programs. In particular, the new-Visit
+page uses the resolved permission for its Visits feature check before rendering the form.
+
 Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **program_admin** = scoped read plus write on owned in-progress Visits; **passcode** = blocked. `read_only` downgrades every role to view-only, and Visit/Action pages combine feature-level `canEdit` with the ownership policy before rendering mutation controls.
 
 ## GPS — `src/lib/geo-validation.ts`
