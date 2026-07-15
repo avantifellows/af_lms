@@ -109,11 +109,11 @@ Field staff who conduct school visits. Owns their visits and actions.
 _Avoid_: Manager, field officer
 
 **Admin**:
-Has scoped read/write access to all visits (same validation rules as PM). Determined by `role = "admin"`.
+Has scoped read/write access to all visits and may complete any scoped Visit without required Action Types, including a Visit started by a PM. Determined by `role = "admin"`.
 _Avoid_: Superuser, root
 
 **Program Admin**:
-Read-only access to visits within their scope. Cannot create, edit, or delete.
+Has scoped read access to visits and can start and manage their own Visits. Their own Visits have no required Action Types; Visits started by other users remain read-only.
 _Avoid_: Viewer, observer
 
 **Permission Level**:
@@ -301,7 +301,15 @@ _Avoid_: Academic Mentorship tab
 - `read_only` downgrades Academic Mentorship management to view-only
 - A **PM** creates **Visits** to a **School**
 - A **Visit** has many **Actions** (each with an **Action Type**)
-- A **Visit** can only be completed when all 7 **Action Types** have at least one completed **Action**
+- A **PM** completing a Visit requires every **Action Type** except `school_staff_interaction`
+- An **Admin** may complete any scoped Visit without required **Action Types**, including a Visit started by a **PM**
+- A **Program Admin** may complete their own Visit without required **Action Types**
+- A **Program Admin** may soft-delete only their own in-progress Visit; Visits started by other users and completed Visits cannot be deleted by a **Program Admin**
+- Optional **Actions** may be skipped entirely by an **Admin** or **Program Admin**, but an **Action** they start must still pass its existing required-field validation before it can be completed
+- No role may complete a Visit while one of its **Actions** remains `in_progress`
+- Every Visit requires a valid GPS reading at start and completion, including Visits managed by an **Admin** or **Program Admin**
+- The `read_only` permission flag still prevents Visit creation and management for every role; a read-only **Program Admin** retains scoped view access only
+- A completed **Program Admin** Visit is read-only to that Program Admin; only an **Admin** may correct completed Action data
 - **Soft Delete** on a **Visit** cascades to its child **Actions**
 - A **Visit Teacher** is visible in School Visit teacher pickers because they are visible in Staff Management, not because they have broad LMS teacher permissions
 - A **Visit Teacher** uses the active LMS permission ID as its picker identity while Staff Management teacher seating determines list membership
