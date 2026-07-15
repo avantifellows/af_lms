@@ -47,11 +47,13 @@ const emptyTotals: UploadTotals = {
   rejected: 0,
 };
 
-function firstRowIssue(result: UploadResult, schoolCode: string): string {
-  return [
+function rowIssues(result: UploadResult, schoolCode: string): string {
+  const issues = [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
-  ][0] ?? (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
+  ];
+  return issues.join("; ") ||
+    (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
 }
 
 // fallow-ignore-next-line complexity
@@ -209,7 +211,7 @@ export default function BulkStudentUploadModal({
                           <td className="px-3 py-2">
                             {String(result.original?.["Student Name"] ?? result.generated_student_id ?? "")}
                           </td>
-                          <td className="px-3 py-2">{firstRowIssue(result, schoolCode)}</td>
+                          <td className="px-3 py-2">{rowIssues(result, schoolCode)}</td>
                         </tr>
                       ))}
                     </tbody>

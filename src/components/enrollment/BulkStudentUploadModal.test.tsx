@@ -35,7 +35,7 @@ describe("BulkStudentUploadModal", () => {
               status: "rejected",
               original: { "Student Name": "Bad Student", Grade: "11" },
               field_errors: { stream: "Primary Exam preparing for is not valid" },
-              row_errors: [],
+              row_errors: ["PEN or Grade 10 Roll no is required"],
               existing_match: null,
             },
           ],
@@ -76,6 +76,9 @@ describe("BulkStudentUploadModal", () => {
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("11")).toBeInTheDocument();
     expect(screen.getByText("Bad Student")).toBeInTheDocument();
+    expect(screen.getByText(
+      "Primary Exam preparing for is not valid; PEN or Grade 10 Roll no is required",
+    )).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toHaveAttribute(
       "href",
       expect.stringContaining("data:text/csv"),
