@@ -1,10 +1,4 @@
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AddUserModal from "./AddUserModal";
 
@@ -40,12 +34,7 @@ const editUser = {
 };
 
 function renderModal(overrides: Partial<typeof defaultProps> = {}) {
-  const props = {
-    ...defaultProps,
-    onClose: vi.fn(),
-    onSave: vi.fn(),
-    ...overrides,
-  };
+  const props = { ...defaultProps, onClose: vi.fn(), onSave: vi.fn(), ...overrides };
   const result = render(<AddUserModal {...props} />);
   return { ...result, props };
 }
@@ -73,25 +62,19 @@ describe("AddUserModal — create mode", () => {
   it("renders 'Add User' title when no user prop", () => {
     renderModal();
     // Title text appears in the heading
-    expect(
-      screen.getByRole("heading", { name: "Add User" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Add User" })).toBeInTheDocument();
   });
 
   it("renders email input that is editable", () => {
     renderModal();
-    const emailInput = document.querySelector(
-      'input[type="email"]',
-    ) as HTMLInputElement;
+    const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement;
     expect(emailInput).not.toBeDisabled();
     expect(emailInput.value).toBe("");
   });
 
   it("renders submit button as 'Add User'", () => {
     renderModal();
-    expect(
-      screen.getByRole("button", { name: "Add User" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add User" })).toBeInTheDocument();
   });
 
   it("renders Cancel button", () => {
@@ -121,16 +104,12 @@ describe("AddUserModal — create mode", () => {
 
   it("shows no programs selected validation message initially", () => {
     renderModal();
-    expect(
-      screen.getByText("At least one program must be selected."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("At least one program must be selected.")).toBeInTheDocument();
   });
 
   it("renders read-only checkbox unchecked by default", () => {
     renderModal();
-    const checkbox = screen.getByRole("checkbox", {
-      name: /read-only/i,
-    }) as HTMLInputElement;
+    const checkbox = screen.getByRole("checkbox", { name: /read-only/i }) as HTMLInputElement;
     expect(checkbox.checked).toBe(false);
   });
 });
@@ -147,18 +126,14 @@ describe("AddUserModal — edit mode", () => {
 
   it("renders email input as disabled with pre-filled value", () => {
     renderModal({ user: editUser });
-    const emailInput = document.querySelector(
-      'input[type="email"]',
-    ) as HTMLInputElement;
+    const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement;
     expect(emailInput).toBeDisabled();
     expect(emailInput.value).toBe("existing@example.com");
   });
 
   it("renders submit button as 'Save Changes'", () => {
     renderModal({ user: editUser });
-    expect(
-      screen.getByRole("button", { name: "Save Changes" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeInTheDocument();
   });
 
   it("pre-fills role from user prop", () => {
@@ -178,8 +153,8 @@ describe("AddUserModal — edit mode", () => {
     renderModal({ user: editUser });
     const checkboxes = screen.getAllByRole("checkbox");
     // CoE (id=1) checked, Nodal (id=2) checked, NVS (id=64) not, read-only not
-    const programCheckboxes = checkboxes.filter((cb) =>
-      (cb as HTMLInputElement).closest("label")?.textContent?.includes("JNV"),
+    const programCheckboxes = checkboxes.filter(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV")
     );
     expect((programCheckboxes[0] as HTMLInputElement).checked).toBe(true); // CoE
     expect((programCheckboxes[1] as HTMLInputElement).checked).toBe(true); // Nodal
@@ -194,9 +169,7 @@ describe("AddUserModal — edit mode", () => {
 describe("AddUserModal — level-based UI", () => {
   it("shows school search when level is 1", () => {
     renderModal();
-    expect(
-      screen.getByPlaceholderText("Search schools by name or code..."),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search schools by name or code...")).toBeInTheDocument();
   });
 
   it("shows region picker when level is 2", () => {
@@ -208,24 +181,18 @@ describe("AddUserModal — level-based UI", () => {
 
   it("hides school search when level is 2", () => {
     renderModal({ user: { ...editUser, level: 2 } });
-    expect(
-      screen.queryByPlaceholderText("Search schools by name or code..."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search schools by name or code...")).not.toBeInTheDocument();
   });
 
   it("hides both school and region pickers when level is 3", () => {
     renderModal({ user: { ...editUser, level: 3 } });
-    expect(
-      screen.queryByPlaceholderText("Search schools by name or code..."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search schools by name or code...")).not.toBeInTheDocument();
     expect(screen.queryByText("Select Regions")).not.toBeInTheDocument();
   });
 
   it("hides both school and region pickers when level is 4", () => {
     renderModal({ user: { ...editUser, level: 4 } });
-    expect(
-      screen.queryByPlaceholderText("Search schools by name or code..."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search schools by name or code...")).not.toBeInTheDocument();
     expect(screen.queryByText("Select Regions")).not.toBeInTheDocument();
   });
 
@@ -233,17 +200,13 @@ describe("AddUserModal — level-based UI", () => {
     const user = userEvent.setup();
     renderModal();
     // Initially level=1, should show school search
-    expect(
-      screen.getByPlaceholderText("Search schools by name or code..."),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search schools by name or code...")).toBeInTheDocument();
 
     // Change level to 2
     const levelSelect = screen.getAllByRole("combobox")[1];
     await user.selectOptions(levelSelect, "2");
 
-    expect(
-      screen.queryByPlaceholderText("Search schools by name or code..."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search schools by name or code...")).not.toBeInTheDocument();
     expect(screen.getByText("Select Regions")).toBeInTheDocument();
   });
 });
@@ -268,9 +231,7 @@ describe("AddUserModal — region selection", () => {
   });
 
   it("shows selected regions text when regions are checked", () => {
-    renderModal({
-      user: { ...editUser, level: 2, regions: ["North", "South"] },
-    });
+    renderModal({ user: { ...editUser, level: 2, regions: ["North", "South"] } });
     expect(screen.getByText("Selected: North, South")).toBeInTheDocument();
   });
 });
@@ -290,14 +251,10 @@ describe("AddUserModal — school search (debounce)", () => {
 
   it("does not fetch schools when search query is less than 2 chars", async () => {
     renderModal();
-    const input = screen.getByPlaceholderText(
-      "Search schools by name or code...",
-    );
+    const input = screen.getByPlaceholderText("Search schools by name or code...");
 
     await act(async () => {
-      await userEvent
-        .setup({ advanceTimers: vi.advanceTimersByTime })
-        .type(input, "A");
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).type(input, "A");
     });
 
     await act(async () => {
@@ -310,21 +267,14 @@ describe("AddUserModal — school search (debounce)", () => {
   it("fetches schools after debounce when query >= 2 chars", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () =>
-        Promise.resolve([
-          { code: "SC001", name: "Test School", region: "North" },
-        ]),
+      json: () => Promise.resolve([{ code: "SC001", name: "Test School", region: "North" }]),
     });
 
     renderModal();
-    const input = screen.getByPlaceholderText(
-      "Search schools by name or code...",
-    );
+    const input = screen.getByPlaceholderText("Search schools by name or code...");
 
     await act(async () => {
-      await userEvent
-        .setup({ advanceTimers: vi.advanceTimersByTime })
-        .type(input, "Te");
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).type(input, "Te");
     });
 
     await act(async () => {
@@ -339,21 +289,14 @@ describe("AddUserModal — school search (debounce)", () => {
   it("displays search results and adds school on click", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve([
-          { code: "SC001", name: "Test School", region: "North" },
-        ]),
+      json: () => Promise.resolve([{ code: "SC001", name: "Test School", region: "North" }]),
     });
 
     renderModal();
-    const input = screen.getByPlaceholderText(
-      "Search schools by name or code...",
-    );
+    const input = screen.getByPlaceholderText("Search schools by name or code...");
 
     await act(async () => {
-      await userEvent
-        .setup({ advanceTimers: vi.advanceTimersByTime })
-        .type(input, "Test");
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).type(input, "Test");
     });
 
     await act(async () => {
@@ -384,9 +327,7 @@ describe("AddUserModal — school search (debounce)", () => {
       fireEvent.change(levelSelect, { target: { value: "3" } });
     });
 
-    expect(
-      screen.queryByPlaceholderText("Search schools by name or code..."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search schools by name or code...")).not.toBeInTheDocument();
   });
 });
 
@@ -397,12 +338,7 @@ describe("AddUserModal — school search (debounce)", () => {
 describe("AddUserModal — school chip management", () => {
   it("shows pre-filled schools as chips with name + code in edit mode", () => {
     renderModal({
-      user: {
-        ...editUser,
-        level: 1,
-        school_codes: ["SC001", "SC002"],
-        regions: null,
-      },
+      user: { ...editUser, level: 1, school_codes: ["SC001", "SC002"], regions: null },
     });
     expect(screen.getByText("JNV Alpha (SC001)")).toBeInTheDocument();
     expect(screen.getByText("JNV Beta (SC002)")).toBeInTheDocument();
@@ -410,12 +346,7 @@ describe("AddUserModal — school chip management", () => {
 
   it("falls back to bare code when the school isn't in the map", () => {
     renderModal({
-      user: {
-        ...editUser,
-        level: 1,
-        school_codes: ["SC001", "MISSING"],
-        regions: null,
-      },
+      user: { ...editUser, level: 1, school_codes: ["SC001", "MISSING"], regions: null },
     });
     expect(screen.getByText("JNV Alpha (SC001)")).toBeInTheDocument();
     expect(screen.getByText("MISSING")).toBeInTheDocument();
@@ -424,12 +355,7 @@ describe("AddUserModal — school chip management", () => {
   it("removes school chip on × button click", async () => {
     const user = userEvent.setup();
     renderModal({
-      user: {
-        ...editUser,
-        level: 1,
-        school_codes: ["SC001", "SC002"],
-        regions: null,
-      },
+      user: { ...editUser, level: 1, school_codes: ["SC001", "SC002"], regions: null },
     });
 
     // Find the remove buttons (×)
@@ -452,10 +378,8 @@ describe("AddUserModal — program selection", () => {
 
     // Find CoE checkbox
     const checkboxes = screen.getAllByRole("checkbox");
-    const coeCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV CoE"),
+    const coeCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV CoE")
     ) as HTMLInputElement;
 
     expect(coeCheckbox.checked).toBe(false);
@@ -471,17 +395,13 @@ describe("AddUserModal — program selection", () => {
 
     // Select NVS only
     const checkboxes = screen.getAllByRole("checkbox");
-    const nvsCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV NVS"),
+    const nvsCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV NVS")
     ) as HTMLInputElement;
 
     await user.click(nvsCheckbox);
 
-    expect(
-      screen.getByText(/NVS-only users have limited access/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/NVS-only users have limited access/)).toBeInTheDocument();
   });
 
   it("hides NVS-only warning when another program is also selected", async () => {
@@ -489,45 +409,33 @@ describe("AddUserModal — program selection", () => {
     renderModal();
 
     const checkboxes = screen.getAllByRole("checkbox");
-    const nvsCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV NVS"),
+    const nvsCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV NVS")
     ) as HTMLInputElement;
-    const coeCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV CoE"),
+    const coeCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV CoE")
     ) as HTMLInputElement;
 
     await user.click(nvsCheckbox);
     await user.click(coeCheckbox);
 
-    expect(
-      screen.queryByText(/NVS-only users have limited access/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/NVS-only users have limited access/)).not.toBeInTheDocument();
   });
 
   it("hides validation message once a program is selected", async () => {
     const user = userEvent.setup();
     renderModal();
 
-    expect(
-      screen.getByText("At least one program must be selected."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("At least one program must be selected.")).toBeInTheDocument();
 
     const checkboxes = screen.getAllByRole("checkbox");
-    const coeCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV CoE"),
+    const coeCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV CoE")
     ) as HTMLInputElement;
 
     await user.click(coeCheckbox);
 
-    expect(
-      screen.queryByText("At least one program must be selected."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("At least one program must be selected.")).not.toBeInTheDocument();
   });
 });
 
@@ -538,9 +446,7 @@ describe("AddUserModal — program selection", () => {
 describe("AddUserModal — role descriptions", () => {
   it("shows teacher description when role is teacher", () => {
     renderModal();
-    expect(
-      screen.getByText(/Teachers can view and manage students/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Teachers can view and manage students/)).toBeInTheDocument();
   });
 
   it("shows PM description when role is program_manager", async () => {
@@ -550,9 +456,7 @@ describe("AddUserModal — role descriptions", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
     await user.selectOptions(roleSelect, "program_manager");
 
-    expect(
-      screen.getByText(/Program Managers can conduct school visits/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Program Managers can conduct school visits/)).toBeInTheDocument();
   });
 
   it("shows admin description when role is admin", async () => {
@@ -562,9 +466,7 @@ describe("AddUserModal — role descriptions", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
     await user.selectOptions(roleSelect, "admin");
 
-    expect(
-      screen.getByText(/Admins have full access to all features/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Admins have full access to all features/)).toBeInTheDocument();
   });
 
   it("shows program admin description when role is program_admin", async () => {
@@ -575,9 +477,7 @@ describe("AddUserModal — role descriptions", () => {
     await user.selectOptions(roleSelect, "program_admin");
 
     expect(
-      screen.getByText(
-        "Program Admins can oversee scoped schools and manage their own school visits",
-      ),
+      screen.getByText("Program Admins can oversee scoped schools and manage their own school visits"),
     ).toBeInTheDocument();
   });
 });
@@ -589,25 +489,18 @@ describe("AddUserModal — role descriptions", () => {
 describe("AddUserModal — form submission (create)", () => {
   it("submits new user with correct payload", async () => {
     const user = userEvent.setup();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
     const { props } = renderModal();
 
     // Fill email
-    const emailInput = document.querySelector(
-      'input[type="email"]',
-    ) as HTMLInputElement;
+    const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement;
     await user.type(emailInput, "new@example.com");
 
     // Select a program (CoE)
     const checkboxes = screen.getAllByRole("checkbox");
-    const coeCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV CoE"),
+    const coeCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV CoE")
     ) as HTMLInputElement;
     await user.click(coeCheckbox);
 
@@ -645,17 +538,13 @@ describe("AddUserModal — form submission (create)", () => {
 
     // Select a program
     const checkboxes = screen.getAllByRole("checkbox");
-    const coeCheckbox = checkboxes.find((cb) =>
-      (cb as HTMLInputElement)
-        .closest("label")
-        ?.textContent?.includes("JNV CoE"),
+    const coeCheckbox = checkboxes.find(
+      (cb) => (cb as HTMLInputElement).closest('label')?.textContent?.includes("JNV CoE")
     ) as HTMLInputElement;
     await user.click(coeCheckbox);
 
     // Fill email
-    const emailInput = document.querySelector(
-      'input[type="email"]',
-    ) as HTMLInputElement;
+    const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement;
     await user.type(emailInput, "test@example.com");
 
     await user.click(screen.getByRole("button", { name: "Add User" }));
@@ -668,18 +557,14 @@ describe("AddUserModal — form submission (create)", () => {
     renderModal();
 
     // Fill email
-    const emailInput = document.querySelector(
-      'input[type="email"]',
-    ) as HTMLInputElement;
+    const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement;
     await user.type(emailInput, "test@example.com");
 
     // Submit without selecting programs
     await user.click(screen.getByRole("button", { name: "Add User" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("At least one program must be selected"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("At least one program must be selected")).toBeInTheDocument();
     });
   });
 });
@@ -691,10 +576,7 @@ describe("AddUserModal — form submission (create)", () => {
 describe("AddUserModal — form submission (edit)", () => {
   it("submits edit with PATCH method and user ID in URL", async () => {
     const user = userEvent.setup();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
     const { props } = renderModal({ user: editUser });
 
@@ -723,10 +605,7 @@ describe("AddUserModal — form submission (edit)", () => {
 
   it("sends school_codes for level 1 and regions=null", async () => {
     const user = userEvent.setup();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
     renderModal({
       user: { ...editUser, level: 1, school_codes: ["SC001"], regions: null },
@@ -743,10 +622,7 @@ describe("AddUserModal — form submission (edit)", () => {
 
   it("sends null for both school_codes and regions at level 3+", async () => {
     const user = userEvent.setup();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
     renderModal({
       user: { ...editUser, level: 3, school_codes: null, regions: null },
@@ -834,9 +710,7 @@ describe("AddUserModal — error handling", () => {
     await user.click(screen.getByRole("button", { name: "Save Changes" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Save Changes" }),
-      ).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Save Changes" })).not.toBeDisabled();
     });
   });
 });
@@ -888,9 +762,7 @@ describe("AddUserModal — read-only toggle", () => {
     const user = userEvent.setup();
     renderModal();
 
-    const checkbox = screen.getByRole("checkbox", {
-      name: /read-only/i,
-    }) as HTMLInputElement;
+    const checkbox = screen.getByRole("checkbox", { name: /read-only/i }) as HTMLInputElement;
     expect(checkbox.checked).toBe(false);
 
     await user.click(checkbox);
@@ -899,10 +771,7 @@ describe("AddUserModal — read-only toggle", () => {
 
   it("submits read_only=true when checked", async () => {
     const user = userEvent.setup();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
     renderModal({ user: { ...editUser, read_only: true } });
 

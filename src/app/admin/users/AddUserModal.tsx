@@ -45,13 +45,7 @@ interface School {
 
 const labelClassName = "block text-sm font-medium text-gray-700";
 
-export default function AddUserModal({
-  user,
-  regions,
-  schoolCodeToName,
-  onClose,
-  onSave,
-}: AddUserModalProps) {
+export default function AddUserModal({ user, regions, schoolCodeToName, onClose, onSave }: AddUserModalProps) {
   const labelForSchool = (code: string) => {
     const name = schoolCodeToName[code];
     return name ? `${name} (${code})` : code;
@@ -60,15 +54,9 @@ export default function AddUserModal({
   const [fullName, setFullName] = useState(user?.full_name || "");
   const [level, setLevel] = useState(user?.level || 1);
   const [role, setRole] = useState(user?.role || "teacher");
-  const [selectedRegions, setSelectedRegions] = useState<string[]>(
-    user?.regions || [],
-  );
-  const [selectedSchools, setSelectedSchools] = useState<string[]>(
-    user?.school_codes || [],
-  );
-  const [selectedPrograms, setSelectedPrograms] = useState<number[]>(
-    user?.program_ids || [],
-  );
+  const [selectedRegions, setSelectedRegions] = useState<string[]>(user?.regions || []);
+  const [selectedSchools, setSelectedSchools] = useState<string[]>(user?.school_codes || []);
+  const [selectedPrograms, setSelectedPrograms] = useState<number[]>(user?.program_ids || []);
   const [readOnly, setReadOnly] = useState(user?.read_only || false);
   const [schoolSearch, setSchoolSearch] = useState("");
   const [searchResults, setSearchResults] = useState<School[]>([]);
@@ -76,14 +64,13 @@ export default function AddUserModal({
   const [error, setError] = useState("");
 
   // Check if only NVS is selected (for warning display)
-  const isNVSOnly =
-    selectedPrograms.length === 1 && selectedPrograms.includes(64);
+  const isNVSOnly = selectedPrograms.length === 1 && selectedPrograms.includes(64);
 
   const toggleProgram = (programId: number) => {
     setSelectedPrograms((prev) =>
       prev.includes(programId)
         ? prev.filter((id) => id !== programId)
-        : [...prev, programId],
+        : [...prev, programId]
     );
   };
 
@@ -97,9 +84,7 @@ export default function AddUserModal({
     }
 
     const timer = setTimeout(async () => {
-      const response = await fetch(
-        `/api/admin/schools?q=${encodeURIComponent(schoolSearch)}`,
-      );
+      const response = await fetch(`/api/admin/schools?q=${encodeURIComponent(schoolSearch)}`);
       if (response.ok) {
         const schools = await response.json();
         setSearchResults(schools);
@@ -148,9 +133,7 @@ export default function AddUserModal({
         body.regions = null;
       }
 
-      const url = isEditing
-        ? `/api/admin/users/${user.id}`
-        : "/api/admin/users";
+      const url = isEditing ? `/api/admin/users/${user.id}` : "/api/admin/users";
       const method = isEditing ? "PATCH" : "POST";
 
       const response = await fetch(url, {
@@ -174,9 +157,7 @@ export default function AddUserModal({
 
   const toggleRegion = (region: string) => {
     setSelectedRegions((prev) =>
-      prev.includes(region)
-        ? prev.filter((r) => r !== region)
-        : [...prev, region],
+      prev.includes(region) ? prev.filter((r) => r !== region) : [...prev, region]
     );
   };
 
@@ -194,95 +175,75 @@ export default function AddUserModal({
 
   return (
     <Modal open={true} onClose={onClose} className="p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">
-          {isEditing ? "Edit User" : "Add User"}
-        </h2>
-        <Button variant="icon" onClick={onClose}>
-          <svg
-            className="h-6 w-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </Button>
-      </div>
-
-      {error && (
-        <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className={labelClassName}>Email</label>
-          <Input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={isEditing}
-            required
-            className={isEditing ? "bg-gray-100 mt-1" : "mt-1"}
-          />
-        </div>
-
-        <div>
-          <label className={labelClassName}>Full Name</label>
-          <Input
-            type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="e.g. Priya Sharma"
-            className="mt-1"
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Display name shown in teacher dropdowns and reports
-          </p>
-        </div>
-
-        <div>
-          <label className={labelClassName}>Role</label>
-          <Select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            className="mt-1 w-full"
-          >
-            <option value="teacher">Teacher - Student management view</option>
-            <option value="program_manager">
-              Program Manager - School visits + student management
-            </option>
-            <option value="program_admin">
-              Program Admin - Scoped oversight + own school visits
-            </option>
-            <option value="admin">Admin - Full access + user management</option>
-          </Select>
-          <p className="mt-1 text-xs text-gray-500">
-            {role === "program_manager" &&
-              "Program Managers can conduct school visits and view their assigned schools"}
-            {role === "program_admin" &&
-              "Program Admins can oversee scoped schools and manage their own school visits"}
-            {role === "teacher" &&
-              "Teachers can view and manage students in their assigned schools"}
-            {role === "admin" &&
-              "Admins have full access to all features, all schools, and all programs"}
-          </p>
-        </div>
-
-        {role === "admin" ? (
-          <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
-            Admins automatically get access to all schools, all programs, and
-            full edit permissions.
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">
+              {isEditing ? "Edit User" : "Add User"}
+            </h2>
+            <Button variant="icon" onClick={onClose}>
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </Button>
           </div>
-        ) : (
-          <>
+
+          {error && (
+            <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className={labelClassName}>Email</label>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isEditing}
+                required
+                className={isEditing ? "bg-gray-100 mt-1" : "mt-1"}
+              />
+            </div>
+
+            <div>
+              <label className={labelClassName}>Full Name</label>
+              <Input
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="e.g. Priya Sharma"
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Display name shown in teacher dropdowns and reports
+              </p>
+            </div>
+
+            <div>
+              <label className={labelClassName}>Role</label>
+              <Select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="mt-1 w-full"
+              >
+                <option value="teacher">Teacher - Student management view</option>
+                <option value="program_manager">Program Manager - School visits + student management</option>
+                <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
+                <option value="admin">Admin - Full access + user management</option>
+              </Select>
+              <p className="mt-1 text-xs text-gray-500">
+                {role === "program_manager" && "Program Managers can conduct school visits and view their assigned schools"}
+                {role === "program_admin" &&
+                  "Program Admins can oversee scoped schools and manage their own school visits"}
+                {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
+                {role === "admin" && "Admins have full access to all features, all schools, and all programs"}
+              </p>
+            </div>
+
+            {role === "admin" ? (
+              <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+                Admins automatically get access to all schools, all programs, and full edit permissions.
+              </div>
+            ) : (
+            <>
             <div>
               <label className={labelClassName}>School Access</label>
               <Select
@@ -290,12 +251,8 @@ export default function AddUserModal({
                 onChange={(e) => setLevel(Number(e.target.value))}
                 className="mt-1 w-full"
               >
-                <option value={3}>
-                  All Schools - Access to all JNV schools
-                </option>
-                <option value={2}>
-                  Region - Access to schools in specific regions
-                </option>
+                <option value={3}>All Schools - Access to all JNV schools</option>
+                <option value={2}>Region - Access to schools in specific regions</option>
                 <option value={1}>School - Access to specific schools</option>
               </Select>
             </div>
@@ -316,8 +273,7 @@ export default function AddUserModal({
             <div>
               <label className={labelClassName}>Assign Programs</label>
               <p className="text-xs text-gray-500 mb-2">
-                Select which programs this user can access. At least one program
-                is required.
+                Select which programs this user can access. At least one program is required.
               </p>
               <div className="mt-2 space-y-2 border rounded-md p-3">
                 {PROGRAMS.map((program) => (
@@ -335,17 +291,14 @@ export default function AddUserModal({
                       <span className="text-sm font-medium text-gray-900">
                         {program.name}
                       </span>
-                      <p className="text-xs text-gray-500">
-                        {program.description}
-                      </p>
+                      <p className="text-xs text-gray-500">{program.description}</p>
                     </div>
                   </label>
                 ))}
               </div>
               {isNVSOnly && (
                 <p className="mt-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
-                  Note: NVS-only users have limited access (students and
-                  analytics only, no visits/curriculum).
+                  Note: NVS-only users have limited access (students and analytics only, no visits/curriculum).
                 </p>
               )}
               {selectedPrograms.length === 0 && (
@@ -360,19 +313,14 @@ export default function AddUserModal({
                 <label className={labelClassName}>Select Regions</label>
                 <div className="mt-2 max-h-48 overflow-y-auto border rounded-md p-2">
                   {regions.map((region) => (
-                    <label
-                      key={region}
-                      className="flex items-center p-2 hover:bg-gray-50 cursor-pointer"
-                    >
+                    <label key={region} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selectedRegions.includes(region)}
                         onChange={() => toggleRegion(region)}
                         className="h-4 w-4 text-accent rounded border-gray-300"
                       />
-                      <span className="ml-2 text-sm text-gray-800">
-                        {region}
-                      </span>
+                      <span className="ml-2 text-sm text-gray-800">{region}</span>
                     </label>
                   ))}
                 </div>
@@ -403,12 +351,8 @@ export default function AddUserModal({
                         onClick={() => addSchool(school.code)}
                         className="w-full text-left px-3 py-2 hover:bg-gray-100 text-sm"
                       >
-                        <span className="font-medium text-gray-900">
-                          {school.name}
-                        </span>
-                        <span className="text-gray-600 ml-2">
-                          ({school.code})
-                        </span>
+                        <span className="font-medium text-gray-900">{school.name}</span>
+                        <span className="text-gray-600 ml-2">({school.code})</span>
                       </button>
                     ))}
                   </div>
@@ -435,18 +379,29 @@ export default function AddUserModal({
                 )}
               </div>
             )}
-          </>
-        )}
+            </>
+            )}
 
-        <div className="mt-6 flex justify-end gap-3">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="sm" disabled={loading}>
-            {loading ? "Saving..." : isEditing ? "Save Changes" : "Add User"}
-          </Button>
-        </div>
-      </form>
+
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={onClose}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={loading}
+              >
+                {loading ? "Saving..." : isEditing ? "Save Changes" : "Add User"}
+              </Button>
+            </div>
+          </form>
     </Modal>
   );
 }

@@ -16,7 +16,7 @@ Next.js 16 (App Router) · React 19 · TypeScript · PostgreSQL + external DB Se
    you're about to do, follow it.
 
 Don't go spelunking through source to rebuild context that's already written down.
-The `.mex/` scaffold is the source of truth for _how_ this project works.
+The `.mex/` scaffold is the source of truth for *how* this project works.
 
 ## The five non-negotiables (full list in `.mex/AGENTS.md`)
 
