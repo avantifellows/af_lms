@@ -720,8 +720,9 @@ describe("positions", () => {
     expect(await updatePosition({ id: 44, body: { user_id: null } })).toEqual({
       ok: true,
     });
-    const updateCall = mockClientQuery.mock.calls.at(-1)!;
-    expect(updateCall[0]).toContain("SET user_id = $1");
+    const updateCall = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE centre_positions SET user_id = $1")
+    )!;
     expect(updateCall[1]).toEqual([null, 44]);
     expect(
       mockClientQuery.mock.calls.some(([sql]) =>
@@ -749,7 +750,11 @@ describe("positions", () => {
     expect(
       await updatePosition({ id: 44, body: { user_id: null }, force: true })
     ).toEqual({ ok: true });
-    expect(mockClientQuery.mock.calls.at(-1)![0]).toContain("SET user_id = $1");
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("UPDATE centre_positions SET user_id = $1")
+      )
+    ).toBe(true);
   });
 
   it("updatePosition fills a seat and clears the occupant's explicit scope", async () => {
@@ -821,6 +826,150 @@ describe("positions", () => {
     expect(
       await setUserRole({ body: { user_id: 70, role: "spm" } })
     ).toMatchObject({ ok: false, status: 404 });
+  });
+
+  // --- app-role sync (user_permission.role driven by centre seats) ---
+
+  // Locate the syncAppRoleFromSeats UPDATE among the transaction's queries.
+  const appRoleUpdate = () =>
+    mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE user_permission") &&
+      String(sql).includes("SET role = $2")
+    );
+
+  it("createPosition promotes teacher → program_manager on a PM-tier seat", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    mockClientQuery.mockResolvedValueOnce({ rows: [] }); // INSERT centre_positions
+    mockClientQuery.mockResolvedValueOnce({ rows: [] }); // clearExplicitSchoolScope
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ n: 1 }] }); // has a PM-tier seat
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "apm", user_id: 70 } })
+    ).toEqual({ ok: true });
+    const roleUpdate = appRoleUpdate()!;
+    expect(roleUpdate[1]).toEqual([70, "program_manager"]);
+    // never touches an already-elevated program_admin/admin
+    expect(String(roleUpdate[0])).toContain(
+      "role IN ('teacher', 'program_manager')"
+    );
+  });
+
+  it("createPosition keeps role at teacher for a subject seat (no PM seat)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    // SELECT-has-PM-seat falls through to the default mock ({ rows: [] }) → none.
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
+    ).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("setUserRole promotes to program_manager when set to a PM tier", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 44 }] }); // seats updated
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ n: 1 }] }); // has a PM-tier seat
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "spm" } })
+    ).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "program_manager"]);
+  });
+
+  it("setUserRole demotes to teacher when all seats become subject roles", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 44 }] }); // seats updated
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 4 }] }); // subject lookup (physics)
+    // SELECT-has-PM-seat → default mock ({ rows: [] }) → no PM tier left.
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "physics" } })
+    ).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("updatePosition re-derives the prior occupant's role when a seat is vacated", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "pm", user_id: 70 },
+    ]); // position (occupied by 70)
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    expect(await updatePosition({ id: 44, body: { user_id: null } })).toEqual({
+      ok: true,
+    });
+    // 70 lost this PM seat; with no PM seat left (default mock) → teacher.
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("deletePosition demotes the occupant when their last PM seat is removed", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last (subject seat remains)
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("deletePosition of a vacant seat touches no app role", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: null }]); // vacant position
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(appRoleUpdate()).toBeUndefined();
+  });
+
+  // --- program_ids sync (user_permission.program_ids = union of seat programs) ---
+
+  const progUpdate = () =>
+    mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE user_permission") &&
+      String(sql).includes("SET program_ids")
+    );
+  // Route the transaction's client queries by SQL so the program_id SELECT can
+  // return a controlled set regardless of call order.
+  const routeClient = (programIds: number[], hasPmSeat = true) =>
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const s = String(sql);
+      if (s.includes("SELECT DISTINCT c.program_id"))
+        return Promise.resolve({ rows: programIds.map((program_id: number) => ({ program_id })) });
+      if (s.includes("role = ANY")) return Promise.resolve({ rows: hasPmSeat ? [{ n: 1 }] : [] });
+      return Promise.resolve({ rows: [] });
+    });
+
+  it("createPosition sets program_ids to the union of the person's seat programs", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check
+    routeClient([2, 1]); // active seats now span programs 1 and 2 (unsorted)
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "pm", user_id: 70 } })
+    ).toEqual({ ok: true });
+    const upd = progUpdate()!;
+    expect(upd[1]).toEqual([70, [1, 2]]); // sorted union
+    // never shrinks an admin's set; only the live row
+    expect(String(upd[0])).toContain("role <> 'admin'");
+    expect(String(upd[0])).toContain("revoked_at IS NULL");
+  });
+
+  it("deletePosition recomputes program_ids from the remaining seats", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    routeClient([1]); // after removal only a program-1 seat remains
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(progUpdate()![1]).toEqual([70, [1]]);
+  });
+
+  it("does not touch program_ids when the person has no active seat", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    routeClient([]); // no seats resolve to a program
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(progUpdate()).toBeUndefined();
   });
 
   it("createTeacher creates the user, teacher record, and seat", async () => {
@@ -1050,9 +1199,13 @@ describe("positions", () => {
   it("deletePosition soft-deletes a vacant seat", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 44, user_id: null }]); // vacant seat
-    mockQuery.mockResolvedValueOnce([]); // UPDATE
     expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
-    expect(mockQuery.mock.calls.at(-1)![0]).toContain("SET deleted_at = now()");
+    // Soft-delete now runs inside the transaction (so the role re-derive is atomic).
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET deleted_at = now()")
+      )
+    ).toBe(true);
   });
 
   it("deletePosition refuses to delete an occupant's only seat unless forced", async () => {
@@ -1067,9 +1220,12 @@ describe("positions", () => {
 
     resetStaffSchemaCheckForTests();
     mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
-    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // occupied seat
-    mockQuery.mockResolvedValueOnce([]); // UPDATE (force skips the last-seat check)
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // occupied seat (force skips the last-seat check)
     expect(await deletePosition({ id: 44, force: true })).toEqual({ ok: true });
-    expect(mockQuery.mock.calls.at(-1)![0]).toContain("SET deleted_at = now()");
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET deleted_at = now()")
+      )
+    ).toBe(true);
   });
 });

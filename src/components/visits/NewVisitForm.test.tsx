@@ -232,7 +232,7 @@ describe("NewVisitForm", () => {
       screen.getByText(/Add an action point/i)
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Complete the visit after all required action types are completed/i)
+      screen.getByText(/Any role-based action requirements are checked at completion/i)
     ).toBeInTheDocument();
   });
 

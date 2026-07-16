@@ -13,7 +13,7 @@ const {
 vi.mock("./permissions", () => ({
   getUserPermission: mockGetUserPermission,
   PROGRAM_IDS: { COE: 1, NODAL: 2 },
-  COE_NODAL_PROGRAM_IDS: [1, 2, 74, 94, 78],
+  PHYSICAL_CENTRE_PROGRAM_IDS: [1, 2, 74, 94, 78, 88],
 }));
 vi.mock("./db", () => ({ query: mockQuery }));
 vi.mock("./curriculum-schema", () => ({

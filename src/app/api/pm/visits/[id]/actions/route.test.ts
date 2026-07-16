@@ -228,10 +228,13 @@ describe("POST /api/pm/visits/[id]/actions", () => {
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("allows a program admin to add an action to their own visit", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "pa@avantifellows.org" }])
+      .mockResolvedValueOnce(ACTION_ROWS);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions", {
       method: "POST",
@@ -240,9 +243,8 @@ describe("POST /api/pm/visits/[id]/actions", () => {
     });
     const res = await POST(req as never, params);
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    await expect(res.json()).resolves.toEqual({ action: ACTION_ROWS[0] });
   });
 
   it("returns 403 for passcode users", async () => {

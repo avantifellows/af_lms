@@ -476,7 +476,9 @@ describe("AddUserModal — role descriptions", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
     await user.selectOptions(roleSelect, "program_admin");
 
-    expect(screen.getByText(/Program Admins can oversee scoped schools/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Program Admins can oversee scoped schools and manage their own school visits"),
+    ).toBeInTheDocument();
   });
 });
 

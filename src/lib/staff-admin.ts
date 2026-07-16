@@ -704,6 +704,43 @@ async function rejectIfRegionLevelUser(
   return null;
 }
 
+// Validate a user about to be seated: the user must exist, must not be
+// region-level (see rejectIfRegionLevelUser), and must not already hold this
+// exact centre+role seat. Shared by createPosition (no seat yet) and
+// updatePosition (pass the edited row's id as `excludePositionId` so filling a
+// seat doesn't collide with itself). Returns a failure to surface, or null when
+// the occupant is allowed.
+async function validateSeatOccupant(
+  userId: number,
+  centreId: number,
+  role: SeatRole,
+  excludePositionId?: number
+): Promise<StaffValidationFailure | null> {
+  const users = await query<{ id: number }>(
+    `SELECT id FROM "user" WHERE id = $1`,
+    [userId]
+  );
+  if (users.length === 0) {
+    return { ok: false, status: 404, error: "User not found" };
+  }
+  const regionBlock = await rejectIfRegionLevelUser(userId);
+  if (regionBlock) return regionBlock;
+  const duplicate = await query<{ id: number }>(
+    `SELECT id FROM centre_positions
+     WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL
+       AND ($4::int IS NULL OR id <> $4)`,
+    [centreId, role, userId, excludePositionId ?? null]
+  );
+  if (duplicate.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: "This person already holds this seat",
+    };
+  }
+  return null;
+}
+
 // Whether `userId`'s only remaining active seat is `excludePositionId` — i.e.
 // removing/vacating that seat would leave them with no seat-derived scope.
 // Strict exclusivity already cleared their explicit school_codes, so this is a
@@ -1481,6 +1518,83 @@ async function syncTeacherSubjectFromRole(
   );
 }
 
+// Keep `user_permission.role` — the app-level role that gates the UI (Start
+// Visit button, PM dashboard; see getFeatureAccess) — in sync with the person's
+// centre seats. The seat is the source of truth: holding any PM-tier seat
+// (apm/pm/spm/ph) makes the person a program_manager; with no PM-tier seat left
+// they fall back to teacher. Both directions apply — gaining a PM seat promotes
+// teacher→program_manager, losing the last one demotes program_manager→teacher.
+//
+// Only ever moves WITHIN the {teacher, program_manager} band. A manually
+// elevated program_admin/admin is org-level (not seat-derived) and is left
+// untouched, so this never demotes a real admin who happens to hold a ph seat.
+// Only ever rewrites the live (revoked_at IS NULL) permission row — the same
+// row the gating read uses — so cleaning up an exited person's seats never
+// mutates their revoked row's role. No-ops when the user has no live
+// user_permission row (a seated person who can't yet log in) or when the role
+// already matches. Call after every seat write, once per affected user (both
+// the new and prior occupant on a move).
+async function syncAppRoleFromSeats(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  const pmSeat = await client.query(
+    `SELECT 1 FROM centre_positions
+     WHERE user_id = $1 AND deleted_at IS NULL AND role = ANY($2)
+     LIMIT 1`,
+    [userId, [...PM_SEAT_ROLES]]
+  );
+  const desired = pmSeat.rows.length > 0 ? "program_manager" : "teacher";
+  await client.query(
+    `UPDATE user_permission
+     SET role = $2, updated_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND role IN ('teacher', 'program_manager')
+       AND role <> $2`,
+    [userId, desired]
+  );
+}
+
+// Keep `user_permission.program_ids` in sync with the person's centre seats:
+// each centre belongs to one program, and a seated person's program scope IS the
+// set of programs across their active centres. Recomputed as a full replace on
+// every seat write, so it always equals the union over CURRENT seats — removing
+// one of two Nodal seats keeps Nodal (the other seat still supplies it); a
+// program only drops when its last seat is gone. This is the write-back the
+// resolver (getProgramContextSync) reads live but never persisted, so raw
+// program_ids consumers (quiz-session batches, ownsRecord, the users page) were
+// stale for multi-program PMs.
+//
+// Only touches the live (revoked_at IS NULL) row, and skips admins — level-3
+// admins have full program access regardless, and their program_ids is a manual
+// set we must not shrink to whatever centres they happen to sit at. No-op when
+// the person has no active seat (don't strip a person mid-offboarding to an
+// empty program set) or when the value is already correct.
+async function syncProgramIdsFromSeats(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  const rows = await client.query<{ program_id: number }>(
+    `SELECT DISTINCT c.program_id
+     FROM centre_positions cp
+     JOIN centres c ON c.id = cp.centre_id
+     WHERE cp.user_id = $1 AND cp.deleted_at IS NULL AND c.program_id IS NOT NULL`,
+    [userId]
+  );
+  if (rows.rows.length === 0) return;
+  const programIds = rows.rows.map((r) => Number(r.program_id)).sort((a, b) => a - b);
+  await client.query(
+    `UPDATE user_permission
+     SET program_ids = $2, updated_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND role <> 'admin'
+       AND COALESCE(program_ids, '{}') <> $2`,
+    [userId, programIds]
+  );
+}
+
 export async function createPosition(params: {
   body: CreatePositionBody;
 }): Promise<StaffMutationResult> {
@@ -1516,27 +1630,8 @@ export async function createPosition(params: {
   }
 
   if (userId !== null) {
-    const users = await query<{ id: number }>(
-      `SELECT id FROM "user" WHERE id = $1`,
-      [userId]
-    );
-    if (users.length === 0) {
-      return { ok: false, status: 404, error: "User not found" };
-    }
-    const regionBlock = await rejectIfRegionLevelUser(userId);
-    if (regionBlock) return regionBlock;
-    const duplicate = await query<{ id: number }>(
-      `SELECT id FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL`,
-      [centreId, role, userId]
-    );
-    if (duplicate.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This person already holds this seat",
-      };
-    }
+    const bad = await validateSeatOccupant(userId, centreId, role);
+    if (bad) return bad;
   }
 
   await withTransaction(async (client) => {
@@ -1548,6 +1643,8 @@ export async function createPosition(params: {
     if (userId !== null) {
       await syncTeacherSubjectFromRole(client, userId, role);
       await clearExplicitSchoolScope(client, userId);
+      await syncAppRoleFromSeats(client, userId);
+      await syncProgramIdsFromSeats(client, userId);
     }
   });
 
@@ -1600,28 +1697,13 @@ export async function updatePosition(params: {
         fields: { user_id: "user_id must be a positive integer or null" },
       };
     }
-    const users = await query<{ id: number }>(
-      `SELECT id FROM "user" WHERE id = $1`,
-      [userId]
+    const bad = await validateSeatOccupant(
+      userId,
+      position.centre_id,
+      position.role,
+      params.id
     );
-    if (users.length === 0) {
-      return { ok: false, status: 404, error: "User not found" };
-    }
-    const regionBlock = await rejectIfRegionLevelUser(userId);
-    if (regionBlock) return regionBlock;
-    const duplicate = await query<{ id: number }>(
-      `SELECT id FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3
-         AND deleted_at IS NULL AND id <> $4`,
-      [position.centre_id, position.role, userId, params.id]
-    );
-    if (duplicate.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This person already holds this seat",
-      };
-    }
+    if (bad) return bad;
   }
 
   // Vacating the seat: refuse if it's the occupant's only seat (would strand
@@ -1642,6 +1724,14 @@ export async function updatePosition(params: {
     );
     if (userId !== null) {
       await clearExplicitSchoolScope(client, userId);
+      await syncAppRoleFromSeats(client, userId);
+      await syncProgramIdsFromSeats(client, userId);
+    }
+    // The prior occupant just lost this seat — re-derive their app role and
+    // program scope too (this may have been their last seat in a program).
+    if (position.user_id !== null && position.user_id !== userId) {
+      await syncAppRoleFromSeats(client, position.user_id);
+      await syncProgramIdsFromSeats(client, position.user_id);
     }
   });
 
@@ -1687,6 +1777,7 @@ export async function setUserRole(params: {
     updatedCount = updated.rows.length;
     if (updatedCount === 0) return;
     await syncTeacherSubjectFromRole(client, userId, role);
+    await syncAppRoleFromSeats(client, userId);
   });
   if (updatedCount === 0) {
     return {
@@ -1725,10 +1816,18 @@ export async function deletePosition(params: {
     return LAST_SEAT_BLOCK;
   }
 
-  await query(
-    `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
-    [params.id]
-  );
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
+      [params.id]
+    );
+    // The occupant just lost this seat — re-derive their app role and program
+    // scope in case it was their last PM-tier seat / last seat in a program.
+    if (position.user_id !== null) {
+      await syncAppRoleFromSeats(client, position.user_id);
+      await syncProgramIdsFromSeats(client, position.user_id);
+    }
+  });
 
   return { ok: true };
 }

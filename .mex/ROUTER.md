@@ -35,7 +35,7 @@ Then read this file fully before doing anything else in this session.
 - Dual auth (Google OAuth + school passcode) with dev-login personas in non-prod.
 - Student enrollment CRUD (reads direct from Postgres; writes proxied to the DB Service) + school dashboard, search, grade filtering, document uploads (S3).
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
-- PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; teacher pickers use the Staff Management Visit Teacher roster.
+- PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; PM completion requires six Action Types, while Admin and Program Admin completion permits zero Actions; Program Admins manage their own in-progress Visits while retaining scoped read access; teacher pickers use the Staff Management Visit Teacher roster.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
 - Academic Mentorship foundation: `academic_mentorship` feature key, School page current-year Mentorship tab views, guarded `/admin/academic-mentorship` grouped mapping overview with Program filtering, current-year manual add/remove/reassign controls, CSV template/upload import for supported years with prior-year rows stored as historical, selector options API, direct LMS-owned mapping writes, and Staff Management delete/exit safeguards for Academic Mentors with Mapping history.
 - Deploy via AWS Amplify; ~2472 unit tests (Vitest/RTL) + 65 E2E (Playwright).
