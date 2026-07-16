@@ -196,4 +196,57 @@ describe("requireHolisticMentorshipAccess", () => {
       "holistic_mentorship_mentor_mentee_mappings"
     );
   });
+
+  it("allows a current eligible Mentor to read their mapped Student", async () => {
+    mockTeacherScope();
+    mockQuery
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "School One", region: "North" },
+      ])
+      .mockResolvedValueOnce([{ user_id: 10 }])
+      .mockResolvedValueOnce([{ id: 73 }]);
+
+    await expect(
+      requireHolisticMentorshipAccess(
+        { user: { email: "teacher@example.com" } },
+        "mapped_student_read",
+        { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+      )
+    ).resolves.toMatchObject({ ok: true, actorUserId: 10 });
+  });
+
+  it.each(["admin", "holistic_mentorship_admin"] as const)(
+    "allows scoped %s read-only Student drill-down",
+    async (role) => {
+      mockQuery
+        .mockResolvedValueOnce([permissionRow(role)])
+        .mockResolvedValueOnce([
+          { id: 20, code: "SCH001", name: "School One", region: "North" },
+        ]);
+
+      await expect(
+        requireHolisticMentorshipAccess(
+          { user: { email: `${role}@example.com` } },
+          "mapped_student_read",
+          { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+        )
+      ).resolves.toMatchObject({ ok: true, canEdit: true });
+    }
+  );
+
+  it.each(["program_manager", "program_admin"] as const)(
+    "denies %s Student drill-down before protected Student data access",
+    async (role) => {
+      mockQuery.mockResolvedValueOnce([permissionRow(role)]);
+
+      await expect(
+        requireHolisticMentorshipAccess(
+          { user: { email: `${role}@example.com` } },
+          "mapped_student_read",
+          { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+        )
+      ).resolves.toMatchObject({ ok: false, status: 403 });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    }
+  );
 });

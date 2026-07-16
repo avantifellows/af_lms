@@ -62,4 +62,24 @@ describe("Holistic Student Phase API", () => {
     expect(response.status).toBe(404);
     expect(mockDetail).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["wrong Mentor", 404],
+    ["former Mentor", 403],
+    ["denied role", 403],
+  ] as const)("blocks a %s before reading protected Phase data", async (_actor, status) => {
+    mockAccess.mockResolvedValue({
+      ok: false,
+      status,
+      error: status === 404 ? "Not found" : "Forbidden",
+    });
+
+    const response = await GET(
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027") as never,
+      context
+    );
+
+    expect(response.status).toBe(status);
+    expect(mockDetail).not.toHaveBeenCalled();
+  });
 });
