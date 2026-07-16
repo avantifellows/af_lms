@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import HolisticMentorshipWorkspace from "./HolisticMentorshipWorkspace";
 
@@ -17,6 +17,7 @@ describe("HolisticMentorshipWorkspace", () => {
   });
 
   it("shows the Program-wide Admin progress and setup workspaces", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: null }) }));
     const user = userEvent.setup();
     render(<HolisticMentorshipWorkspace mode="admin" />);
 
@@ -24,6 +25,6 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(screen.getByText("No mapped Students to show yet.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
-    expect(screen.getByText("No Holistic Phases configured yet.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Create blank Plan" })).toBeInTheDocument();
   });
 });

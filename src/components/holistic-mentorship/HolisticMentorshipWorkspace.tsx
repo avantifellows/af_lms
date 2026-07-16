@@ -4,6 +4,7 @@ import { ClipboardList, Users } from "lucide-react";
 import { useState } from "react";
 
 import { Card } from "@/components/ui";
+import PhasePlanSetup from "./PhasePlanSetup";
 
 type WorkspaceMode = "teacher" | "admin";
 
@@ -45,10 +46,14 @@ export default function HolisticMentorshipWorkspace({ mode }: { mode: WorkspaceM
         ))}
       </div>
 
-      <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">
-        <Icon aria-hidden="true" className="h-7 w-7 text-text-muted" />
-        <p className="text-sm font-medium text-text-muted">{active.empty}</p>
-      </Card>
+      {mode === "admin" && active.id === "phases" ? (
+        <PhasePlanSetup />
+      ) : (
+        <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">
+          <Icon aria-hidden="true" className="h-7 w-7 text-text-muted" />
+          <p className="text-sm font-medium text-text-muted">{active.empty}</p>
+        </Card>
+      )}
     </section>
   );
 }

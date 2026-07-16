@@ -21,7 +21,7 @@ edges:
     condition: when adding a write that must proxy to the DB Service
   - target: patterns/add-api-route.md
     condition: when adding a route that reads or writes
-last_updated: 2026-06-25
+last_updated: 2026-07-17
 ---
 
 # Data Access
@@ -31,7 +31,7 @@ Five backends. Picking the wrong one for a write is a real bug — read this bef
 ## 1. PostgreSQL — `query()` (the default)
 `import { query } from "@/lib/db"` → `query<RowType>(sql, params)`. Returns `rows`.
 - **All reads** (lists, dashboards, detail pages, scope resolution).
-- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum, permissions/centre tables, and Academic Mentor-Mentee Mappings.
+- **Direct writes** for LMS-owned tables only: PM visits (`lms_pm_school_visits`, `lms_pm_school_visit_actions`), curriculum, permissions/centre tables, Academic Mentor-Mentee Mappings, and Holistic Mentorship product records.
 - Multi-statement writes: `withTransaction(async (client) => { ... })` (no nesting — it throws).
 - Pool is a singleton (10 conns, 15s `statement_timeout`, 5s connect timeout). **Always `$1` placeholders.** This module is server-only — never import it (transitively) into a client component.
 - DB naming: Ecto — `inserted_at`/`updated_at`, snake_case, server TZ UTC. Derive IST dates in SQL: `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`.
@@ -65,7 +65,7 @@ if (!res.ok) { const text = await res.text(); /* surface upstream error */ }
 | Operation | Backend |
 |-----------|---------|
 | Any read / list / dashboard | Postgres `query()` |
-| Visit / curriculum / permissions / centre / Academic Mentor-Mentee Mapping write | Postgres `query()` (direct) |
+| Visit / curriculum / permissions / centre / Academic or Holistic Mentorship write | Postgres `query()` / `withTransaction()` (direct) |
 | Student / batch / quiz-session / document-metadata write | DB Service `fetch` (Bearer token) |
 | Quiz analytics read | BigQuery (`bigquery.ts`) |
 | Performance deep-dive read | DynamoDB (`dynamodb.ts`) |
