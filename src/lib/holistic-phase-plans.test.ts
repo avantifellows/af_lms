@@ -58,7 +58,7 @@ describe("Holistic Phase Plans", () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
-        .mockResolvedValueOnce({ rows: [{ title: "Belonging", guidance_markdown: "Discuss goals", question_count: "2", valid_question_count: "2" }] })
+        .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "2", valid_question_count: "2" }] })
         .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
         .mockResolvedValueOnce({ rows: [] }),
     };
@@ -73,13 +73,28 @@ describe("Holistic Phase Plans", () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
-        .mockResolvedValueOnce({ rows: [{ title: "Belonging", guidance_markdown: "Discuss goals", question_count: "1", valid_question_count: "0" }] }),
+        .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "1", valid_question_count: "0" }] }),
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
     await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", actorUserId: 9, confirmed: true }))
-      .resolves.toEqual({ ok: false, status: 422, error: "Complete title, Guidance, and Questions before opening" });
+      .resolves.toEqual({ ok: false, status: 422, error: "Complete Grade, title, Guidance, and Questions before opening" });
     expect(client.query).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["an unsupported Grade", { grade: "10", question_count: "1", valid_question_count: "1" }],
+    ["more than four Questions", { grade: "11", question_count: "5", valid_question_count: "5" }],
+  ])("does not open a Phase with %s", async (_case, definition) => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
+        .mockResolvedValueOnce({ rows: [{ title: "Belonging", guidance_markdown: "Discuss goals", ...definition }] }),
+    };
+    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+
+    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", actorUserId: 9, confirmed: true }))
+      .resolves.toEqual({ ok: false, status: 422, error: "Complete Grade, title, Guidance, and Questions before opening" });
   });
 
   it("does not delete a Phase that has ever opened", async () => {

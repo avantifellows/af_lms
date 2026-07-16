@@ -12,6 +12,7 @@ import {
   reorderHolisticPhases,
   setHolisticPhaseState,
   updateHolisticPhase,
+  validateAcademicYear,
   type PhasePlanResult,
 } from "@/lib/holistic-phase-plans";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest) {
   const { access } = await sessionAccess("program_read");
   if (!access.ok) return error(access.error, access.status);
   const academicYear = request.nextUrl.searchParams.get("academic_year") ?? CURRENT_ACADEMIC_YEAR;
-  if (!/^\d{4}-\d{4}$/.test(academicYear)) return error("Invalid Academic Year");
+  if (!validateAcademicYear(academicYear)) return error("Invalid Academic Year");
   return NextResponse.json({ plan: await getHolisticPhasePlan(academicYear) });
 }
 

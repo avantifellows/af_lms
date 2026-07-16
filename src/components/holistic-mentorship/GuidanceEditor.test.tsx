@@ -9,9 +9,9 @@ describe("GuidanceEditor", () => {
     const user = userEvent.setup();
     render(<GuidanceEditor value="" onChange={() => {}} previewValue="## Unsaved Guidance" />);
 
-    await user.click(screen.getByRole("tab", { name: "Preview" }));
+    await user.click(screen.getByRole("button", { name: "Preview" }));
 
-    expect(screen.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Preview" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Unsaved Guidance" })).toBeInTheDocument();
   });
 });

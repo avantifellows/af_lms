@@ -19,13 +19,12 @@ export default function GuidanceEditor({
   const [mode, setMode] = useState<"edit" | "preview">("edit");
   return (
     <div className="space-y-2">
-      <div role="tablist" aria-label="Guidance view" className="inline-flex rounded-md border border-border p-1 md:hidden">
+      <div role="group" aria-label="Guidance view" className="inline-flex rounded-md border border-border p-1 md:hidden">
         {(["edit", "preview"] as const).map((item) => (
           <button
             key={item}
             type="button"
-            role="tab"
-            aria-selected={mode === item}
+            aria-pressed={mode === item}
             onClick={() => setMode(item)}
             className={`min-h-9 rounded px-3 text-sm font-medium ${mode === item ? "bg-accent text-text-on-accent" : "text-text-secondary"}`}
           >

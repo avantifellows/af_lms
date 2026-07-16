@@ -75,7 +75,7 @@ type MutablePhaseRow = {
   used: boolean;
 };
 
-function validateAcademicYear(value: string): boolean {
+export function validateAcademicYear(value: string): boolean {
   const match = /^(\d{4})-(\d{4})$/.exec(value);
   return !!match && Number(match[2]) === Number(match[1]) + 1;
 }
@@ -382,18 +382,20 @@ export async function setHolisticPhaseState(input: {
       return { ok: false, status: 422, error: "A used Phase cannot return to Locked" };
     }
     if (input.state === "open") {
-      const definition = await client.query<{ title: string; guidance_markdown: string; question_count: number | string; valid_question_count: number | string }>(
-        `SELECT p.title, p.guidance_markdown, COUNT(q.id) AS question_count,
+      const definition = await client.query<{ grade: number | string; title: string; guidance_markdown: string; question_count: number | string; valid_question_count: number | string }>(
+        `SELECT g.number AS grade, p.title, p.guidance_markdown, COUNT(q.id) AS question_count,
                 COUNT(q.id) FILTER (WHERE BTRIM(q.text) <> '') AS valid_question_count
          FROM holistic_mentorship_phases p
+         JOIN grade g ON g.id = p.grade_id
          LEFT JOIN holistic_mentorship_phase_questions q ON q.phase_id = p.id
-         WHERE p.id = $1 GROUP BY p.id`,
+         WHERE p.id = $1 GROUP BY p.id, g.number`,
         [input.phaseId]
       );
       const current = definition.rows[0];
-      if (!current?.title.trim() || !current.guidance_markdown.trim() ||
-          Number(current.question_count) < 1 || Number(current.question_count) !== Number(current.valid_question_count)) {
-        return { ok: false, status: 422, error: "Complete title, Guidance, and Questions before opening" };
+      if (![11, 12].includes(Number(current?.grade)) || !current?.title.trim() || !current.guidance_markdown.trim() ||
+          Number(current.question_count) < 1 || Number(current.question_count) > 4 ||
+          Number(current.question_count) !== Number(current.valid_question_count)) {
+        return { ok: false, status: 422, error: "Complete Grade, title, Guidance, and Questions before opening" };
       }
       const guidanceError = validateHolisticGuidance(current.guidance_markdown);
       if (guidanceError) return { ok: false, status: 422, error: guidanceError };

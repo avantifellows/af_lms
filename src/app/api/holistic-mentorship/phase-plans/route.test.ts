@@ -26,6 +26,20 @@ describe("/api/holistic-mentorship/phase-plans", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("rejects a malformed Academic Year before Plan data access", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "hm-admin@example.com" } });
+    mockQuery.mockResolvedValueOnce([{
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    }]);
+
+    const response = await GET(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans?academic_year=2026-2028"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid Academic Year" });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
   it("lets a Holistic Mentorship Admin create the blank current-year Plan", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "hm-admin@example.com" } });
     mockQuery.mockResolvedValueOnce([{
