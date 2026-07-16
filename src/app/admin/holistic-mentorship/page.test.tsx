@@ -1,13 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetServerSession, mockRedirect, mockRequireAccess } = vi.hoisted(() => ({
-  mockGetServerSession: vi.fn(),
-  mockRedirect: vi.fn((url: string) => {
-    throw new Error(`REDIRECT:${url}`);
-  }),
-  mockRequireAccess: vi.fn(),
-}));
+const { mockGetServerSession, mockPageHeader, mockRedirect, mockRequireAccess } = vi.hoisted(
+  () => ({
+    mockGetServerSession: vi.fn(),
+    mockPageHeader: vi.fn(({ title }: { title: string }) => <h1>{title}</h1>),
+    mockRedirect: vi.fn((url: string) => {
+      throw new Error(`REDIRECT:${url}`);
+    }),
+    mockRequireAccess: vi.fn(),
+  })
+);
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -16,7 +19,7 @@ vi.mock("@/lib/holistic-mentorship", () => ({
   requireHolisticMentorshipAccess: mockRequireAccess,
 }));
 vi.mock("@/components/PageHeader", () => ({
-  default: ({ title }: { title: string }) => <h1>{title}</h1>,
+  default: mockPageHeader,
 }));
 
 import HolisticMentorshipAdminPage from "./page";
@@ -43,7 +46,7 @@ describe("HolisticMentorshipAdminPage", () => {
 
   it("renders the Program-wide shell for an authorized Admin", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "admin@example.com" } });
-    mockRequireAccess.mockResolvedValue({ ok: true });
+    mockRequireAccess.mockResolvedValue({ ok: true, permission: { role: "admin" } });
 
     render(await HolisticMentorshipAdminPage());
 
@@ -53,6 +56,25 @@ describe("HolisticMentorshipAdminPage", () => {
     expect(mockRequireAccess).toHaveBeenCalledWith(
       { user: { email: "admin@example.com" } },
       "program_read"
+    );
+    expect(mockPageHeader).toHaveBeenCalledWith(
+      expect.objectContaining({ backHref: "/dashboard" }),
+      undefined
+    );
+  });
+
+  it("does not link the dedicated Admin back to its redirecting dashboard", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
+    mockRequireAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "holistic_mentorship_admin" },
+    });
+
+    render(await HolisticMentorshipAdminPage());
+
+    expect(mockPageHeader).toHaveBeenCalledWith(
+      expect.objectContaining({ backHref: undefined }),
+      undefined
     );
   });
 });

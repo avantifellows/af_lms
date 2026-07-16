@@ -140,12 +140,12 @@ export async function requireHolisticMentorshipAccess(
     return { ok: false, status: 403, error: "Forbidden" };
   }
 
-  const isProgramAdmin =
+  const isProgramWideActor =
     permission.role === "admin" || permission.role === "holistic_mentorship_admin";
   const readAction = action === "program_read" || action === "mapped_student_read";
   const programActionAllowed =
     (action === "privacy_delete" && permission.role === "admin") ||
-    (isProgramAdmin &&
+    (isProgramWideActor &&
       ["program_read", "mapped_student_read", "phase_configure", "profile_regenerate"].includes(
         action
       ));
