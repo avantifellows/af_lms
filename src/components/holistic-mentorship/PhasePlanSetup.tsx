@@ -35,6 +35,8 @@ export default function PhasePlanSetup() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const selectedPhase = draft?.id ? plan?.phases.find((phase) => phase.id === draft.id) : undefined;
+  const definitionReadOnly = !plan?.editable || !!selectedPhase?.frozen || !!selectedPhase?.used;
 
   const load = useCallback(async (year = academicYear) => {
     setPlan(undefined);
@@ -211,7 +213,7 @@ export default function PhasePlanSetup() {
                   <Input className="mt-1" maxLength={120} value={draft.title} disabled={!plan.editable || draft.everOpened} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
                 </label>
               </div>
-              <GuidanceEditor value={draft.guidanceMarkdown} readOnly={!plan.editable} onChange={(guidanceMarkdown) => setDraft({ ...draft, guidanceMarkdown })} />
+              <GuidanceEditor value={draft.guidanceMarkdown} readOnly={definitionReadOnly} onChange={(guidanceMarkdown) => setDraft({ ...draft, guidanceMarkdown })} />
               <fieldset className="space-y-2" disabled={!plan.editable || draft.everOpened}>
                 <legend className="text-sm font-semibold text-text-primary">Questions</legend>
                 {draft.questions.map((question, index) => (
@@ -224,8 +226,8 @@ export default function PhasePlanSetup() {
               </fieldset>
               {plan.editable && (
                 <div className="flex flex-wrap justify-between gap-2 border-t border-border pt-4">
-                  <div>{draft.id && <Button type="button" variant="secondary" onClick={() => changeState(plan.phases.find((phase) => phase.id === draft.id)!)} disabled={busy}>{plan.phases.find((phase) => phase.id === draft.id)?.state === "open" ? "Return to Locked" : "Open Phase"}</Button>}</div>
-                  <Button type="button" onClick={save} disabled={busy}>Save Phase</Button>
+                  <div>{draft.id && <Button type="button" variant="secondary" onClick={() => changeState(plan.phases.find((phase) => phase.id === draft.id)!)} disabled={busy || !!selectedPhase?.frozen || !!selectedPhase?.used}>{plan.phases.find((phase) => phase.id === draft.id)?.state === "open" ? "Return to Locked" : "Open Phase"}</Button>}</div>
+                  <Button type="button" onClick={save} disabled={busy || definitionReadOnly}>Save Phase</Button>
                 </div>
               )}
             </div>

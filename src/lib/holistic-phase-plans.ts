@@ -382,15 +382,17 @@ export async function setHolisticPhaseState(input: {
       return { ok: false, status: 422, error: "A used Phase cannot return to Locked" };
     }
     if (input.state === "open") {
-      const definition = await client.query<{ title: string; guidance_markdown: string; question_count: number | string }>(
-        `SELECT p.title, p.guidance_markdown, COUNT(q.id) AS question_count
+      const definition = await client.query<{ title: string; guidance_markdown: string; question_count: number | string; valid_question_count: number | string }>(
+        `SELECT p.title, p.guidance_markdown, COUNT(q.id) AS question_count,
+                COUNT(q.id) FILTER (WHERE BTRIM(q.text) <> '') AS valid_question_count
          FROM holistic_mentorship_phases p
          LEFT JOIN holistic_mentorship_phase_questions q ON q.phase_id = p.id
          WHERE p.id = $1 GROUP BY p.id`,
         [input.phaseId]
       );
       const current = definition.rows[0];
-      if (!current?.title.trim() || !current.guidance_markdown.trim() || Number(current.question_count) < 1) {
+      if (!current?.title.trim() || !current.guidance_markdown.trim() ||
+          Number(current.question_count) < 1 || Number(current.question_count) !== Number(current.valid_question_count)) {
         return { ok: false, status: 422, error: "Complete title, Guidance, and Questions before opening" };
       }
       const guidanceError = validateHolisticGuidance(current.guidance_markdown);
