@@ -139,6 +139,11 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(mockClientQuery.mock.calls.some(([sql]) =>
       String(sql).includes("DELETE FROM holistic_mentorship_mentor_mentee_mappings")
     )).toBe(false);
+    const cleanup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_post_session_answers")
+    );
+    expect(String(cleanup?.[0])).toContain("state = 'draft'");
+    expect(String(cleanup?.[0])).toContain("FOR UPDATE");
   });
 
   it("takes over only the exact confirmed current Mapping and records both lifecycle actions", async () => {
@@ -172,6 +177,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(String(draftCleanup?.[0])).toContain(
       "holistic_mentorship_post_session_note_audits"
     );
+    expect(String(draftCleanup?.[0])).toContain("state = 'draft'");
     expect(draftCleanup?.[1]).toEqual([[41], 9, "teacher_takeover"]);
   });
 

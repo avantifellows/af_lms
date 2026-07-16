@@ -78,6 +78,10 @@ export type HolisticStudentPhaseDetail = {
   student: { id: number; name: string; externalStudentId: string | null; grade: 11 | 12 };
   phases: HolisticPhaseSummary[];
   selectedPhase: HolisticPhaseSummary | (Extract<HolisticPhaseSummary, { locked: false }> & {
+    revision: number;
+    mappingId: number;
+    notesRevision: number;
+    canEditNotes: boolean;
     guidanceMarkdown: string;
     context: HolisticStudentContext;
     questions: Array<{ questionId: number; text: string; position: number }>;
@@ -172,6 +176,7 @@ export function deriveHolisticPhaseProgress(
 
 type StudentRow = {
   student_id: number | string;
+  mapping_id: number | string;
   name: string | null;
   external_student_id: string | null;
   grade: number | string;
@@ -184,6 +189,7 @@ type PhaseRow = {
   grade: number | string;
   title: string;
   position: number;
+  revision: number;
   state: "locked" | "open";
   guidance_markdown: string;
 };
@@ -232,7 +238,7 @@ export async function getHolisticStudentPhase(params: {
   role: string;
 }): Promise<HolisticStudentPhaseDetail | null> {
   const students = await query<StudentRow>(
-    `SELECT st.id AS student_id,
+    `SELECT st.id AS student_id, mapping.id AS mapping_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
             st.student_id AS external_student_id, g.number AS grade, journey.entry_grade
      FROM holistic_mentorship_mentor_mentee_mappings mapping
@@ -265,7 +271,7 @@ export async function getHolisticStudentPhase(params: {
   const priorYear = previousAcademicYear(params.academicYear);
   const phaseRows = await query<PhaseRow>(
     `SELECT phase.id, plan.academic_year, grade.number AS grade, phase.title,
-            phase.position, phase.state, phase.guidance_markdown
+            phase.position, phase.state, phase.guidance_markdown, phase.revision
      FROM holistic_mentorship_phases phase
      JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
      JOIN grade ON grade.id = phase.grade_id
@@ -452,6 +458,8 @@ export async function getHolisticStudentPhase(params: {
   });
   const selectedNotes = notesByPhase.get(selected.id);
   const canReadDraft = params.role === "teacher" && selectedNotes?.authorUserId === params.actorUserId;
+  const erasedDraftForActor = params.role === "teacher" && selectedNotes?.state === "draft" &&
+    selectedNotes.authorUserId !== params.actorUserId && selectedNotes.answers.length === 0;
 
   return {
     student: {
@@ -468,11 +476,16 @@ export async function getHolisticStudentPhase(params: {
       locked: false,
       active: activeByYearGrade.get(`${selected.academic_year}:${selected.grade}`) === selected.id,
       progress: progressByPhase.get(selected.id) ?? "pending",
-      draftSaved: selectedNotes?.state === "draft",
+      draftSaved: selectedNotes?.state === "draft" && !erasedDraftForActor,
+      revision: selected.revision,
+      mappingId: Number(student.mapping_id),
+      notesRevision: selectedNotes?.revision ?? 0,
+      canEditNotes: params.role === "teacher" &&
+        (!selectedNotes || selectedNotes.authorUserId === params.actorUserId || erasedDraftForActor),
       guidanceMarkdown: selected.guidance_markdown,
       context,
       questions: questionsByPhase.get(selected.id) ?? [],
-      notes: selectedNotes ? {
+      notes: selectedNotes && !erasedDraftForActor ? {
         state: selectedNotes.state,
         revision: selectedNotes.revision,
         firstSubmittedAt: selectedNotes.firstSubmittedAt,

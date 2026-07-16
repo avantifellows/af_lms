@@ -224,4 +224,39 @@ describe("Holistic Student Phase derivation", () => {
     });
     expect(result?.selectedPhase).not.toHaveProperty("notes.answers");
   });
+
+  it("shows an erased draft as a blank editable form to the replacement Mentor", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])
+      .mockResolvedValueOnce([{ id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 5, state: "open", guidance_markdown: "Listen first." }])
+      .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
+      .mockResolvedValueOnce([{ phase_id: 73, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }])
+      .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+      .mockResolvedValueOnce([{
+        notes_id: 101, phase_id: 73, author_user_id: 9, state: "draft", revision: 4,
+        first_submitted_at: null, last_edited_at: "2026-07-02T00:00:00Z",
+        question_id: null, question: null, question_position: null, answer: null,
+      }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await getHolisticStudentPhase({
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+    });
+
+    expect(result).toMatchObject({
+      readOnly: false,
+      selectedPhase: {
+        draftSaved: false,
+        notesRevision: 4,
+        canEditNotes: true,
+        notes: null,
+      },
+    });
+  });
 });
