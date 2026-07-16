@@ -235,6 +235,34 @@ export async function blockIfAcademicMentorshipHistory(
   };
 }
 
+export async function blockIfHolisticMentorshipHistory(
+  userId: number
+): Promise<StaffValidationFailure | null> {
+  const rows = await query<{
+    has_mapping_history: boolean;
+    has_notes_history: boolean;
+  }>(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings
+         WHERE mentor_user_id = $1
+       ) AS has_mapping_history,
+       EXISTS (
+         SELECT 1 FROM holistic_mentorship_post_session_notes
+         WHERE author_user_id = $1
+       ) AS has_notes_history`,
+    [userId]
+  );
+  if (!rows[0]?.has_mapping_history && !rows[0]?.has_notes_history) return null;
+  return {
+    ok: false,
+    status: 409,
+    code: "holistic_mentorship_history",
+    error:
+      "This User has Holistic Mentor-Mentee Mapping or authored Post-Session Notes history. Deletion is blocked to preserve audit history.",
+  };
+}
+
 // --- Roster ---
 
 export type StaffRosterResult =
@@ -648,6 +676,7 @@ async function vacateSeatsAndRevoke(
   client: PoolClient,
   userId: number
 ): Promise<void> {
+  await endIneligibleHolisticMappings(client, userId, "mentor_exit", true);
   await client.query(
     `UPDATE centre_positions SET user_id = NULL, updated_at = now()
      WHERE user_id = $1 AND deleted_at IS NULL`,
@@ -657,6 +686,35 @@ async function vacateSeatsAndRevoke(
     `UPDATE user_permission SET revoked_at = now(), updated_at = now()
      WHERE user_id = $1 AND revoked_at IS NULL`,
     [userId]
+  );
+}
+
+export async function endIneligibleHolisticMappings(
+  client: PoolClient,
+  userId: number,
+  reason: "mentor_exit" | "mentor_role_changed" | "mentor_seat_changed" | "mentor_access_revoked",
+  endAll = false
+): Promise<void> {
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings mapping
+     SET ended_at = now(), ended_by_user_id = NULL, end_source = $2,
+         end_reason = $3, updated_at = now()
+     WHERE mapping.mentor_user_id = $1
+       AND mapping.ended_at IS NULL
+       AND ($4::boolean OR NOT EXISTS (
+         SELECT 1
+         FROM teacher t
+         JOIN user_permission up
+           ON up.user_id = t.user_id AND up.revoked_at IS NULL AND up.role = 'teacher'
+         JOIN centre_positions cp
+           ON cp.user_id = t.user_id AND cp.deleted_at IS NULL
+          AND NOT (cp.role = ANY($5::text[]))
+         JOIN centres c
+           ON c.id = cp.centre_id AND c.is_active IS TRUE
+          AND c.school_id = mapping.school_id AND c.program_id = mapping.program_id
+         WHERE t.user_id = $1 AND t.is_af_teacher = true AND t.exit_date IS NULL
+       ))`,
+    [userId, "af_lms_staff_management", reason, endAll, [...PM_SEAT_ROLES]]
   );
 }
 
@@ -1727,6 +1785,11 @@ export async function updatePosition(params: {
     // The prior occupant just lost this seat — re-derive their app role and
     // program scope too (this may have been their last seat in a program).
     if (position.user_id !== null && position.user_id !== userId) {
+      await endIneligibleHolisticMappings(
+        client,
+        position.user_id,
+        "mentor_seat_changed"
+      );
       await syncAppRoleFromSeats(client, position.user_id);
       await syncProgramIdsFromSeats(client, position.user_id);
     }
@@ -1775,6 +1838,7 @@ export async function setUserRole(params: {
     if (updatedCount === 0) return;
     await syncTeacherSubjectFromRole(client, userId, role);
     await syncAppRoleFromSeats(client, userId);
+    await endIneligibleHolisticMappings(client, userId, "mentor_role_changed");
   });
   if (updatedCount === 0) {
     return {
@@ -1821,6 +1885,11 @@ export async function deletePosition(params: {
     // The occupant just lost this seat — re-derive their app role and program
     // scope in case it was their last PM-tier seat / last seat in a program.
     if (position.user_id !== null) {
+      await endIneligibleHolisticMappings(
+        client,
+        position.user_id,
+        "mentor_seat_changed"
+      );
       await syncAppRoleFromSeats(client, position.user_id);
       await syncProgramIdsFromSeats(client, position.user_id);
     }

@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Card } from "@/components/ui";
 import PhasePlanSetup from "./PhasePlanSetup";
+import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
 
 type WorkspaceMode = "teacher" | "admin";
 
@@ -19,9 +20,23 @@ const WORKSPACES = {
   ],
 } as const;
 
-export default function HolisticMentorshipWorkspace({ mode }: { mode: WorkspaceMode }) {
+export default function HolisticMentorshipWorkspace({
+  mode,
+  schoolCode,
+}: {
+  mode: WorkspaceMode;
+  schoolCode?: string;
+}) {
   const workspaces = WORKSPACES[mode];
-  const [activeId, setActiveId] = useState<string>(workspaces[0].id);
+  const [activeId, setActiveId] = useState<string>(() => {
+    if (mode !== "teacher" || !schoolCode || typeof window === "undefined") {
+      return workspaces[0].id;
+    }
+    const saved = sessionStorage.getItem(`holistic-mappings-view:${schoolCode}`);
+    return workspaces.some((workspace) => workspace.id === saved)
+      ? saved!
+      : workspaces[0].id;
+  });
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   const Icon = active.icon;
 
@@ -34,7 +49,12 @@ export default function HolisticMentorshipWorkspace({ mode }: { mode: WorkspaceM
             type="button"
             role="tab"
             aria-selected={workspace.id === active.id}
-            onClick={() => setActiveId(workspace.id)}
+            onClick={() => {
+              setActiveId(workspace.id);
+              if (mode === "teacher" && schoolCode) {
+                sessionStorage.setItem(`holistic-mappings-view:${schoolCode}`, workspace.id);
+              }
+            }}
             className={`min-h-11 rounded-md px-4 py-2 text-sm font-semibold transition-colors ${
               workspace.id === active.id
                 ? "bg-accent text-text-on-accent"
@@ -46,7 +66,9 @@ export default function HolisticMentorshipWorkspace({ mode }: { mode: WorkspaceM
         ))}
       </div>
 
-      {mode === "admin" && active.id === "phases" ? (
+      {mode === "teacher" && schoolCode ? (
+        <TeacherMappingWorkspace schoolCode={schoolCode} view={active.id as "assign" | "mentees"} />
+      ) : mode === "admin" && active.id === "phases" ? (
         <PhasePlanSetup />
       ) : (
         <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">

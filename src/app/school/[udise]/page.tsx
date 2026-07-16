@@ -535,7 +535,7 @@ export default async function SchoolPage({ params }: PageProps) {
   );
   const holisticMentorshipContent =
     holisticAccess?.ok && permission?.role === "teacher" ? (
-      <HolisticMentorshipWorkspace mode="teacher" />
+      <HolisticMentorshipWorkspace mode="teacher" schoolCode={school.code} />
     ) : holisticAccess?.ok ? (
       <section className="space-y-4">
         <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">

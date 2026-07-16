@@ -326,6 +326,8 @@ describe("updateTeacherRecord", () => {
     expect(String(blockerCall?.[0])).toContain("m.ended_at IS NULL");
     expect(blockerCall?.[1]).toEqual([70]);
     const clientSql = mockClientQuery.mock.calls.map((call) => call[0]).join("\n");
+    expect(clientSql).toContain("holistic_mentorship_mentor_mentee_mappings");
+    expect(clientSql).toContain("end_reason = $3");
     expect(clientSql).toContain("UPDATE centre_positions SET user_id = NULL");
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
   });
@@ -724,6 +726,17 @@ describe("positions", () => {
       String(sql).includes("UPDATE centre_positions SET user_id = $1")
     )!;
     expect(updateCall[1]).toEqual([null, 44]);
+    const holisticCleanup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(holisticCleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_seat_changed",
+      false,
+      expect.any(Array),
+    ]);
+    expect(String(holisticCleanup?.[0])).toContain("NOT EXISTS");
     expect(
       mockClientQuery.mock.calls.some(([sql]) =>
         String(sql).includes("SET school_codes = NULL")

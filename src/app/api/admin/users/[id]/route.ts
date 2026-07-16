@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, withTransaction } from "@/lib/db";
-import { blockIfAcademicMentorshipHistory } from "@/lib/staff-admin";
+import {
+  blockIfAcademicMentorshipHistory,
+  blockIfHolisticMentorshipHistory,
+  endIneligibleHolisticMappings,
+} from "@/lib/staff-admin";
 import { requireAdminApiAccess } from "../../route-helpers";
 
 interface RouteParams {
@@ -47,6 +51,15 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json(
         { error: blocker.error, code: blocker.code },
         { status: blocker.status }
+      );
+    }
+    const holisticBlocker = await blockIfHolisticMentorshipHistory(
+      Number(targetUserId)
+    );
+    if (holisticBlocker) {
+      return NextResponse.json(
+        { error: holisticBlocker.error, code: holisticBlocker.code },
+        { status: holisticBlocker.status }
       );
     }
   }
@@ -107,8 +120,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // schools from the seat). Editing explicit scope here would re-introduce the
     // over-grant / move-doesn't-revoke staleness, so it's disabled for seated
     // users: reject any attempt to set school_codes/regions, and keep both NULL.
-    const seated = await query<{ one: number }>(
-      `SELECT 1 AS one
+    const seated = await query<{ one: number; user_id: number | string }>(
+      `SELECT 1 AS one, up.user_id
        FROM centre_positions cp
        JOIN user_permission up ON up.user_id = cp.user_id
        WHERE up.id = $1 AND cp.deleted_at IS NULL
@@ -129,28 +142,39 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    await query(
-      `UPDATE user_permission
-       SET level = COALESCE($1, level),
-           role = COALESCE($2, role),
-           school_codes = $3,
-           regions = $4,
-           program_ids = COALESCE($5, program_ids),
-           read_only = COALESCE($6, read_only),
-           full_name = $7,
-           updated_at = NOW()
-       WHERE id = $8`,
-      [
-        isHolisticAdmin ? 3 : level,
-        userRole,
-        isHolisticAdmin || isSeated ? null : school_codes || null,
-        isHolisticAdmin || isSeated ? null : regions || null,
-        isHolisticAdmin ? [1] : program_ids || null,
-        read_only,
-        full_name ?? null,
-        id,
-      ]
-    );
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE user_permission
+         SET level = COALESCE($1, level),
+             role = COALESCE($2, role),
+             school_codes = $3,
+             regions = $4,
+             program_ids = COALESCE($5, program_ids),
+             read_only = COALESCE($6, read_only),
+             full_name = $7,
+             updated_at = NOW()
+         WHERE id = $8`,
+        [
+          isHolisticAdmin ? 3 : level,
+          userRole,
+          isHolisticAdmin || isSeated ? null : school_codes || null,
+          isHolisticAdmin || isSeated ? null : regions || null,
+          isHolisticAdmin ? [1] : program_ids || null,
+          read_only,
+          full_name ?? null,
+          id,
+        ]
+      );
+      const targetUserId = Number(seated[0]?.user_id);
+      if (userRole && userRole !== "teacher" && Number.isSafeInteger(targetUserId)) {
+        await endIneligibleHolisticMappings(
+          client,
+          targetUserId,
+          "mentor_role_changed",
+          true
+        );
+      }
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

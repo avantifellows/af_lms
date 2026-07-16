@@ -100,6 +100,27 @@ describe("DELETE /api/admin/users/[id]", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("blocks deleting a user with Holistic Mapping or authored-Notes history", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ has_mapping_history: true, has_notes_history: false }]);
+
+    const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      code: "holistic_mentorship_history",
+    });
+    expect(String(mockQuery.mock.calls[2][0])).toContain(
+      "holistic_mentorship_post_session_notes"
+    );
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("resolves legacy null permission user_id by email before mapping-history checks", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
@@ -218,6 +239,29 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
+  });
+
+  it("ends Holistic Mappings in the same transaction when a Teacher role changes", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery.mockResolvedValueOnce([{ one: 1, user_id: 70 }]);
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { role: "program_manager", program_ids: [1] },
+    });
+
+    expect((await PATCH(req as never, params)).status).toBe(200);
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    const cleanup = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(cleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_role_changed",
+      true,
+      expect.any(Array),
+    ]);
   });
 
   it("changes an unseated user to Program 1-wide Holistic Mentorship Admin", async () => {
