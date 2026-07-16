@@ -9,6 +9,7 @@ import {
   apiError,
   enforceVisitWriteAccess,
   parseJsonBody,
+  requiresVisitActionsForCompletion,
   requireVisitsAccess,
 } from "@/lib/visits-policy";
 
@@ -125,141 +126,143 @@ export async function POST(
     return apiError(422, "All in-progress action points must be ended before completing visit");
   }
 
-  const completedClassroomActions = await query<CompletedClassroomActionRow>(
-    `SELECT a.id, a.data
-     FROM lms_pm_school_visit_actions a
-     WHERE a.visit_id = $1
-       AND a.deleted_at IS NULL
-       AND a.action_type = 'classroom_observation'
-       AND a.status = 'completed'
-     ORDER BY a.id ASC`,
-    [id]
-  );
-
-  if (completedClassroomActions.length === 0) {
-    return apiError(
-      422,
-      "At least one completed classroom observation is required to complete visit",
-      ["No completed classroom observation action found for this visit"]
+  if (requiresVisitActionsForCompletion(actor)) {
+    const completedClassroomActions = await query<CompletedClassroomActionRow>(
+      `SELECT a.id, a.data
+       FROM lms_pm_school_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.action_type = 'classroom_observation'
+         AND a.status = 'completed'
+       ORDER BY a.id ASC`,
+      [id]
     );
-  }
 
-  let hasValidCompletedClassroomObservation = false;
-  let firstInvalidDetails: string[] = [];
-
-  for (const action of completedClassroomActions) {
-    const validation = validateClassroomObservationComplete(action.data);
-    if (validation.valid) {
-      hasValidCompletedClassroomObservation = true;
-      break;
+    if (completedClassroomActions.length === 0) {
+      return apiError(
+        422,
+        "At least one completed classroom observation is required to complete visit",
+        ["No completed classroom observation action found for this visit"]
+      );
     }
 
-    if (firstInvalidDetails.length === 0) {
-      firstInvalidDetails = validation.errors.map((error) => `Action ${action.id}: ${error}`);
+    let hasValidCompletedClassroomObservation = false;
+    let firstInvalidDetails: string[] = [];
+
+    for (const action of completedClassroomActions) {
+      const validation = validateClassroomObservationComplete(action.data);
+      if (validation.valid) {
+        hasValidCompletedClassroomObservation = true;
+        break;
+      }
+
+      if (firstInvalidDetails.length === 0) {
+        firstInvalidDetails = validation.errors.map((error) => `Action ${action.id}: ${error}`);
+      }
     }
-  }
 
-  if (!hasValidCompletedClassroomObservation) {
-    return apiError(
-      422,
-      "At least one completed classroom observation is required to complete visit",
-      firstInvalidDetails
+    if (!hasValidCompletedClassroomObservation) {
+      return apiError(
+        422,
+        "At least one completed classroom observation is required to complete visit",
+        firstInvalidDetails
+      );
+    }
+
+    const completedAFTeamActions = await query<{ id: number }>(
+      `SELECT a.id
+       FROM lms_pm_school_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.action_type = 'af_team_interaction'
+         AND a.status = 'completed'
+       LIMIT 1`,
+      [id]
     );
-  }
 
-  const completedAFTeamActions = await query<{ id: number }>(
-    `SELECT a.id
-     FROM lms_pm_school_visit_actions a
-     WHERE a.visit_id = $1
-       AND a.deleted_at IS NULL
-       AND a.action_type = 'af_team_interaction'
-       AND a.status = 'completed'
-     LIMIT 1`,
-    [id]
-  );
+    if (completedAFTeamActions.length === 0) {
+      return apiError(
+        422,
+        "At least one completed AF Team Interaction is required to complete visit",
+        ["No completed AF Team Interaction action found for this visit"]
+      );
+    }
 
-  if (completedAFTeamActions.length === 0) {
-    return apiError(
-      422,
-      "At least one completed AF Team Interaction is required to complete visit",
-      ["No completed AF Team Interaction action found for this visit"]
+    const completedIndividualTeacherActions = await query<{ id: number }>(
+      `SELECT a.id
+       FROM lms_pm_school_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.action_type = 'individual_af_teacher_interaction'
+         AND a.status = 'completed'
+       LIMIT 1`,
+      [id]
     );
-  }
 
-  const completedIndividualTeacherActions = await query<{ id: number }>(
-    `SELECT a.id
-     FROM lms_pm_school_visit_actions a
-     WHERE a.visit_id = $1
-       AND a.deleted_at IS NULL
-       AND a.action_type = 'individual_af_teacher_interaction'
-       AND a.status = 'completed'
-     LIMIT 1`,
-    [id]
-  );
+    if (completedIndividualTeacherActions.length === 0) {
+      return apiError(
+        422,
+        "At least one completed Individual AF Teacher Interaction is required to complete visit",
+        ["No completed Individual AF Teacher Interaction action found for this visit"]
+      );
+    }
 
-  if (completedIndividualTeacherActions.length === 0) {
-    return apiError(
-      422,
-      "At least one completed Individual AF Teacher Interaction is required to complete visit",
-      ["No completed Individual AF Teacher Interaction action found for this visit"]
+    const completedPrincipalInteractionActions = await query<{ id: number }>(
+      `SELECT a.id
+       FROM lms_pm_school_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.action_type = 'principal_interaction'
+         AND a.status = 'completed'
+       LIMIT 1`,
+      [id]
     );
-  }
 
-  const completedPrincipalInteractionActions = await query<{ id: number }>(
-    `SELECT a.id
-     FROM lms_pm_school_visit_actions a
-     WHERE a.visit_id = $1
-       AND a.deleted_at IS NULL
-       AND a.action_type = 'principal_interaction'
-       AND a.status = 'completed'
-     LIMIT 1`,
-    [id]
-  );
+    if (completedPrincipalInteractionActions.length === 0) {
+      return apiError(
+        422,
+        "At least one completed Principal Interaction is required to complete visit",
+        ["No completed principal_interaction action found"]
+      );
+    }
 
-  if (completedPrincipalInteractionActions.length === 0) {
-    return apiError(
-      422,
-      "At least one completed Principal Interaction is required to complete visit",
-      ["No completed principal_interaction action found"]
+    const completedGroupStudentActions = await query<{ id: number }>(
+      `SELECT a.id
+       FROM lms_pm_school_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.action_type = 'group_student_discussion'
+         AND a.status = 'completed'
+       LIMIT 1`,
+      [id]
     );
-  }
 
-  const completedGroupStudentActions = await query<{ id: number }>(
-    `SELECT a.id
-     FROM lms_pm_school_visit_actions a
-     WHERE a.visit_id = $1
-       AND a.deleted_at IS NULL
-       AND a.action_type = 'group_student_discussion'
-       AND a.status = 'completed'
-     LIMIT 1`,
-    [id]
-  );
+    if (completedGroupStudentActions.length === 0) {
+      return apiError(
+        422,
+        "At least one completed Student Interaction is required to complete visit",
+        ["No completed group_student_discussion action found for this visit"]
+      );
+    }
 
-  if (completedGroupStudentActions.length === 0) {
-    return apiError(
-      422,
-      "At least one completed Student Interaction is required to complete visit",
-      ["No completed group_student_discussion action found for this visit"]
+    const completedIndividualStudentActions = await query<{ id: number }>(
+      `SELECT a.id
+       FROM lms_pm_school_visit_actions a
+       WHERE a.visit_id = $1
+         AND a.deleted_at IS NULL
+         AND a.action_type = 'individual_student_discussion'
+         AND a.status = 'completed'
+       LIMIT 1`,
+      [id]
     );
-  }
 
-  const completedIndividualStudentActions = await query<{ id: number }>(
-    `SELECT a.id
-     FROM lms_pm_school_visit_actions a
-     WHERE a.visit_id = $1
-       AND a.deleted_at IS NULL
-       AND a.action_type = 'individual_student_discussion'
-       AND a.status = 'completed'
-     LIMIT 1`,
-    [id]
-  );
-
-  if (completedIndividualStudentActions.length === 0) {
-    return apiError(
-      422,
-      "At least one completed Individual Student Interaction is required to complete visit",
-      ["No completed individual_student_discussion action found for this visit"]
-    );
+    if (completedIndividualStudentActions.length === 0) {
+      return apiError(
+        422,
+        "At least one completed Individual Student Interaction is required to complete visit",
+        ["No completed individual_student_discussion action found for this visit"]
+      );
+    }
   }
 
   const updatedVisit = await query<Pick<VisitAccessRow, "id" | "status" | "completed_at">>(

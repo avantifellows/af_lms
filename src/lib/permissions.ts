@@ -36,7 +36,7 @@ export type FeatureAccess = "none" | "view" | "edit";
 // Feature permission matrix: feature → role → access level
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
-  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
+  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
   curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   academic_mentorship: { teacher: "view",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },

@@ -347,21 +347,23 @@ describe("PATCH /api/pm/visits/[id]/actions/[actionId]", () => {
     });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("allows a program admin to save an action on their own visit", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "pa@avantifellows.org" }])
+      .mockResolvedValueOnce([BASE_ACTION_ROW])
+      .mockResolvedValueOnce([{ ...BASE_ACTION_ROW, data: { questions: {}, additional_notes: "updated" } }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "PATCH",
-      body: JSON.stringify({ data: { notes: "updated" } }),
+      body: JSON.stringify({ data: { questions: {}, additional_notes: "updated" } }),
       headers: { "Content-Type": "application/json" },
     });
     const res = await PATCH(req as never, params);
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
   });
 
   it("returns 409 when visit is completed", async () => {
@@ -1516,19 +1518,22 @@ describe("DELETE /api/pm/visits/[id]/actions/[actionId]", () => {
     });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("allows a program admin to delete an action on their own visit", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "pa@avantifellows.org" }])
+      .mockResolvedValueOnce([BASE_ACTION_ROW])
+      .mockResolvedValueOnce([{ id: 101 }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101", {
       method: "DELETE",
     });
     const res = await DELETE(req as never, params);
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ success: true });
   });
 
   it("returns 409 when visit is completed", async () => {
