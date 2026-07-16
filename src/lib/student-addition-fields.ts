@@ -416,6 +416,9 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
   }
 
   if (fields.first_name !== undefined) {
+    if (typeof fields.first_name === "string" && fields.first_name.includes(".")) {
+      return editError("first_name", "Student Name should not contain '.'");
+    }
     fields.first_name = normalizeName(fields.first_name);
     if (!fields.first_name) return editError("first_name", "Student Name is required");
   }
@@ -446,8 +449,12 @@ export function validateStudentAdditionInput(
   const grade = parseGrade(input.grade);
   if (!grade) addError(fieldErrors, "grade", "Grade must be 11 or 12");
 
+  const rawStudentName = stringValue(input.student_name);
   const student_name = normalizeName(input.student_name);
   if (!student_name) addError(fieldErrors, "student_name", "Student Name is required");
+  if (rawStudentName.includes(".")) {
+    addError(fieldErrors, "student_name", "Student Name should not contain '.'");
+  }
 
   const date_of_birth = parseDate(input.date_of_birth);
   if (!date_of_birth) {

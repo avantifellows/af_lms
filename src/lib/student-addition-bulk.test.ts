@@ -55,6 +55,18 @@ async function workbookBuffer(sheets: Record<string, unknown[][]>) {
 }
 
 describe("parseStudentAdditionUpload", () => {
+  it("replaces periods in uploaded student names with spaces", async () => {
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [uploadHeaders, validRowValues] }),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.rows[0].student_name).toBe("Asha K Kumar");
+  });
+
   it("rejects legacy xls uploads with a save-as-xlsx message", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xls",

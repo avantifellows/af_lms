@@ -134,7 +134,7 @@ function parseRowsFromAoA(
     for (const column of STUDENT_ADDITION_UPLOAD_COLUMNS) {
       const value = text(sourceRow[headerIndex.get(column.label) ?? -1]);
       original[column.label] = value;
-      input[column.key] = value;
+      input[column.key] = column.key === "student_name" ? value.replace(/\./g, " ") : value;
     }
 
     const parsedOriginalRowNumber =

@@ -159,6 +159,12 @@ export default function EditStudentModal({
       return;
     }
 
+    if ("first_name" in changed && formData.first_name.includes(".")) {
+      setFieldErrors({ first_name: "Student Name should not contain '.'" });
+      setLoading(false);
+      return;
+    }
+
     if ("phone" in changed && !/^\d{10}$/.test(formData.phone)) {
       setError("Parents Phone Number must be exactly 10 digits");
       setLoading(false);

@@ -6,7 +6,10 @@ import { PROGRAM_IDS } from "@/lib/constants";
 import EnrollmentTabContent from "./EnrollmentTabContent";
 import type { ProgramStats } from "@/lib/enrollment-stats";
 
-const { mockRefresh } = vi.hoisted(() => ({ mockRefresh: vi.fn() }));
+const { mockRefresh, createdResult } = vi.hoisted(() => ({
+  mockRefresh: vi.fn(),
+  createdResult: { studentId: "202812345678" as string | null, penNumber: "12345678901" as string | null },
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh }),
@@ -25,8 +28,8 @@ vi.mock("@/components/StudentTable", () => ({
 
 vi.mock("./AddStudentModal", () => ({
   __esModule: true,
-  default: ({ open, onCreated }: { open: boolean; onCreated: (studentId: string | null) => void }) =>
-    open ? <button onClick={() => onCreated("202812345678")}>mock add modal</button> : null,
+  default: ({ open, onCreated }: { open: boolean; onCreated: (studentId: string | null, penNumber: string | null) => void }) =>
+    open ? <button onClick={() => onCreated(createdResult.studentId, createdResult.penNumber)}>mock add modal</button> : null,
 }));
 
 vi.mock("./BulkStudentUploadModal", () => ({
@@ -66,6 +69,32 @@ const baseProps = {
 describe("EnrollmentTabContent", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    createdResult.studentId = "202812345678";
+    createdResult.penNumber = "12345678901";
+  });
+
+  it("shows the Student ID-only login instructions", async () => {
+    createdResult.penNumber = null;
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...baseProps} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+    await user.click(screen.getByRole("button", { name: "mock add modal" }));
+
+    expect(screen.getByText("Student successfully added with 202812345678")).toBeInTheDocument();
+    expect(screen.getByText("Student can login using their Student ID + DoB")).toBeInTheDocument();
+  });
+
+  it("shows the PEN-only login instructions without a generated Student ID", async () => {
+    createdResult.studentId = null;
+    const user = userEvent.setup();
+    render(<EnrollmentTabContent {...baseProps} />);
+
+    await user.click(screen.getByRole("button", { name: "Add Student" }));
+    await user.click(screen.getByRole("button", { name: "mock add modal" }));
+
+    expect(screen.getByText("Student successfully added")).toBeInTheDocument();
+    expect(screen.getByText("Student can login using their PEN + DoB")).toBeInTheDocument();
   });
 
   it("shows the Add Student entry only for the selected NVS program and refreshes after create", async () => {
@@ -76,8 +105,8 @@ describe("EnrollmentTabContent", () => {
     await user.click(screen.getByRole("button", { name: "mock add modal" }));
 
     expect(mockRefresh).toHaveBeenCalled();
-    expect(screen.getByText("Student added")).toBeInTheDocument();
-    expect(screen.getByText("202812345678")).toBeInTheDocument();
+    expect(screen.getByText("Student successfully added with 202812345678")).toBeInTheDocument();
+    expect(screen.getByText("Student can login using either Student ID or PEN + DoB")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add another student" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "mock add modal" })).not.toBeInTheDocument();
   });

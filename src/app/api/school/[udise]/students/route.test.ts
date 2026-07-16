@@ -37,7 +37,7 @@ const school = {
 
 const validBody = {
   grade: "11",
-  student_name: " asha  k. kumar ",
+  student_name: " asha  k kumar ",
   date_of_birth: "02/01/2010",
   gender: "Female",
   category: "Gen",

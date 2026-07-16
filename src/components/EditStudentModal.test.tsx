@@ -228,6 +228,18 @@ describe("EditStudentModal", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("rejects periods in the student name", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.clear(getByName("first_name"));
+    await user.type(getByName("first_name"), "Ravi.Kumar");
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(await screen.findByText("Student Name should not contain '.'")).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("sends only the changed profile field", async () => {
     const user = userEvent.setup();
     renderModal();

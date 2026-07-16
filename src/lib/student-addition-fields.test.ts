@@ -11,7 +11,7 @@ import {
 describe("canonicalizeStudentEditPayload", () => {
   it("normalizes partial edit fields with the canonical student contract", () => {
     expect(canonicalizeStudentEditPayload({
-      first_name: "  ravi..  KUMAR ",
+      first_name: "  ravi  KUMAR ",
       father_name: " suresh. KUMAR ",
       gender: "Others",
       category: "Gen-EWS",
@@ -30,6 +30,14 @@ describe("canonicalizeStudentEditPayload", () => {
     });
   });
 
+  it("rejects periods in manually edited student names", () => {
+    expect(canonicalizeStudentEditPayload({ first_name: "Ravi.Kumar" })).toEqual({
+      ok: false,
+      error: "Student Name should not contain '.'",
+      field_errors: { first_name: "Student Name should not contain '.'" },
+    });
+  });
+
   it("rejects incomplete CWSN/category edits", () => {
     expect(canonicalizeStudentEditPayload({ physically_handicapped: true })).toEqual({
       ok: false,
@@ -44,7 +52,7 @@ describe("canonicalizeStudentEditPayload", () => {
 
 const validInput = {
   grade: "11",
-  student_name: " asha  k. kumar ",
+  student_name: " asha  k kumar ",
   date_of_birth: "02/01/2010",
   gender: "Female",
   category: "Gen",
@@ -60,6 +68,14 @@ const validInput = {
 };
 
 describe("validateStudentAdditionInput", () => {
+  it("rejects periods in manually entered student names", () => {
+    const result = validateStudentAdditionInput({ ...validInput, student_name: "Asha.Kumar" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.student_name).toBe("Student Name should not contain '.'");
+  });
+
   it("uses an 11-digit PEN as the canonical optional identifier", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, apaar_id: undefined, pen_number: "12345678901" },

@@ -69,7 +69,7 @@ describe("PATCH /api/student/[id]", () => {
     const req = jsonRequest("http://localhost/api/student/100", {
       method: "PATCH",
       body: {
-        first_name: "  ravi..  KUMAR ",
+        first_name: "  ravi  KUMAR ",
         last_name: "",
         father_name: " suresh. KUMAR ",
         gender: "Others",

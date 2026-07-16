@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { X } from "lucide-react";
 
 import { Button, FormSection, Input, Modal, Select } from "@/components/ui";
@@ -27,7 +27,7 @@ interface AddStudentModalProps {
   schoolUdise: string;
   schoolCode: string;
   onClose: () => void;
-  onCreated: (studentId: string | null) => void;
+  onCreated: (studentId: string | null, penNumber: string | null) => void;
 }
 
 const initialForm: Record<keyof StudentAdditionInput, string> = {
@@ -74,6 +74,7 @@ export default function AddStudentModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serviceFieldErrors, setServiceFieldErrors] = useState<Record<string, string>>({});
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const validation = useMemo(
     () => validateStudentAdditionInput(form, {
@@ -93,6 +94,10 @@ export default function AddStudentModal({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (error) scrollContainerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
+  }, [error]);
+
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [name]: value };
@@ -103,9 +108,6 @@ export default function AddStudentModal({
         next.g10_roll_no = prev.g10_board === CBSE_BOARD
           ? digitsOnly(value).slice(0, 8)
           : rollCharactersOnly(value).slice(0, G10_ROLL_MAX_LENGTH);
-      }
-      if (name === "g10_board" && value === CBSE_BOARD) {
-        next.g10_roll_no = digitsOnly(prev.g10_roll_no).slice(0, 8);
       }
       return next;
     });
@@ -121,7 +123,7 @@ export default function AddStudentModal({
   const touchField = (name: keyof StudentAdditionInput) => {
     setTouched((prev) => ({ ...prev, [name]: true }));
     const normalizedName = validation.row.student_name;
-    if (name === "student_name" && normalizedName) {
+    if (name === "student_name" && normalizedName && !form.student_name.includes(".")) {
       setForm((prev) => ({ ...prev, student_name: normalizedName }));
     }
   };
@@ -279,6 +281,7 @@ export default function AddStudentModal({
           inputMode={isCbseBoard ? "numeric" : "text"}
           minLength={isCbseBoard ? 8 : G10_ROLL_MIN_LENGTH}
           maxLength={isCbseBoard ? 8 : G10_ROLL_MAX_LENGTH}
+          disabled={!form.g10_board}
           value={form.g10_roll_no}
           onChange={(event) => setField("g10_roll_no", event.target.value)}
           onBlur={() => touchField("g10_roll_no")}
@@ -352,7 +355,10 @@ export default function AddStudentModal({
       }
 
       if (result?.status === "created") {
-        onCreated(result.generated_student_id ?? result.normalized?.student_id ?? null);
+        onCreated(
+          result.generated_student_id ?? result.normalized?.student_id ?? null,
+          form.pen_number.trim() || null,
+        );
         onClose();
       } else {
         setError("Student was not created");
@@ -377,7 +383,7 @@ export default function AddStudentModal({
       </div>
 
       <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        <div ref={scrollContainerRef} className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
               {error}

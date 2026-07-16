@@ -6,3 +6,4 @@
 {"timestamp":"2026-07-15T16:24:52.217Z","kind":"decision","message":"Review #202: centralize partial edit canonicalization in student-addition-fields and require current NVS Batch evidence before showing Edit.","files":[],"cwd":"."}
 {"timestamp":"2026-07-15T16:41:14.000Z","kind":"decision","message":"NVS dropout now reuses the Centre-free existing-Student gate, accepts only explicit NVS intent, and proxies server-derived Student ID or PEN with safe upstream errors.","files":[],"cwd":"."}
 {"timestamp":"2026-07-15T21:12:52.119Z","kind":"note","message":"Recorded Playwright manual QA evidence for revised NVS student addition and the NDA batch configuration prerequisite.","files":[],"cwd":"."}
+{"timestamp":"2026-07-16T09:31:16.002Z","kind":"note","message":"Applied staging QA feedback: explicit period handling for names, visible add errors, board-first roll entry, NDA batch metadata, and identifier-aware success messaging.","files":[],"cwd":"."}

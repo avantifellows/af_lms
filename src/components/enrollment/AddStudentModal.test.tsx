@@ -71,7 +71,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("Student ID will be 202812345678")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add Student" }));
 
-    await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalledWith("202812345678"));
+    await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalledWith("202812345678", "12345678901"));
     expect(baseProps.onClose).toHaveBeenCalled();
     expect(screen.queryByText(/Student added/)).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(
@@ -107,6 +107,11 @@ describe("AddStudentModal", () => {
   });
 
   it("shows safe upstream field errors", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
     vi.mocked(fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -126,6 +131,7 @@ describe("AddStudentModal", () => {
         "PEN already belongs to another Student",
       ),
     );
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 
   it("shows PEN-only rows do not generate Student ID", async () => {
@@ -138,7 +144,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("PEN-only: no Student ID will be generated.")).toBeInTheDocument();
   });
 
-  it("shows the normalized Student Name back on blur", async () => {
+  it("rejects periods in Student Name instead of silently removing them", async () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
     const name = screen.getByLabelText("Student Name");
@@ -146,7 +152,9 @@ describe("AddStudentModal", () => {
     await user.type(name, "aSHA. k  KUMAR");
     await user.tab();
 
-    expect(name).toHaveValue("Asha K Kumar");
+    expect(name).toHaveValue("aSHA. k  KUMAR");
+    expect(screen.getByText("Student Name should not contain '.'")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
   it("filters restricted fields and caps fixed-length numeric inputs", async () => {
@@ -157,6 +165,8 @@ describe("AddStudentModal", () => {
     expect(screen.getByLabelText("PEN")).toHaveValue("12345678901");
 
     const rollInput = screen.getByLabelText("Grade 10 Roll no");
+    expect(rollInput).toBeDisabled();
+    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
     await user.type(screen.getByLabelText("Grade 10 Roll no"), "abc12345678901");
     expect(rollInput).toHaveValue("ABC1234567");
 
@@ -187,11 +197,13 @@ describe("AddStudentModal", () => {
     render(<AddStudentModal {...baseProps} />);
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC123");
+    await user.selectOptions(screen.getByLabelText("G10 board"), "Others");
+    await user.type(screen.getByLabelText("Grade 10 Roll no"), "ABC1234567");
     await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
 
-    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("123");
+    expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("ABC1234567");
     expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
   it("shows field-level validation for short numeric inputs", async () => {
