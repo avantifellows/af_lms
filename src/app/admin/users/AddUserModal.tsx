@@ -101,17 +101,22 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
 
     try {
       const isAdminRole = role === "admin";
+      const isHolisticAdminRole = role === "holistic_mentorship_admin";
 
       // Validate program selection (not needed for admins)
-      if (!isAdminRole && selectedPrograms.length === 0) {
+      if (!isAdminRole && !isHolisticAdminRole && selectedPrograms.length === 0) {
         throw new Error("At least one program must be selected");
       }
 
       const body: Record<string, unknown> = {
-        level: isAdminRole ? 3 : level,
+        level: isAdminRole || isHolisticAdminRole ? 3 : level,
         role,
         read_only: isAdminRole ? false : readOnly,
-        program_ids: isAdminRole ? PROGRAMS.map((p) => p.id) : selectedPrograms,
+        program_ids: isAdminRole
+          ? PROGRAMS.map((p) => p.id)
+          : isHolisticAdminRole
+            ? [1]
+            : selectedPrograms,
         full_name: fullName.trim() || null,
       };
 
@@ -119,7 +124,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
         body.email = email;
       }
 
-      if (isAdminRole) {
+      if (isAdminRole || isHolisticAdminRole) {
         body.school_codes = null;
         body.regions = null;
       } else if (level === 2) {
@@ -227,6 +232,7 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
                 <option value="teacher">Teacher - Student management view</option>
                 <option value="program_manager">Program Manager - School visits + student management</option>
                 <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
+                <option value="holistic_mentorship_admin">Holistic Mentorship Admin - Program 1 mentorship</option>
                 <option value="admin">Admin - Full access + user management</option>
               </Select>
               <p className="mt-1 text-xs text-gray-500">
@@ -234,6 +240,8 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
                 {role === "program_admin" &&
                   "Program Admins can oversee scoped schools and manage their own school visits"}
                 {role === "teacher" && "Teachers can view and manage students in their assigned schools"}
+                {role === "holistic_mentorship_admin" &&
+                  "Holistic Mentorship Admins can manage Holistic Mentorship for Program 1"}
                 {role === "admin" && "Admins have full access to all features, all schools, and all programs"}
               </p>
             </div>
@@ -242,6 +250,24 @@ export default function AddUserModal({ user, regions, schoolCodeToName, onClose,
               <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
                 Admins automatically get access to all schools, all programs, and full edit permissions.
               </div>
+            ) : role === "holistic_mentorship_admin" ? (
+              <>
+                <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+                  Access includes all Program 1 Schools and only Holistic Mentorship.
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="readOnly"
+                    checked={readOnly}
+                    onChange={(e) => setReadOnly(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-accent"
+                  />
+                  <label htmlFor="readOnly" className="ml-2 text-sm text-gray-800">
+                    Read-only access
+                  </label>
+                </div>
+              </>
             ) : (
             <>
             <div>

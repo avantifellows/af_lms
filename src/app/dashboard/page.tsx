@@ -287,6 +287,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     );
   }
 
+  if (permission.role === "holistic_mentorship_admin") {
+    redirect("/admin/holistic-mentorship");
+  }
+
   const hasPMAccess = getFeatureAccess(permission, "pm_dashboard").canView;
   const canViewVisitSummary =
     (permission.role === "admin" || permission.role === "program_admin") &&
@@ -297,6 +301,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       permission.role === "admin") &&
     programContext.hasCoEOrNodal &&
     getFeatureAccess(permission, "curriculum").canView;
+  const canViewHolisticAdmin =
+    permission.role === "admin" &&
+    getFeatureAccess(permission, "holistic_mentorship").canView;
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
@@ -372,6 +379,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             )}
           </div>
           <div className="flex items-center gap-3 sm:gap-4">
+            {canViewHolisticAdmin && (
+              <Link
+                href="/admin/holistic-mentorship"
+                className="text-sm font-bold text-accent hover:text-accent-hover"
+              >
+                Holistic Mentorship
+              </Link>
+            )}
             {permission.role === "admin" && (
               <Link
                 href="/admin"

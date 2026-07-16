@@ -278,6 +278,28 @@ describe("getFeatureAccess", () => {
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
     });
+
+    it.each([
+      ["teacher", "edit"],
+      ["holistic_mentorship_admin", "edit"],
+      ["admin", "edit"],
+      ["program_manager", "none"],
+      ["program_admin", "none"],
+    ] as const)("gives %s %s access to holistic mentorship", (role, access) => {
+      const permission = makePermission({ role, program_ids: [PROGRAM_IDS.COE] });
+      expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe(access);
+    });
+
+    it("grants the dedicated role no other feature access", () => {
+      const permission = makePermission({
+        role: "holistic_mentorship_admin",
+        level: 3,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe("edit");
+      expect(getFeatureAccess(permission, "students").access).toBe("none");
+      expect(getFeatureAccess(permission, "academic_mentorship").access).toBe("none");
+    });
   });
 
   describe("NVS-only gating", () => {
@@ -360,6 +382,19 @@ describe("getFeatureAccess", () => {
         program_ids: [PROGRAM_IDS.COE],
       });
       expect(getFeatureAccess(perm, "visits")).toEqual({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
+    });
+
+    it("downgrades holistic mentorship writes to view", () => {
+      const permission = makePermission({
+        role: "holistic_mentorship_admin",
+        read_only: true,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(permission, "holistic_mentorship")).toEqual({
         access: "view",
         canView: true,
         canEdit: false,

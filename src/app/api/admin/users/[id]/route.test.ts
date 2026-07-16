@@ -220,6 +220,35 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(json.success).toBe(true);
   });
 
+  it("changes an unseated user to Program 1-wide Holistic Mentorship Admin", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: {
+        level: 1,
+        role: "holistic_mentorship_admin",
+        program_ids: [64],
+        school_codes: ["SCH001"],
+      },
+    });
+
+    expect((await PATCH(req as never, params)).status).toBe(200);
+    expect(mockQuery.mock.calls[1][1]).toEqual([
+      3,
+      "holistic_mentorship_admin",
+      null,
+      null,
+      [1],
+      undefined,
+      null,
+      "5",
+    ]);
+  });
+
   it("rejects (409) editing school_codes for a user with a centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);

@@ -20,7 +20,7 @@ edges:
     condition: when working on PM school visits or visit action types
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-07-15
+last_updated: 2026-07-17
 ---
 
 # Session Bootstrap
@@ -38,6 +38,7 @@ Then read this file fully before doing anything else in this session.
 - PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; PM completion requires six Action Types, while Admin and Program Admin completion permits zero Actions; Program Admins manage their own in-progress Visits while retaining scoped read access; teacher pickers use the Staff Management Visit Teacher roster.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
 - Academic Mentorship foundation: `academic_mentorship` feature key, School page current-year Mentorship tab views, guarded `/admin/academic-mentorship` grouped mapping overview with Program filtering, current-year manual add/remove/reassign controls, CSV template/upload import for supported years with prior-year rows stored as historical, selector options API, direct LMS-owned mapping writes, and Staff Management delete/exit safeguards for Academic Mentors with Mapping history.
+- Holistic Mentorship access foundation: dedicated `holistic_mentorship_admin` role, Program 1 action policy, separate School-page Academic/Holistic tabs, and role-specific empty Teacher/Admin workspaces.
 - Deploy via AWS Amplify; ~2472 unit tests (Vitest/RTL) + 65 E2E (Playwright).
 
 **Not yet built / in progress:**

@@ -1566,11 +1566,8 @@ async function syncAppRoleFromSeats(
 // program_ids consumers (quiz-session batches, ownsRecord, the users page) were
 // stale for multi-program PMs.
 //
-// Only touches the live (revoked_at IS NULL) row, and skips admins — level-3
-// admins have full program access regardless, and their program_ids is a manual
-// set we must not shrink to whatever centres they happen to sit at. No-op when
-// the person has no active seat (don't strip a person mid-offboarding to an
-// empty program set) or when the value is already correct.
+// Only touches the live (revoked_at IS NULL) row, and skips manually elevated
+// Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived.
 async function syncProgramIdsFromSeats(
   client: PoolClient,
   userId: number
@@ -1589,7 +1586,7 @@ async function syncProgramIdsFromSeats(
      SET program_ids = $2, updated_at = now()
      WHERE user_id = $1
        AND revoked_at IS NULL
-       AND role <> 'admin'
+       AND role NOT IN ('admin', 'holistic_mentorship_admin')
        AND COALESCE(program_ids, '{}') <> $2`,
     [userId, programIds]
   );

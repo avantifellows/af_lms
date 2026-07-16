@@ -837,7 +837,7 @@ describe("positions", () => {
       String(sql).includes("SET role = $2")
     );
 
-  it("createPosition promotes teacher → program_manager on a PM-tier seat", async () => {
+  it("createPosition promotes Teachers without overwriting manually elevated roles", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
     mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
@@ -851,7 +851,7 @@ describe("positions", () => {
     ).toEqual({ ok: true });
     const roleUpdate = appRoleUpdate()!;
     expect(roleUpdate[1]).toEqual([70, "program_manager"]);
-    // never touches an already-elevated program_admin/admin
+    // The narrow role band also preserves holistic_mentorship_admin.
     expect(String(roleUpdate[0])).toContain(
       "role IN ('teacher', 'program_manager')"
     );
@@ -949,8 +949,10 @@ describe("positions", () => {
     ).toEqual({ ok: true });
     const upd = progUpdate()!;
     expect(upd[1]).toEqual([70, [1, 2]]); // sorted union
-    // never shrinks an admin's set; only the live row
-    expect(String(upd[0])).toContain("role <> 'admin'");
+    // Seat sync never shrinks either manually elevated admin role's Program scope.
+    expect(String(upd[0])).toContain(
+      "role NOT IN ('admin', 'holistic_mentorship_admin')"
+    );
     expect(String(upd[0])).toContain("revoked_at IS NULL");
   });
 

@@ -82,8 +82,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const validRoles = [
+      "teacher",
+      "program_manager",
+      "program_admin",
+      "holistic_mentorship_admin",
+      "admin",
+    ];
+    const userRole = role && validRoles.includes(role) ? role : undefined;
+    const isHolisticAdmin = userRole === "holistic_mentorship_admin";
+
     // Validate program_ids if provided
-    if (program_ids !== undefined) {
+    if (!isHolisticAdmin && program_ids !== undefined) {
       if (!Array.isArray(program_ids) || program_ids.length === 0) {
         return NextResponse.json(
           { error: "At least one program must be assigned" },
@@ -91,9 +101,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         );
       }
     }
-
-    const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
-    const userRole = role && validRoles.includes(role) ? role : undefined;
 
     // Centre seats are the source of truth for a seated user's school scope
     // (staff-admin clears school_codes/regions on assignment; resolveScope derives
@@ -133,7 +140,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
            full_name = $7,
            updated_at = NOW()
        WHERE id = $8`,
-      [level, userRole, isSeated ? null : school_codes || null, isSeated ? null : regions || null, program_ids || null, read_only, full_name ?? null, id]
+      [
+        isHolisticAdmin ? 3 : level,
+        userRole,
+        isHolisticAdmin || isSeated ? null : school_codes || null,
+        isHolisticAdmin || isSeated ? null : regions || null,
+        isHolisticAdmin ? [1] : program_ids || null,
+        read_only,
+        full_name ?? null,
+        id,
+      ]
     );
 
     return NextResponse.json({ success: true });

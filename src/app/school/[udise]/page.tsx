@@ -32,6 +32,8 @@ import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
+import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
+import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 
 interface School {
   id: string;
@@ -351,6 +353,10 @@ export default async function SchoolPage({ params }: PageProps) {
     }
   }
 
+  if (permission?.role === "holistic_mentorship_admin") {
+    redirect("/admin/holistic-mentorship");
+  }
+
   // Derive everything from the single permission object — no extra DB calls
   const programContext = getProgramContextSync(permission);
 
@@ -381,8 +387,19 @@ export default async function SchoolPage({ params }: PageProps) {
   const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
   const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
+  const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
+
+  const holisticAccess = holisticMentorshipAccess.canView
+    ? permission?.role === "teacher"
+      ? await requireHolisticMentorshipAccess(session, "roster_view", {
+          schoolCode: school.code,
+        })
+      : await requireHolisticMentorshipAccess(session, "program_read", {
+          schoolCode: school.code,
+        })
+    : null;
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
@@ -516,6 +533,22 @@ export default async function SchoolPage({ params }: PageProps) {
       manageHref={mentorshipManageHref}
     />
   );
+  const holisticMentorshipContent =
+    holisticAccess?.ok && permission?.role === "teacher" ? (
+      <HolisticMentorshipWorkspace mode="teacher" />
+    ) : holisticAccess?.ok ? (
+      <section className="space-y-4">
+        <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
+          Holistic Mentorship
+        </h2>
+        <Link
+          href="/admin/holistic-mentorship"
+          className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-semibold text-text-on-accent hover:bg-accent-hover"
+        >
+          Open Program workspace
+        </Link>
+      </section>
+    ) : null;
 
   const visitsContent = (
     <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />
@@ -539,7 +572,10 @@ export default async function SchoolPage({ params }: PageProps) {
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
     ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
+    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Academic Mentorship", content: mentorshipContent }] : []),
+    ...(holisticMentorshipContent
+      ? [{ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticMentorshipContent }]
+      : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 

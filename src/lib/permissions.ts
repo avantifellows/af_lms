@@ -17,7 +17,12 @@ export type AccessLevel = 1 | 2 | 3;
 // 3 = All schools access
 
 // User roles
-export type UserRole = "teacher" | "program_manager" | "program_admin" | "admin";
+export type UserRole =
+  | "teacher"
+  | "program_manager"
+  | "program_admin"
+  | "holistic_mentorship_admin"
+  | "admin";
 
 // Feature types for permission checking
 export type Feature =
@@ -25,6 +30,7 @@ export type Feature =
   | "visits"
   | "curriculum"
   | "academic_mentorship"
+  | "holistic_mentorship"
   | "performance"
   | "summary_stats"
   | "pm_dashboard"
@@ -35,14 +41,15 @@ export type FeatureAccess = "none" | "view" | "edit";
 
 // Feature permission matrix: feature → role → access level
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
-  students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
-  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
-  curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
-  academic_mentorship: { teacher: "view",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
-  performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
-  summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
-  pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
-  quiz_sessions: { teacher: "edit",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  academic_mentorship: { teacher: "view", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  holistic_mentorship: { teacher: "edit", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "edit", admin: "edit" },
+  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")

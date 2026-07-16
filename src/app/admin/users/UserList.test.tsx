@@ -184,6 +184,20 @@ describe("UserList", () => {
       expect(screen.getByText("Program Admin")).toBeInTheDocument();
     });
 
+    it("renders Holistic Mentorship Admin role label", () => {
+      renderList({
+        initialUsers: [
+          {
+            ...users[1],
+            id: 100,
+            email: "holistic@avantifellows.org",
+            role: "holistic_mentorship_admin",
+          },
+        ],
+      });
+      expect(screen.getByText("Holistic Mentorship Admin")).toBeInTheDocument();
+    });
+
     it("renders level badges", () => {
       renderList();
       // Level labels from LEVEL_LABELS

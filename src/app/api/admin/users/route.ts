@@ -58,16 +58,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const validRoles = [
+      "teacher",
+      "program_manager",
+      "program_admin",
+      "holistic_mentorship_admin",
+      "admin",
+    ];
+    const userRole = validRoles.includes(role) ? role : "teacher";
+    const isHolisticAdmin = userRole === "holistic_mentorship_admin";
+
     // Validate program_ids
-    if (!program_ids || !Array.isArray(program_ids) || program_ids.length === 0) {
+    if (!isHolisticAdmin && (!program_ids || !Array.isArray(program_ids) || program_ids.length === 0)) {
       return NextResponse.json(
         { error: "At least one program must be assigned" },
         { status: 400 }
       );
     }
-
-    const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
-    const userRole = validRoles.includes(role) ? role : "teacher";
 
     const result = await query<{ id: number }>(
       `INSERT INTO user_permission (email, level, role, school_codes, regions, program_ids, read_only, full_name)
@@ -82,7 +89,16 @@ export async function POST(request: NextRequest) {
          full_name = EXCLUDED.full_name,
          updated_at = NOW()
        RETURNING id`,
-      [email, level, userRole, school_codes || null, regions || null, program_ids, read_only || false, full_name || null]
+      [
+        email,
+        isHolisticAdmin ? 3 : level,
+        userRole,
+        isHolisticAdmin ? null : school_codes || null,
+        isHolisticAdmin ? null : regions || null,
+        isHolisticAdmin ? [1] : program_ids,
+        read_only || false,
+        full_name || null,
+      ]
     );
 
     return NextResponse.json({ id: result[0].id, success: true });
