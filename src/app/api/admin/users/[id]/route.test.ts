@@ -8,7 +8,12 @@ const { mockQuery, mockWithTransaction } = vi.hoisted(() => {
     // top-level and in-transaction queries are captured in one call list.
     mockWithTransaction: vi.fn(
       async (fn: (client: { query: typeof mockQuery }) => Promise<unknown>) =>
-        fn({ query: mockQuery })
+        fn({
+          query: async (...args: unknown[]) => {
+            const result = await mockQuery(...args);
+            return result && !Array.isArray(result) ? result : { rows: result ?? [] };
+          },
+        })
     ),
   };
 });
@@ -38,7 +43,12 @@ beforeEach(() => {
   vi.resetAllMocks();
   mockWithTransaction.mockImplementation(
     async (fn: (client: { query: typeof mockQuery }) => Promise<unknown>) =>
-      fn({ query: mockQuery })
+      fn({
+        query: async (...args: unknown[]) => {
+          const result = await mockQuery(...args);
+          return result && !Array.isArray(result) ? result : { rows: result ?? [] };
+        },
+      })
   );
 });
 
@@ -100,25 +110,35 @@ describe("DELETE /api/admin/users/[id]", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
-  it("blocks deleting a user with Holistic Mapping or authored-Notes history", async () => {
+  it("revokes LMS access and ends Holistic Mappings without blocking on history", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
     mockQuery
       .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ has_mapping_history: true, has_notes_history: false }]);
+      .mockResolvedValue([]);
 
     const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
     const res = await DELETE(req as never, params);
 
-    expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toMatchObject({
-      code: "holistic_mentorship_history",
-    });
-    expect(String(mockQuery.mock.calls[2][0])).toContain(
-      "holistic_mentorship_post_session_notes"
+    expect(res.status).toBe(200);
+    const cleanup = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
     );
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(cleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_access_revoked",
+      true,
+      expect.any(Array),
+    ]);
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes("DELETE FROM user_permission"))
+    ).toBe(true);
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes("has_mapping_history"))
+    ).toBe(false);
   });
 
   it("resolves legacy null permission user_id by email before mapping-history checks", async () => {

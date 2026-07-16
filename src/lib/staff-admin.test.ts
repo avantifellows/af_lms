@@ -309,6 +309,11 @@ describe("updateTeacherRecord", () => {
     mockQuery
       .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
       .mockResolvedValueOnce([]);
+    mockClientQuery.mockImplementation(async (sql: unknown) => ({
+      rows: String(sql).includes("RETURNING mapping.student_id")
+        ? [{ student_id: 41 }]
+        : [],
+    }));
 
     const result = await updateTeacherRecord({
       id: 1,
@@ -328,6 +333,8 @@ describe("updateTeacherRecord", () => {
     const clientSql = mockClientQuery.mock.calls.map((call) => call[0]).join("\n");
     expect(clientSql).toContain("holistic_mentorship_mentor_mentee_mappings");
     expect(clientSql).toContain("end_reason = $3");
+    expect(clientSql).toContain("holistic_mentorship_post_session_answers");
+    expect(clientSql).toContain("holistic_mentorship_post_session_note_audits");
     expect(clientSql).toContain("UPDATE centre_positions SET user_id = NULL");
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
   });

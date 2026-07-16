@@ -58,6 +58,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("gr.number IN (11, 12)");
     expect(sql).toContain("roster_program.program_id = $3");
     expect(sql).not.toMatch(/profile|historical|phase|academic_mentorship/i);
+    expect(sql).not.toContain("LIMIT 100");
     expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
   });
 
@@ -91,6 +92,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(mockWithTransaction).toHaveBeenCalledOnce();
     const sql = mockClientQuery.mock.calls.map(([text]) => String(text)).join("\n");
     expect(sql).toContain("FOR UPDATE OF st");
+    expect(sql).toContain("ORDER BY st.id\n         FOR UPDATE OF st");
     expect(sql).toContain("FOR UPDATE");
     const inserts = mockClientQuery.mock.calls.filter(([text]) =>
       String(text).includes("INSERT INTO holistic_mentorship_mentor_mentee_mappings")
@@ -131,7 +133,9 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       String(sql).includes("end_reason = $3")
     );
     expect(update?.[1]).toEqual([9, "af_lms_teacher", "teacher_removal", [73, 74]]);
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("DELETE"))).toBe(false);
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("DELETE FROM holistic_mentorship_mentor_mentee_mappings")
+    )).toBe(false);
   });
 
   it("takes over only the exact confirmed current Mapping and records both lifecycle actions", async () => {
@@ -155,8 +159,17 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     const end = mockClientQuery.mock.calls.find(([sql]) => String(sql).includes("end_reason = $3"));
     expect(end?.[1]).toEqual([9, "af_lms_teacher", "teacher_takeover", [73]]);
-    const insert = mockClientQuery.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO holistic"));
+    const insert = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO holistic_mentorship_mentor_mentee_mappings")
+    );
     expect(insert?.[1]).toEqual([41, 9, 4, 1, "2026-2027", 9, "af_lms_teacher_takeover"]);
+    const draftCleanup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_post_session_answers")
+    );
+    expect(String(draftCleanup?.[0])).toContain(
+      "holistic_mentorship_post_session_note_audits"
+    );
+    expect(draftCleanup?.[1]).toEqual([[41], 9, "teacher_takeover"]);
   });
 
   it("rolls back the whole selection when any Student is no longer eligible", async () => {

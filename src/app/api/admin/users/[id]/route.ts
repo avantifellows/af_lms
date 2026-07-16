@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { query, withTransaction } from "@/lib/db";
 import {
   blockIfAcademicMentorshipHistory,
-  blockIfHolisticMentorshipHistory,
   endIneligibleHolisticMappings,
 } from "@/lib/staff-admin";
 import { requireAdminApiAccess } from "../../route-helpers";
@@ -53,19 +52,16 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         { status: blocker.status }
       );
     }
-    const holisticBlocker = await blockIfHolisticMentorshipHistory(
-      Number(targetUserId)
-    );
-    if (holisticBlocker) {
-      return NextResponse.json(
-        { error: holisticBlocker.error, code: holisticBlocker.code },
-        { status: holisticBlocker.status }
-      );
-    }
   }
 
   await withTransaction(async (client) => {
     if (targetUserId != null) {
+      await endIneligibleHolisticMappings(
+        client,
+        Number(targetUserId),
+        "mentor_access_revoked",
+        true
+      );
       await client.query(
         `UPDATE centre_positions SET deleted_at = now(), updated_at = now()
          WHERE user_id = $1 AND deleted_at IS NULL`,

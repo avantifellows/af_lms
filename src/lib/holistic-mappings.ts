@@ -62,7 +62,9 @@ async function actorIsEligible(
     `SELECT DISTINCT u.id AS user_id
      FROM teacher t
      JOIN "user" u ON u.id = t.user_id
-     JOIN user_permission up ON up.user_id = u.id AND up.revoked_at IS NULL AND up.role = 'teacher'
+     JOIN user_permission up
+       ON (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
+      AND up.revoked_at IS NULL AND up.role = 'teacher'
      JOIN centre_positions cp
        ON cp.user_id = u.id AND cp.deleted_at IS NULL AND NOT (cp.role = ANY($4::text[]))
      JOIN centres c ON c.id = cp.centre_id AND c.is_active IS TRUE
@@ -72,6 +74,38 @@ async function actorIsEligible(
     [actorUserId, schoolId, PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
   );
   return actor.rows.length > 0;
+}
+
+export async function eraseDraftHolisticNotes(
+  client: PoolClient,
+  studentIds: number[],
+  actorUserId: number,
+  reason: string
+): Promise<void> {
+  if (studentIds.length === 0) return;
+  await client.query(
+    `WITH draft_notes AS MATERIALIZED (
+       SELECT id
+       FROM holistic_mentorship_post_session_notes
+       WHERE student_id = ANY($1::bigint[]) AND state = 'draft'
+       FOR UPDATE
+     ), updated_notes AS (
+       UPDATE holistic_mentorship_post_session_notes notes
+       SET revision = revision + 1, last_edited_at = now(), updated_at = now()
+       FROM draft_notes
+       WHERE notes.id = draft_notes.id
+       RETURNING notes.id
+     ), erased_answers AS (
+       DELETE FROM holistic_mentorship_post_session_answers answers
+       USING updated_notes
+       WHERE answers.notes_id = updated_notes.id
+     )
+     INSERT INTO holistic_mentorship_post_session_note_audits
+       (notes_id, actor_user_id, action, occurred_at, reason, inserted_at, updated_at)
+     SELECT id, $2, 'draft_erased_on_mapping_end', now(), $3, now(), now()
+     FROM updated_notes`,
+    [studentIds, actorUserId, reason]
+  );
 }
 
 async function currentOwnership(
@@ -111,7 +145,7 @@ export async function assignHolisticMentees(params: {
   selections: Array<{ studentId: number; expectedMappingId: number | null }>;
   takeoverConfirmed: boolean;
 }): Promise<HolisticMappingMutationResult> {
-  const studentIds = params.selections.map(({ studentId }) => studentId);
+  const studentIds = params.selections.map(({ studentId }) => studentId).sort((a, b) => a - b);
   try {
     return await withTransaction(async (client) => {
       if (!(await actorIsEligible(client, params.actorUserId, params.schoolId))) {
@@ -145,6 +179,7 @@ export async function assignHolisticMentees(params: {
            AND st.id = ANY($4::bigint[])
            AND st.status IS DISTINCT FROM 'dropout'
            AND gr.number IN (11, 12)
+         ORDER BY st.id
          FOR UPDATE OF st`,
         [params.schoolId, params.academicYear, PROGRAM_IDS.COE, studentIds]
       );
@@ -185,6 +220,12 @@ export async function assignHolisticMentees(params: {
                end_reason = $3, updated_at = now()
            WHERE id = ANY($4::bigint[])`,
           [params.actorUserId, "af_lms_teacher", "teacher_takeover", replacedIds]
+        );
+        await eraseDraftHolisticNotes(
+          client,
+          active.rows.map((row) => Number(row.student_id)),
+          params.actorUserId,
+          "teacher_takeover"
         );
       }
 
@@ -262,6 +303,12 @@ export async function removeHolisticMentees(params: {
          WHERE id = ANY($4::bigint[])`,
         [params.actorUserId, "af_lms_teacher", "teacher_removal", mappingIds]
       );
+      await eraseDraftHolisticNotes(
+        client,
+        studentIds,
+        params.actorUserId,
+        "teacher_removal"
+      );
       return { ok: true, changed: mappingIds.length };
     });
   } catch (error) {
@@ -327,8 +374,7 @@ export async function listHolisticAssignmentRoster(params: {
        AND ($4 = '%%' OR st.student_id ILIKE $4 OR
             TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $4)
        AND ($5::int IS NULL OR gr.number = $5)
-     ORDER BY gr.number, name NULLS LAST, st.student_id
-     LIMIT 100`,
+     ORDER BY gr.number, name NULLS LAST, st.student_id`,
     [
       params.schoolId,
       params.academicYear,

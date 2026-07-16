@@ -15,6 +15,7 @@
 
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
+import { eraseDraftHolisticNotes } from "./holistic-mappings";
 import {
   type AdminGuardResult,
   type AdminSession,
@@ -232,34 +233,6 @@ export async function blockIfAcademicMentorshipHistory(
     status: 409,
     code: "academic_mentorship_history",
     error: `This Teacher has Academic Mentor-Mentee Mapping history. Deleting the Teacher is blocked to preserve audit history: ${academicMentorshipManagementLink(rows[0])}`,
-  };
-}
-
-export async function blockIfHolisticMentorshipHistory(
-  userId: number
-): Promise<StaffValidationFailure | null> {
-  const rows = await query<{
-    has_mapping_history: boolean;
-    has_notes_history: boolean;
-  }>(
-    `SELECT
-       EXISTS (
-         SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings
-         WHERE mentor_user_id = $1
-       ) AS has_mapping_history,
-       EXISTS (
-         SELECT 1 FROM holistic_mentorship_post_session_notes
-         WHERE author_user_id = $1
-       ) AS has_notes_history`,
-    [userId]
-  );
-  if (!rows[0]?.has_mapping_history && !rows[0]?.has_notes_history) return null;
-  return {
-    ok: false,
-    status: 409,
-    code: "holistic_mentorship_history",
-    error:
-      "This User has Holistic Mentor-Mentee Mapping or authored Post-Session Notes history. Deletion is blocked to preserve audit history.",
   };
 }
 
@@ -695,7 +668,7 @@ export async function endIneligibleHolisticMappings(
   reason: "mentor_exit" | "mentor_role_changed" | "mentor_seat_changed" | "mentor_access_revoked",
   endAll = false
 ): Promise<void> {
-  await client.query(
+  const ended = await client.query<{ student_id: number | string }>(
     `UPDATE holistic_mentorship_mentor_mentee_mappings mapping
      SET ended_at = now(), ended_by_user_id = NULL, end_source = $2,
          end_reason = $3, updated_at = now()
@@ -713,8 +686,15 @@ export async function endIneligibleHolisticMappings(
            ON c.id = cp.centre_id AND c.is_active IS TRUE
           AND c.school_id = mapping.school_id AND c.program_id = mapping.program_id
          WHERE t.user_id = $1 AND t.is_af_teacher = true AND t.exit_date IS NULL
-       ))`,
+       ))
+     RETURNING mapping.student_id`,
     [userId, "af_lms_staff_management", reason, endAll, [...PM_SEAT_ROLES]]
+  );
+  await eraseDraftHolisticNotes(
+    client,
+    ended.rows.map((row) => Number(row.student_id)),
+    userId,
+    reason
   );
 }
 
