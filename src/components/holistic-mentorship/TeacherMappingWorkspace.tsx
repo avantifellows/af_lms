@@ -1,6 +1,7 @@
 "use client";
 
-import { Search, UserMinus, UserPlus } from "lucide-react";
+import { ArrowRight, Search, UserMinus, UserPlus } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
@@ -10,6 +11,7 @@ interface Student {
   name: string;
   externalStudentId: string | null;
   grade: number;
+  activePhaseId: number | null;
   ownership: {
     mappingId: number;
     mentorUserId: number;
@@ -204,7 +206,7 @@ export default function TeacherMappingWorkspace({
                 <th className="px-3 py-3">Student</th>
                 <th className="px-3 py-3">Grade</th>
                 <th className="px-3 py-3">Current Mentor</th>
-                {view === "mentees" && <th className="w-32 px-3 py-3"><span className="sr-only">Actions</span></th>}
+                {view === "mentees" && <th className="w-56 px-3 py-3"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -231,14 +233,25 @@ export default function TeacherMappingWorkspace({
                     <td className="px-3 py-3">{mine ? "You" : student.ownership?.mentorName ?? "Unassigned"}</td>
                     {view === "mentees" && (
                       <td className="px-3 py-3 text-right">
-                        <button
-                          type="button"
-                          className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-medium hover:bg-hover-bg disabled:opacity-50"
-                          disabled={busy}
-                          onClick={() => void remove(student)}
-                        >
-                          <UserMinus aria-hidden="true" className="h-4 w-4" /> Remove
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          {student.activePhaseId && (
+                            <Link
+                              href={`/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${new URLSearchParams({ school_code: schoolCode, academic_year: CURRENT_ACADEMIC_YEAR })}`}
+                              aria-label={`Open ${student.name}`}
+                              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-3 font-medium text-text-on-accent hover:bg-accent-hover"
+                            >
+                              Open <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                            </Link>
+                          )}
+                          <button
+                            type="button"
+                            className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-medium hover:bg-hover-bg disabled:opacity-50"
+                            disabled={busy}
+                            onClick={() => void remove(student)}
+                          >
+                            <UserMinus aria-hidden="true" className="h-4 w-4" /> Remove
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>

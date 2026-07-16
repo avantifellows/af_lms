@@ -30,6 +30,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         name: "Asha Rao",
         external_student_id: "ST-41",
         grade: "11",
+        active_phase_id: "73",
         mapping_id: "73",
         mentor_user_id: "9",
         mentor_name: "Nila Sen",
@@ -49,6 +50,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         name: "Asha Rao",
         externalStudentId: "ST-41",
         grade: 11,
+        activePhaseId: 73,
         ownership: { mappingId: 73, mentorUserId: 9, mentorName: "Nila Sen" },
       },
     ]);
@@ -57,7 +59,8 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("st.status IS DISTINCT FROM 'dropout'");
     expect(sql).toContain("gr.number IN (11, 12)");
     expect(sql).toContain("roster_program.program_id = $3");
-    expect(sql).not.toMatch(/profile|historical|phase|academic_mentorship/i);
+    expect(sql).toContain("ORDER BY phase.position DESC");
+    expect(sql).not.toMatch(/profile|historical|academic_mentorship/i);
     expect(sql).not.toContain("LIMIT 100");
     expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
   });

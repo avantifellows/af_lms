@@ -8,6 +8,7 @@ interface RosterRow {
   name: string | null;
   external_student_id: string | null;
   grade: number | string;
+  active_phase_id: number | string | null;
   mapping_id: number | string | null;
   mentor_user_id: number | string | null;
   mentor_name: string | null;
@@ -18,6 +19,7 @@ export interface HolisticAssignmentRosterStudent {
   name: string;
   externalStudentId: string | null;
   grade: number;
+  activePhaseId: number | null;
   ownership: {
     mappingId: number;
     mentorUserId: number;
@@ -335,6 +337,7 @@ export async function listHolisticAssignmentRoster(params: {
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
             st.student_id AS external_student_id,
             gr.number AS grade,
+            active_phase.id AS active_phase_id,
             mapping.id AS mapping_id,
             mapping.mentor_user_id,
             NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name
@@ -363,6 +366,15 @@ export async function listHolisticAssignmentRoster(params: {
        ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id), er_batch.id
        LIMIT 1
      ) roster_program ON true
+     LEFT JOIN LATERAL (
+       SELECT phase.id
+       FROM holistic_mentorship_phase_plans plan
+       JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id AND phase.state = 'open'
+       JOIN grade phase_grade ON phase_grade.id = phase.grade_id AND phase_grade.number = gr.number
+       WHERE plan.program_id = $3 AND plan.academic_year = $2
+       ORDER BY phase.position DESC
+       LIMIT 1
+     ) active_phase ON true
      LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping
        ON mapping.student_id = st.id
       AND mapping.academic_year = $2
@@ -389,6 +401,7 @@ export async function listHolisticAssignmentRoster(params: {
     name: row.name || row.external_student_id || "Unknown Student",
     externalStudentId: row.external_student_id,
     grade: Number(row.grade),
+    activePhaseId: row.active_phase_id === null ? null : Number(row.active_phase_id),
     ownership:
       row.mapping_id === null || row.mentor_user_id === null
         ? null

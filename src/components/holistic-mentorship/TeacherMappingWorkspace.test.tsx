@@ -45,4 +45,28 @@ describe("TeacherMappingWorkspace", () => {
     });
     expect(await screen.findByText("No eligible Students to show yet.")).toBeInTheDocument();
   });
+
+  it("opens a Mentee at the stable Active Phase identity", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        actorUserId: 9,
+        students: [{
+          studentId: 41,
+          name: "Asha Rao",
+          externalStudentId: "ST-41",
+          grade: 11,
+          activePhaseId: 73,
+          ownership: { mappingId: 81, mentorUserId: 9, mentorName: "Nila Sen" },
+        }],
+      }),
+    }));
+
+    render(<TeacherMappingWorkspace schoolCode="SCH001" view="mentees" />);
+
+    expect(await screen.findByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027"
+    );
+  });
 });
