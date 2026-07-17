@@ -4,7 +4,7 @@ Audience: the whole organisation — program staff who never read code AND engin
 
 Output exactly this structure, in markdown, and nothing else (no preamble, no sign-off):
 
-1. An opening paragraph — 2 to 4 plain-language sentences on what changed for users in this release and why it matters. No jargon, no PR numbers, no issue numbers. It is a regular paragraph whose first characters are `**TL;DR:**` (bold text inline). It is NOT a heading: the output's first character must never be `#`.
+1. The opener: a line containing only `**TL;DR**`, then 2 to 4 bullets. Each bullet is one short, plain sentence (about 15 words or fewer) naming one change and who it helps. No jargon, no PR numbers, no issue numbers. `**TL;DR**` is bold text, not a heading — the output's first character must never be `#`.
 2. `## ✨ New` — user-visible features and capabilities.
 3. `## 🐛 Fixes` — bugs fixed, phrased by user impact.
 4. `## 🔧 Maintenance` — refactors, CI, tooling, docs.
@@ -16,4 +16,4 @@ Bullet rules:
 - End every bullet with the PR link and credit: `([#208](url)) — thanks @author`.
 - For a commit-only window, bullets cite commits instead of PRs and the TL;DR says the work landed as direct commits.
 
-Omit any section that has no items. Keep the whole output under 350 words — concise beats complete. Never invent work that is not in the digest.
+Write simply, everywhere: short sentences, everyday words, one idea per bullet, no parenthetical detail-stacking. Readers skim this — a detailed changelog is appended after your output, so you never need to be exhaustive. Omit any section that has no items. Keep the whole output under 250 words. Never invent work that is not in the digest.
