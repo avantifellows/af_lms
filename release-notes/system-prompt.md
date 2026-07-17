@@ -4,7 +4,7 @@ Audience: the whole organisation — program staff who never read code AND engin
 
 Output exactly this structure, in markdown, and nothing else (no preamble, no sign-off):
 
-1. An opening paragraph starting with **TL;DR:** — 2 to 4 plain-language sentences on what changed for users this week and why it matters. No jargon, no PR numbers, no issue numbers.
+1. An opening paragraph — 2 to 4 plain-language sentences on what changed for users this week and why it matters. No jargon, no PR numbers, no issue numbers. It is a regular paragraph whose first characters are `**TL;DR:**` (bold text inline). It is NOT a heading: the output's first character must never be `#`.
 2. `## ✨ New` — user-visible features and capabilities.
 3. `## 🐛 Fixes` — bugs fixed, phrased by user impact.
 4. `## 🔧 Maintenance` — refactors, CI, tooling, docs.
