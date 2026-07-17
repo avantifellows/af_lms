@@ -15,7 +15,10 @@
 
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
-import { eraseDraftHolisticNotes } from "./holistic-mappings";
+import {
+  eraseDraftHolisticNotes,
+  lockHolisticMentorMappingMutation,
+} from "./holistic-mappings";
 import {
   type AdminGuardResult,
   type AdminSession,
@@ -668,6 +671,7 @@ export async function endIneligibleHolisticMappings(
   reason: "mentor_exit" | "mentor_role_changed" | "mentor_seat_changed" | "mentor_access_revoked",
   endAll = false
 ): Promise<void> {
+  await lockHolisticMentorMappingMutation(client, userId);
   const ended = await client.query<{ student_id: number | string }>(
     `UPDATE holistic_mentorship_mentor_mentee_mappings mapping
      SET ended_at = now(), ended_by_user_id = NULL, end_source = $2,

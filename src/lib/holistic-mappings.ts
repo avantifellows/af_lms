@@ -78,6 +78,16 @@ async function actorIsEligible(
   return actor.rows.length > 0;
 }
 
+export async function lockHolisticMentorMappingMutation(
+  client: PoolClient,
+  mentorUserId: number
+): Promise<void> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [`holistic_mentorship_mentor:${mentorUserId}`]
+  );
+}
+
 export async function eraseDraftHolisticNotes(
   client: PoolClient,
   studentIds: number[],
@@ -112,7 +122,8 @@ export async function eraseDraftHolisticNotes(
 
 async function currentOwnership(
   studentIds: number[],
-  academicYear: string
+  academicYear: string,
+  schoolId: number
 ): Promise<Array<{ studentId: number; ownership: HolisticAssignmentRosterStudent["ownership"] }>> {
   const rows = await query<ActiveMappingRow & { mentor_name: string | null }>(
     `SELECT mapping.id, mapping.student_id, mapping.mentor_user_id,
@@ -121,8 +132,10 @@ async function currentOwnership(
      JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      WHERE mapping.student_id = ANY($1::bigint[])
        AND mapping.academic_year = $2
+       AND mapping.school_id = $3
+       AND mapping.program_id = $4
        AND mapping.ended_at IS NULL`,
-    [studentIds, academicYear]
+    [studentIds, academicYear, schoolId, PROGRAM_IDS.COE]
   );
   const byStudent = new Map(rows.map((row) => [Number(row.student_id), row]));
   return studentIds.map((studentId) => {
@@ -191,14 +204,16 @@ async function lockEligibleStudents(
 async function lockActiveMappings(
   client: PoolClient,
   studentIds: number[],
-  academicYear: string
+  academicYear: string,
+  schoolId: number
 ) {
   const active = await client.query<ActiveMappingRow>(
     `SELECT id, student_id, mentor_user_id
      FROM holistic_mentorship_mentor_mentee_mappings
-     WHERE student_id = ANY($1::bigint[]) AND academic_year = $2 AND ended_at IS NULL
+     WHERE student_id = ANY($1::bigint[]) AND academic_year = $2
+       AND school_id = $3 AND program_id = $4 AND ended_at IS NULL
      FOR UPDATE`,
-    [studentIds, academicYear]
+    [studentIds, academicYear, schoolId, PROGRAM_IDS.COE]
   );
   return {
     rows: active.rows,
@@ -294,13 +309,19 @@ async function assignInTransaction(
   params: Parameters<typeof assignHolisticMentees>[0],
   studentIds: number[]
 ): Promise<HolisticMappingMutationResult> {
+  await lockHolisticMentorMappingMutation(client, params.actorUserId);
   await requireEligibleActor(client, params.actorUserId, params.schoolId);
   await lockEligibleStudents(client, {
     schoolId: params.schoolId,
     academicYear: params.academicYear,
     studentIds,
   });
-  const active = await lockActiveMappings(client, studentIds, params.academicYear);
+  const active = await lockActiveMappings(
+    client,
+    studentIds,
+    params.academicYear,
+    params.schoolId
+  );
   assertAssignmentsCurrent(
     params.selections,
     active.byStudent,
@@ -315,14 +336,18 @@ async function assignInTransaction(
 async function mutationConflict(
   error: MappingMutationError | { code?: unknown },
   studentIds: number[],
-  academicYear: string
+  academicYear: string,
+  schoolId: number
 ): Promise<HolisticMappingMutationResult> {
   const known = error instanceof MappingMutationError;
+  if (known && error.status === 422) {
+    return { ok: false, status: error.status, error: error.message };
+  }
   return {
     ok: false,
     status: known ? error.status : 409,
     error: known ? error.message : "Mapping ownership changed; review the refreshed roster",
-    ownership: await currentOwnership(studentIds, academicYear),
+    ownership: await currentOwnership(studentIds, academicYear, schoolId),
   };
 }
 
@@ -338,7 +363,12 @@ export async function assignHolisticMentees(params: {
     return await withTransaction((client) => assignInTransaction(client, params, studentIds));
   } catch (error) {
     if (error instanceof MappingMutationError || isUniqueViolation(error)) {
-      return mutationConflict(error as MappingMutationError | { code?: unknown }, studentIds, params.academicYear);
+      return mutationConflict(
+        error as MappingMutationError | { code?: unknown },
+        studentIds,
+        params.academicYear,
+        params.schoolId
+      );
     }
     throw error;
   }
@@ -349,8 +379,14 @@ async function removeInTransaction(
   params: Parameters<typeof removeHolisticMentees>[0],
   studentIds: number[]
 ): Promise<HolisticMappingMutationResult> {
+  await lockHolisticMentorMappingMutation(client, params.actorUserId);
   await requireEligibleActor(client, params.actorUserId, params.schoolId);
-  const active = await lockActiveMappings(client, studentIds, params.academicYear);
+  const active = await lockActiveMappings(
+    client,
+    studentIds,
+    params.academicYear,
+    params.schoolId
+  );
   for (const expected of params.mappings) {
     const current = active.byStudent.get(expected.studentId);
     if (Number(current?.id ?? 0) !== expected.expectedMappingId ||
@@ -385,7 +421,7 @@ export async function removeHolisticMentees(params: {
     return await withTransaction((client) => removeInTransaction(client, params, studentIds));
   } catch (error) {
     if (error instanceof MappingMutationError) {
-      return mutationConflict(error, studentIds, params.academicYear);
+      return mutationConflict(error, studentIds, params.academicYear, params.schoolId);
     }
     throw error;
   }
@@ -443,6 +479,8 @@ export async function listHolisticAssignmentRoster(params: {
      LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping
        ON mapping.student_id = st.id
       AND mapping.academic_year = $2
+      AND mapping.school_id = $1
+      AND mapping.program_id = $3
       AND mapping.ended_at IS NULL
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      WHERE st.status IS DISTINCT FROM 'dropout'

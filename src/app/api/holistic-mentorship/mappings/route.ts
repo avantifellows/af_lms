@@ -10,7 +10,6 @@ import {
   type HolisticMappingMutationResult,
 } from "@/lib/holistic-mappings";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
-import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import {
   holisticApiError,
   positiveInteger,
@@ -36,7 +35,7 @@ export async function GET(request: NextRequest) {
   const grade = gradeValue === null || gradeValue === ""
     ? null
     : Number(gradeValue);
-  if (!validSchoolCode(schoolCode) || !validateAcademicYear(academicYear) ||
+  if (!validSchoolCode(schoolCode) || academicYear !== CURRENT_ACADEMIC_YEAR ||
       search.length > 100 || (grade !== null && grade !== 11 && grade !== 12)) {
     return holisticApiError("Invalid roster filters");
   }
@@ -61,7 +60,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const value = await readJsonObject(request);
   if (!value || !validSchoolCode(value.school_code) ||
-      typeof value.academic_year !== "string" || !validateAcademicYear(value.academic_year) ||
+      value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       typeof value.takeover_confirmed !== "boolean" || !Array.isArray(value.selections) ||
       value.selections.length < 1 || value.selections.length > 50) {
     return holisticApiError("Invalid Mapping selection");
@@ -100,7 +99,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const value = await readJsonObject(request);
   if (!value || !validSchoolCode(value.school_code) ||
-      typeof value.academic_year !== "string" || !validateAcademicYear(value.academic_year) ||
+      value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       value.confirmed !== true || !Array.isArray(value.mappings) ||
       value.mappings.length < 1 || value.mappings.length > 50) {
     return holisticApiError("Invalid Mapping removal");

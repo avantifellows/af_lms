@@ -22,21 +22,67 @@ interface Student {
 interface SavedFilters {
   search: string;
   grade: "" | "11" | "12";
+  assignment: "" | "unassigned" | "other";
+}
+
+const EMPTY_FILTERS: SavedFilters = { search: "", grade: "", assignment: "" };
+
+function savedGrade(value: unknown): SavedFilters["grade"] {
+  return value === "11" || value === "12" ? value : "";
+}
+
+function savedAssignment(value: unknown): SavedFilters["assignment"] {
+  return value === "unassigned" || value === "other" ? value : "";
 }
 
 function savedFilters(schoolCode: string): SavedFilters {
-  if (typeof window === "undefined") return { search: "", grade: "" };
+  if (typeof window === "undefined") return EMPTY_FILTERS;
   try {
-    return JSON.parse(sessionStorage.getItem(`holistic-mappings:${schoolCode}`) || "null") ??
-      { search: "", grade: "" };
+    const parsed = JSON.parse(
+      sessionStorage.getItem(`holistic-mappings:${schoolCode}`) || "null"
+    ) as Partial<SavedFilters> | null;
+    if (!parsed) return EMPTY_FILTERS;
+    return {
+      search: typeof parsed.search === "string" ? parsed.search : "",
+      grade: savedGrade(parsed.grade),
+      assignment: savedAssignment(parsed.assignment),
+    };
   } catch {
-    return { search: "", grade: "" };
+    return EMPTY_FILTERS;
   }
 }
 
-function studentsForView(students: Student[], view: "assign" | "mentees", actorUserId: number | null) {
-  if (view === "assign") return students;
-  return students.filter((student) => student.ownership?.mentorUserId === actorUserId);
+function studentsForView(
+  students: Student[],
+  view: "assign" | "mentees",
+  actorUserId: number | null,
+  assignment: SavedFilters["assignment"]
+) {
+  if (view === "mentees") {
+    return students.filter((student) => student.ownership?.mentorUserId === actorUserId);
+  }
+  return students.filter((student) => {
+    if (student.ownership?.mentorUserId === actorUserId) return false;
+    if (assignment === "unassigned") return student.ownership === null;
+    if (assignment === "other") return student.ownership !== null;
+    return true;
+  });
+}
+
+function studentCount(count: number): string {
+  return `${count} Student${count === 1 ? "" : "s"}`;
+}
+
+function assignmentConfirmation(choices: Student[], reassigned: Student[]): string {
+  if (reassigned.length === 0) return `Assign ${studentCount(choices.length)} to yourself?`;
+  const mentors = [...new Set(reassigned.map((student) => student.ownership!.mentorName))];
+  const verb = reassigned.length === 1 ? "is" : "are";
+  return `${studentCount(reassigned.length)} ${verb} currently assigned to ${mentors.join(", ")}. Assign all ${studentCount(choices.length)} to yourself?`;
+}
+
+function assignmentSuccess(choices: Student[], reassigned: Student[]): string {
+  if (reassigned.length === 0) return `Assigned ${studentCount(choices.length)} to you.`;
+  return `Assigned ${studentCount(choices.length)} to you, including ${studentCount(reassigned.length)} reassigned from another Mentor.`;
 }
 
 export default function TeacherMappingWorkspace({
@@ -51,15 +97,19 @@ export default function TeacherMappingWorkspace({
   const initial = useMemo(() => savedFilters(schoolCode), [schoolCode]);
   const [search, setSearch] = useState(initial.search);
   const [grade, setGrade] = useState<SavedFilters["grade"]>(initial.grade);
+  const [assignment, setAssignment] = useState<SavedFilters["assignment"]>(initial.assignment);
   const [students, setStudents] = useState<Student[]>([]);
   const [actorUserId, setActorUserId] = useState<number | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [success, setSuccess] = useState("");
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    setSuccess("");
+    let loaded = false;
     const params = new URLSearchParams({
       school_code: schoolCode,
       academic_year: CURRENT_ACADEMIC_YEAR,
@@ -74,22 +124,26 @@ export default function TeacherMappingWorkspace({
       setActorUserId(data.actorUserId);
       setSelected([]);
       setMessage("");
+      loaded = true;
     } catch (error) {
       if ((error as Error).name !== "AbortError") setMessage((error as Error).message);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
+    return loaded;
   }, [grade, schoolCode, search]);
 
   useEffect(() => {
     sessionStorage.setItem(
       `holistic-mappings:${schoolCode}`,
-      JSON.stringify({ search, grade })
+      JSON.stringify({ search, grade, assignment })
     );
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [grade, load, schoolCode, search]);
+  }, [assignment, grade, load, schoolCode, search]);
+
+  useEffect(() => setSelected([]), [view]);
 
   useEffect(() => {
     const key = `holistic-mappings-scroll:${schoolCode}`;
@@ -100,7 +154,7 @@ export default function TeacherMappingWorkspace({
     return () => window.removeEventListener("scroll", remember);
   }, [schoolCode]);
 
-  const visible = studentsForView(students, view, actorUserId);
+  const visible = studentsForView(students, view, actorUserId, assignment);
 
   const toggle = (studentId: number) => {
     setSelected((current) =>
@@ -111,11 +165,12 @@ export default function TeacherMappingWorkspace({
   };
 
   const assign = async () => {
-    const choices = students.filter((student) => selected.includes(student.studentId));
-    const takeover = choices.some(
+    const choices = visible.filter((student) => selected.includes(student.studentId));
+    const reassigned = choices.filter(
       (student) => student.ownership && student.ownership.mentorUserId !== actorUserId
     );
-    if (takeover && !window.confirm("Take over the selected Students from their current Mentor?")) return;
+    const takeover = reassigned.length > 0;
+    if (!window.confirm(assignmentConfirmation(choices, reassigned))) return;
     setBusy(true);
     let problem = "";
     try {
@@ -137,13 +192,19 @@ export default function TeacherMappingWorkspace({
     } catch {
       problem = "Unable to update Mappings";
     }
-    await load();
-    setMessage(problem);
+    const refreshed = await load();
+    if (problem) {
+      setMessage(problem);
+    } else if (refreshed) {
+      setSuccess(assignmentSuccess(choices, reassigned));
+    }
     setBusy(false);
   };
 
   const remove = async (student: Student) => {
-    if (!student.ownership || !window.confirm(`Remove ${student.name} from My Mentees?`)) return;
+    if (!student.ownership || !window.confirm(
+      `Remove ${student.name} from My Mentees? The Student will become unassigned and you will lose access to their Holistic Mentorship data.`
+    )) return;
     setBusy(true);
     let problem = "";
     try {
@@ -165,15 +226,27 @@ export default function TeacherMappingWorkspace({
     } catch {
       problem = "Unable to remove Mapping";
     }
-    await load();
-    setMessage(problem);
+    const refreshed = await load();
+    if (problem) setMessage(problem);
+    if (!problem && refreshed) {
+      setSuccess(`Removed ${student.name}. The Student is now unassigned.`);
+    }
     setBusy(false);
   };
 
   return (
     <div className="space-y-4">
-      <MappingFilters search={search} grade={grade} onSearchChange={setSearch} onGradeChange={setGrade} />
+      <MappingFilters
+        search={search}
+        grade={grade}
+        assignment={assignment}
+        view={view}
+        onSearchChange={(value) => { setSelected([]); setSearch(value); }}
+        onGradeChange={(value) => { setSelected([]); setGrade(value); }}
+        onAssignmentChange={(value) => { setSelected([]); setAssignment(value); }}
+      />
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
+      {success && <p role="status" className="text-sm text-success">{success}</p>}
       <MappingResults
         loading={loading}
         students={visible}
@@ -193,11 +266,14 @@ export default function TeacherMappingWorkspace({
   );
 }
 
-function MappingFilters({ search, grade, onSearchChange, onGradeChange }: {
+function MappingFilters({ search, grade, assignment, view, onSearchChange, onGradeChange, onAssignmentChange }: {
   search: string;
   grade: SavedFilters["grade"];
+  assignment: SavedFilters["assignment"];
+  view: "assign" | "mentees";
   onSearchChange: (value: string) => void;
   onGradeChange: (value: SavedFilters["grade"]) => void;
+  onAssignmentChange: (value: SavedFilters["assignment"]) => void;
 }) {
   return <div className="flex flex-col gap-3 sm:flex-row">
     <label className="relative min-w-0 flex-1">
@@ -210,6 +286,11 @@ function MappingFilters({ search, grade, onSearchChange, onGradeChange }: {
       value={grade} onChange={(event) => onGradeChange(event.target.value as SavedFilters["grade"])}>
       <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
     </select>
+    {view === "assign" && <select aria-label="Filter by Assignment" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm"
+      value={assignment} onChange={(event) => onAssignmentChange(event.target.value as SavedFilters["assignment"])}>
+      <option value="">All available</option><option value="unassigned">Unassigned</option>
+      <option value="other">Assigned to another Mentor</option>
+    </select>}
   </div>;
 }
 

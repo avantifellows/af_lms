@@ -60,6 +60,8 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("gr.number IN (11, 12)");
     expect(sql).toContain("roster_program.program_id = $3");
     expect(sql).toContain("ORDER BY phase.position DESC");
+    expect(sql).toContain("mapping.school_id = $1");
+    expect(sql).toContain("mapping.program_id = $3");
     expect(sql).not.toMatch(/profile|historical|academic_mentorship/i);
     expect(sql).not.toContain("LIMIT 100");
     expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
@@ -94,6 +96,8 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     expect(mockWithTransaction).toHaveBeenCalledOnce();
     const sql = mockClientQuery.mock.calls.map(([text]) => String(text)).join("\n");
+    expect(String(mockClientQuery.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
+    expect(mockClientQuery.mock.calls[0][1]).toEqual(["holistic_mentorship_mentor:9"]);
     expect(sql).toContain("FOR UPDATE OF st");
     expect(sql).toContain("ORDER BY st.id\n         FOR UPDATE OF st");
     expect(sql).toContain("FOR UPDATE");
@@ -102,6 +106,10 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     );
     expect(inserts).toHaveLength(2);
     expect(inserts[0][1]).toEqual([41, 9, 4, 1, "2026-2027", 9, "af_lms_teacher_claim"]);
+    const mappingLock = mockClientQuery.mock.calls.find(([text]) =>
+      String(text).includes("FROM holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(mappingLock?.[1]).toEqual([[41, 42], "2026-2027", 4, 1]);
   });
 
   it("removes only confirmed actor-owned Mappings while retaining history", async () => {
@@ -181,6 +189,69 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(draftCleanup?.[1]).toEqual([[41], 9, "teacher_takeover"]);
   });
 
+  it("requires a fresh takeover confirmation before ending another Mentor's Mapping", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const text = String(sql);
+      if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
+      if (text.includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (text.includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 73, student_id: 41, mentor_user_id: 8 }] };
+      }
+      return { rows: [] };
+    });
+    mockQuery.mockResolvedValueOnce([
+      { id: 73, student_id: 41, mentor_user_id: 8, mentor_name: "Nila Sen" },
+    ]);
+
+    await expect(assignHolisticMentees({
+      actorUserId: 9,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      selections: [{ studentId: 41, expectedMappingId: 73 }],
+      takeoverConfirmed: false,
+    })).resolves.toMatchObject({
+      ok: false,
+      status: 409,
+      error: "Confirm takeover using the refreshed roster",
+    });
+
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("end_reason = $3"))).toBe(false);
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO holistic"))).toBe(false);
+    expect(mockQuery.mock.calls[0][1]).toEqual([[41], "2026-2027", 4, 1]);
+  });
+
+  it("does not remove another Mentor's Mapping or expose ownership outside the School scope", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const text = String(sql);
+      if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
+      if (text.includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 73, student_id: 41, mentor_user_id: 8 }] };
+      }
+      return { rows: [] };
+    });
+    mockQuery.mockResolvedValueOnce([]);
+
+    await expect(removeHolisticMentees({
+      actorUserId: 9,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      mappings: [{ studentId: 41, expectedMappingId: 73 }],
+      confirmed: true,
+    })).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership: [{ studentId: 41, ownership: null }],
+    });
+
+    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("end_reason = $3"))).toBe(false);
+    const lock = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(lock?.[1]).toEqual([[41], "2026-2027", 4, 1]);
+    expect(mockQuery.mock.calls[0][1]).toEqual([[41], "2026-2027", 4, 1]);
+  });
+
   it("rolls back the whole selection when any Student is no longer eligible", async () => {
     mockClientQuery.mockImplementation((sql: unknown) => {
       const text = String(sql);
@@ -190,7 +261,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     });
     mockQuery.mockResolvedValue([]);
 
-    await expect(assignHolisticMentees({
+    const result = await assignHolisticMentees({
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -199,8 +270,14 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         { studentId: 42, expectedMappingId: null },
       ],
       takeoverConfirmed: false,
-    })).resolves.toMatchObject({ ok: false, status: 422 });
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 422,
+      error: "One or more Students are no longer eligible",
+    });
     expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO"))).toBe(false);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns refreshed safe ownership after a first-writer conflict", async () => {
@@ -224,5 +301,6 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         ownership: { mappingId: 73, mentorUserId: 8, mentorName: "Nila Sen" },
       }],
     });
+    expect(mockQuery.mock.calls[0][1]).toEqual([[41], "2026-2027", 4, 1]);
   });
 });

@@ -136,6 +136,7 @@ describe("Holistic release preflight", () => {
         "admin",
         "program_manager",
         "program_admin",
+        "read_only",
         "passcode",
       ],
       states: ["locked", "open", "active", "skipped", "pending", "completed"],

@@ -116,4 +116,42 @@ describe("Holistic Mentorship Mapping API", () => {
       mappings: [{ studentId: 41, expectedMappingId: 73 }],
     });
   });
+
+  it.each([
+    ["GET", "http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2025-2026"],
+    ["POST", "http://localhost/api/holistic-mentorship/mappings"],
+    ["DELETE", "http://localhost/api/holistic-mentorship/mappings"],
+  ])("rejects non-current Academic Years for %s before authorization", async (method, url) => {
+    const body = method === "POST"
+      ? {
+          school_code: "SCH001",
+          academic_year: "2025-2026",
+          takeover_confirmed: false,
+          selections: [{ student_id: 41, expected_mapping_id: null }],
+        }
+      : method === "DELETE"
+        ? {
+            school_code: "SCH001",
+            academic_year: "2025-2026",
+            confirmed: true,
+            mappings: [{ student_id: 41, expected_mapping_id: 73 }],
+          }
+        : undefined;
+    const request = new Request(url, {
+      method,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+    const response = method === "GET"
+      ? await GET(request as never)
+      : method === "POST"
+        ? await POST(request as never)
+        : await DELETE(request as never);
+
+    expect(response.status).toBe(400);
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockRoster).not.toHaveBeenCalled();
+    expect(mockAssign).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
 });
