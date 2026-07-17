@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 
 import { expect, test } from "../fixtures/auth";
 import { getTestPool } from "../helpers/db";
@@ -7,6 +7,7 @@ type Fixture = {
   schoolCode: string;
   draftStudentId: number;
   unassignedStudentId: number;
+  unassignedStudentExternalId: string;
   formerStudentId: number;
   profileGrade11StudentId: number;
   historicalGrade12StudentId: number;
@@ -17,6 +18,12 @@ type Fixture = {
 };
 
 let fixture: Fixture;
+
+const RESPONSIVE_VIEWPORTS = [
+  { name: "desktop", width: 1280, height: 800 },
+  { name: "phone-portrait", width: 375, height: 812 },
+  { name: "phone-landscape", width: 812, height: 375 },
+] as const;
 
 test.describe("Holistic Mentorship release workflows", () => {
   test.describe.configure({ mode: "serial" });
@@ -99,10 +106,15 @@ test.describe("Holistic Mentorship release workflows", () => {
          ORDER BY centre.school_id LIMIT 1`
       );
       const row = result.rows[0];
+      const unassignedStudent = await pool.query<{ student_id: string }>(
+        "SELECT student_id FROM student WHERE id = $1",
+        [row.unassigned_student_id]
+      );
       fixture = {
         schoolCode: row.school_code,
         draftStudentId: Number(row.draft_student_id),
         unassignedStudentId: Number(row.unassigned_student_id),
+        unassignedStudentExternalId: unassignedStudent.rows[0].student_id,
         formerStudentId: Number(row.former_student_id),
         profileGrade11StudentId: Number(row.profile_grade_11_student_id),
         historicalGrade12StudentId: Number(row.historical_grade_12_student_id),
@@ -114,6 +126,152 @@ test.describe("Holistic Mentorship release workflows", () => {
     } finally {
       await pool.end();
     }
+  });
+
+  test("Mentor and Admin workflows remain responsive, keyboard usable, and free of browser errors", async ({
+    holisticTeacherPage,
+    holisticAdminPage,
+  }, testInfo) => {
+    const teacherHealth = collectBrowserHealth(holisticTeacherPage);
+    const adminHealth = collectBrowserHealth(holisticAdminPage);
+
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await holisticTeacherPage.setViewportSize(viewport);
+      await openTeacherWorkspace(holisticTeacherPage);
+
+      const teacherSections = holisticTeacherPage.getByRole("tablist", {
+        name: "Holistic Mentorship sections",
+      });
+      await expect(teacherSections).toBeVisible();
+      await expect(teacherSections.getByRole("tab", { name: "Assign Students" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      );
+      await expect(holisticTeacherPage.getByRole("textbox", { name: "Search Students" })).toBeVisible();
+      await expect(holisticTeacherPage.getByRole("combobox", { name: "Filter by Grade" })).toBeVisible();
+      await expect(holisticTeacherPage.getByRole("combobox", { name: "Filter by Assignment" })).toBeVisible();
+      await expect(holisticTeacherPage.getByRole("table", { name: "Student assignment results" })).toBeVisible();
+      await expectContainedHorizontalScroll(
+        holisticTeacherPage.getByRole("table", { name: "Student assignment results" })
+      );
+      await expectNoPageOverflow(holisticTeacherPage);
+      await expectMinimumTapTarget(teacherSections.getByRole("tab", { name: "Assign Students" }));
+      await captureResponsiveScreenshot(holisticTeacherPage, testInfo, `mentor-assignment-${viewport.name}`);
+    }
+
+    await holisticTeacherPage.setViewportSize(RESPONSIVE_VIEWPORTS[0]);
+    await openTeacherWorkspace(holisticTeacherPage);
+    const teacherSections = holisticTeacherPage.getByRole("tablist", {
+      name: "Holistic Mentorship sections",
+    });
+    const assignTab = teacherSections.getByRole("tab", { name: "Assign Students" });
+    const menteesTab = teacherSections.getByRole("tab", { name: "My Mentees" });
+    await assignTab.focus();
+    await assignTab.press("ArrowRight");
+    await expect(menteesTab).toBeFocused();
+    await expect(menteesTab).toHaveAttribute("aria-selected", "true");
+    await expect(holisticTeacherPage.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
+    await menteesTab.press("Home");
+    await expect(assignTab).toBeFocused();
+    await expect(assignTab).toHaveAttribute("aria-selected", "true");
+
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await holisticTeacherPage.setViewportSize(viewport);
+      await holisticTeacherPage.goto(studentPhaseUrl(
+        fixture.profileGrade11StudentId,
+        fixture.firstGrade11PhaseId
+      ));
+      const phaseTabs = holisticTeacherPage.getByRole("tablist", { name: "Holistic Phases" });
+      await expect(phaseTabs).toBeVisible();
+      await expect(phaseTabs.getByRole("tab", { selected: true })).toBeVisible();
+      await expect(holisticTeacherPage.getByRole("heading", { name: "Student Context" })).toBeVisible();
+      await expect(holisticTeacherPage.getByRole("heading", { name: "Post-Session Notes" })).toBeVisible();
+      await expectNoPageOverflow(holisticTeacherPage);
+      await captureResponsiveScreenshot(holisticTeacherPage, testInfo, `mentor-phase-${viewport.name}`);
+    }
+
+    await holisticTeacherPage.setViewportSize(RESPONSIVE_VIEWPORTS[0]);
+    const phaseTabs = holisticTeacherPage.getByRole("tablist", { name: "Holistic Phases" });
+    const selectedPhase = phaseTabs.getByRole("tab", { selected: true });
+    const enabledPhases = phaseTabs.locator('[role="tab"]:not([aria-disabled="true"])');
+    const lastEnabledPhase = enabledPhases.last();
+    const firstEnabledPhase = enabledPhases.first();
+    await selectedPhase.focus();
+    await selectedPhase.press("End");
+    await expect(lastEnabledPhase).toBeFocused();
+    await expect(lastEnabledPhase).toHaveAttribute("aria-selected", "true");
+    await lastEnabledPhase.press("Home");
+    await expect(firstEnabledPhase).toBeFocused();
+    await expect(firstEnabledPhase).toHaveAttribute("aria-selected", "true");
+
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await holisticAdminPage.setViewportSize(viewport);
+      await openAdminProgress(holisticAdminPage);
+      const adminSections = holisticAdminPage.getByRole("tablist", {
+        name: "Holistic Mentorship sections",
+      });
+      await expect(adminSections).toBeVisible();
+      await expect(adminSections.getByRole("tab", { name: "Students & Progress" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      );
+      await expect(holisticAdminPage.getByRole("combobox", { name: "Program" })).toBeVisible();
+      await expect(holisticAdminPage.getByRole("combobox", { name: "Academic Year" })).toBeVisible();
+      await expect(holisticAdminPage.getByRole("combobox", { name: "Phase lens" })).toBeVisible();
+      await expect(holisticAdminPage.getByRole("button", { name: "Refresh" })).toBeVisible();
+      await expect(holisticAdminPage.getByRole("button", { name: "Export CSV" })).toBeVisible();
+      const progressTable = holisticAdminPage.getByRole("table", { name: "Student progress results" });
+      await expect(progressTable).toBeVisible();
+      await expect(progressTable).toHaveAttribute("aria-busy", "false");
+      await expectContainedHorizontalScroll(progressTable);
+      await captureResponsiveScreenshot(holisticAdminPage, testInfo, `admin-progress-${viewport.name}`);
+      await expectNoPageOverflow(holisticAdminPage);
+      await expectMinimumTapTarget(holisticAdminPage.getByRole("button", { name: "Refresh" }));
+      await expectMinimumTapTarget(holisticAdminPage.getByRole("button", { name: "Export CSV" }));
+    }
+
+    await holisticAdminPage.setViewportSize(RESPONSIVE_VIEWPORTS[0]);
+    await openAdminProgress(holisticAdminPage);
+    const adminSections = holisticAdminPage.getByRole("tablist", {
+      name: "Holistic Mentorship sections",
+    });
+    const progressTab = adminSections.getByRole("tab", { name: "Students & Progress" });
+    const phaseSetupTab = adminSections.getByRole("tab", { name: "Phase Setup" });
+    await progressTab.focus();
+    await progressTab.press("End");
+    await expect(phaseSetupTab).toBeFocused();
+    await expect(phaseSetupTab).toHaveAttribute("aria-selected", "true");
+    await phaseSetupTab.press("Home");
+    await expect(progressTab).toBeFocused();
+    await expect(progressTab).toHaveAttribute("aria-selected", "true");
+
+    const profileOpener = holisticAdminPage.getByRole("button", { name: /^Profile for / }).first();
+    await profileOpener.focus();
+    await profileOpener.click();
+    const profileDialog = holisticAdminPage.getByRole("dialog", { name: / Profile$/ });
+    await expect(profileDialog).toBeVisible();
+    await expect(profileDialog.getByRole("button", { name: "Close" })).toBeFocused();
+    await holisticAdminPage.keyboard.press("Shift+Tab");
+    expect(await profileDialog.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
+    await holisticAdminPage.keyboard.press("Escape");
+    await expect(profileDialog).toBeHidden();
+    await expect(profileOpener).toBeFocused();
+
+    await holisticAdminPage.setViewportSize(RESPONSIVE_VIEWPORTS[1]);
+    await phaseSetupTab.click();
+    await expect(holisticAdminPage.getByRole("region", { name: "Phase Setup" })).toBeVisible();
+    await holisticAdminPage.getByText("Synthetic Grade 11 Active", { exact: true }).click();
+    const guidanceSwitch = holisticAdminPage.getByRole("group", { name: "Guidance view" });
+    await expect(guidanceSwitch).toBeVisible();
+    const previewButton = guidanceSwitch.getByRole("button", { name: "Preview" });
+    await previewButton.click();
+    await expect(previewButton).toHaveAttribute("aria-pressed", "true");
+    await expectMinimumTapTarget(previewButton);
+    await expectNoPageOverflow(holisticAdminPage);
+    await captureResponsiveScreenshot(holisticAdminPage, testInfo, "admin-phase-setup-phone-portrait");
+
+    expectBrowserHealth(teacherHealth);
+    expectBrowserHealth(adminHealth);
   });
 
   test("Profile and Context sources follow the approved precedence", async ({
@@ -165,6 +323,8 @@ test.describe("Holistic Mentorship release workflows", () => {
     }
     await holisticTeacherPage.setViewportSize({ width: 1280, height: 800 });
     await openTeacherWorkspace(holisticTeacherPage);
+    await holisticTeacherPage.getByRole("textbox", { name: "Search Students" })
+      .fill(fixture.unassignedStudentExternalId);
     const unassigned = holisticTeacherPage.locator(`input[aria-label^="Select "]:not(:disabled)`).first();
     await expect(unassigned).toBeVisible();
     await unassigned.check();
@@ -234,9 +394,25 @@ test.describe("Holistic Mentorship release workflows", () => {
     );
     expect(progress.status()).toBe(200);
     const progressBody = await progress.json();
-    expect(progressBody.rows.some((row: { studentId: number }) => row.studentId === fixture.unassignedStudentId)).toBe(false);
-    const draftRow = progressBody.rows.find((row: { studentId: number }) => row.studentId === fixture.draftStudentId);
-    expect(draftRow).toMatchObject({ progress: "pending", phaseState: "active", answers: [] });
+    expect(progressBody.rows.some((row: { studentId: number }) => row.studentId === fixture.unassignedStudentId)).toBe(true);
+    const completedProgress = await holisticAdminPage.request.get(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=school&direction=asc" +
+      `&phase_id=${fixture.firstGrade11PhaseId}`
+    );
+    expect(completedProgress.status()).toBe(200);
+    const completedBody = await completedProgress.json();
+    const completedRow = completedBody.rows.find(
+      (row: { studentId: number }) => row.studentId === fixture.profileGrade11StudentId
+    );
+    expect(completedRow).toMatchObject({
+      phaseState: "open",
+      progress: "completed",
+      answers: [{
+        position: 1,
+        question: "Synthetic: What support will help next?",
+        answer: "Synthetic mentoring note.",
+      }],
+    });
 
     const csv = await holisticAdminPage.request.get(
       "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=student_name&direction=asc&format=csv"
@@ -268,7 +444,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticAdminPage.getByRole("tab", { name: "Students & Progress" }).click();
     await holisticAdminPage.route("**/api/holistic-mentorship/profiles/*", async (route) => {
       if (route.request().method() === "POST") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ state: "queued" }) });
+        await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ state: "queued" }) });
       } else {
         await route.continue();
       }
@@ -276,7 +452,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticAdminPage.getByRole("button", { name: /^Profile for / }).first().click();
     holisticAdminPage.once("dialog", (dialog) => dialog.accept());
     await holisticAdminPage.getByRole("button", { name: "Regenerate Profile" }).click();
-    await expect(holisticAdminPage.getByRole("status")).toHaveText("Regeneration queued.");
+    await expect(holisticAdminPage.getByText("Regeneration queued.", { exact: true })).toBeVisible();
   });
 
   test("global Admin and Holistic Admin have distinct role and deletion gates", async ({
@@ -328,10 +504,22 @@ test.describe("Holistic Mentorship release workflows", () => {
 
 async function openTeacherWorkspace(page: Page) {
   await page.goto(`/school/${fixture.schoolCode}`);
-  const tab = page.getByRole("button", { name: "Holistic Mentorship", exact: true });
+  const tab = page.getByRole("tab", { name: "Holistic Mentorship", exact: true });
   await expect(tab).toBeVisible();
   await tab.click();
-  await expect(page.getByRole("tab", { name: "Assign Students" })).toBeVisible();
+  const assignTab = page.getByRole("tab", { name: "Assign Students" });
+  await expect(assignTab).toBeVisible();
+  if (await assignTab.getAttribute("aria-selected") !== "true") await assignTab.click();
+  await expect(assignTab).toHaveAttribute("aria-selected", "true");
+}
+
+async function openAdminProgress(page: Page) {
+  await page.goto("/admin/holistic-mentorship");
+  await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
+  const progressTab = page.getByRole("tab", { name: "Students & Progress" });
+  await expect(progressTab).toBeVisible();
+  if (await progressTab.getAttribute("aria-selected") !== "true") await progressTab.click();
+  await expect(page.getByRole("table", { name: "Student progress results" })).toBeVisible();
 }
 
 function studentPhaseUrl(studentId: number, phaseId: number) {
@@ -344,5 +532,98 @@ async function apiStatus(page: Page, url: string, method: string, body: unknown)
 }
 
 async function expectNoPageOverflow(page: Page) {
-  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
+  const overflow = await page.evaluate(() => {
+    const original = { x: window.scrollX, y: window.scrollY };
+    window.scrollTo(document.documentElement.scrollWidth, original.y);
+    const horizontalPageScroll = window.scrollX;
+    window.scrollTo(original.x, original.y);
+    return {
+      horizontalPageScroll,
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      offenders: Array.from(document.querySelectorAll<HTMLElement>("body *"))
+        .map((element) => {
+          const bounds = element.getBoundingClientRect();
+          return {
+            tag: element.tagName,
+            className: element.className,
+            left: Math.round(bounds.left),
+            right: Math.round(bounds.right),
+            width: Math.round(bounds.width),
+          };
+        })
+        .filter(({ left, right }) => left < -1 || right > document.documentElement.clientWidth + 1)
+        .slice(0, 12),
+    };
+  });
+  expect(overflow.horizontalPageScroll,
+    `page scrolled ${overflow.horizontalPageScroll}px horizontally (document ${overflow.document}px, viewport ${overflow.viewport}px); offenders: ${JSON.stringify(overflow.offenders)}`)
+    .toBeLessThanOrEqual(1);
+}
+
+async function expectContainedHorizontalScroll(table: ReturnType<Page["getByRole"]>) {
+  const result = await table.evaluate((element) => {
+    const container = element.parentElement;
+    if (!container) return null;
+    const bounds = container.getBoundingClientRect();
+    return {
+      left: bounds.left,
+      right: bounds.right,
+      viewport: document.documentElement.clientWidth,
+      scrollable: container.scrollWidth > container.clientWidth,
+    };
+  });
+  expect(result).not.toBeNull();
+  expect(result!.left).toBeGreaterThanOrEqual(-1);
+  expect(result!.right).toBeLessThanOrEqual(result!.viewport + 1);
+  if (result!.viewport < 640) expect(result!.scrollable).toBe(true);
+}
+
+async function expectMinimumTapTarget(locator: ReturnType<Page["getByRole"]>) {
+  const box = await locator.boundingBox();
+  expect(box, "expected a visible tap target").not.toBeNull();
+  expect(box!.width).toBeGreaterThanOrEqual(44);
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+}
+
+async function captureResponsiveScreenshot(page: Page, testInfo: TestInfo, name: string) {
+  await page.evaluate(() => document.fonts.ready);
+  await page.addStyleTag({
+    content: "*, *::before, *::after { animation: none !important; transition: none !important; }",
+  });
+  const path = testInfo.outputPath(`${name}.png`);
+  await page.screenshot({ path, animations: "disabled", caret: "hide" });
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
+type BrowserHealth = {
+  consoleErrors: string[];
+  pageErrors: string[];
+  networkErrors: string[];
+};
+
+function collectBrowserHealth(page: Page): BrowserHealth {
+  const health: BrowserHealth = { consoleErrors: [], pageErrors: [], networkErrors: [] };
+  page.on("console", (message) => {
+    if (message.type() === "error") health.consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => health.pageErrors.push(error.message));
+  page.on("requestfailed", (request) => {
+    if (!request.url().includes("/api/holistic-mentorship/")) return;
+    const failure = request.failure()?.errorText ?? "request failed";
+    if (failure.includes("ERR_ABORTED")) return;
+    health.networkErrors.push(`${request.method()} ${request.url()} - ${failure}`);
+  });
+  page.on("response", (response) => {
+    if (response.url().includes("/api/holistic-mentorship/") && response.status() >= 500) {
+      health.networkErrors.push(`${response.request().method()} ${response.url()} - HTTP ${response.status()}`);
+    }
+  });
+  return health;
+}
+
+function expectBrowserHealth(health: BrowserHealth) {
+  expect(health.consoleErrors, "browser console errors").toEqual([]);
+  expect(health.pageErrors, "uncaught browser errors").toEqual([]);
+  expect(health.networkErrors, "Holistic Mentorship network errors").toEqual([]);
 }

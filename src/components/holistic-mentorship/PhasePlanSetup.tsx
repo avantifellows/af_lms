@@ -178,7 +178,7 @@ export default function PhasePlanSetup() {
     });
   }
 
-  if (plan === undefined) return <p className="py-12 text-center text-sm text-text-muted">Loading Phase Plan...</p>;
+  if (plan === undefined) return <p role="status" className="py-12 text-center text-sm text-text-muted">Loading Phase Plan...</p>;
 
   return (
     <section className="space-y-5" aria-label="Phase Setup">
@@ -303,7 +303,7 @@ function PhaseListItem({ phase, previous, next, index, editable, selected, busy,
   onRemove: (phase: Phase) => Promise<void>;
 }) {
   return <div className={`flex gap-3 px-2 py-3 ${selected ? "bg-selected-bg" : ""}`}>
-    <button type="button" onClick={() => onEdit(phase)} className="min-w-0 flex-1 text-left">
+    <button type="button" aria-pressed={selected} onClick={() => onEdit(phase)} className="min-w-0 flex-1 text-left">
       <span className="text-xs font-semibold text-text-muted">Phase {phase.number} · Grade {phase.grade}</span>
       <span className="block truncate text-sm font-semibold text-text-primary">{phase.title}</span>
       <span className="text-xs text-text-secondary">{phaseStatusLabel(phase)}</span>
@@ -333,11 +333,11 @@ function PhaseListActions({ phase, previous, next, index, editable, busy, onMove
   const canMoveUp = mutable && phaseIsMutable(previous, editable);
   const canMoveDown = mutable && phaseIsMutable(next, editable);
   return <div className="flex shrink-0 items-center">
-    <Button type="button" variant="icon" size="sm" title="Move up" aria-label={`Move Phase ${phase.number} up`}
+    <Button type="button" variant="icon" className="min-w-11" title="Move up" aria-label={`Move Phase ${phase.number} up`}
       disabled={!canMoveUp || busy} onClick={() => void onMove(index, -1)}><ArrowUp className="h-4 w-4" /></Button>
-    <Button type="button" variant="icon" size="sm" title="Move down" aria-label={`Move Phase ${phase.number} down`}
+    <Button type="button" variant="icon" className="min-w-11" title="Move down" aria-label={`Move Phase ${phase.number} down`}
       disabled={!canMoveDown || busy} onClick={() => void onMove(index, 1)}><ArrowDown className="h-4 w-4" /></Button>
-    <Button type="button" variant="icon" size="sm" title="Delete" aria-label={`Delete Phase ${phase.number}`}
+    <Button type="button" variant="icon" className="min-w-11" title="Delete" aria-label={`Delete Phase ${phase.number}`}
       disabled={!mutable || busy} onClick={() => void onRemove(phase)}><Trash2 className="h-4 w-4" /></Button>
   </div>;
 }
@@ -387,8 +387,9 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
       onChange={(guidanceMarkdown) => onChange({ ...draft, guidanceMarkdown })} />
     <fieldset className="space-y-2" disabled={identityReadOnly}>
       <legend className="text-sm font-semibold text-text-primary">Questions</legend>
-      {draft.questions.map((question, index) => <div key={question.id ?? index} className="flex gap-2">
-        <Input aria-label={`Question ${index + 1}`} value={question.text}
+      {draft.questions.map((question, index) => <div key={question.id ?? index}
+        className="grid grid-cols-[minmax(0,1fr)_repeat(3,2.75rem)] gap-2">
+        <Input className="min-w-0" aria-label={`Question ${index + 1}`} value={question.text}
           onChange={(event) => onChange(updateQuestion(draft, index, event.target.value))} />
         <Button type="button" variant="icon" title="Move Question up" aria-label={`Move Question ${index + 1} up`}
           disabled={index === 0} onClick={() => onChange(moveQuestion(draft, index, -1))}>
@@ -403,7 +404,7 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>)}
-      <Button type="button" variant="secondary" size="sm" disabled={draft.questions.length === 4}
+      <Button type="button" variant="secondary" disabled={draft.questions.length === 4}
         onClick={() => onChange({ ...draft, questions: [...draft.questions, { text: "" }] })}>
         <Plus className="h-4 w-4" /> Add Question
       </Button>

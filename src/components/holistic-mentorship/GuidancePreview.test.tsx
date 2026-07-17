@@ -27,7 +27,10 @@ Start with **trust** and *listen* carefully.
     expect(screen.getAllByRole("list")).toHaveLength(2);
     expect(document.querySelector("blockquote")).toHaveTextContent("Let the student lead.");
     expect(screen.getByRole("separator")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open guide" })).toHaveAttribute("href", "https://example.org/guide");
+    const guide = screen.getByRole("link", { name: /Open guide.*opens in a new tab/ });
+    expect(guide).toHaveAttribute("href", "https://example.org/guide");
+    expect(guide).toHaveAttribute("target", "_blank");
+    expect(guide).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("never renders raw HTML, images, or unsafe links", () => {

@@ -46,6 +46,12 @@ describe("ProgressWorkspace", () => {
     expect(screen.getByText("mentor@example.com")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Completed on" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Actions" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Student progress table" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("table", { name: "Student progress results" })).toHaveAttribute(
+      "aria-busy",
+      "false"
+    );
     expect(screen.getByText(/Last refreshed/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open Student One/ })).toHaveAttribute(
       "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027"
@@ -220,6 +226,29 @@ describe("ProgressWorkspace", () => {
 
     expect(screen.getByRole("button", { name: "Regenerate Profile" })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("opens Profile in a labelled native dialog, closes on cancel, and restores focus", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(
+      input.includes("/profiles/41")
+        ? new Response(JSON.stringify({ summaries: [], regeneration: null }))
+        : new Response(JSON.stringify(payload))
+    )));
+
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    const trigger = screen.getByRole("button", { name: "Profile for Student One" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole("dialog", { name: /Student One Student Profile/ });
+    expect(dialog.tagName).toBe("DIALOG");
+    expect(dialog).toHaveAttribute("open");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close" })).toHaveFocus());
+
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
   });
 
   it("waits for stored status and prevents duplicate regeneration requests", async () => {

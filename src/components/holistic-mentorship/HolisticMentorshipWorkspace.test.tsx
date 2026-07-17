@@ -1,10 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import HolisticMentorshipWorkspace from "./HolisticMentorshipWorkspace";
 
 describe("HolisticMentorshipWorkspace", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("shows the Teacher assignment and Mentee empty workspaces", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -39,7 +45,41 @@ describe("HolisticMentorshipWorkspace", () => {
       "true"
     );
     expect(await screen.findByText("No Mentees assigned yet.")).toBeInTheDocument();
-    sessionStorage.clear();
+  });
+
+  it("links the workspace tabs to their panel and supports the full keyboard pattern", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ students: [], actorUserId: 9 }),
+    }));
+    const user = userEvent.setup();
+    render(<HolisticMentorshipWorkspace mode="teacher" schoolCode="SCH001" />);
+
+    const tablist = screen.getByRole("tablist", { name: "Holistic Mentorship sections" });
+    const assign = screen.getByRole("tab", { name: "Assign Students" });
+    const mentees = screen.getByRole("tab", { name: "My Mentees" });
+    const panel = screen.getByRole("tabpanel", { name: "Assign Students" });
+    expect(tablist).toContainElement(assign);
+    expect(assign).toHaveAttribute("aria-controls", panel.id);
+    expect(panel).toHaveAttribute("aria-labelledby", assign.id);
+    expect(assign).toHaveAttribute("tabindex", "0");
+    expect(mentees).toHaveAttribute("tabindex", "-1");
+
+    assign.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(mentees).toHaveFocus();
+    expect(mentees).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "My Mentees" })).toBe(panel);
+
+    await user.keyboard("{ArrowRight}");
+    expect(assign).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(mentees).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(assign).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(mentees).toHaveFocus();
+    expect(sessionStorage.getItem("holistic-mappings-view:SCH001")).toBe("mentees");
   });
 
   it("shows the Program-wide Admin progress and setup workspaces", async () => {

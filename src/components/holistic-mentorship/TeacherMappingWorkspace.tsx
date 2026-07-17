@@ -309,14 +309,23 @@ function MappingResults({ loading, students, view, canEdit, actorUserId, selecte
   onToggle: (studentId: number) => void;
   onRemove: (student: Student) => Promise<void>;
 }) {
-  if (loading) return <p className="py-12 text-center text-sm text-text-muted">Loading Students...</p>;
+  if (loading) {
+    return <p role="status" aria-live="polite" className="py-12 text-center text-sm text-text-muted">
+      Loading Students...
+    </p>;
+  }
   if (students.length === 0) {
-    return <p className="py-12 text-center text-sm font-medium text-text-muted">
+    return <p role="status" aria-live="polite" className="py-12 text-center text-sm font-medium text-text-muted">
       {view === "assign" ? "No eligible Students to show yet." : "No Mentees assigned yet."}
     </p>;
   }
-  return <MappingTable students={students} view={view} canEdit={canEdit} actorUserId={actorUserId} selected={selected}
-    busy={busy} schoolCode={schoolCode} onToggle={onToggle} onRemove={onRemove} />;
+  return <>
+    <p role="status" aria-live="polite" className="sr-only">
+      Showing {studentCount(students.length)}.
+    </p>
+    <MappingTable students={students} view={view} canEdit={canEdit} actorUserId={actorUserId} selected={selected}
+      busy={busy} schoolCode={schoolCode} onToggle={onToggle} onRemove={onRemove} />
+  </>;
 }
 
 function MappingTable({ students, view, canEdit, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
@@ -330,8 +339,10 @@ function MappingTable({ students, view, canEdit, actorUserId, selected, busy, sc
   onToggle: (studentId: number) => void;
   onRemove: (student: Student) => Promise<void>;
 }) {
-  return <div className="overflow-x-auto border-y border-border">
-    <table className="w-full min-w-[640px] text-left text-sm">
+  const label = view === "assign" ? "Student assignment results" : "My Mentees results";
+  return <div role="region" aria-label={label} tabIndex={0}
+    className="overflow-x-auto border-y border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
+    <table aria-label={label} className="w-full min-w-[640px] text-left text-sm">
       <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
         {view === "assign" && canEdit && <th className="w-12 px-3 py-3"><span className="sr-only">Select</span></th>}
         <th className="px-3 py-3">Student</th><th className="px-3 py-3">Grade</th><th className="px-3 py-3">Current Mentor</th>
@@ -381,8 +392,10 @@ function MappingSelectCell({ view, canEdit, student, selected, mine, onToggle }:
 }) {
   if (view !== "assign" || !canEdit) return null;
   return <td className="px-3 py-3">
-    <input type="checkbox" aria-label={`Select ${student.name}`} checked={selected} disabled={mine}
-      onChange={() => onToggle(student.studentId)} />
+    <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 has-[:disabled]:cursor-not-allowed">
+      <input type="checkbox" aria-label={`Select ${student.name}`} checked={selected} disabled={mine}
+        className="h-5 w-5 accent-accent" onChange={() => onToggle(student.studentId)} />
+    </label>
   </td>;
 }
 
@@ -405,7 +418,7 @@ function MappingActionsCell({ view, student, canEdit, busy, schoolCode, onRemove
         </Link>}
         {canEdit && (
           <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-medium hover:bg-hover-bg disabled:opacity-50"
-            disabled={busy} onClick={() => void onRemove(student)}>
+            aria-label={`Remove ${student.name}`} disabled={busy} onClick={() => void onRemove(student)}>
             <UserMinus aria-hidden="true" className="h-4 w-4" /> Remove
           </button>
         )}

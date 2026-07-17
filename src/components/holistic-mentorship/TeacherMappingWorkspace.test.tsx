@@ -32,7 +32,9 @@ describe("TeacherMappingWorkspace", () => {
     const user = userEvent.setup();
 
     render(<TeacherMappingWorkspace schoolCode="SCH001" view="assign" />);
-    await user.click(await screen.findByRole("checkbox", { name: "Select Asha Rao" }));
+    const checkbox = await screen.findByRole("checkbox", { name: "Select Asha Rao" });
+    expect(checkbox.closest("label")).toHaveClass("min-h-11", "min-w-11");
+    await user.click(checkbox);
     await user.click(screen.getByRole("button", { name: "Assign 1 selected" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -45,7 +47,7 @@ describe("TeacherMappingWorkspace", () => {
       selections: [{ student_id: 41, expected_mapping_id: null }],
     });
     expect(confirm).toHaveBeenCalledWith("Assign 1 Student to yourself?");
-    expect(screen.getByRole("status")).toHaveTextContent("Assigned 1 Student to you.");
+    expect(screen.getByText("Assigned 1 Student to you.")).toHaveAttribute("role", "status");
     expect(await screen.findByText("No eligible Students to show yet.")).toBeInTheDocument();
   });
 
@@ -71,6 +73,10 @@ describe("TeacherMappingWorkspace", () => {
     expect(await screen.findByText("Available Student")).toBeInTheDocument();
     expect(screen.getByText("Another Mentee")).toBeInTheDocument();
     expect(screen.queryByText("My Mentee")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Student assignment results" }))
+      .toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("table", { name: "Student assignment results" })).toBeInTheDocument();
+    expect(screen.getByText("Showing 2 Students.")).toHaveAttribute("role", "status");
 
     await user.click(screen.getByRole("checkbox", { name: "Select Available Student" }));
     expect(screen.getByRole("button", { name: "Assign 1 selected" })).toBeInTheDocument();
@@ -195,14 +201,21 @@ describe("TeacherMappingWorkspace", () => {
     const user = userEvent.setup();
 
     render(<TeacherMappingWorkspace schoolCode="SCH001" view="mentees" />);
-    await user.click(await screen.findByRole("button", { name: "Remove" }));
+    await user.click(await screen.findByRole("button", { name: "Remove Asha Rao" }));
 
     expect(confirm).toHaveBeenCalledWith(
       "Remove Asha Rao from My Mentees? The Student will become unassigned and you will lose access to their Holistic Mentorship data."
     );
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Removed Asha Rao. The Student is now unassigned."
-    );
+    expect(await screen.findByText("Removed Asha Rao. The Student is now unassigned."))
+      .toHaveAttribute("role", "status");
+  });
+
+  it("announces that Mapping results are loading", () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => undefined)));
+
+    render(<TeacherMappingWorkspace schoolCode="SCH001" view="assign" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Students...");
   });
 
   it("refreshes ownership and announces a stale Mapping conflict", async () => {
@@ -275,6 +288,6 @@ describe("TeacherMappingWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Assign 1 selected" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to refresh the roster");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assigned 1 Student to you.")).not.toBeInTheDocument();
   });
 });

@@ -26,7 +26,7 @@ export default function GuidanceEditor({
             type="button"
             aria-pressed={mode === item}
             onClick={() => setMode(item)}
-            className={`min-h-9 rounded px-3 text-sm font-medium ${mode === item ? "bg-accent text-text-on-accent" : "text-text-secondary"}`}
+            className={`min-h-11 rounded px-3 text-sm font-medium ${mode === item ? "bg-accent text-text-on-accent" : "text-text-secondary"}`}
           >
             {item === "edit" ? "Edit" : "Preview"}
           </button>

@@ -77,10 +77,19 @@ describe("StudentPhaseWorkspace", () => {
     }} />);
 
     expect(screen.getByRole("heading", { name: "Asha Rao" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Phase 4/ })).toHaveAttribute(
+    const priorTab = screen.getByRole("tab", { name: /Phase 4/ });
+    expect(priorTab).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027"
     );
+    const inactivePanel = document.getElementById(priorTab.getAttribute("aria-controls")!);
+    expect(inactivePanel).toHaveAttribute("role", "tabpanel");
+    expect(inactivePanel).toHaveAttribute("aria-labelledby", priorTab.id);
+    expect(inactivePanel).toHaveAttribute("hidden");
+    const selectedTab = screen.getByRole("tab", { name: /Phase 5/ });
+    const phasePanel = screen.getByRole("tabpanel");
+    expect(selectedTab).toHaveAttribute("aria-controls", phasePanel.id);
+    expect(phasePanel).toHaveAttribute("aria-labelledby", selectedTab.id);
     expect(screen.getByText("From Phase 4 - Building confidence")).toBeInTheDocument();
     expect(screen.getByText("A weekly plan")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -576,8 +585,25 @@ describe("StudentPhaseWorkspace", () => {
     }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Submit Notes" }));
-    expect(screen.getByRole("textbox", { name: "First answer" })).toHaveFocus();
-    expect(screen.getByRole("textbox", { name: "First answer" })).toHaveAttribute("aria-invalid", "true");
+    const first = screen.getByRole("textbox", { name: "First answer" });
+    const second = screen.getByRole("textbox", { name: "Second answer" });
+    const validation = screen.getByRole("alert");
+    expect(first).toHaveFocus();
+    expect(first).toHaveAttribute("aria-invalid", "true");
+    expect(first).toHaveAttribute("aria-describedby", validation.id);
+    expect(second).toHaveAttribute("aria-invalid", "true");
+    expect(second).toHaveAttribute("aria-describedby", validation.id);
+
+    fireEvent.change(first, { target: { value: "First response" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Answer every Question before submitting");
+    expect(first).toHaveAttribute("aria-invalid", "false");
+    expect(first).not.toHaveAttribute("aria-describedby");
+    expect(second).toHaveAttribute("aria-describedby", validation.id);
+
+    fireEvent.change(second, { target: { value: "Second response" } });
+    expect(screen.queryByText("Answer every Question before submitting")).not.toBeInTheDocument();
+    expect(second).toHaveAttribute("aria-invalid", "false");
+    expect(second).not.toHaveAttribute("aria-describedby");
   });
 
   it("shows prior-author submitted Notes read-only with submitter and timestamps", () => {

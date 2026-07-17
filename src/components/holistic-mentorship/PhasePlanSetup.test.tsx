@@ -72,6 +72,7 @@ describe("PhasePlanSetup", () => {
     render(<PhasePlanSetup />);
 
     await user.click(await screen.findByRole("button", { name: /Saved title/ }));
+    expect(screen.getByRole("button", { name: /Saved title/ })).toHaveAttribute("aria-pressed", "true");
     const title = screen.getByLabelText("Title");
     await user.clear(title);
     await user.type(title, "Unsaved title");

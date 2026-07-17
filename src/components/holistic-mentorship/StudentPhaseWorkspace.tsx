@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { Button } from "@/components/ui/Button";
@@ -42,6 +42,8 @@ type NotesSnapshot = Pick<NotesEditorProps, "notes" | "notesRevision">;
 type NotesRouter = ReturnType<typeof useRouter>;
 type BeforeNotesNavigation = () => boolean | Promise<boolean>;
 const NOTES_REFRESH_URLS = "holistic-notes-refresh-urls";
+const SUBMIT_BLANK_ANSWER_ERROR = "Answer every Question before submitting";
+const SAVE_BLANK_ANSWER_ERROR = "Answer every Question before saving";
 
 function browserNavigation() {
   return (window as typeof window & { navigation?: BrowserNavigation }).navigation ?? null;
@@ -329,6 +331,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const [editingSubmitted, setEditingSubmitted] = useState(false);
   const [status, setStatus] = useState<NotesEditorStatus>(initialEditor.status);
   const [error, setError] = useState("");
+  const [validationError, setValidationError] = useState("");
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
   const [finalWriting, setFinalWriting] = useState(false);
@@ -339,6 +342,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const textareas = useRef<Record<number, HTMLTextAreaElement | null>>({});
   const hydratedServerRevision = useRef(initialNotesRevision(props));
   const mutationRevision = useRef(initialEditor.revision);
+  const validationErrorId = useId();
   const mutate = useNotesMutation(props, mutationRevision);
   const apiUrl = notesApiUrl(props);
   const canAutosave = canAutosaveNotes(props.editable, notesState);
@@ -372,6 +376,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setStatus(nextEditor.status);
     setEditingSubmitted(false);
     setError("");
+    setValidationError("");
     setConflict(false);
     return true;
   }, [props.questions]);
@@ -479,6 +484,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setEditingSubmitted(false);
     setStatus("idle");
     setError("");
+    setValidationError("");
     setSuccess("");
     setConflict(false);
     return true;
@@ -501,11 +507,11 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   };
   const submit = async () => {
     if (hasBlankAnswer(props.questions, answers)) {
-      setStatus("failed");
-      setError("Answer every Question before submitting");
+      setValidationError(SUBMIT_BLANK_ANSWER_ERROR);
       focusFirstBlank();
       return;
     }
+    setValidationError("");
     setFinalWriting(true);
     if (!(await flushDraft()) || !window.confirm("Submit these Post-Session Notes?")) {
       setFinalWriting(false);
@@ -532,11 +538,11 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   };
   const saveCorrection = async () => {
     if (hasBlankAnswer(props.questions, answers)) {
-      setStatus("failed");
-      setError("Answer every Question before saving");
+      setValidationError(SAVE_BLANK_ANSWER_ERROR);
       focusFirstBlank();
       return;
     }
+    setValidationError("");
     setFinalWriting(true);
     if (!window.confirm("Save changes to submitted Notes?")) {
       setFinalWriting(false);
@@ -564,6 +570,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const beginCorrection = () => {
     setEditingSubmitted(true);
     setStatus("idle");
+    setValidationError("");
     setSuccess("");
   };
   const cancelCorrection = () => {
@@ -575,13 +582,16 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setStatus("idle");
   };
   const updateAnswer = (questionId: number, answer: string) => {
-    setAnswers((current) => ({ ...current, [questionId]: answer }));
+    const nextAnswers = { ...answers, [questionId]: answer };
+    setAnswers(nextAnswers);
     setError("");
+    if (validationError && !hasBlankAnswer(props.questions, nextAnswers)) setValidationError("");
     setSuccess("");
   };
 
   return <NotesEditorContent showInputs={shouldShowNotesInputs(canAutosave, editingSubmitted)}
-    questions={props.questions} answers={answers} status={status} error={error} success={success}
+    questions={props.questions} answers={answers} status={status} error={error}
+    validationError={validationError} validationErrorId={validationErrorId} success={success}
     canEdit={canEditSubmittedNotes(props.editable, notesState)}
     canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
     editingSubmitted={editingSubmitted} disabled={finalWriting} onEdit={beginCorrection}
@@ -590,7 +600,8 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />;
 }
 
-function NotesEditorContent({ showInputs, questions, answers, status, error, success, canEdit,
+function NotesEditorContent({ showInputs, questions, answers, status, error, validationError,
+  validationErrorId, success, canEdit,
   canRetry, editingSubmitted, disabled, onEdit, onAnswerChange, onTextarea, onRetry,
   onSaveCorrection, onCancelCorrection, onSubmit }: {
   showInputs: boolean;
@@ -598,6 +609,8 @@ function NotesEditorContent({ showInputs, questions, answers, status, error, suc
   answers: Record<number, string>;
   status: NotesEditorStatus;
   error: string;
+  validationError: string;
+  validationErrorId: string;
   success: string;
   canEdit: boolean;
   canRetry: boolean;
@@ -613,6 +626,7 @@ function NotesEditorContent({ showInputs, questions, answers, status, error, suc
 }) {
   if (showInputs) {
     return <EditableNotesForm questions={questions} answers={answers} status={status} error={error}
+      validationError={validationError} validationErrorId={validationErrorId}
       canRetry={canRetry} editingSubmitted={editingSubmitted} disabled={disabled}
       onAnswerChange={onAnswerChange} onTextarea={onTextarea} onRetry={onRetry}
       onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />;
@@ -636,12 +650,15 @@ function SubmittedNotesView({ questions, answers, canEdit, onEdit }: {
   </>;
 }
 
-function EditableNotesForm({ questions, answers, status, error, canRetry, editingSubmitted,
+function EditableNotesForm({ questions, answers, status, error, validationError, validationErrorId,
+  canRetry, editingSubmitted,
   disabled, onAnswerChange, onTextarea, onRetry, onSaveCorrection, onCancelCorrection, onSubmit }: {
   questions: NotesEditorProps["questions"];
   answers: Record<number, string>;
   status: NotesEditorStatus;
   error: string;
+  validationError: string;
+  validationErrorId: string;
   canRetry: boolean;
   editingSubmitted: boolean;
   disabled: boolean;
@@ -653,26 +670,32 @@ function EditableNotesForm({ questions, answers, status, error, canRetry, editin
   onSubmit: () => Promise<void>;
 }) {
   return <>
-    {questions.map((question) => <label key={question.questionId}
-      className="block space-y-1 text-sm font-semibold text-text-secondary">
-      {question.text}
-      <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
-        aria-invalid={status === "failed" && !answers[question.questionId]?.trim()} rows={4}
+    {questions.map((question) => {
+      const invalid = Boolean(validationError && !answers[question.questionId]?.trim());
+      return <label key={question.questionId} className="block space-y-1 text-sm font-semibold text-text-secondary">
+        {question.text}
+        <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
+        aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
         disabled={disabled}
         value={answers[question.questionId] ?? ""}
         onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
         className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
-    </label>)}
-    <NotesEditorActions status={status} error={error} canRetry={canRetry} editingSubmitted={editingSubmitted}
+      </label>;
+    })}
+    <NotesEditorActions status={status} error={error} validationError={validationError}
+      validationErrorId={validationErrorId} canRetry={canRetry} editingSubmitted={editingSubmitted}
       disabled={disabled}
       onRetry={onRetry} onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />
   </>;
 }
 
-function NotesEditorActions({ status, error, canRetry, editingSubmitted, onRetry, onSaveCorrection,
+function NotesEditorActions({ status, error, validationError, validationErrorId, canRetry,
+  editingSubmitted, onRetry, onSaveCorrection,
   disabled, onCancelCorrection, onSubmit }: {
   status: NotesEditorStatus;
   error: string;
+  validationError: string;
+  validationErrorId: string;
   canRetry: boolean;
   editingSubmitted: boolean;
   disabled: boolean;
@@ -682,6 +705,9 @@ function NotesEditorActions({ status, error, canRetry, editingSubmitted, onRetry
   onSubmit: () => Promise<void>;
 }) {
   return <div className="flex min-h-11 flex-wrap items-center gap-3" aria-live="polite">
+    {validationError && <span id={validationErrorId} role="alert" className="text-sm text-danger">
+      {validationError}
+    </span>}
     {status === "saving" && <span className="text-sm text-text-muted">Saving</span>}
     {status === "saved" && <span className="text-sm font-medium text-success">Saved</span>}
     {status === "failed" && <>
@@ -740,7 +766,10 @@ export default function StudentPhaseWorkspace({
       <StudentIdentity student={detail.student} readOnly={detail.readOnly} />
       <PhaseNavigation studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
+      <InactivePhasePanels studentId={detail.student.id} phases={phases}
+        selectedPhaseId={detail.selectedPhase.phaseId} />
       <SelectedPhaseContent phase={visibleSelected} studentId={detail.student.id}
+        selectedPhase={detail.selectedPhase}
         readOnly={detail.readOnly} schoolCode={schoolCode} academicYear={academicYear}
         onSubmitted={(phaseId) => setCompletedPhaseIds((current) => new Set(current).add(phaseId))} />
     </div>
@@ -762,6 +791,25 @@ function StudentIdentity({ student, readOnly }: {
 function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string) {
   const query = new URLSearchParams({ school_code: schoolCode, academic_year: academicYear });
   return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
+}
+
+function phaseTabId(studentId: number, phase: Pick<PhaseNavigationItem, "phaseId" | "number">) {
+  return `holistic-phase-tab-${studentId}-${phase.phaseId ?? `placeholder-${phase.number}`}`;
+}
+
+function phasePanelId(studentId: number, phase: Pick<PhaseNavigationItem, "phaseId" | "number">) {
+  return `holistic-phase-panel-${studentId}-${phase.phaseId ?? `placeholder-${phase.number}`}`;
+}
+
+function InactivePhasePanels({ studentId, phases, selectedPhaseId }: {
+  studentId: number;
+  phases: HolisticStudentPhaseDetail["phases"];
+  selectedPhaseId: number | null;
+}) {
+  return <>{phases.filter((phase) =>
+    phase.phaseId !== null && "locked" in phase && !phase.locked && phase.phaseId !== selectedPhaseId
+  ).map((phase) => <div key={phase.phaseId} id={phasePanelId(studentId, phase)} role="tabpanel"
+    aria-labelledby={phaseTabId(studentId, phase)} hidden />)}</>;
 }
 
 function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear }: {
@@ -802,7 +850,8 @@ function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYe
   academicYear: string;
 }) {
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
-    return <button type="button" role="tab" aria-disabled="true" aria-selected="false" disabled
+    return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
+      aria-disabled="true" aria-selected="false" tabIndex={-1} disabled
       className="min-h-11 shrink-0 rounded-md border border-border bg-bg-card-alt px-3 text-left text-sm text-text-muted opacity-60">
       <span className="block font-semibold">Phase {phase.number}</span>
       <span className="block max-w-40 truncate text-xs">{phase.title}</span>
@@ -813,7 +862,8 @@ function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYe
     ? "border-accent bg-accent text-text-on-accent"
     : "border-border bg-bg-card text-text-secondary hover:bg-hover-bg";
   return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear)}
-    role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
+    id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
+    aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${phaseStage(phase)}`}
     className={`min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm ${className}`}>
     <span className="block font-semibold">Phase {phase.number}</span>
@@ -822,8 +872,9 @@ function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYe
   </Link>;
 }
 
-function SelectedPhaseContent({ phase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
+function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
   phase: OpenSelectedPhase | null;
+  selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
   studentId: number;
   readOnly: boolean;
   schoolCode: string;
@@ -831,10 +882,16 @@ function SelectedPhaseContent({ phase, studentId, readOnly, schoolCode, academic
   onSubmitted: (phaseId: number) => void;
 }) {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
+  const tabId = phaseTabId(studentId, selectedPhase);
+  const panelId = phasePanelId(studentId, selectedPhase);
   if (!phase) {
-    return <p className="border-y border-border py-10 text-center text-sm text-text-muted">This Phase is locked.</p>;
+    return <p id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
+      className="border-y border-border py-10 text-center text-sm text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      This Phase is locked.
+    </p>;
   }
-  return <>
+  return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
+    className="space-y-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <PhaseHeading phase={phase} />
     <div role="group" aria-label="Preparation panel" className="grid grid-cols-2 rounded-md border border-border lg:hidden">
       <button type="button" aria-pressed={mobilePanel === "context"}
@@ -858,7 +915,7 @@ function SelectedPhaseContent({ phase, studentId, readOnly, schoolCode, academic
     <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
       phase={phase} studentId={studentId} readOnly={readOnly}
       schoolCode={schoolCode} academicYear={academicYear} onSubmitted={() => onSubmitted(phase.phaseId)} />
-  </>;
+  </section>;
 }
 
 function PhaseHeading({ phase }: { phase: OpenSelectedPhase }) {

@@ -16,7 +16,10 @@ export default function GuidancePreview({ markdown }: { markdown: string }) {
           hr: () => <hr className="border-border" />,
           img: () => null,
           a: ({ href, children }) => href && /^https?:\/\//i.test(href)
-            ? <a href={href} target="_blank" rel="noreferrer" className="font-medium text-accent underline">{children}</a>
+            ? <a href={href} target="_blank" rel="noopener noreferrer"
+                className="font-medium text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                {children}<span className="sr-only"> (opens in a new tab)</span>
+              </a>
             : <>{children}</>,
         }}
       >

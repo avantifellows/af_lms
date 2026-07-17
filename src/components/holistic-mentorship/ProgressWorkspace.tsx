@@ -2,7 +2,7 @@
 
 import { Download, ExternalLink, RefreshCw, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
@@ -240,7 +240,7 @@ export default function ProgressWorkspace() {
   };
 
   return (
-    <div className="min-w-0 max-w-full space-y-5">
+    <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressCounts counts={data.counts} />
       <ProgressFilterPanel
         filters={filters}
@@ -282,7 +282,7 @@ function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
     ["No active phase", counts.noActivePhase],
   ];
   return <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-5">
-    {items.map(([label, value]) => <div key={label} className="bg-bg-card px-4 py-3">
+    {items.map(([label, value]) => <div key={label} className="bg-bg-card px-4 py-3 last:col-span-2 sm:last:col-span-1">
       <p className="text-xs font-medium text-text-muted">{label}</p>
       <p className="mt-1 text-2xl font-semibold text-text-primary">{value}</p>
     </div>)}
@@ -317,41 +317,41 @@ function ProgressFilterPanel({
   onDirectionChange: () => void;
 }) {
   return <div className="space-y-3 border-y border-border py-4">
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <label className="relative sm:col-span-2">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <label className="relative min-w-0 sm:col-span-2">
         <span className="sr-only">Search Students</span>
         <Search aria-hidden="true" className="absolute left-3 top-3 h-5 w-5 text-text-muted" />
         <input className="min-h-11 w-full rounded-md border border-border bg-bg pl-10 pr-3 text-sm" value={filters.search}
           onChange={onChange("search")} placeholder="Student name or external ID" />
       </label>
-      <label className="text-xs font-medium text-text-muted">
+      <label className="min-w-0 text-xs font-medium text-text-muted">
         Program
         <select aria-label="Program" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm text-text-primary" value={PROGRAM_IDS.COE} disabled>
           <option value={PROGRAM_IDS.COE}>{PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE]} (Program {PROGRAM_IDS.COE})</option>
         </select>
       </label>
-      <label className="text-xs font-medium text-text-muted">
+      <label className="min-w-0 text-xs font-medium text-text-muted">
         Academic Year
         <select aria-label="Academic Year" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm text-text-primary" value={filters.academicYear} onChange={onAcademicYearChange}>
           {academicYears.map((year) => <option key={year}>{year}</option>)}
         </select>
       </label>
-      <select aria-label="Phase lens" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.phase} onChange={onChange("phase")}>
+      <select aria-label="Phase lens" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.phase} onChange={onChange("phase")}>
         <option value="">Active Phase for each Grade</option>
         {options.phases.map((item) => <option key={item.id} value={item.id}>Phase {item.number}: {item.title} (Grade {item.grade})</option>)}
       </select>
-      <select aria-label="Filter by School" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.school} onChange={onChange("school")}>
+      <select aria-label="Filter by School" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.school} onChange={onChange("school")}>
         <option value="">All Schools</option>
         {options.schools.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
       </select>
-      <select aria-label="Filter by Grade" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.grade} onChange={onChange("grade")}>
+      <select aria-label="Filter by Grade" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.grade} onChange={onChange("grade")}>
         <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
       </select>
-      <select aria-label="Filter by Mentor" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.mentor} onChange={onChange("mentor")}>
+      <select aria-label="Filter by Mentor" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.mentor} onChange={onChange("mentor")}>
         <option value="">All Mentors</option>
         {options.mentors.map((item) => <option key={item.userId} value={item.userId}>{item.name}</option>)}
       </select>
-      <select aria-label="Filter by Progress" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.progress} onChange={onChange("progress")}>
+      <select aria-label="Filter by Progress" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.progress} onChange={onChange("progress")}>
         <option value="">All Progress</option><option value="pending">Pending</option><option value="completed">Completed</option>
         <option value="skipped">Skipped</option><option value="no_active_phase">No active phase</option>
       </select>
@@ -359,21 +359,21 @@ function ProgressFilterPanel({
     {filters.academicYear !== CURRENT_ACADEMIC_YEAR &&
       <p className="text-sm font-medium text-text-muted">Earlier academic years are read-only.</p>}
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2 text-xs text-text-muted">
-        <span>{refreshedAt ? `Last refreshed ${new Date(refreshedAt).toLocaleString()}` : "Not refreshed"}</span>
-        <Button variant="icon" size="sm" aria-label="Refresh" onClick={onRefresh} disabled={loading}>
-          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-muted">
+        <span aria-live="polite" className="min-w-0 break-words">{refreshedAt ? `Last refreshed ${new Date(refreshedAt).toLocaleString()}` : "Not refreshed"}</span>
+        <Button className="min-w-11" variant="icon" aria-label="Refresh" onClick={onRefresh} disabled={loading}>
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 motion-reduce:animate-none ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
-      <div className="flex items-center gap-2">
-        <select aria-label="Sort results" className="min-h-9 rounded-md border border-border bg-bg px-2 text-xs" value={filters.sort} onChange={onChange("sort")}>
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+        <select aria-label="Sort results" className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-bg px-2 text-xs sm:flex-none" value={filters.sort} onChange={onChange("sort")}>
           <option value="student_name">Student</option><option value="school">School</option><option value="grade">Grade</option>
           <option value="mentor">Mentor</option><option value="phase">Phase</option><option value="progress">Progress</option>
         </select>
-        <button type="button" className="min-h-9 rounded-md border border-border px-3 text-xs" onClick={onDirectionChange}>
+        <button type="button" className="min-h-11 rounded-md border border-border px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={onDirectionChange}>
           {filters.direction === "asc" ? "Ascending" : "Descending"}
         </button>
-        <Button type="button" variant="secondary" size="sm" onClick={onExport} disabled={exporting}>
+        <Button type="button" variant="secondary" onClick={onExport} disabled={exporting}>
           <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
         </Button>
       </div>
@@ -395,12 +395,13 @@ function ProgressResults({
   hasMappings: boolean;
   onOpenProfile: (row: Row) => void;
 }) {
-  return <div aria-label="Student progress results" className="w-full min-w-0 max-w-full overflow-x-auto border-y border-border">
-    <table className="w-full min-w-[1200px] text-left text-sm">
+  return <div role="region" aria-label="Student progress table" tabIndex={0}
+    className="w-full min-w-0 max-w-full overflow-x-auto border-y border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
+    <table aria-busy={loading} aria-label="Student progress results" className="w-full min-w-[1200px] text-left text-sm">
       <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
         <th className="px-3 py-3">Student</th><th className="px-3 py-3">School</th><th className="px-3 py-3">Grade</th>
         <th className="px-3 py-3">Mentor</th><th className="px-3 py-3">Phase</th><th className="px-3 py-3">Availability</th>
-        <th className="px-3 py-3">Progress</th><th className="px-3 py-3">Completed on</th><th className="px-3 py-3"><span className="sr-only">Actions</span></th>
+        <th className="px-3 py-3">Progress</th><th className="px-3 py-3">Completed on</th><th className="px-3 py-3">Actions</th>
       </tr></thead>
       <tbody className="divide-y divide-border">
         <ProgressRows rows={rows} loading={loading} academicYear={academicYear} hasMappings={hasMappings} onOpenProfile={onOpenProfile} />
@@ -417,7 +418,7 @@ function ProgressRows({ rows, loading, academicYear, hasMappings, onOpenProfile 
   onOpenProfile: (row: Row) => void;
 }) {
   if (loading && rows.length === 0) {
-    return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted">Loading mapped Students...</td></tr>;
+    return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
   }
   if (rows.length === 0) {
     return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted">
@@ -471,10 +472,10 @@ function ProgressActions({ row, academicYear, onOpenProfile }: {
   onOpenProfile: (row: Row) => void;
 }) {
   return <div className="flex justify-end gap-1">
-    <Button variant="icon" size="sm" aria-label={`Profile for ${row.studentName}`} onClick={() => onOpenProfile(row)}>
+    <Button className="min-w-11" variant="icon" aria-label={`Profile for ${row.studentName}`} onClick={() => onOpenProfile(row)}>
       <Sparkles aria-hidden="true" className="h-4 w-4" />
     </Button>
-    {row.phaseId && <Link aria-label={`Open ${row.studentName}`} className="inline-flex min-h-9 items-center rounded-md p-2 text-accent hover:bg-hover-bg"
+    {row.phaseId && <Link aria-label={`Open ${row.studentName}`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md p-2 text-accent hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({ school_code: row.schoolCode, academic_year: academicYear })}`}>
       <ExternalLink aria-hidden="true" className="h-4 w-4" />
     </Link>}
@@ -486,11 +487,11 @@ function ProgressPagination({ page, totalPages, onPageChange }: {
   totalPages: number;
   onPageChange: React.Dispatch<React.SetStateAction<number>>;
 }) {
-  return <div className="flex items-center justify-between text-sm">
+  return <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
     <span className="text-text-muted">Page {page} of {totalPages}</span>
     <div className="flex gap-2">
-      <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onPageChange((value) => value - 1)}>Previous</Button>
-      <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => onPageChange((value) => value + 1)}>Next</Button>
+      <Button variant="secondary" disabled={page <= 1} onClick={() => onPageChange((value) => value - 1)}>Previous</Button>
+      <Button variant="secondary" disabled={page >= totalPages} onClick={() => onPageChange((value) => value + 1)}>Next</Button>
     </div>
   </div>;
 }
@@ -538,31 +539,90 @@ function useProfilePanel(student: Row, academicYear: string) {
 function ProfilePanel({ student, academicYear, onClose }: { student: Row; academicYear: string; onClose: () => void }) {
   const panel = useProfilePanel(student, academicYear);
   const running = panel.profile?.regeneration?.state === "running";
-  return <div role="dialog" aria-modal="true" aria-label={`${student.studentName} Profile`} className="fixed inset-0 z-50 flex justify-end bg-black/30">
-    <div className="h-full w-full max-w-xl overflow-y-auto bg-bg-card p-6 shadow-xl">
-      <div className="flex items-start justify-between gap-4 border-b border-border pb-4"><div><h2 className="text-lg font-semibold">{student.studentName}</h2><p className="text-sm text-text-muted">Student Profile</p></div>
-        <Button variant="secondary" size="sm" onClick={onClose}>Close</Button></div>
-      <div className="space-y-4 py-5">
-        <ProfilePanelContent {...panel} />
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={!panel.statusKnown || panel.submitting || running} onClick={panel.regenerate} aria-busy={panel.submitting}>
-            <RefreshCw aria-hidden="true" className="h-4 w-4" /> Regenerate Profile
-          </Button>
-          <Button variant="secondary" disabled={panel.loading || panel.submitting} onClick={() => void panel.load()}>
-            Refresh Status
-          </Button>
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const handledClose = useRef(false);
+  const onCloseRef = useRef(onClose);
+  const titleId = useId();
+  const subtitleId = useId();
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  const finishClose = useCallback(() => {
+    if (handledClose.current) return;
+    handledClose.current = true;
+    onCloseRef.current();
+  }, []);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (dialog && !dialog.open) {
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+    }
+    closeButtonRef.current?.focus();
+    return () => { openerRef.current?.focus(); };
+  }, []);
+
+  const requestClose = () => {
+    const dialog = dialogRef.current;
+    if (dialog?.open && typeof dialog.close === "function") dialog.close();
+    finishClose();
+  };
+
+  const keepFocusInDialog = (event: React.KeyboardEvent<HTMLDialogElement>) => {
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => element.getClientRects().length > 0);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return <dialog
+    ref={dialogRef}
+    aria-modal="true"
+    aria-labelledby={`${titleId} ${subtitleId}`}
+    className="fixed inset-0 z-50 m-0 h-dvh max-h-none w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent"
+    onClose={finishClose}
+    onCancel={(event) => { event.preventDefault(); requestClose(); }}
+    onKeyDown={keepFocusInDialog}
+  >
+    <div className="flex h-full justify-end bg-black/30">
+      <div className="h-full w-full max-w-xl min-w-0 overflow-y-auto overscroll-contain bg-bg-card p-4 shadow-xl sm:p-6">
+        <div className="flex items-start justify-between gap-4 border-b border-border pb-4"><div className="min-w-0"><h2 id={titleId} className="break-words text-lg font-semibold">{student.studentName}</h2><p id={subtitleId} className="text-sm text-text-muted">Student Profile</p></div>
+          <Button ref={closeButtonRef} className="shrink-0" variant="secondary" onClick={requestClose}>Close</Button></div>
+        <div className="space-y-4 py-5">
+          <ProfilePanelContent {...panel} />
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={!panel.statusKnown || panel.submitting || running} onClick={panel.regenerate} aria-busy={panel.submitting}>
+              <RefreshCw aria-hidden="true" className="h-4 w-4" /> Regenerate Profile
+            </Button>
+            <Button variant="secondary" disabled={panel.loading || panel.submitting} onClick={() => void panel.load()}>
+              Refresh Status
+            </Button>
+          </div>
         </div>
       </div>
     </div>
-  </div>;
+  </dialog>;
 }
 
 function ProfilePanelContent({ profile, loading, loadError, actionMessage }: ReturnType<typeof useProfilePanel>) {
   return <>
     {profile?.regeneration && <p className="text-sm">Regeneration status: <Badge variant={regenerationVariant(profile.regeneration.state)}>{profile.regeneration.state}</Badge></p>}
-    {loading && <p className="text-sm text-text-muted">Refreshing Profile status...</p>}
+    {loading && <p role="status" className="text-sm text-text-muted">Refreshing Profile status...</p>}
     {profile?.summaries.length === 0 && <p className="text-sm text-text-muted">Profile unavailable for the Active configuration.</p>}
-    {profile?.summaries.map((summary) => <section key={summary.position} className="border-b border-border pb-4"><h3 className="text-sm font-semibold">{summary.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{summary.summary}</p></section>)}
+    {profile?.summaries.map((summary) => <section key={summary.position} className="min-w-0 border-b border-border pb-4"><h3 className="break-words text-sm font-semibold">{summary.title}</h3><p className="mt-1 break-words whitespace-pre-wrap text-sm text-text-secondary">{summary.summary}</p></section>)}
     {loadError && <p role="alert" className="text-sm text-danger">{loadError}</p>}
     {actionMessage && <p role={actionMessage.error ? "alert" : "status"} className={actionMessage.error ? "text-sm text-danger" : "text-sm text-text-secondary"}>{actionMessage.text}</p>}
   </>;
