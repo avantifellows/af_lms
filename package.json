@@ -13,6 +13,8 @@
     "fallow:health": "fallow health --score --hotspots --targets",
     "db:setup-permissions": "npx ts-node scripts/setup-permissions.ts",
     "centres:import": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-centres.ts",
+    "holistic:import-history": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-holistic-historical-notes.ts",
+    "holistic:rollover": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/rollover-holistic-mappings.ts",
     "staff:clear-seated-scope": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/clear-seated-school-codes.ts",
     "centres:seed-options": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-centre-options.ts",
     "curriculum:seed-dummy": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-curriculum-dummy-data.ts",

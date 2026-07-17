@@ -249,4 +249,21 @@ describe("requireHolisticMentorshipAccess", () => {
       expect(mockQuery).toHaveBeenCalledTimes(1);
     }
   );
+
+  it.each(["holistic_mentorship_admin", "teacher", "program_manager", "program_admin"] as const)(
+    "denies %s approved privacy deletion",
+    async (role) => {
+      mockQuery.mockResolvedValueOnce([permissionRow(role)]);
+      await expect(requireHolisticMentorshipAccess(
+        { user: { email: `${role}@example.com` } }, "privacy_delete"
+      )).resolves.toMatchObject({ ok: false, status: 403 });
+    }
+  );
+
+  it("allows only a writable global Admin to execute approved privacy deletion", async () => {
+    mockQuery.mockResolvedValueOnce([permissionRow("admin")]);
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "admin@example.com" } }, "privacy_delete"
+    )).resolves.toMatchObject({ ok: true, canEdit: true });
+  });
 });
