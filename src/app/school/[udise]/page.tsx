@@ -1,7 +1,7 @@
 import { query } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { getServerSession } from "next-auth";
+import { getServerSession, type Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   getAcademicMentorshipActorUserId,
@@ -292,6 +292,75 @@ function SchoolAccessMessage({
       </Card>
     </div>
   );
+}
+
+async function resolveSchoolPermission(
+  session: Session
+): Promise<UserPermission | null> {
+  if (session.isPasscodeUser || !session.user?.email) return null;
+  return getResolvedPermission(session.user.email);
+}
+
+function getSchoolIdentityAccessMessage(
+  session: Session,
+  permission: UserPermission | null,
+  school: School
+): ReactNode | null {
+  if (session.isPasscodeUser && session.schoolCode !== school.code) {
+    return (
+      <SchoolAccessMessage
+        title="Access Denied"
+        message="Your passcode only grants access to a different school."
+        href="/"
+      />
+    );
+  }
+  if (
+    !session.isPasscodeUser &&
+    (!permission || !canAccessSchoolSync(permission, school.code, school.region || undefined))
+  ) {
+    return (
+      <SchoolAccessMessage
+        title="Access Denied"
+        message="You don't have permission to view this school."
+        href="/dashboard"
+      />
+    );
+  }
+  return null;
+}
+
+function getProgramAccessMessage(
+  session: Session,
+  programContext: ProgramPermissionContext
+): ReactNode | null {
+  if (session.isPasscodeUser || programContext.hasAccess) return null;
+  return (
+    <SchoolAccessMessage
+      title="No Program Access"
+      message="You are not assigned to any programs. Please contact an administrator."
+      href="/dashboard"
+    />
+  );
+}
+
+function redirectHolisticMentorshipAdmin(permission: UserPermission | null): void {
+  if (permission?.role === "holistic_mentorship_admin") {
+    redirect("/admin/holistic-mentorship");
+  }
+}
+
+function getSchoolNavigation(
+  session: Session,
+  permission: UserPermission | null
+): { backHref?: string; userEmail?: string } {
+  const multipleSchools = !session.isPasscodeUser && hasMultipleSchools(permission);
+  return {
+    backHref: multipleSchools ? "/dashboard" : undefined,
+    userEmail: session.isPasscodeUser
+      ? `School ${session.schoolCode}`
+      : session.user?.email || undefined,
+  };
 }
 
 function EnrollmentSchoolTab({
@@ -591,56 +660,17 @@ export default async function SchoolPage({ params }: PageProps) {
     notFound();
   }
 
-  // Check permissions
-  const isPasscodeUser = session.isPasscodeUser;
-  const passcodeSchoolCode = session.schoolCode;
+  const permission = await resolveSchoolPermission(session);
+  const identityAccessMessage = getSchoolIdentityAccessMessage(session, permission, school);
+  if (identityAccessMessage) return identityAccessMessage;
+  redirectHolisticMentorshipAdmin(permission);
 
-  if (isPasscodeUser && passcodeSchoolCode !== school.code) {
-    return (
-      <SchoolAccessMessage
-        title="Access Denied"
-        message="Your passcode only grants access to a different school."
-        href="/"
-      />
-    );
-  }
-
-  // Single DB call for permission — reuse everywhere
-  const permission = !isPasscodeUser && session.user?.email
-    ? await getResolvedPermission(session.user.email)
-    : null;
-
-  if (!isPasscodeUser && (
-    !permission || !canAccessSchoolSync(permission, school.code, school.region || undefined)
-  )) {
-    return (
-      <SchoolAccessMessage
-        title="Access Denied"
-        message="You don't have permission to view this school."
-        href="/dashboard"
-      />
-    );
-  }
-
-  if (permission?.role === "holistic_mentorship_admin") {
-    redirect("/admin/holistic-mentorship");
-  }
-
-  // Derive everything from the single permission object — no extra DB calls
   const programContext = getProgramContextSync(permission);
-
-  if (!isPasscodeUser && !programContext.hasAccess) {
-    return (
-      <SchoolAccessMessage
-        title="No Program Access"
-        message="You are not assigned to any programs. Please contact an administrator."
-        href="/dashboard"
-      />
-    );
-  }
+  const programAccessMessage = getProgramAccessMessage(session, programContext);
+  if (programAccessMessage) return programAccessMessage;
 
   // Derive feature access from the permission matrix
-  const opts = { isPasscodeUser };
+  const opts = { isPasscodeUser: session.isPasscodeUser };
   const studentsAccess = getFeatureAccess(permission, "students", opts);
   const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
@@ -661,15 +691,14 @@ export default async function SchoolPage({ params }: PageProps) {
 
   const nvsStreams = getDistinctNVSStreams(batches);
   const isAdmin = permission?.role === "admin";
-  const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
-  const backHref = multipleSchools ? "/dashboard" : undefined;
+  const navigation = getSchoolNavigation(session, permission);
   const enrollmentContent = (
     <EnrollmentSchoolTab
       students={dedupedStudents}
       dataIssues={dataIssues}
       studentsAccess={studentsAccess}
       programContext={programContext}
-      isPasscodeUser={Boolean(isPasscodeUser)}
+      isPasscodeUser={Boolean(session.isPasscodeUser)}
       isAdmin={isAdmin}
       grades={grades}
       batches={batches}
@@ -700,10 +729,7 @@ export default async function SchoolPage({ params }: PageProps) {
     <SchoolPageLayout
       school={school}
       tabs={tabs}
-      backHref={backHref}
-      userEmail={isPasscodeUser
-        ? `School ${passcodeSchoolCode}`
-        : session.user?.email || undefined}
+      {...navigation}
     />
   );
 }
