@@ -71,12 +71,12 @@ export default function BulkStudentUploadModal({
   const [results, setResults] = useState<UploadResult[]>([]);
 
   const rejectedCsvHref = useMemo(() => {
-    if (!results.some((result) => result.status === "rejected")) return null;
-    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results))}`;
-  }, [results]);
+    if (!results.some((result) => result.status !== "created")) return null;
+    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results, schoolCode))}`;
+  }, [results, schoolCode]);
 
-  const done = (totals?.created ?? 0) + (totals?.already_exists ?? 0);
-  const toGo = (totals?.duplicate_in_file ?? 0) + (totals?.rejected ?? 0);
+  const done = totals?.created ?? 0;
+  const toGo = (totals?.total ?? 0) - done;
 
   useEffect(() => {
     if (!open) {

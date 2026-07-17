@@ -292,4 +292,10 @@ describe("formatStudentAdditionExistingMatch", () => {
       ),
     ).toContain("Student ID: 2028AB12Z | PEN: 12345678901 | APAAR: 123456789012");
   });
+
+  it("does not claim a same-school match when school details are unavailable", () => {
+    expect(
+      formatStudentAdditionExistingMatch({ student_id: "2028AB12Z" }, "JNV001"),
+    ).toBe("This student already exists. Student ID: 2028AB12Z.");
+  });
 });

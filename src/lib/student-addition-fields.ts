@@ -154,7 +154,7 @@ export function formatStudentAdditionExistingMatch(
     matchText(match.apaar_id) ? `APAAR: ${matchText(match.apaar_id)}` : "",
   ].filter(Boolean).join(" | ");
 
-  if (schoolCode && (!matchSchoolCode || matchSchoolCode === schoolCode)) {
+  if (schoolCode && matchSchoolCode === schoolCode) {
     return `This student is already part of this school. ${identities}.`;
   }
   if (!matchSchoolCode) {
@@ -183,13 +183,18 @@ function formatFieldErrors(errors: Record<string, string> | undefined): string {
     .join("; ");
 }
 
-export function buildRejectedRowsCsv(results: StudentAdditionCsvResult[]): string {
+export function buildRejectedRowsCsv(
+  results: StudentAdditionCsvResult[],
+  schoolCode?: string,
+): string {
   const headers = [
     "Original Row Number",
     "Row Status",
     ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label),
     "Field Errors",
     "Row Errors",
+    "Issue",
+    "Existing School Relationship",
     "Matched Identifier",
     "Existing Student ID",
     "Existing PEN Number",
@@ -206,16 +211,31 @@ export function buildRejectedRowsCsv(results: StudentAdditionCsvResult[]): strin
   ];
 
   const rows = results
-    .filter((result) => result.status === "rejected")
+    .filter((result) => result.status !== "created")
     // fallow-ignore-next-line complexity
     .map((result) => {
       const existing = result.existing_match ?? {};
+      const existingSchoolCode = matchText(existing.school_code);
+      const schoolRelationship = result.status === "already_exists"
+        ? !existingSchoolCode
+          ? "Unknown"
+          : existingSchoolCode === schoolCode
+            ? "Same school"
+            : "Different school"
+        : "";
+      const issue = result.status === "already_exists"
+        ? formatStudentAdditionExistingMatch(existing, schoolCode)
+        : result.status === "duplicate_in_file"
+          ? "Duplicate row in uploaded file"
+          : "";
       return [
         result.row_number ?? "",
         result.status ?? "",
         ...STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => result.original?.[column.label] ?? ""),
         formatFieldErrors(result.field_errors),
         (result.row_errors ?? []).join("; "),
+        issue,
+        schoolRelationship,
         existing.matched_identifier ?? "",
         existing.student_id ?? "",
         existing.pen_number ?? "",

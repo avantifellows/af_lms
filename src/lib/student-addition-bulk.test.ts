@@ -307,13 +307,19 @@ describe("parseStudentAdditionUpload", () => {
         row_number: 4,
         status: "already_exists",
         original: { "Student Name": "Already Present Row" },
+        existing_match: {
+          student_id: "202812345679",
+          student_name: "Existing Student",
+          school_name: "JNV Other",
+          school_code: "JNV999",
+        },
       },
       {
         row_number: 5,
         status: "duplicate_in_file",
         original: { "Student Name": "Duplicate Student" },
       },
-    ]);
+    ], "JNV001");
 
     expect(csv).toContain("Original Row Number,Row Status");
     expect(csv).toContain("Bad Student");
@@ -323,8 +329,12 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).toContain("Existing PEN Number,Existing APAAR ID");
     expect(csv).toContain("12345678901,123456789012");
     expect(csv).not.toContain("Created Student");
-    expect(csv).not.toContain("Already Present Row");
-    expect(csv).not.toContain("Duplicate Student");
+    expect(csv).toContain("Already Present Row");
+    expect(csv).toContain("Duplicate Student");
+    expect(csv).toContain("Existing School Relationship");
+    expect(csv).toContain("Different school");
+    expect(csv).toContain("This identifier already belongs to Existing Student at JNV Other (JNV999)");
+    expect(csv).toContain("Duplicate row in uploaded file");
   });
 
   it("round-trips a PEN-based rejected CSV with its original row number", async () => {

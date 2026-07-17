@@ -85,7 +85,7 @@ describe("BulkStudentUploadModal", () => {
     );
   });
 
-  it("does not expose a rejected rows CSV when results only contain skipped rows", async () => {
+  it("counts every uncreated row as to go and includes skipped rows in the rejected CSV", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -126,10 +126,13 @@ describe("BulkStudentUploadModal", () => {
     );
     await user.click(screen.getByRole("button", { name: "Upload students" }));
 
-    await waitFor(() => expect(screen.getByText("1 done, 1 to go")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("0 done, 2 to go")).toBeInTheDocument());
     expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
     expect(screen.getByText(/JNV999, UDISE 99999999999/)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Download rejected rows CSV" })).not.toBeInTheDocument();
+    const download = screen.getByRole("link", { name: "Download rejected rows CSV" });
+    expect(download).toHaveAttribute("href", expect.stringContaining("Existing"));
+    expect(download).toHaveAttribute("href", expect.stringContaining("Duplicate"));
+    expect(download).toHaveAttribute("href", expect.stringContaining("Different%20school"));
   });
 
   it("uses school code for same-school duplicate messages", async () => {
@@ -168,6 +171,10 @@ describe("BulkStudentUploadModal", () => {
     await waitFor(() => {
       expect(screen.getByText(/already part of this school/)).toBeInTheDocument();
     });
+    expect(screen.getByRole("link", { name: "Download rejected rows CSV" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("Same%20school"),
+    );
   });
 
   it("resets upload state when reopened", async () => {
