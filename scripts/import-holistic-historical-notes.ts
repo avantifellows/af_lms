@@ -1,39 +1,31 @@
-import * as dotenv from "dotenv";
 import { readFile } from "node:fs/promises";
 
+import { createHolisticOperationsDb } from "../src/lib/holistic-operations-db";
+import { runHistoricalHolisticNotesImport } from "../src/lib/holistic-operations";
 import type { HistoricalHolisticNoteSource } from "../src/lib/holistic-operations";
-
-function value(args: string[], name: string): string | undefined {
-  return args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-}
+import {
+  configureHolisticScriptEnvironment,
+  getHolisticOperationMode,
+  getHolisticScriptArgument,
+  isHistoricalHolisticNotesSource,
+  runHolisticScript,
+} from "../src/lib/holistic-script";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const sourcePath = value(args, "--source");
-  if (args.includes("--apply") && args.includes("--dry-run")) {
-    throw new Error("Use either --apply or --dry-run, not both");
-  }
-  const mode = args.includes("--apply") ? "apply" : "dry-run";
-  const actorUserId = Number(value(args, "--actor-user-id"));
-  const sourceSnapshot = value(args, "--source-snapshot");
-  if (!sourcePath) throw new Error("--source=<private-json-export> is required");
-  if (mode === "apply" && (!Number.isSafeInteger(actorUserId) || actorUserId < 1 || !sourceSnapshot)) {
-    throw new Error("Apply requires --actor-user-id and --source-snapshot");
-  }
-  dotenv.config({ path: value(args, "--env-file") ?? ".env.local", quiet: true });
-  const parsed: unknown = JSON.parse(await readFile(sourcePath, "utf8"));
-  if (!Array.isArray(parsed) || parsed.some((record) => !isSourceRecord(record))) {
-    throw new Error("Source must be a JSON array of grouped Historical Notes records");
-  }
-  const source: HistoricalHolisticNoteSource[] = parsed;
-  const [{ runHistoricalHolisticNotesImport }, { historicalImportDb }, db] = await Promise.all([
-    import("../src/lib/holistic-operations"),
-    import("../src/lib/holistic-operations-db"),
-    import("../src/lib/db"),
-  ]);
+  const options = parseOptions(args);
+  configureHolisticScriptEnvironment(args, ".env.local");
+  const source = await readSource(options.sourcePath);
+  const db = await import("../src/lib/db");
+  const operationsDb = createHolisticOperationsDb(db);
+
   try {
     const report = await runHistoricalHolisticNotesImport({
-      mode, actorUserId, sourceSnapshot, source: { read: async () => source }, db: historicalImportDb,
+      mode: options.mode,
+      actorUserId: options.actorUserId,
+      sourceSnapshot: options.sourceSnapshot,
+      source: { read: async () => source },
+      db: operationsDb.historicalImport,
     });
     console.log(JSON.stringify(report));
     if (!report.ok) process.exitCode = 1;
@@ -42,21 +34,32 @@ async function main(): Promise<void> {
   }
 }
 
-function isSourceRecord(value: unknown): value is HistoricalHolisticNoteSource {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.businessStudentId === "string" && record.businessStudentId.length > 0 &&
-    typeof record.sourceRecordKey === "string" && record.sourceRecordKey.length > 0 &&
-    (record.sourceMentorId === null || typeof record.sourceMentorId === "string") &&
-    Array.isArray(record.questions) && record.questions.every((question) => {
-      if (!question || typeof question !== "object" || Array.isArray(question)) return false;
-      const item = question as Record<string, unknown>;
-      return Number.isInteger(item.position) && typeof item.question === "string" &&
-        (item.answer === null || typeof item.answer === "string");
-    });
+function parseOptions(args: string[]) {
+  const mode = getHolisticOperationMode(args);
+  const sourcePath = getHolisticScriptArgument(args, "--source");
+  if (!sourcePath) throw new Error("--source=<private-json-export> is required");
+
+  const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
+  const sourceSnapshot = getHolisticScriptArgument(args, "--source-snapshot");
+  if (mode === "apply") validateApplyOptions(actorUserId, sourceSnapshot);
+  return { mode, actorUserId, sourceSnapshot, sourcePath };
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : "Historical import failed");
-  process.exitCode = 1;
-});
+function validateApplyOptions(
+  actorUserId: number,
+  sourceSnapshot: string | undefined
+): void {
+  if (!Number.isSafeInteger(actorUserId) || actorUserId < 1 || !sourceSnapshot) {
+    throw new Error("Apply requires --actor-user-id and --source-snapshot");
+  }
+}
+
+async function readSource(sourcePath: string): Promise<HistoricalHolisticNoteSource[]> {
+  const parsed: unknown = JSON.parse(await readFile(sourcePath, "utf8"));
+  if (!isHistoricalHolisticNotesSource(parsed)) {
+    throw new Error("Source must be a JSON array of grouped Historical Notes records");
+  }
+  return parsed;
+}
+
+runHolisticScript(main, "Historical import failed");

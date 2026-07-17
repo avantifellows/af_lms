@@ -140,6 +140,192 @@ async function currentOwnership(
   });
 }
 
+async function requireEligibleActor(client: PoolClient, actorUserId: number, schoolId: number) {
+  if (!(await actorIsEligible(client, actorUserId, schoolId))) {
+    throw new MappingMutationError(422, "Teacher is no longer eligible for this School");
+  }
+}
+
+async function lockEligibleStudents(
+  client: PoolClient,
+  params: { schoolId: number; academicYear: string; studentIds: number[] }
+) {
+  const eligible = await client.query<{ student_id: number | string }>(
+    `SELECT st.id AS student_id
+     FROM group_user gu_school
+     JOIN "group" school_group
+       ON school_group.id = gu_school.group_id AND school_group.type = 'school' AND school_group.child_id = $1
+     JOIN "user" u ON u.id = gu_school.user_id
+     JOIN student st ON st.user_id = u.id
+     JOIN enrollment_record er_grade
+       ON er_grade.user_id = u.id AND er_grade.group_type = 'grade'
+      AND er_grade.academic_year = $2 AND er_grade.is_current = true
+     JOIN grade gr ON gr.id = er_grade.group_id
+     JOIN LATERAL (
+       SELECT b.program_id
+       FROM enrollment_record er_batch
+       JOIN "group" batch_group
+         ON batch_group.id = er_batch.group_id AND batch_group.type = 'batch'
+       JOIN batch b ON b.id = batch_group.child_id
+       WHERE er_batch.user_id = u.id
+         AND er_batch.group_type = 'batch'
+         AND er_batch.is_current = true
+       ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id), er_batch.id
+       LIMIT 1
+     ) roster_program ON true
+     WHERE roster_program.program_id = $3
+       AND st.id = ANY($4::bigint[])
+       AND st.status IS DISTINCT FROM 'dropout'
+       AND gr.number IN (11, 12)
+     ORDER BY st.id
+         FOR UPDATE OF st`,
+    [params.schoolId, params.academicYear, PROGRAM_IDS.COE, params.studentIds]
+  );
+  const eligibleIds = new Set(eligible.rows.map((row) => Number(row.student_id)));
+  if (eligibleIds.size !== params.studentIds.length ||
+      params.studentIds.some((id) => !eligibleIds.has(id))) {
+    throw new MappingMutationError(422, "One or more Students are no longer eligible");
+  }
+}
+
+async function lockActiveMappings(
+  client: PoolClient,
+  studentIds: number[],
+  academicYear: string
+) {
+  const active = await client.query<ActiveMappingRow>(
+    `SELECT id, student_id, mentor_user_id
+     FROM holistic_mentorship_mentor_mentee_mappings
+     WHERE student_id = ANY($1::bigint[]) AND academic_year = $2 AND ended_at IS NULL
+     FOR UPDATE`,
+    [studentIds, academicYear]
+  );
+  return {
+    rows: active.rows,
+    byStudent: new Map(active.rows.map((row) => [Number(row.student_id), row])),
+  };
+}
+
+function assertAssignmentsCurrent(
+  selections: Array<{ studentId: number; expectedMappingId: number | null }>,
+  activeByStudent: Map<number, ActiveMappingRow>,
+  actorUserId: number,
+  takeoverConfirmed: boolean
+) {
+  for (const selection of selections) {
+    assertAssignmentCurrent(
+      selection,
+      activeByStudent.get(selection.studentId),
+      actorUserId,
+      takeoverConfirmed
+    );
+  }
+}
+
+function assertAssignmentCurrent(
+  selection: { studentId: number; expectedMappingId: number | null },
+  current: ActiveMappingRow | undefined,
+  actorUserId: number,
+  takeoverConfirmed: boolean
+) {
+  const currentId = current ? Number(current.id) : 0;
+  const expectedId = selection.expectedMappingId ?? 0;
+  if (currentId !== expectedId) {
+    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
+  }
+  if (!current) return;
+  if (Number(current.mentor_user_id) === actorUserId) {
+    throw new MappingMutationError(409, "Student is already assigned to you");
+  }
+  if (!takeoverConfirmed) {
+    throw new MappingMutationError(409, "Confirm takeover using the refreshed roster");
+  }
+}
+
+async function endMappingsForTakeover(
+  client: PoolClient,
+  active: ActiveMappingRow[],
+  actorUserId: number
+) {
+  if (active.length === 0) return;
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
+         end_reason = $3, updated_at = now()
+     WHERE id = ANY($4::bigint[])`,
+    [actorUserId, "af_lms_teacher", "teacher_takeover", active.map((row) => Number(row.id))]
+  );
+  await eraseDraftHolisticNotes(
+    client,
+    active.map((row) => Number(row.student_id)),
+    actorUserId,
+    "teacher_takeover"
+  );
+}
+
+async function insertMappings(
+  client: PoolClient,
+  params: {
+    studentIds: number[];
+    actorUserId: number;
+    schoolId: number;
+    academicYear: string;
+    activeByStudent: Map<number, ActiveMappingRow>;
+  }
+) {
+  for (const studentId of params.studentIds) {
+    const source = params.activeByStudent.has(studentId)
+      ? "af_lms_teacher_takeover"
+      : "af_lms_teacher_claim";
+    await client.query(
+      `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+         (student_id, mentor_user_id, school_id, program_id, academic_year,
+          started_at, assigned_by_user_id, assignment_source, inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), $6, $7, now(), now())
+       RETURNING id`,
+      [studentId, params.actorUserId, params.schoolId, PROGRAM_IDS.COE,
+        params.academicYear, params.actorUserId, source]
+    );
+  }
+}
+
+async function assignInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof assignHolisticMentees>[0],
+  studentIds: number[]
+): Promise<HolisticMappingMutationResult> {
+  await requireEligibleActor(client, params.actorUserId, params.schoolId);
+  await lockEligibleStudents(client, {
+    schoolId: params.schoolId,
+    academicYear: params.academicYear,
+    studentIds,
+  });
+  const active = await lockActiveMappings(client, studentIds, params.academicYear);
+  assertAssignmentsCurrent(
+    params.selections,
+    active.byStudent,
+    params.actorUserId,
+    params.takeoverConfirmed
+  );
+  await endMappingsForTakeover(client, active.rows, params.actorUserId);
+  await insertMappings(client, { ...params, studentIds, activeByStudent: active.byStudent });
+  return { ok: true, changed: studentIds.length };
+}
+
+async function mutationConflict(
+  error: MappingMutationError | { code?: unknown },
+  studentIds: number[],
+  academicYear: string
+): Promise<HolisticMappingMutationResult> {
+  const known = error instanceof MappingMutationError;
+  return {
+    ok: false,
+    status: known ? error.status : 409,
+    error: known ? error.message : "Mapping ownership changed; review the refreshed roster",
+    ownership: await currentOwnership(studentIds, academicYear),
+  };
+}
+
 export async function assignHolisticMentees(params: {
   actorUserId: number;
   schoolId: number;
@@ -149,117 +335,39 @@ export async function assignHolisticMentees(params: {
 }): Promise<HolisticMappingMutationResult> {
   const studentIds = params.selections.map(({ studentId }) => studentId).sort((a, b) => a - b);
   try {
-    return await withTransaction(async (client) => {
-      if (!(await actorIsEligible(client, params.actorUserId, params.schoolId))) {
-        throw new MappingMutationError(422, "Teacher is no longer eligible for this School");
-      }
-
-      const eligible = await client.query<{ student_id: number | string }>(
-        `SELECT st.id AS student_id
-         FROM group_user gu_school
-         JOIN "group" school_group
-           ON school_group.id = gu_school.group_id AND school_group.type = 'school' AND school_group.child_id = $1
-         JOIN "user" u ON u.id = gu_school.user_id
-         JOIN student st ON st.user_id = u.id
-         JOIN enrollment_record er_grade
-           ON er_grade.user_id = u.id AND er_grade.group_type = 'grade'
-          AND er_grade.academic_year = $2 AND er_grade.is_current = true
-         JOIN grade gr ON gr.id = er_grade.group_id
-         JOIN LATERAL (
-           SELECT b.program_id
-           FROM enrollment_record er_batch
-           JOIN "group" batch_group
-             ON batch_group.id = er_batch.group_id AND batch_group.type = 'batch'
-           JOIN batch b ON b.id = batch_group.child_id
-           WHERE er_batch.user_id = u.id
-             AND er_batch.group_type = 'batch'
-             AND er_batch.is_current = true
-           ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id), er_batch.id
-           LIMIT 1
-         ) roster_program ON true
-         WHERE roster_program.program_id = $3
-           AND st.id = ANY($4::bigint[])
-           AND st.status IS DISTINCT FROM 'dropout'
-           AND gr.number IN (11, 12)
-         ORDER BY st.id
-         FOR UPDATE OF st`,
-        [params.schoolId, params.academicYear, PROGRAM_IDS.COE, studentIds]
-      );
-      const eligibleIds = new Set(eligible.rows.map((row) => Number(row.student_id)));
-      if (eligibleIds.size !== studentIds.length || studentIds.some((id) => !eligibleIds.has(id))) {
-        throw new MappingMutationError(422, "One or more Students are no longer eligible");
-      }
-
-      const active = await client.query<ActiveMappingRow>(
-        `SELECT id, student_id, mentor_user_id
-         FROM holistic_mentorship_mentor_mentee_mappings
-         WHERE student_id = ANY($1::bigint[]) AND academic_year = $2 AND ended_at IS NULL
-         FOR UPDATE`,
-        [studentIds, params.academicYear]
-      );
-      const activeByStudent = new Map(
-        active.rows.map((row) => [Number(row.student_id), row])
-      );
-
-      for (const selection of params.selections) {
-        const current = activeByStudent.get(selection.studentId);
-        if (Number(current?.id ?? 0) !== (selection.expectedMappingId ?? 0)) {
-          throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
-        }
-        if (current && Number(current.mentor_user_id) === params.actorUserId) {
-          throw new MappingMutationError(409, "Student is already assigned to you");
-        }
-        if (current && !params.takeoverConfirmed) {
-          throw new MappingMutationError(409, "Confirm takeover using the refreshed roster");
-        }
-      }
-
-      const replacedIds = active.rows.map((row) => Number(row.id));
-      if (replacedIds.length > 0) {
-        await client.query(
-          `UPDATE holistic_mentorship_mentor_mentee_mappings
-           SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
-               end_reason = $3, updated_at = now()
-           WHERE id = ANY($4::bigint[])`,
-          [params.actorUserId, "af_lms_teacher", "teacher_takeover", replacedIds]
-        );
-        await eraseDraftHolisticNotes(
-          client,
-          active.rows.map((row) => Number(row.student_id)),
-          params.actorUserId,
-          "teacher_takeover"
-        );
-      }
-
-      for (const studentId of studentIds) {
-        const source = activeByStudent.has(studentId)
-          ? "af_lms_teacher_takeover"
-          : "af_lms_teacher_claim";
-        await client.query(
-          `INSERT INTO holistic_mentorship_mentor_mentee_mappings
-             (student_id, mentor_user_id, school_id, program_id, academic_year,
-              started_at, assigned_by_user_id, assignment_source, inserted_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, now(), $6, $7, now(), now())
-           RETURNING id`,
-          [studentId, params.actorUserId, params.schoolId, PROGRAM_IDS.COE,
-            params.academicYear, params.actorUserId, source]
-        );
-      }
-      return { ok: true, changed: studentIds.length };
-    });
+    return await withTransaction((client) => assignInTransaction(client, params, studentIds));
   } catch (error) {
     if (error instanceof MappingMutationError || isUniqueViolation(error)) {
-      return {
-        ok: false,
-        status: error instanceof MappingMutationError ? error.status : 409,
-        error: error instanceof MappingMutationError
-          ? error.message
-          : "Mapping ownership changed; review the refreshed roster",
-        ownership: await currentOwnership(studentIds, params.academicYear),
-      };
+      return mutationConflict(error as MappingMutationError | { code?: unknown }, studentIds, params.academicYear);
     }
     throw error;
   }
+}
+
+async function removeInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof removeHolisticMentees>[0],
+  studentIds: number[]
+): Promise<HolisticMappingMutationResult> {
+  await requireEligibleActor(client, params.actorUserId, params.schoolId);
+  const active = await lockActiveMappings(client, studentIds, params.academicYear);
+  for (const expected of params.mappings) {
+    const current = active.byStudent.get(expected.studentId);
+    if (Number(current?.id ?? 0) !== expected.expectedMappingId ||
+        Number(current?.mentor_user_id ?? 0) !== params.actorUserId) {
+      throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
+    }
+  }
+  const mappingIds = params.mappings.map(({ expectedMappingId }) => expectedMappingId);
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
+         end_reason = $3, updated_at = now()
+     WHERE id = ANY($4::bigint[])`,
+    [params.actorUserId, "af_lms_teacher", "teacher_removal", mappingIds]
+  );
+  await eraseDraftHolisticNotes(client, studentIds, params.actorUserId, "teacher_removal");
+  return { ok: true, changed: mappingIds.length };
 }
 
 export async function removeHolisticMentees(params: {
@@ -274,53 +382,10 @@ export async function removeHolisticMentees(params: {
     return { ok: false, status: 422, error: "Removal confirmation is required" };
   }
   try {
-    return await withTransaction(async (client) => {
-      if (!(await actorIsEligible(client, params.actorUserId, params.schoolId))) {
-        throw new MappingMutationError(422, "Teacher is no longer eligible for this School");
-      }
-      const active = await client.query<ActiveMappingRow>(
-        `SELECT id, student_id, mentor_user_id
-         FROM holistic_mentorship_mentor_mentee_mappings
-         WHERE student_id = ANY($1::bigint[]) AND academic_year = $2 AND ended_at IS NULL
-         FOR UPDATE`,
-        [studentIds, params.academicYear]
-      );
-      const activeByStudent = new Map(
-        active.rows.map((row) => [Number(row.student_id), row])
-      );
-      for (const expected of params.mappings) {
-        const current = activeByStudent.get(expected.studentId);
-        if (
-          Number(current?.id ?? 0) !== expected.expectedMappingId ||
-          Number(current?.mentor_user_id ?? 0) !== params.actorUserId
-        ) {
-          throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
-        }
-      }
-      const mappingIds = params.mappings.map(({ expectedMappingId }) => expectedMappingId);
-      await client.query(
-        `UPDATE holistic_mentorship_mentor_mentee_mappings
-         SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
-             end_reason = $3, updated_at = now()
-         WHERE id = ANY($4::bigint[])`,
-        [params.actorUserId, "af_lms_teacher", "teacher_removal", mappingIds]
-      );
-      await eraseDraftHolisticNotes(
-        client,
-        studentIds,
-        params.actorUserId,
-        "teacher_removal"
-      );
-      return { ok: true, changed: mappingIds.length };
-    });
+    return await withTransaction((client) => removeInTransaction(client, params, studentIds));
   } catch (error) {
     if (error instanceof MappingMutationError) {
-      return {
-        ok: false,
-        status: error.status,
-        error: error.message,
-        ownership: await currentOwnership(studentIds, params.academicYear),
-      };
+      return mutationConflict(error, studentIds, params.academicYear);
     }
     throw error;
   }

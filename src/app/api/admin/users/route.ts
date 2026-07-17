@@ -6,6 +6,63 @@ import { requireAdminApiAccess } from "../route-helpers";
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
 
+const USER_ROLES = new Set([
+  "teacher",
+  "program_manager",
+  "program_admin",
+  "holistic_mentorship_admin",
+  "admin",
+]);
+
+type UserWrite = {
+  email: string;
+  level: number;
+  role?: string;
+  school_codes?: string[] | null;
+  regions?: string[] | null;
+  program_ids?: number[] | null;
+  read_only?: boolean;
+  full_name?: string | null;
+};
+
+function userRole(value: UserWrite): string {
+  return USER_ROLES.has(value.role ?? "") ? value.role! : "teacher";
+}
+
+function validateUserWrite(value: UserWrite): string | null {
+  if (!value.email) return "Email and level are required";
+  if (!value.level) return "Email and level are required";
+  if (value.level < 1) return "Level must be between 1 and 3";
+  if (value.level > 3) return "Level must be between 1 and 3";
+  if (userRole(value) === "holistic_mentorship_admin") return null;
+  if (!Array.isArray(value.program_ids)) return "At least one program must be assigned";
+  if (value.program_ids.length === 0) return "At least one program must be assigned";
+  return null;
+}
+
+function userWriteParams(value: UserWrite) {
+  const role = userRole(value);
+  const holisticAdmin = role === "holistic_mentorship_admin";
+  const scope = holisticAdmin
+    ? { level: 3, schoolCodes: null, regions: null, programIds: [1] }
+    : {
+        level: value.level,
+        schoolCodes: value.school_codes || null,
+        regions: value.regions || null,
+        programIds: value.program_ids,
+      };
+  return [
+    value.email,
+    scope.level,
+    role,
+    scope.schoolCodes,
+    scope.regions,
+    scope.programIds,
+    value.read_only || false,
+    value.full_name || null,
+  ];
+}
+
 // GET /api/admin/users - List all users
 export async function GET() {
   const access = await requireAdminApiAccess();
@@ -41,39 +98,10 @@ export async function POST(request: NextRequest) {
   if (!access.ok) return access.response;
 
   try {
-    const body = await request.json();
-    const { email, level, role, school_codes, regions, program_ids, read_only, full_name } = body;
-
-    if (!email || !level) {
-      return NextResponse.json(
-        { error: "Email and level are required" },
-        { status: 400 }
-      );
-    }
-
-    if (level < 1 || level > 3) {
-      return NextResponse.json(
-        { error: "Level must be between 1 and 3" },
-        { status: 400 }
-      );
-    }
-
-    const validRoles = [
-      "teacher",
-      "program_manager",
-      "program_admin",
-      "holistic_mentorship_admin",
-      "admin",
-    ];
-    const userRole = validRoles.includes(role) ? role : "teacher";
-    const isHolisticAdmin = userRole === "holistic_mentorship_admin";
-
-    // Validate program_ids
-    if (!isHolisticAdmin && (!program_ids || !Array.isArray(program_ids) || program_ids.length === 0)) {
-      return NextResponse.json(
-        { error: "At least one program must be assigned" },
-        { status: 400 }
-      );
+    const body = await request.json() as UserWrite;
+    const validationError = validateUserWrite(body);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
     const result = await query<{ id: number }>(
@@ -89,16 +117,7 @@ export async function POST(request: NextRequest) {
          full_name = EXCLUDED.full_name,
          updated_at = NOW()
        RETURNING id`,
-      [
-        email,
-        isHolisticAdmin ? 3 : level,
-        userRole,
-        isHolisticAdmin ? null : school_codes || null,
-        isHolisticAdmin ? null : regions || null,
-        isHolisticAdmin ? [1] : program_ids,
-        read_only || false,
-        full_name || null,
-      ]
+      userWriteParams(body)
     );
 
     return NextResponse.json({ id: result[0].id, success: true });

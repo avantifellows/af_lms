@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHolisticProfileSourceEvidence,
+  buildHolisticProfileSourceQuery,
   runHolisticReleasePreflight,
 } from "./holistic-release";
 import {
@@ -11,6 +12,20 @@ import {
 } from "./holistic-fixtures";
 
 describe("Holistic release preflight", () => {
+  it("builds the approved Form query without exposing the Form registry", () => {
+    const sourceQuery = buildHolisticProfileSourceQuery("avantifellows", "assessments");
+
+    expect(sourceQuery.query).toContain("`avantifellows.assessments.all_responses_form_level`");
+    expect(sourceQuery.params).toEqual({
+      grade11Form: "6a44a83d1184e717b920c499",
+      grade11Session: "EnableStudents_6a44a83d1184e717b920c499",
+      grade12Form: "6a4deca8e030ebe34669fb0f",
+      grade12Session: "EnableStudents_6a4deca8e030ebe34669fb0f",
+    });
+    expect(() => buildHolisticProfileSourceQuery("bad.project", "assessments"))
+      .toThrow("Invalid BigQuery project or dataset");
+  });
+
   it("blocks unsafe identity and form evidence without writing while Profile gaps remain non-blocking", async () => {
     const calls: string[] = [];
     const db = async (sql: string) => {

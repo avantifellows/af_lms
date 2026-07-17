@@ -1,5 +1,6 @@
 import { query, withTransaction } from "./db";
 import { PROGRAM_IDS } from "./constants";
+import type { PoolClient } from "pg";
 
 type NotesInput = {
   mode: "draft" | "submit" | "edit";
@@ -19,18 +20,36 @@ export type HolisticNotesResult =
   | { ok: true; changed: boolean; revision: number }
   | { ok: false; status: 403 | 404 | 409 | 422; error: string; currentRevision?: number };
 
-export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNotesResult> {
-  const academicYearStart = Number(input.academicYear.slice(0, 4));
-  const priorAcademicYear = `${academicYearStart - 1}-${academicYearStart}`;
+type NotesScope = {
+  mapping_id: number | string;
+  mentor_user_id: number | string;
+  phase_revision: number;
+  phase_state: "locked" | "open";
+};
 
-  try {
-    return await withTransaction(async (client) => {
-    const scope = await client.query<{
-      mapping_id: number | string;
-      mentor_user_id: number | string;
-      phase_revision: number;
-      phase_state: "locked" | "open";
-    }>(
+type ExistingNotes = {
+  id: number | string;
+  author_user_id: number | string;
+  state: "draft" | "submitted";
+  revision: number;
+  has_answers: boolean;
+};
+
+function notesConflict(revision: number): HolisticNotesResult {
+  return {
+    ok: false,
+    status: 409,
+    error: "Notes changed; reload the latest version",
+    currentRevision: revision,
+  };
+}
+
+async function loadScope(
+  client: PoolClient,
+  input: NotesInput,
+  priorAcademicYear: string
+): Promise<NotesScope | null> {
+  const scope = await client.query<NotesScope>(
       `SELECT mapping.id AS mapping_id, mapping.mentor_user_id,
               phase.revision AS phase_revision, phase.state AS phase_state
        FROM holistic_mentorship_mentor_mentee_mappings mapping
@@ -64,92 +83,161 @@ export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNote
        FOR UPDATE OF mapping, phase`,
       [input.phaseId, input.studentId, input.schoolId, PROGRAM_IDS.COE,
         input.academicYear, priorAcademicYear]
-    );
-    const current = scope.rows[0];
-    if (!current) return { ok: false, status: 404, error: "Not found" };
-    if (Number(current.mentor_user_id) !== input.actorUserId) {
-      return { ok: false, status: 404, error: "Not found" };
-    }
-    if (current.phase_state !== "open") {
-      return { ok: false, status: 422, error: "Phase is not Open" };
-    }
+  );
+  return scope.rows[0] ?? null;
+}
 
-    const questions = await client.query<{ id: number | string }>(
-      `SELECT id FROM holistic_mentorship_phase_questions
-       WHERE phase_id = $1 ORDER BY position FOR SHARE`,
-      [input.phaseId]
-    );
-    if (questions.rows.length === 0) {
-      return { ok: false, status: 422, error: "Phase has no configured Questions" };
-    }
-    const questionIds = new Set(questions.rows.map(({ id }) => Number(id)));
-    if (input.answers.some(({ questionId }) => !questionIds.has(questionId))) {
-      return { ok: false, status: 422, error: "Answer does not belong to this Phase" };
-    }
-    if (input.mode === "draft" && input.expectedRevision === 0 && !input.answers.some(({ answer }) => answer.trim())) {
-      return { ok: true, changed: false, revision: 0 };
-    }
+function validateScope(scope: NotesScope | null, input: NotesInput): HolisticNotesResult | null {
+  if (!scope || Number(scope.mentor_user_id) !== input.actorUserId) {
+    return { ok: false, status: 404, error: "Not found" };
+  }
+  return scope.phase_state === "open"
+    ? null
+    : { ok: false, status: 422, error: "Phase is not Open" };
+}
 
-    const found = await client.query<{
-      id: number | string;
-      author_user_id: number | string;
-      state: "draft" | "submitted";
-      revision: number;
-      has_answers: boolean;
-    }>(
+async function loadQuestionIds(client: PoolClient, phaseId: number): Promise<Set<number>> {
+  const questions = await client.query<{ id: number | string }>(
+    `SELECT id FROM holistic_mentorship_phase_questions
+     WHERE phase_id = $1 ORDER BY position FOR SHARE`,
+    [phaseId]
+  );
+  return new Set(questions.rows.map(({ id }) => Number(id)));
+}
+
+function validateAnswers(
+  questionIds: Set<number>,
+  input: NotesInput
+): HolisticNotesResult | null {
+  if (questionIds.size === 0) {
+    return { ok: false, status: 422, error: "Phase has no configured Questions" };
+  }
+  return input.answers.some(({ questionId }) => !questionIds.has(questionId))
+    ? { ok: false, status: 422, error: "Answer does not belong to this Phase" }
+    : null;
+}
+
+function isEmptyInitialDraft(input: NotesInput): boolean {
+  return input.mode === "draft" && input.expectedRevision === 0 &&
+    !input.answers.some(({ answer }) => answer.trim());
+}
+
+async function loadExistingNotes(
+  client: PoolClient,
+  studentId: number,
+  phaseId: number
+): Promise<ExistingNotes | null> {
+  const found = await client.query<ExistingNotes>(
       `SELECT notes.id, notes.author_user_id, notes.state, notes.revision,
               EXISTS (SELECT 1 FROM holistic_mentorship_post_session_answers answer
                       WHERE answer.notes_id = notes.id) AS has_answers
        FROM holistic_mentorship_post_session_notes notes
        WHERE notes.student_id = $1 AND notes.phase_id = $2 FOR UPDATE`,
-      [input.studentId, input.phaseId]
-    );
-    const existing = found.rows[0];
-    if ((existing?.revision ?? 0) !== input.expectedRevision) {
-      return {
-        ok: false,
-        status: 409,
-        error: "Notes changed; reload the latest version",
-        currentRevision: existing?.revision ?? 0,
-      };
-    }
-    const claimsErasedDraft = existing && existing.state === "draft" &&
-      !existing.has_answers && input.mode === "draft";
-    if (existing && Number(existing.author_user_id) !== input.actorUserId && !claimsErasedDraft) {
-      return { ok: false, status: 403, error: "Forbidden" };
-    }
-    if (input.mode !== "draft") {
-      if (!input.confirmed) {
-        return { ok: false, status: 422, error: "Confirmation is required" };
-      }
-      if (Number(current.mapping_id) !== input.expectedMappingId ||
-          current.phase_revision !== input.expectedPhaseRevision) {
-        return {
-          ok: false,
-          status: 409,
-          error: "Mapping or Phase changed; reload before saving",
-          currentRevision: existing?.revision ?? 0,
-        };
-      }
-      if (!existing || (input.mode === "submit" && existing.state !== "draft") ||
-          (input.mode === "edit" && existing.state !== "submitted")) {
-        return { ok: false, status: 422, error: input.mode === "submit"
-          ? "Save a draft before submitting"
-          : "Only submitted Notes can be corrected" };
-      }
-      const answers = new Map(input.answers.map(({ questionId, answer }) => [questionId, answer.trim()]));
-      if (answers.size !== questionIds.size || [...questionIds].some((id) => !answers.get(id))) {
-        return { ok: false, status: 422, error: "Answer every Question before submitting" };
-      }
-    }
-    if (input.mode === "draft" && existing?.state === "submitted") {
-      return { ok: false, status: 422, error: "Submitted Notes are read-only" };
-    }
+    [studentId, phaseId]
+  );
+  return found.rows[0] ?? null;
+}
 
-    let notesId: number;
-    let revision: number;
-    if (existing) {
-      const updated = await client.query<{ revision: number }>(
+function claimsErasedDraft(existing: ExistingNotes | null, mode: NotesInput["mode"]): boolean {
+  return !!existing && existing.state === "draft" && !existing.has_answers && mode === "draft";
+}
+
+function validateAuthor(existing: ExistingNotes | null, input: NotesInput): HolisticNotesResult | null {
+  if (!existing || Number(existing.author_user_id) === input.actorUserId ||
+      claimsErasedDraft(existing, input.mode)) return null;
+  return { ok: false, status: 403, error: "Forbidden" };
+}
+
+function validateFinalTokens(
+  scope: NotesScope,
+  existing: ExistingNotes | null,
+  input: NotesInput
+): HolisticNotesResult | null {
+  if (!input.confirmed) return { ok: false, status: 422, error: "Confirmation is required" };
+  if (Number(scope.mapping_id) !== input.expectedMappingId) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Mapping or Phase changed; reload before saving",
+      currentRevision: existing?.revision ?? 0,
+    };
+  }
+  if (scope.phase_revision !== input.expectedPhaseRevision) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Mapping or Phase changed; reload before saving",
+      currentRevision: existing?.revision ?? 0,
+    };
+  }
+  return null;
+}
+
+function validateFinalState(
+  existing: ExistingNotes | null,
+  input: NotesInput
+): HolisticNotesResult | null {
+  const expectedState = input.mode === "submit" ? "draft" : "submitted";
+  if (existing?.state === expectedState) return null;
+  return {
+    ok: false,
+    status: 422,
+    error: input.mode === "submit"
+      ? "Save a draft before submitting"
+      : "Only submitted Notes can be corrected",
+  };
+}
+
+function hasEveryAnswer(questionIds: Set<number>, input: NotesInput): boolean {
+  const answers = new Map(input.answers.map(({ questionId, answer }) => [questionId, answer.trim()]));
+  if (answers.size !== questionIds.size) return false;
+  return ![...questionIds].some((id) => !answers.get(id));
+}
+
+function validateFinalWrite(
+  scope: NotesScope,
+  existing: ExistingNotes | null,
+  questionIds: Set<number>,
+  input: NotesInput
+): HolisticNotesResult | null {
+  const tokenError = validateFinalTokens(scope, existing, input);
+  if (tokenError) return tokenError;
+  const stateError = validateFinalState(existing, input);
+  if (stateError) return stateError;
+  return hasEveryAnswer(questionIds, input)
+    ? null
+    : { ok: false, status: 422, error: "Answer every Question before submitting" };
+}
+
+function existingRevision(existing: ExistingNotes | null): number {
+  return existing ? existing.revision : 0;
+}
+
+function validateExisting(
+  scope: NotesScope,
+  existing: ExistingNotes | null,
+  questionIds: Set<number>,
+  input: NotesInput
+): HolisticNotesResult | null {
+  const revision = existingRevision(existing);
+  if (revision !== input.expectedRevision) {
+    return notesConflict(revision);
+  }
+  const authorError = validateAuthor(existing, input);
+  if (authorError) return authorError;
+  if (input.mode !== "draft") return validateFinalWrite(scope, existing, questionIds, input);
+  return existing?.state === "submitted"
+    ? { ok: false, status: 422, error: "Submitted Notes are read-only" }
+    : null;
+}
+
+async function upsertNotes(
+  client: PoolClient,
+  existing: ExistingNotes | null,
+  input: NotesInput
+): Promise<{ notesId: number; revision: number }> {
+  if (existing) {
+    const updated = await client.query<{ revision: number }>(
         `UPDATE holistic_mentorship_post_session_notes
          SET revision = revision + 1,
              state = CASE WHEN $3 = 'submit' THEN 'submitted' ELSE state END,
@@ -158,56 +246,93 @@ export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNote
                THEN COALESCE(first_submitted_at, now()) ELSE first_submitted_at END,
              last_edited_at = now(), updated_at = now()
          WHERE id = $1 AND revision = $2 RETURNING revision`,
-        [existing.id, input.expectedRevision, input.mode, input.actorUserId]
-      );
-      if (!updated.rows[0]) {
-        return { ok: false, status: 409, error: "Notes changed; reload the latest version" };
-      }
-      notesId = Number(existing.id);
-      revision = updated.rows[0].revision;
-    } else {
-      const inserted = await client.query<{ id: number | string; revision: number }>(
+      [existing.id, input.expectedRevision, input.mode, input.actorUserId]
+    );
+    if (!updated.rows[0]) throw new Error("optimistic_notes_update_failed");
+    return { notesId: Number(existing.id), revision: updated.rows[0].revision };
+  }
+  const inserted = await client.query<{ id: number | string; revision: number }>(
         `INSERT INTO holistic_mentorship_post_session_notes
            (student_id, phase_id, author_user_id, state, revision, first_drafted_at,
             last_edited_at, inserted_at, updated_at)
          VALUES ($1, $2, $3, 'draft', 1, now(), now(), now(), now())
          RETURNING id, revision`,
-        [input.studentId, input.phaseId, input.actorUserId]
-      );
-      notesId = Number(inserted.rows[0].id);
-      revision = inserted.rows[0].revision;
-    }
+    [input.studentId, input.phaseId, input.actorUserId]
+  );
+  return { notesId: Number(inserted.rows[0].id), revision: inserted.rows[0].revision };
+}
 
-    await client.query(
+async function replaceAnswers(client: PoolClient, notesId: number, input: NotesInput) {
+  await client.query(
       `DELETE FROM holistic_mentorship_post_session_answers WHERE notes_id = $1`,
       [notesId]
-    );
-    for (const answer of input.answers.filter(({ answer }) => answer.trim())) {
-      await client.query(
+  );
+  for (const answer of input.answers.filter(({ answer }) => answer.trim())) {
+    await client.query(
         `INSERT INTO holistic_mentorship_post_session_answers
            (notes_id, question_id, answer, inserted_at, updated_at)
          VALUES ($1, $2, $3, now(), now())`,
-        [notesId, answer.questionId, input.mode === "draft" ? answer.answer : answer.answer.trim()]
-      );
-    }
-    if (!existing) {
-      await client.query(
+      [notesId, answer.questionId, input.mode === "draft" ? answer.answer : answer.answer.trim()]
+    );
+  }
+}
+
+async function freezeNewNotesPhase(client: PoolClient, existing: ExistingNotes | null, input: NotesInput) {
+  if (existing) return;
+  await client.query(
         `UPDATE holistic_mentorship_phases
          SET frozen_at = COALESCE(frozen_at, now()),
              frozen_by_user_id = COALESCE(frozen_by_user_id, $1), updated_at = now()
          WHERE id = $2`,
-        [input.actorUserId, input.phaseId]
-      );
-    }
-    await client.query(
+    [input.actorUserId, input.phaseId]
+  );
+}
+
+async function recordNotesAudit(client: PoolClient, notesId: number, input: NotesInput) {
+  const action = input.mode === "draft"
+    ? "draft_saved"
+    : input.mode === "submit" ? "submitted" : "submitted_edited";
+  await client.query(
       `INSERT INTO holistic_mentorship_post_session_note_audits
          (notes_id, actor_user_id, action, occurred_at, inserted_at, updated_at)
        VALUES ($1, $2, $3, now(), now(), now())`,
-      [notesId, input.actorUserId, input.mode === "draft" ? "draft_saved"
-        : input.mode === "submit" ? "submitted" : "submitted_edited"]
-    );
-      return { ok: true, changed: true, revision };
-    });
+    [notesId, input.actorUserId, action]
+  );
+}
+
+async function saveNotesTransaction(
+  client: PoolClient,
+  input: NotesInput,
+  priorAcademicYear: string
+): Promise<HolisticNotesResult> {
+  const scope = await loadScope(client, input, priorAcademicYear);
+  const scopeError = validateScope(scope, input);
+  if (scopeError) return scopeError;
+  const questionIds = await loadQuestionIds(client, input.phaseId);
+  const answerError = validateAnswers(questionIds, input);
+  if (answerError) return answerError;
+  if (isEmptyInitialDraft(input)) return { ok: true, changed: false, revision: 0 };
+  const existing = await loadExistingNotes(client, input.studentId, input.phaseId);
+  const existingError = validateExisting(scope!, existing, questionIds, input);
+  if (existingError) return existingError;
+  let saved: { notesId: number; revision: number };
+  try {
+    saved = await upsertNotes(client, existing, input);
+  } catch (error) {
+    if ((error as Error).message !== "optimistic_notes_update_failed") throw error;
+    return notesConflict(existing?.revision ?? 0);
+  }
+  await replaceAnswers(client, saved.notesId, input);
+  await freezeNewNotesPhase(client, existing, input);
+  await recordNotesAudit(client, saved.notesId, input);
+  return { ok: true, changed: true, revision: saved.revision };
+}
+
+export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNotesResult> {
+  const academicYearStart = Number(input.academicYear.slice(0, 4));
+  const priorAcademicYear = `${academicYearStart - 1}-${academicYearStart}`;
+  try {
+    return await withTransaction((client) => saveNotesTransaction(client, input, priorAcademicYear));
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code !== "23505") throw error;
     const current = await query<{ revision: number }>(

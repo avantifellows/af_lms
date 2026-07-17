@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import { deleteHolisticStudentContent } from "@/lib/holistic-privacy";
+import { positiveIntegerString, readJsonObject } from "../../route-helpers";
 
 type RouteContext = { params: Promise<{ studentId: string }> };
 
@@ -11,13 +12,10 @@ export async function POST(request: Request, context: RouteContext) {
   const session = await getServerSession(authOptions);
   const access = await requireHolisticMentorshipAccess(session, "privacy_delete");
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
-  const studentId = Number((await context.params).studentId);
-  let body: unknown;
-  try { body = await request.json(); } catch { body = null; }
-  const value = body && typeof body === "object" && !Array.isArray(body)
-    ? body as Record<string, unknown> : null;
+  const studentId = positiveIntegerString((await context.params).studentId);
+  const value = await readJsonObject(request);
   const reason = typeof value?.reason === "string" ? value.reason.trim() : "";
-  if (!Number.isSafeInteger(studentId) || studentId < 1 || value?.approved !== true ||
+  if (!studentId || value?.approved !== true ||
       reason.length < 10 || reason.length > 500) {
     return NextResponse.json({ error: "Approved deletion and reason are required" }, { status: 422 });
   }

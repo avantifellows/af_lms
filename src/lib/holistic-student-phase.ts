@@ -1,3 +1,6 @@
+import { PROGRAM_IDS } from "./constants";
+import { query } from "./db";
+
 export type HolisticPhaseProgress = "pending" | "skipped" | "completed";
 
 export type HolisticPhaseTimeline = {
@@ -224,12 +227,7 @@ type NotesRow = {
 type ProfileRow = { title: string; summary: string; position: number };
 type HistoricalRow = { question: string; answer: string | null; position: number };
 
-function previousAcademicYear(academicYear: string): string {
-  const start = Number(academicYear.slice(0, 4));
-  return `${start - 1}-${start}`;
-}
-
-export async function getHolisticStudentPhase(params: {
+type StudentPhaseParams = {
   studentId: number;
   phaseId: number;
   schoolId: number;
@@ -237,7 +235,53 @@ export async function getHolisticStudentPhase(params: {
   actorUserId?: number;
   role: string;
   canEdit: boolean;
-}): Promise<HolisticStudentPhaseDetail | null> {
+};
+
+type PhaseNotes = {
+  notesId: number;
+  authorUserId: number;
+  state: "draft" | "submitted";
+  revision: number;
+  firstSubmittedAt: string | null;
+  lastEditedAt: string;
+  answers: Array<{ questionId: number; question: string; answer: string }>;
+};
+
+type NumberedPhase = Omit<PhaseRow, "id" | "grade"> & ApplicablePhase;
+
+type PhaseRelations = {
+  questionRows: QuestionRow[];
+  transitionRows: TransitionRow[];
+  mappingRows: Array<{ academic_year: string; started_at: string }>;
+  notesRows: NotesRow[];
+  profileRows: ProfileRow[];
+  historicalRows: HistoricalRow[];
+};
+
+type OpenSelectedPhaseParams = {
+  selected: NumberedPhase;
+  applicable: NumberedPhase[];
+  notesByPhase: Map<number, PhaseNotes>;
+  questionsByPhase: Map<number, Array<{ questionId: number; text: string; position: number }>>;
+  progress: Map<number, HolisticPhaseProgress>;
+  active: Map<string, number>;
+  profileRows: ProfileRow[];
+  historicalRows: HistoricalRow[];
+  currentGrade: 11 | 12;
+  entryGrade: 11 | 12;
+  hasPriorYearMapping: boolean;
+  actorUserId?: number;
+  role: string;
+  canEdit: boolean;
+  mappingId: number;
+};
+
+function previousAcademicYear(academicYear: string): string {
+  const start = Number(academicYear.slice(0, 4));
+  return `${start - 1}-${start}`;
+}
+
+async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow | null> {
   const students = await query<StudentRow>(
     `SELECT st.id AS student_id, mapping.id AS mapping_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
@@ -266,11 +310,11 @@ export async function getHolisticStudentPhase(params: {
      LIMIT 1`,
     [params.studentId, params.schoolId, PROGRAM_IDS.COE, params.academicYear]
   );
-  const student = students[0];
-  if (!student) return null;
+  return students[0] ?? null;
+}
 
-  const priorYear = previousAcademicYear(params.academicYear);
-  const phaseRows = await query<PhaseRow>(
+async function loadPhaseRows(academicYears: string[]): Promise<PhaseRow[]> {
+  return query<PhaseRow>(
     `SELECT phase.id, plan.academic_year, grade.number AS grade, phase.title,
             phase.position, phase.state, phase.guidance_markdown, phase.revision
      FROM holistic_mentorship_phases phase
@@ -278,11 +322,15 @@ export async function getHolisticStudentPhase(params: {
      JOIN grade ON grade.id = phase.grade_id
      WHERE plan.program_id = $1 AND plan.academic_year = ANY($2::text[])
      ORDER BY plan.academic_year, phase.position`,
-    [PROGRAM_IDS.COE, [priorYear, params.academicYear]]
+    [PROGRAM_IDS.COE, academicYears]
   );
-  if (!phaseRows.some(({ id }) => Number(id) === params.phaseId)) return null;
+}
 
-  const phaseIds = phaseRows.map(({ id }) => Number(id));
+async function loadPhaseRelations(
+  params: StudentPhaseParams,
+  phaseIds: number[],
+  academicYears: string[]
+): Promise<PhaseRelations> {
   const [questionRows, transitionRows, mappingRows, notesRows, profileRows, historicalRows] = await Promise.all([
     query<QuestionRow>(
       `SELECT id, phase_id, text, position FROM holistic_mentorship_phase_questions
@@ -299,7 +347,7 @@ export async function getHolisticStudentPhase(params: {
        FROM holistic_mentorship_mentor_mentee_mappings
        WHERE student_id = $1 AND program_id = $2 AND academic_year = ANY($3::text[])
        GROUP BY academic_year`,
-      [params.studentId, PROGRAM_IDS.COE, [priorYear, params.academicYear]]
+      [params.studentId, PROGRAM_IDS.COE, academicYears]
     ),
     query<NotesRow>(
       `SELECT notes.id AS notes_id, notes.phase_id, notes.author_user_id, notes.state,
@@ -331,50 +379,256 @@ export async function getHolisticStudentPhase(params: {
       [params.studentId]
     ),
   ]);
+  return { questionRows, transitionRows, mappingRows, notesRows, profileRows, historicalRows };
+}
 
-  const firstMappingByYear = new Map(mappingRows.map((row) => [row.academic_year, row.started_at]));
-  const transitionsByPhase = new Map<number, HolisticPhaseTimeline["transitions"]>();
-  for (const row of transitionRows) {
+function groupTransitions(rows: TransitionRow[]) {
+  const grouped = new Map<number, HolisticPhaseTimeline["transitions"]>();
+  for (const row of rows) {
     const phaseId = Number(row.phase_id);
-    const transitions = transitionsByPhase.get(phaseId) ?? [];
+    const transitions = grouped.get(phaseId) ?? [];
     transitions.push({ toState: row.to_state, occurredAt: row.occurred_at });
-    transitionsByPhase.set(phaseId, transitions);
+    grouped.set(phaseId, transitions);
   }
-  const questionsByPhase = new Map<number, Array<{ questionId: number; text: string; position: number }>>();
-  for (const row of questionRows) {
+  return grouped;
+}
+
+function groupQuestions(rows: QuestionRow[]) {
+  const grouped = new Map<number, Array<{ questionId: number; text: string; position: number }>>();
+  for (const row of rows) {
     const phaseId = Number(row.phase_id);
-    const questions = questionsByPhase.get(phaseId) ?? [];
+    const questions = grouped.get(phaseId) ?? [];
     questions.push({ questionId: Number(row.id), text: row.text, position: row.position });
-    questionsByPhase.set(phaseId, questions);
+    grouped.set(phaseId, questions);
   }
-  const notesByPhase = new Map<number, {
-    notesId: number;
-    authorUserId: number;
-    state: "draft" | "submitted";
-    revision: number;
-    firstSubmittedAt: string | null;
-    lastEditedAt: string;
-    answers: Array<{ questionId: number; question: string; answer: string }>;
-  }>();
-  for (const row of notesRows) {
+  return grouped;
+}
+
+function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
+  const grouped = new Map<number, PhaseNotes>();
+  for (const row of rows) {
     const phaseId = Number(row.phase_id);
-    const notes = notesByPhase.get(phaseId) ?? {
-      notesId: Number(row.notes_id), authorUserId: Number(row.author_user_id), state: row.state,
-      revision: row.revision, firstSubmittedAt: row.first_submitted_at,
-      lastEditedAt: row.last_edited_at, answers: [],
+    const notes = grouped.get(phaseId) ?? {
+      notesId: Number(row.notes_id),
+      authorUserId: Number(row.author_user_id),
+      state: row.state,
+      revision: row.revision,
+      firstSubmittedAt: row.first_submitted_at,
+      lastEditedAt: row.last_edited_at,
+      answers: [],
     };
     if (row.question !== null && row.answer !== null) {
-      notes.answers.push({ questionId: Number(row.question_id), question: row.question, answer: row.answer });
+      notes.answers.push({
+        questionId: Number(row.question_id),
+        question: row.question,
+        answer: row.answer,
+      });
     }
-    notesByPhase.set(phaseId, notes);
+    grouped.set(phaseId, notes);
   }
+  return grouped;
+}
 
-  const numbered = phaseRows.map((row) => ({
+function numberPhases(rows: PhaseRow[]): NumberedPhase[] {
+  return rows.map((row) => ({
     ...row,
     id: Number(row.id),
     grade: Number(row.grade) as 11 | 12,
-    number: phaseRows.filter((candidate) => candidate.academic_year === row.academic_year && candidate.position <= row.position).length,
+    number: rows.filter((candidate) =>
+      candidate.academic_year === row.academic_year && candidate.position <= row.position
+    ).length,
   }));
+}
+
+function progressByPhase(params: {
+  phases: NumberedPhase[];
+  academicYears: string[];
+  firstMappingByYear: Map<string, string>;
+  transitionsByPhase: Map<number, HolisticPhaseTimeline["transitions"]>;
+  notesByPhase: Map<number, PhaseNotes>;
+}) {
+  const result = new Map<number, HolisticPhaseProgress>();
+  for (const year of params.academicYears) {
+    for (const grade of [11, 12] as const) {
+      const phases = params.phases.filter((phase) => phase.academic_year === year && phase.grade === grade);
+      const progress = deriveHolisticPhaseProgress(
+        phases.map((phase) => ({
+          id: phase.id,
+          position: phase.position,
+          transitions: params.transitionsByPhase.get(phase.id) ?? [],
+        })),
+        params.firstMappingByYear.get(year) ?? null,
+        phases.flatMap((phase) => {
+          const notes = params.notesByPhase.get(phase.id);
+          return notes ? [{ phaseId: phase.id, state: notes.state }] : [];
+        })
+      );
+      for (const item of progress) result.set(...item);
+    }
+  }
+  return result;
+}
+
+function activePhases(phases: NumberedPhase[]) {
+  const active = new Map<string, number>();
+  for (const phase of phases) {
+    if (phase.state === "open") active.set(`${phase.academic_year}:${phase.grade}`, phase.id);
+  }
+  return active;
+}
+
+function studentSummary(student: StudentRow, grade: 11 | 12) {
+  return {
+    id: Number(student.student_id),
+    name: student.name || student.external_student_id || "Unknown Student",
+    externalStudentId: student.external_student_id,
+    grade,
+  };
+}
+
+function summarizePhase(
+  phase: NumberedPhase | { phaseId: null; number: number; title: string; placeholder: true },
+  notesByPhase: Map<number, PhaseNotes>,
+  progress: Map<number, HolisticPhaseProgress>,
+  active: Map<string, number>
+): HolisticPhaseSummary {
+  if (!("id" in phase)) return phase;
+  if (phase.state === "locked") {
+    return { phaseId: phase.id, number: phase.number, title: phase.title, locked: true };
+  }
+  const notes = notesByPhase.get(phase.id);
+  return {
+    phaseId: phase.id,
+    number: phase.number,
+    title: phase.title,
+    grade: phase.grade,
+    academicYear: phase.academic_year,
+    locked: false,
+    active: active.get(`${phase.academic_year}:${phase.grade}`) === phase.id,
+    progress: progress.get(phase.id) ?? "pending",
+    draftSaved: notes?.state === "draft",
+  };
+}
+
+function submittedPhaseNotes(
+  phases: NumberedPhase[],
+  notesByPhase: Map<number, PhaseNotes>
+) {
+  return phases.flatMap((phase) => {
+    const notes = notesByPhase.get(phase.id);
+    return notes?.state === "submitted"
+      ? [{ phaseId: phase.id, lastEditedAt: notes.lastEditedAt, answers: notes.answers }]
+      : [];
+  });
+}
+
+function selectedPhaseContext(params: OpenSelectedPhaseParams) {
+  return resolveHolisticStudentContext({
+    targetPhaseId: params.selected.id,
+    phases: params.applicable.map(({ id, number, title }) => ({ id, number, title })),
+    submittedNotes: submittedPhaseNotes(params.applicable, params.notesByPhase),
+    profile: params.profileRows.length
+      ? params.profileRows.map(({ title, summary }) => ({ title, summary }))
+      : null,
+    historicalAnswers: params.historicalRows.length
+      ? params.historicalRows.map(({ question, answer }) => ({ question, answer }))
+      : null,
+    launchGrade12: params.currentGrade === 12 && !params.hasPriorYearMapping,
+    entryGradeFirstPhaseId: params.applicable.find(({ grade }) => grade === params.entryGrade)?.id ??
+      params.selected.id,
+  });
+}
+
+function erasedDraftForActor(
+  notes: PhaseNotes | undefined,
+  actorUserId: number | undefined,
+  teacher: boolean
+) {
+  if (!teacher || notes?.state !== "draft") return false;
+  return notes.authorUserId !== actorUserId && notes.answers.length === 0;
+}
+
+function visibleNotes(notes: PhaseNotes | undefined, canReadDraft: boolean, erasedDraft: boolean) {
+  if (!notes || erasedDraft) return null;
+  const detail = {
+    state: notes.state,
+    revision: notes.revision,
+    firstSubmittedAt: notes.firstSubmittedAt,
+    lastEditedAt: notes.lastEditedAt,
+  };
+  return notes.state === "submitted" || canReadDraft
+    ? { ...detail, answers: notes.answers }
+    : detail;
+}
+
+function canEditSelectedNotes(
+  notes: PhaseNotes | undefined,
+  params: OpenSelectedPhaseParams,
+  teacher: boolean,
+  erasedDraft: boolean
+) {
+  if (!teacher) return false;
+  if (!params.canEdit) return false;
+  if (!notes) return true;
+  if (notes.authorUserId === params.actorUserId) return true;
+  return erasedDraft;
+}
+
+function openSelectedPhase(params: OpenSelectedPhaseParams) {
+  const notes = params.notesByPhase.get(params.selected.id);
+  const teacher = params.role === "teacher";
+  const canReadDraft = teacher ? notes?.authorUserId === params.actorUserId : false;
+  const erasedDraft = erasedDraftForActor(notes, params.actorUserId, teacher);
+  return {
+    phaseId: params.selected.id,
+    number: params.selected.number,
+    title: params.selected.title,
+    grade: params.selected.grade,
+    academicYear: params.selected.academic_year,
+    locked: false as const,
+    active: params.active.get(`${params.selected.academic_year}:${params.selected.grade}`) ===
+      params.selected.id,
+    progress: params.progress.get(params.selected.id) ?? "pending",
+    draftSaved: notes?.state === "draft" && !erasedDraft,
+    revision: params.selected.revision,
+    mappingId: params.mappingId,
+    notesRevision: notes?.revision ?? 0,
+    canEditNotes: canEditSelectedNotes(notes, params, teacher, erasedDraft),
+    guidanceMarkdown: params.selected.guidance_markdown,
+    context: selectedPhaseContext(params),
+    questions: params.questionsByPhase.get(params.selected.id) ?? [],
+    notes: visibleNotes(notes, canReadDraft, erasedDraft),
+  };
+}
+
+export async function getHolisticStudentPhase(params: {
+  studentId: number;
+  phaseId: number;
+  schoolId: number;
+  academicYear: string;
+  actorUserId?: number;
+  role: string;
+  canEdit: boolean;
+}): Promise<HolisticStudentPhaseDetail | null> {
+  const student = await loadMappedStudent(params);
+  if (!student) return null;
+
+  const priorYear = previousAcademicYear(params.academicYear);
+  const academicYears = [priorYear, params.academicYear];
+  const phaseRows = await loadPhaseRows(academicYears);
+  if (!phaseRows.some(({ id }) => Number(id) === params.phaseId)) return null;
+
+  const relations = await loadPhaseRelations(
+    params,
+    phaseRows.map(({ id }) => Number(id)),
+    academicYears
+  );
+  const { mappingRows, profileRows, historicalRows } = relations;
+  const firstMappingByYear = new Map(mappingRows.map((row) => [row.academic_year, row.started_at]));
+  const transitionsByPhase = groupTransitions(relations.transitionRows);
+  const questionsByPhase = groupQuestions(relations.questionRows);
+  const notesByPhase = groupNotes(relations.notesRows);
+  const numbered = numberPhases(phaseRows);
   const currentGrade = Number(student.grade) as 11 | 12;
   const hasPriorYearMapping = firstMappingByYear.has(priorYear);
   const entryGrade = Number(student.entry_grade ?? (hasPriorYearMapping ? 11 : currentGrade)) as 11 | 12;
@@ -385,117 +639,50 @@ export async function getHolisticStudentPhase(params: {
     currentPhases: numbered.filter(({ academic_year }) => academic_year === params.academicYear),
     priorGrade11Phases: numbered.filter(({ academic_year, grade }) => academic_year === priorYear && grade === 11),
   });
-  const realApplicable = applicable.filter((phase): phase is ApplicablePhase & PhaseRow & { academic_year: string } => "id" in phase);
+  const realApplicable = applicable.filter((phase): phase is NumberedPhase => "id" in phase);
   const selected = realApplicable.find(({ id }) => id === params.phaseId);
   if (!selected) return null;
 
-  const progressByPhase = new Map<number, HolisticPhaseProgress>();
-  for (const year of [priorYear, params.academicYear]) {
-    for (const grade of [11, 12] as const) {
-      const group = realApplicable.filter((phase) => phase.academic_year === year && phase.grade === grade);
-      const progress = deriveHolisticPhaseProgress(
-        group.map((phase) => ({ id: phase.id, position: phase.position, transitions: transitionsByPhase.get(phase.id) ?? [] })),
-        firstMappingByYear.get(year) ?? null,
-        group.flatMap((phase) => {
-          const notes = notesByPhase.get(phase.id);
-          return notes ? [{ phaseId: phase.id, state: notes.state }] : [];
-        })
-      );
-      for (const item of progress) progressByPhase.set(...item);
-    }
-  }
-  const activeByYearGrade = new Map<string, number>();
-  for (const phase of numbered) {
-    if (phase.state === "open") activeByYearGrade.set(`${phase.academic_year}:${phase.grade}`, phase.id);
-  }
-
-  const phaseSummary = (phase: typeof applicable[number]) => {
-    if (!("id" in phase)) return phase;
-    if (phase.state === "locked") {
-      return { phaseId: phase.id, number: phase.number, title: phase.title, locked: true as const };
-    }
-    const notes = notesByPhase.get(phase.id);
-    return {
-      phaseId: phase.id,
-      number: phase.number,
-      title: phase.title,
-      grade: phase.grade,
-      academicYear: phase.academic_year,
-      locked: false as const,
-      active: activeByYearGrade.get(`${phase.academic_year}:${phase.grade}`) === phase.id,
-      progress: progressByPhase.get(phase.id) ?? "pending",
-      draftSaved: notes?.state === "draft",
-    };
-  };
-  const phases = applicable.map(phaseSummary);
-  const selectedSummary = phaseSummary(selected);
+  const progress = progressByPhase({
+    phases: realApplicable,
+    academicYears,
+    firstMappingByYear,
+    transitionsByPhase,
+    notesByPhase,
+  });
+  const active = activePhases(numbered);
+  const phases = applicable.map((phase) => summarizePhase(phase, notesByPhase, progress, active));
+  const selectedSummary = summarizePhase(selected, notesByPhase, progress, active);
+  const readOnly = params.role !== "teacher" || !params.canEdit;
   if (selected.state === "locked") {
     return {
-      student: {
-        id: Number(student.student_id), name: student.name || student.external_student_id || "Unknown Student",
-        externalStudentId: student.external_student_id, grade: currentGrade,
-      },
+      student: studentSummary(student, currentGrade),
       phases,
       selectedPhase: selectedSummary,
-      readOnly: params.role !== "teacher" || !params.canEdit,
+      readOnly,
     };
   }
 
-  const sequence = realApplicable.map(({ id, number, title }) => ({ id, number, title }));
-  const submittedNotes = realApplicable.flatMap((phase) => {
-    const notes = notesByPhase.get(phase.id);
-    return notes?.state === "submitted"
-      ? [{ phaseId: phase.id, lastEditedAt: notes.lastEditedAt, answers: notes.answers }]
-      : [];
-  });
-  const context = resolveHolisticStudentContext({
-    targetPhaseId: selected.id,
-    phases: sequence,
-    submittedNotes,
-    profile: profileRows.length ? profileRows.map(({ title, summary }) => ({ title, summary })) : null,
-    historicalAnswers: historicalRows.length ? historicalRows.map(({ question, answer }) => ({ question, answer })) : null,
-    launchGrade12: currentGrade === 12 && !hasPriorYearMapping,
-    entryGradeFirstPhaseId: realApplicable.find(({ grade }) => grade === entryGrade)?.id ?? selected.id,
-  });
-  const selectedNotes = notesByPhase.get(selected.id);
-  const canReadDraft = params.role === "teacher" && selectedNotes?.authorUserId === params.actorUserId;
-  const erasedDraftForActor = params.role === "teacher" && selectedNotes?.state === "draft" &&
-    selectedNotes.authorUserId !== params.actorUserId && selectedNotes.answers.length === 0;
-
   return {
-    student: {
-      id: Number(student.student_id), name: student.name || student.external_student_id || "Unknown Student",
-      externalStudentId: student.external_student_id, grade: currentGrade,
-    },
+    student: studentSummary(student, currentGrade),
     phases,
-    selectedPhase: {
-      phaseId: selected.id,
-      number: selected.number,
-      title: selected.title,
-      grade: selected.grade,
-      academicYear: selected.academic_year,
-      locked: false,
-      active: activeByYearGrade.get(`${selected.academic_year}:${selected.grade}`) === selected.id,
-      progress: progressByPhase.get(selected.id) ?? "pending",
-      draftSaved: selectedNotes?.state === "draft" && !erasedDraftForActor,
-      revision: selected.revision,
+    selectedPhase: openSelectedPhase({
+      selected,
+      applicable: realApplicable,
+      notesByPhase,
+      questionsByPhase,
+      progress,
+      active,
+      profileRows,
+      historicalRows,
+      currentGrade,
+      entryGrade,
+      hasPriorYearMapping,
+      actorUserId: params.actorUserId,
+      role: params.role,
+      canEdit: params.canEdit,
       mappingId: Number(student.mapping_id),
-      notesRevision: selectedNotes?.revision ?? 0,
-      canEditNotes: params.role === "teacher" && params.canEdit &&
-        (!selectedNotes || selectedNotes.authorUserId === params.actorUserId || erasedDraftForActor),
-      guidanceMarkdown: selected.guidance_markdown,
-      context,
-      questions: questionsByPhase.get(selected.id) ?? [],
-      notes: selectedNotes && !erasedDraftForActor ? {
-        state: selectedNotes.state,
-        revision: selectedNotes.revision,
-        firstSubmittedAt: selectedNotes.firstSubmittedAt,
-        lastEditedAt: selectedNotes.lastEditedAt,
-        ...((selectedNotes.state === "submitted" || canReadDraft) ? { answers: selectedNotes.answers } : {}),
-      } : null,
-    },
-    readOnly: params.role !== "teacher" || !params.canEdit,
+    }),
+    readOnly,
   };
 }
-import { PROGRAM_IDS } from "./constants";
-import { query } from "./db";

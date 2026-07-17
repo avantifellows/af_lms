@@ -1,7 +1,8 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
 import { query } from "./db";
+import type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
 
-export type HolisticProgress = "pending" | "completed" | "skipped" | "no_active_phase";
+export type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
 export type HolisticProgressSort = "student_name" | "school" | "grade" | "mentor" | "phase" | "progress";
 export type HolisticProgressDirection = "asc" | "desc";
 
@@ -16,26 +17,6 @@ export type HolisticProgressFilters = {
   sort: HolisticProgressSort;
   direction: HolisticProgressDirection;
   page: number;
-};
-
-export type HolisticProgressRow = {
-  studentId: number;
-  studentName: string;
-  externalStudentId: string | null;
-  grade: 11 | 12;
-  schoolName: string;
-  schoolCode: string;
-  mentorName: string;
-  mentorEmail: string | null;
-  phaseId: number | null;
-  phaseNumber: number | null;
-  phaseTitle: string | null;
-  phaseState: "open" | "locked" | null;
-  progress: HolisticProgress;
-  completedAt: string | null;
-  notesAuthor: string | null;
-  notesLastEditedAt: string | null;
-  answers: Array<{ position: number; question: string; answer: string }>;
 };
 
 export type HolisticProgressOptions = {

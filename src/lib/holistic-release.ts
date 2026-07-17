@@ -11,7 +11,10 @@ const APPROVED_PROFILE_FORMS = {
     sessionId: "EnableStudents_6a4deca8e030ebe34669fb0f",
   },
 } as const;
+const APPROVED_PROFILE_GRADES = [11, 12] as const;
 const APPROVED_PROFILE_THEME_COUNTS = [3, 6, 7, 8, 10];
+const BIGQUERY_PROJECT_PATTERN = /^[A-Za-z0-9_-]+$/;
+const BIGQUERY_DATASET_PATTERN = /^[A-Za-z0-9_]+$/;
 
 type Query = <T extends Record<string, unknown> = Record<string, unknown>>(
   sql: string,
@@ -36,6 +39,52 @@ interface BigQueryProfileRow {
   question_id: string;
   question_position_index: string | number;
   question_set_title: string;
+}
+
+type ProfileForm = HolisticProfileSourceEvidence["forms"][number];
+type ProfileQuestion = ProfileForm["questions"][number];
+type PreflightRosterRow = {
+  student_id: number;
+  user_id: string;
+  grade: number;
+  has_profile: boolean;
+};
+type PreflightActorRow = { actor_class: string; actor_count: number | string };
+type PreflightIdentityRow = { source_user_id: string; student_id: number; eligible: boolean };
+type PreflightHistoryRow = { safe_candidates: number | string; excluded_rows: number | string };
+
+interface PreflightEvidence {
+  schools: Array<{ school_id: number }>;
+  roster: PreflightRosterRow[];
+  actors: PreflightActorRow[];
+  identities: PreflightIdentityRow[];
+  historical: PreflightHistoryRow[];
+}
+
+interface PreflightParams {
+  db: Query;
+  academicYear: string;
+  profileSource: HolisticProfileSourceEvidence;
+}
+
+export function buildHolisticProfileSourceQuery(project: string, dataset: string) {
+  if (!BIGQUERY_PROJECT_PATTERN.test(project) || !BIGQUERY_DATASET_PATTERN.test(dataset)) {
+    throw new Error("Invalid BigQuery project or dataset");
+  }
+  return {
+    query: `SELECT user_id, test_id, session_id, question_id, question_position_index, question_set_title
+            FROM \`${project}.${dataset}.all_responses_form_level\`
+            WHERE test_type = 'form'
+              AND ((test_id = @grade11Form AND session_id = @grade11Session)
+                OR (test_id = @grade12Form AND session_id = @grade12Session))
+            ORDER BY user_id, test_id, question_position_index, question_id`,
+    params: {
+      grade11Form: APPROVED_PROFILE_FORMS[11].formId,
+      grade11Session: APPROVED_PROFILE_FORMS[11].sessionId,
+      grade12Form: APPROVED_PROFILE_FORMS[12].formId,
+      grade12Session: APPROVED_PROFILE_FORMS[12].sessionId,
+    },
+  };
 }
 
 export function buildHolisticProfileSourceEvidence(
@@ -71,11 +120,22 @@ export function buildHolisticProfileSourceEvidence(
   };
 }
 
-export async function runHolisticReleasePreflight(params: {
-  db: Query;
-  academicYear: string;
-  profileSource: HolisticProfileSourceEvidence;
-}) {
+export async function runHolisticReleasePreflight(params: PreflightParams) {
+  const evidence = await loadPreflightEvidence(params);
+  const blockers = [
+    ...getProfileFormBlockers(params.profileSource.forms),
+    ...getIdentityBlockers(params.profileSource.sourceUserIds, evidence.identities),
+  ];
+  const incompleteProfiles = evidence.roster.filter(({ has_profile }) => !has_profile).length;
+  return {
+    ok: blockers.length === 0,
+    blockers,
+    warnings: getProfileWarnings(incompleteProfiles),
+    counts: getPreflightCounts(evidence, incompleteProfiles),
+  };
+}
+
+async function loadPreflightEvidence(params: PreflightParams): Promise<PreflightEvidence> {
   const [schools, roster, actors, identities, historical] = await Promise.all([
     params.db<{ school_id: number }>(
       `/* preflight_program_schools */
@@ -84,7 +144,7 @@ export async function runHolisticReleasePreflight(params: {
        WHERE program_id = $1 AND is_active IS TRUE AND school_id IS NOT NULL`,
       [PROGRAM_IDS.COE]
     ),
-    params.db<{ student_id: number; user_id: string; grade: number; has_profile: boolean }>(
+    params.db<PreflightRosterRow>(
       `/* preflight_roster */
        SELECT DISTINCT student.id AS student_id, student.user_id::text AS user_id,
               centre_students.grade,
@@ -104,7 +164,7 @@ export async function runHolisticReleasePreflight(params: {
          AND student.status IS DISTINCT FROM 'dropout'`,
       [PROGRAM_IDS.COE, params.academicYear]
     ),
-    params.db<{ actor_class: string; actor_count: number | string }>(
+    params.db<PreflightActorRow>(
       `/* preflight_actors */
        WITH eligible_teachers AS (
          SELECT DISTINCT teacher.user_id
@@ -127,7 +187,7 @@ export async function runHolisticReleasePreflight(params: {
         WHERE role = 'admin' AND level = 3 AND revoked_at IS NULL`,
       [PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
     ),
-    params.db<{ source_user_id: string; student_id: number; eligible: boolean }>(
+    params.db<PreflightIdentityRow>(
       `/* preflight_identity */
        WITH source_user(source_user_id) AS (SELECT unnest($1::text[]))
        SELECT source_user.source_user_id, student.id AS student_id,
@@ -142,7 +202,7 @@ export async function runHolisticReleasePreflight(params: {
        JOIN student ON student.user_id::text = source_user.source_user_id`,
       [params.profileSource.sourceUserIds, PROGRAM_IDS.COE, params.academicYear]
     ),
-    params.db<{ safe_candidates: number | string; excluded_rows: number | string }>(
+    params.db<PreflightHistoryRow>(
       `/* preflight_historical */
        WITH source_student(business_student_id) AS (SELECT unnest($1::text[])), matches AS (
          SELECT source_student.business_student_id,
@@ -161,65 +221,129 @@ export async function runHolisticReleasePreflight(params: {
       [params.profileSource.historicalBusinessStudentIds ?? [], PROGRAM_IDS.COE, params.academicYear]
     ),
   ]);
+  return { schools, roster, actors, identities, historical };
+}
 
-  const blockers: string[] = [];
-  for (const grade of [11, 12] as const) {
-    const form = params.profileSource.forms.find((candidate) => candidate.grade === grade);
-    const approved = APPROVED_PROFILE_FORMS[grade];
-    const ids = new Set(form?.questions.map(({ questionId }) => questionId));
-    const positions = form?.questions.map(({ position }) => position).sort((a, b) => a - b) ?? [];
-    const themes = new Map<string, number>();
-    for (const { questionSetTitle } of form?.questions ?? []) {
-      themes.set(questionSetTitle, (themes.get(questionSetTitle) ?? 0) + 1);
-    }
-    const themeCounts = [...themes.values()].sort((a, b) => a - b);
-    if (!form || form.formId !== approved.formId || form.sessionId !== approved.sessionId ||
-        form.questions.length !== 34 || ids.size !== 34 ||
-        positions.some((position, index) => position !== index + 1) ||
-        !APPROVED_PROFILE_THEME_COUNTS.every((count, index) => themeCounts[index] === count)) {
-      blockers.push(`Approved Grade ${grade} Profile Form structure is invalid`);
-    }
+function getProfileFormBlockers(forms: ProfileForm[]): string[] {
+  return APPROVED_PROFILE_GRADES.flatMap((grade) => {
+    const form = forms.find((candidate) => candidate.grade === grade);
+    return isApprovedProfileForm(form, grade)
+      ? []
+      : [`Approved Grade ${grade} Profile Form structure is invalid`];
+  });
+}
+
+function isApprovedProfileForm(form: ProfileForm | undefined, grade: 11 | 12): boolean {
+  if (!form) return false;
+  const approved = APPROVED_PROFILE_FORMS[grade];
+  return form.formId === approved.formId &&
+    form.sessionId === approved.sessionId &&
+    hasApprovedQuestions(form.questions);
+}
+
+function hasApprovedQuestions(questions: ProfileQuestion[]): boolean {
+  return questions.length === 34 &&
+    new Set(questions.map(({ questionId }) => questionId)).size === 34 &&
+    hasSequentialPositions(questions) &&
+    hasApprovedThemeCounts(questions);
+}
+
+function hasSequentialPositions(questions: ProfileQuestion[]): boolean {
+  const positions = questions.map(({ position }) => position).sort((a, b) => a - b);
+  return positions.every((position, index) => position === index + 1);
+}
+
+function hasApprovedThemeCounts(questions: ProfileQuestion[]): boolean {
+  const themes = new Map<string, number>();
+  for (const { questionSetTitle } of questions) {
+    themes.set(questionSetTitle, (themes.get(questionSetTitle) ?? 0) + 1);
   }
+  const counts = [...themes.values()].sort((a, b) => a - b);
+  return APPROVED_PROFILE_THEME_COUNTS.every((count, index) => counts[index] === count);
+}
 
-  const bySourceUser = new Map<string, typeof identities>();
+function groupIdentities(identities: PreflightIdentityRow[]): Map<string, PreflightIdentityRow[]> {
+  const bySourceUser = new Map<string, PreflightIdentityRow[]>();
   for (const identity of identities) {
     const matches = bySourceUser.get(identity.source_user_id) ?? [];
     matches.push(identity);
     bySourceUser.set(identity.source_user_id, matches);
   }
-  const uniqueSourceUsers = [...new Set(params.profileSource.sourceUserIds)];
-  const missing = uniqueSourceUsers.filter((id) => !bySourceUser.has(id)).length;
-  const ambiguous = uniqueSourceUsers.filter((id) => (bySourceUser.get(id)?.length ?? 0) > 1).length;
-  const wrongScope = uniqueSourceUsers.filter((id) => {
-    const matches = bySourceUser.get(id) ?? [];
-    return matches.length === 1 && !matches[0].eligible;
-  }).length;
-  if (missing) blockers.push(`${missing} BigQuery User ${missing === 1 ? "identity is" : "identities are"} missing from LMS`);
-  if (ambiguous) blockers.push(`${ambiguous} BigQuery User ${ambiguous === 1 ? "identity is" : "identities are"} ambiguous in LMS`);
-  if (wrongScope) blockers.push(`${wrongScope} BigQuery User ${wrongScope === 1 ? "is" : "are"} outside the Program 1 Grade 11/12 roster`);
+  return bySourceUser;
+}
 
-  const actorCount = (actorClass: string) => Number(actors.find(({ actor_class }) => actor_class === actorClass)?.actor_count ?? 0);
-  const incompleteProfiles = roster.filter(({ has_profile }) => !has_profile).length;
-  const history = historical[0] ?? { safe_candidates: 0, excluded_rows: 0 };
-  return {
-    ok: blockers.length === 0,
+function getIdentityIssueCounts(sourceUserIds: string[], identities: PreflightIdentityRow[]) {
+  const bySourceUser = groupIdentities(identities);
+  let missing = 0;
+  let ambiguous = 0;
+  let wrongScope = 0;
+  for (const id of new Set(sourceUserIds)) {
+    const matches = bySourceUser.get(id);
+    if (!matches) missing += 1;
+    else if (matches.length > 1) ambiguous += 1;
+    else if (!matches[0].eligible) wrongScope += 1;
+  }
+  return { missing, ambiguous, wrongScope };
+}
+
+function getIdentityBlockers(
+  sourceUserIds: string[],
+  identities: PreflightIdentityRow[]
+): string[] {
+  const blockers: string[] = [];
+  const { missing, ambiguous, wrongScope } = getIdentityIssueCounts(sourceUserIds, identities);
+  addCountBlocker(blockers, missing, "identity is", "identities are", "missing from LMS");
+  addCountBlocker(blockers, ambiguous, "identity is", "identities are", "ambiguous in LMS");
+  addCountBlocker(
     blockers,
-    warnings: incompleteProfiles
-      ? [`${incompleteProfiles} eligible Student${incompleteProfiles === 1 ? " has" : "s have"} no successful Active-configuration Profile`]
-      : [],
-    counts: {
-      programSchools: schools.length,
-      eligibleStudents: roster.length,
-      grade11Students: roster.filter(({ grade }) => Number(grade) === 11).length,
-      grade12Students: roster.filter(({ grade }) => Number(grade) === 12).length,
-      eligibleTeachers: actorCount("teacher"),
-      holisticAdmins: actorCount("holistic_admin"),
-      globalAdmins: actorCount("global_admin"),
-      incompleteProfiles,
-      historicalCandidates: Number(history.safe_candidates),
-      excludedHistoricalRows: Number(history.excluded_rows),
-    },
+    wrongScope,
+    "is",
+    "are",
+    "outside the Program 1 Grade 11/12 roster"
+  );
+  return blockers;
+}
+
+function addCountBlocker(
+  blockers: string[],
+  count: number,
+  singular: string,
+  plural: string,
+  suffix: string
+): void {
+  if (!count) return;
+  blockers.push(`${count} BigQuery User ${count === 1 ? singular : plural} ${suffix}`);
+}
+
+function getProfileWarnings(incompleteProfiles: number): string[] {
+  if (!incompleteProfiles) return [];
+  const verb = incompleteProfiles === 1 ? " has" : "s have";
+  return [
+    `${incompleteProfiles} eligible Student${verb} no successful Active-configuration Profile`,
+  ];
+}
+
+function getPreflightCounts(evidence: PreflightEvidence, incompleteProfiles: number) {
+  const history = evidence.historical[0] ?? { safe_candidates: 0, excluded_rows: 0 };
+  return {
+    programSchools: evidence.schools.length,
+    eligibleStudents: evidence.roster.length,
+    grade11Students: countRosterGrade(evidence.roster, 11),
+    grade12Students: countRosterGrade(evidence.roster, 12),
+    eligibleTeachers: getActorCount(evidence.actors, "teacher"),
+    holisticAdmins: getActorCount(evidence.actors, "holistic_admin"),
+    globalAdmins: getActorCount(evidence.actors, "global_admin"),
+    incompleteProfiles,
+    historicalCandidates: Number(history.safe_candidates),
+    excludedHistoricalRows: Number(history.excluded_rows),
   };
 }
 
-export { APPROVED_PROFILE_FORMS };
+function countRosterGrade(roster: PreflightRosterRow[], grade: number): number {
+  return roster.filter((row) => Number(row.grade) === grade).length;
+}
+
+function getActorCount(actors: PreflightActorRow[], actorClass: string): number {
+  const actor = actors.find(({ actor_class }) => actor_class === actorClass);
+  return Number(actor?.actor_count ?? 0);
+}

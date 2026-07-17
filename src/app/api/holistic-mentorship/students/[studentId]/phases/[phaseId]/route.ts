@@ -6,38 +6,110 @@ import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import { saveHolisticNotes } from "@/lib/holistic-notes";
 import { getHolisticStudentPhase } from "@/lib/holistic-student-phase";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
+import {
+  positiveInteger,
+  positiveIntegerString,
+  readJsonObject,
+} from "../../../../route-helpers";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ studentId: string; phaseId: string }> }
-) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { studentId: rawStudentId, phaseId: rawPhaseId } = await params;
-  const studentId = Number(rawStudentId);
-  const phaseId = Number(rawPhaseId);
+type RouteParams = Promise<{ studentId: string; phaseId: string }>;
+type NotesMode = "draft" | "submit" | "edit";
+
+async function targetFrom(request: NextRequest, params: RouteParams) {
+  const raw = await params;
+  const studentId = positiveIntegerString(raw.studentId);
+  const phaseId = positiveIntegerString(raw.phaseId);
   const searchParams = new URL(request.url).searchParams;
   const schoolCode = searchParams.get("school_code") ?? "";
   const academicYear = searchParams.get("academic_year") ?? "";
-  if (!Number.isInteger(studentId) || studentId < 1 || !Number.isInteger(phaseId) || phaseId < 1 ||
-      !schoolCode || !validateAcademicYear(academicYear)) {
-    return NextResponse.json({ error: "Invalid Student, Phase, School, or Academic Year" }, { status: 422 });
+  return studentId && phaseId && schoolCode && validateAcademicYear(academicYear)
+    ? { studentId, phaseId, schoolCode, academicYear }
+    : null;
+}
+
+async function authenticatedTarget(request: NextRequest, params: RouteParams) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
   }
+  const target = await targetFrom(request, params);
+  if (!target) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { error: "Invalid Student, Phase, School, or Academic Year" },
+        { status: 422 }
+      ),
+    };
+  }
+  return { ok: true as const, session, target };
+}
+
+function notesMode(value: unknown): NotesMode | null {
+  return value === "draft" || value === "submit" || value === "edit" ? value : null;
+}
+
+function parseAnswer(value: unknown): { questionId: number; answer: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, unknown>;
+  const questionId = positiveInteger(item.question_id);
+  return questionId && typeof item.answer === "string" && item.answer.length <= 10_000
+    ? { questionId, answer: item.answer }
+    : null;
+}
+
+function parseAnswers(value: unknown): Array<{ questionId: number; answer: string }> | null {
+  if (!Array.isArray(value) || value.length > 4) return null;
+  const answers = value.map(parseAnswer);
+  if (answers.some((answer) => !answer)) return null;
+  const parsed = answers as Array<{ questionId: number; answer: string }>;
+  return new Set(parsed.map(({ questionId }) => questionId)).size === parsed.length
+    ? parsed
+    : null;
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function currentRevisionTokens(value: Record<string, unknown>, mode: NotesMode) {
+  if (mode === "draft") {
+    return { expectedMappingId: undefined, expectedPhaseRevision: undefined, confirmed: false };
+  }
+  const expectedMappingId = positiveInteger(value.expected_mapping_id);
+  const expectedPhaseRevision = positiveInteger(value.expected_phase_revision);
+  return expectedMappingId && expectedPhaseRevision && value.confirmed === true
+    ? { expectedMappingId, expectedPhaseRevision, confirmed: true }
+    : null;
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: RouteParams }
+) {
+  const parsed = await authenticatedTarget(request, params);
+  if (!parsed.ok) return parsed.response;
+  const { session, target } = parsed;
 
   const access = await requireHolisticMentorshipAccess(session, "mapped_student_read", {
-    schoolCode,
-    studentId,
-    academicYear,
+    schoolCode: target.schoolCode,
+    studentId: target.studentId,
+    academicYear: target.academicYear,
   });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
   const detail = await getHolisticStudentPhase({
-    studentId,
-    phaseId,
+    studentId: target.studentId,
+    phaseId: target.phaseId,
     schoolId: access.school!.id,
-    academicYear,
+    academicYear: target.academicYear,
     actorUserId: access.actorUserId,
     role: access.permission.role,
     canEdit: access.canEdit,
@@ -49,76 +121,45 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ studentId: string; phaseId: string }> }
+  { params }: { params: RouteParams }
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { studentId: rawStudentId, phaseId: rawPhaseId } = await params;
-  const studentId = Number(rawStudentId);
-  const phaseId = Number(rawPhaseId);
-  const searchParams = new URL(request.url).searchParams;
-  const schoolCode = searchParams.get("school_code") ?? "";
-  const academicYear = searchParams.get("academic_year") ?? "";
-  if (!Number.isSafeInteger(studentId) || studentId < 1 || !Number.isSafeInteger(phaseId) || phaseId < 1 ||
-      !schoolCode || !validateAcademicYear(academicYear)) {
-    return NextResponse.json({ error: "Invalid Student, Phase, School, or Academic Year" }, { status: 422 });
-  }
+  const parsed = await authenticatedTarget(request, params);
+  if (!parsed.ok) return parsed.response;
+  const { session, target } = parsed;
 
-  let value: Record<string, unknown>;
-  try {
-    const parsed: unknown = await request.json();
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-    value = parsed as Record<string, unknown>;
-  } catch {
+  const value = await readJsonObject(request);
+  if (!value) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 422 });
   }
-  const action = value.action;
-  const mode = action === "draft" || action === "submit" || action === "edit" ? action : null;
+  const mode = notesMode(value.action);
   if (!mode) return NextResponse.json({ error: "Invalid Notes" }, { status: 422 });
   const access = await requireHolisticMentorshipAccess(session, `notes_${mode}` as "notes_draft" | "notes_submit" | "notes_edit", {
-    schoolCode,
-    studentId,
-    academicYear,
+    schoolCode: target.schoolCode,
+    studentId: target.studentId,
+    academicYear: target.academicYear,
   });
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
 
-  const expectedRevision = value.expected_revision;
-  const rawAnswers = value.answers;
-  if (typeof expectedRevision !== "number" || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 ||
-      !Array.isArray(rawAnswers) || rawAnswers.length > 4) {
+  const expectedRevision = nonNegativeInteger(value.expected_revision);
+  const answers = parseAnswers(value.answers);
+  if (expectedRevision === null || !answers) {
     return NextResponse.json({ error: "Invalid Notes" }, { status: 422 });
   }
-  const answers = rawAnswers.map((answer) => {
-    if (!answer || typeof answer !== "object") return null;
-    const item = answer as Record<string, unknown>;
-    return typeof item.question_id === "number" && Number.isSafeInteger(item.question_id) && item.question_id > 0 &&
-      typeof item.answer === "string" && item.answer.length <= 10_000
-      ? { questionId: item.question_id, answer: item.answer }
-      : null;
-  });
-  if (answers.some((answer) => !answer) || new Set(answers.map((answer) => answer?.questionId)).size !== answers.length) {
-    return NextResponse.json({ error: "Invalid Notes" }, { status: 422 });
-  }
-  if (mode !== "draft" && (
-    typeof value.expected_mapping_id !== "number" || !Number.isSafeInteger(value.expected_mapping_id) || value.expected_mapping_id < 1 ||
-    typeof value.expected_phase_revision !== "number" || !Number.isSafeInteger(value.expected_phase_revision) || value.expected_phase_revision < 1 ||
-    value.confirmed !== true
-  )) {
+  const currentTokens = currentRevisionTokens(value, mode);
+  if (!currentTokens) {
     return NextResponse.json({ error: "Current revisions and confirmation are required" }, { status: 422 });
   }
 
   const result = await saveHolisticNotes({
     mode,
-    studentId,
-    phaseId,
+    studentId: target.studentId,
+    phaseId: target.phaseId,
     schoolId: access.school!.id,
-    academicYear,
+    academicYear: target.academicYear,
     actorUserId: access.actorUserId!,
     expectedRevision,
-    answers: answers as Array<{ questionId: number; answer: string }>,
-    expectedMappingId: typeof value.expected_mapping_id === "number" ? value.expected_mapping_id : undefined,
-    expectedPhaseRevision: typeof value.expected_phase_revision === "number" ? value.expected_phase_revision : undefined,
-    confirmed: value.confirmed === true,
+    answers,
+    ...currentTokens,
   });
   return result.ok
     ? NextResponse.json(result)

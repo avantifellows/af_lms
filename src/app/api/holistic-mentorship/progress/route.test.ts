@@ -30,7 +30,7 @@ describe("Holistic progress API", () => {
   });
 
   it.each([
-    "sort=sql", "direction=sideways", "progress=unknown", "grade=10", "phase_id=0",
+    "sort=sql", "sort=", "direction=sideways", "direction=", "format=", "progress=unknown", "grade=10", "phase_id=0",
     "mentor_user_id=-1", "page=0", "school_code=bad%20code", `search=${"x".repeat(101)}`,
   ])("rejects non-allowlisted filter %s without querying progress", async (filter) => {
     const response = await GET(new Request(`http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&${filter}`) as never);

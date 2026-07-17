@@ -51,6 +51,39 @@ interface HolisticMentorshipSchoolRow extends Omit<HolisticMentorshipSchool, "id
   id: number | string;
 }
 
+const PROGRAM_ACTIONS = new Set<HolisticMentorshipAction>([
+  "program_read",
+  "mapped_student_read",
+  "phase_configure",
+  "profile_regenerate",
+]);
+const TEACHER_ACTIONS = new Set<HolisticMentorshipAction>([
+  "roster_view",
+  "mapping_mutation",
+  "mapped_student_read",
+  "notes_draft",
+  "notes_submit",
+  "notes_edit",
+]);
+const MAPPING_REQUIRED_ACTIONS = new Set<HolisticMentorshipAction>([
+  "mapped_student_read",
+  "notes_draft",
+  "notes_submit",
+  "notes_edit",
+]);
+const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
+  "program_read",
+  "mapped_student_read",
+  "roster_view",
+]);
+
+function denied(
+  status: 401 | 403 | 404,
+  error: "Unauthorized" | "Forbidden" | "School not found" | "Not found"
+): HolisticMentorshipAccessResult {
+  return { ok: false, status, error };
+}
+
 async function findProgramSchool(
   schoolCode: string
 ): Promise<HolisticMentorshipSchool | null> {
@@ -121,80 +154,90 @@ async function ownsActiveMapping(params: {
   return rows.length > 0;
 }
 
+function allowedActor(permission: UserPermission, action: HolisticMentorshipAction) {
+  const programWide = permission.role === "admin" || permission.role === "holistic_mentorship_admin";
+  return {
+    teacher: permission.role === "teacher" && TEACHER_ACTIONS.has(action),
+    program: (action === "privacy_delete" && permission.role === "admin") ||
+      (programWide && PROGRAM_ACTIONS.has(action)),
+  };
+}
+
+async function resolveSchool(
+  permission: UserPermission,
+  schoolCode?: string
+): Promise<HolisticMentorshipSchool | HolisticMentorshipAccessResult | undefined> {
+  if (!schoolCode) return undefined;
+  const school = await findProgramSchool(schoolCode);
+  if (!school) return denied(404, "School not found");
+  return canAccessSchoolSync(permission, school.code, school.region ?? undefined)
+    ? school
+    : denied(403, "Forbidden");
+}
+
+async function teacherAccess(params: {
+  email: string;
+  permission: UserPermission;
+  canEdit: boolean;
+  action: HolisticMentorshipAction;
+  school?: HolisticMentorshipSchool;
+  studentId?: number;
+  academicYear?: string;
+}): Promise<HolisticMentorshipAccessResult> {
+  if (!params.school) return denied(403, "Forbidden");
+  const actorUserId = await findEligibleTeacherUserId(params.email, params.school.id);
+  if (actorUserId === null) return denied(403, "Forbidden");
+  if (MAPPING_REQUIRED_ACTIONS.has(params.action)) {
+    const ownsMapping = params.studentId && await ownsActiveMapping({
+      actorUserId,
+      schoolId: params.school.id,
+      studentId: params.studentId,
+      academicYear: params.academicYear ?? CURRENT_ACADEMIC_YEAR,
+    });
+    if (!ownsMapping) return denied(404, "Not found");
+  }
+  return {
+    ok: true,
+    email: params.email,
+    permission: params.permission,
+    canEdit: params.canEdit,
+    actorUserId,
+    school: params.school,
+  };
+}
+
 export async function requireHolisticMentorshipAccess(
   session: HolisticMentorshipSession,
   action: HolisticMentorshipAction,
   options: { schoolCode?: string; studentId?: number; academicYear?: string } = {}
 ): Promise<HolisticMentorshipAccessResult> {
   const email = session?.user?.email;
-  if (!email) {
-    return { ok: false, status: 401, error: "Unauthorized" };
-  }
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
+  if (!email) return denied(401, "Unauthorized");
+  if (session.isPasscodeUser) return denied(403, "Forbidden");
 
   const permission = await getResolvedPermission(email);
   const access = getFeatureAccess(permission, "holistic_mentorship");
-  if (!permission || !access.canView) {
-    return { ok: false, status: 403, error: "Forbidden" };
+  if (!permission || !access.canView) return denied(403, "Forbidden");
+
+  const allowed = allowedActor(permission, action);
+  if ((!allowed.program && !allowed.teacher) || (!READ_ONLY_ACTIONS.has(action) && !access.canEdit)) {
+    return denied(403, "Forbidden");
   }
 
-  const isProgramWideActor =
-    permission.role === "admin" || permission.role === "holistic_mentorship_admin";
-  const readAction = action === "program_read" || action === "mapped_student_read";
-  const programActionAllowed =
-    (action === "privacy_delete" && permission.role === "admin") ||
-    (isProgramWideActor &&
-      ["program_read", "mapped_student_read", "phase_configure", "profile_regenerate"].includes(
-        action
-      ));
-  const teacherActionAllowed =
-    permission.role === "teacher" &&
-    [
-      "roster_view",
-      "mapping_mutation",
-      "mapped_student_read",
-      "notes_draft",
-      "notes_submit",
-      "notes_edit",
-    ].includes(action);
+  const resolvedSchool = await resolveSchool(permission, options.schoolCode);
+  if (resolvedSchool && "ok" in resolvedSchool) return resolvedSchool;
+  const school = resolvedSchool as HolisticMentorshipSchool | undefined;
 
-  if ((!programActionAllowed && !teacherActionAllowed) || (!readAction && action !== "roster_view" && !access.canEdit)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  let school: HolisticMentorshipSchool | undefined;
-  if (options.schoolCode) {
-    school = (await findProgramSchool(options.schoolCode)) ?? undefined;
-    if (!school) {
-      return { ok: false, status: 404, error: "School not found" };
-    }
-    if (!canAccessSchoolSync(permission, school.code, school.region ?? undefined)) {
-      return { ok: false, status: 403, error: "Forbidden" };
-    }
-  }
-
-  if (teacherActionAllowed) {
-    if (!school) return { ok: false, status: 403, error: "Forbidden" };
-    const actorUserId = await findEligibleTeacherUserId(email, school.id);
-    if (actorUserId === null) {
-      return { ok: false, status: 403, error: "Forbidden" };
-    }
-    if (["mapped_student_read", "notes_draft", "notes_submit", "notes_edit"].includes(action)) {
-      if (
-        !options.studentId ||
-        !(await ownsActiveMapping({
-          actorUserId,
-          schoolId: school.id,
-          studentId: options.studentId,
-          academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
-        }))
-      ) {
-        return { ok: false, status: 404, error: "Not found" };
-      }
-    }
-    return { ok: true, email, permission, canEdit: access.canEdit, actorUserId, school };
+  if (allowed.teacher) {
+    return teacherAccess({
+      email,
+      permission,
+      canEdit: access.canEdit,
+      action,
+      school,
+      studentId: options.studentId,
+      academicYear: options.academicYear,
+    });
   }
 
   return { ok: true, email, permission, canEdit: access.canEdit, school };

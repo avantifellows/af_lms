@@ -1,5 +1,4 @@
 import { PROGRAM_IDS } from "./constants";
-import { query, withTransaction } from "./db";
 import type {
   HistoricalImportDb,
   HistoricalImportWrite,
@@ -10,16 +9,31 @@ import type {
 } from "./holistic-operations";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
-export const historicalImportDb: HistoricalImportDb = {
-  async resolve(source) {
-    if (!source.length) return [];
-    return query<{
-      business_student_id: string;
-      student_id: number | string;
-      mentor_user_id: number | string | null;
-      eligible: boolean;
-    }>(
-      `WITH source(business_student_id, source_mentor_id) AS (
+type Database = Pick<typeof import("./db"), "query" | "withTransaction">;
+type TransactionClient = Parameters<Parameters<Database["withTransaction"]>[0]>[0];
+
+export function createHolisticOperationsDb(database: Database): {
+  historicalImport: HistoricalImportDb;
+  rollover: HolisticRolloverDb;
+} {
+  return {
+    historicalImport: createHistoricalImportDb(database),
+    rollover: createHolisticRolloverDb(database),
+  };
+}
+
+function createHistoricalImportDb(database: Database): HistoricalImportDb {
+  const { query, withTransaction } = database;
+  return {
+    async resolve(source) {
+      if (!source.length) return [];
+      return query<{
+        business_student_id: string;
+        student_id: number | string;
+        mentor_user_id: number | string | null;
+        eligible: boolean;
+      }>(
+        `WITH source(business_student_id, source_mentor_id) AS (
          SELECT * FROM unnest($1::text[], $2::text[])
        )
        SELECT source.business_student_id, student.id AS student_id,
@@ -50,38 +64,39 @@ export const historicalImportDb: HistoricalImportDb = {
          FROM teacher WHERE teacher.teacher_id = source.source_mentor_id
            AND teacher.is_af_teacher IS TRUE
        ) mentor ON TRUE`,
-      [
-        source.map(({ businessStudentId }) => businessStudentId),
-        source.map(({ sourceMentorId }) => sourceMentorId),
-        "2026-2027",
-        PROGRAM_IDS.COE,
-      ]
-    ).then((rows): ResolvedHistoricalStudent[] => rows.map((row) => ({
-      businessStudentId: row.business_student_id,
-      studentId: Number(row.student_id),
-      mentorUserId: row.mentor_user_id == null ? null : Number(row.mentor_user_id),
-      eligible: row.eligible,
-    })));
-  },
-  async existing(studentIds, sourceSystem) {
-    if (!studentIds.length) return new Set<number>();
-    const rows = await query<{ student_id: number | string }>(
-      `SELECT student_id FROM holistic_mentorship_historical_notes
+        [
+          source.map(({ businessStudentId }) => businessStudentId),
+          source.map(({ sourceMentorId }) => sourceMentorId),
+          "2026-2027",
+          PROGRAM_IDS.COE,
+        ]
+      ).then((rows): ResolvedHistoricalStudent[] => rows.map((row) => ({
+        businessStudentId: row.business_student_id,
+        studentId: Number(row.student_id),
+        mentorUserId: row.mentor_user_id == null ? null : Number(row.mentor_user_id),
+        eligible: row.eligible,
+      })));
+    },
+    async existing(studentIds, sourceSystem) {
+      if (!studentIds.length) return new Set<number>();
+      const rows = await query<{ student_id: number | string }>(
+        `SELECT student_id FROM holistic_mentorship_historical_notes
        WHERE student_id = ANY($1::bigint[]) AND source_system = $2`,
-      [studentIds, sourceSystem]
-    );
-    return new Set(rows.map(({ student_id }) => Number(student_id)));
-  },
-  async insert(records) {
-    if (!records.length) return;
-    await withTransaction(async (client) => {
-      for (const record of records) await insertHistoricalRecord(client, record);
-    });
-  },
-};
+        [studentIds, sourceSystem]
+      );
+      return new Set(rows.map(({ student_id }) => Number(student_id)));
+    },
+    async insert(records) {
+      if (!records.length) return;
+      await withTransaction(async (client) => {
+        for (const record of records) await insertHistoricalRecord(client, record);
+      });
+    },
+  };
+}
 
 async function insertHistoricalRecord(
-  client: Parameters<Parameters<typeof withTransaction>[0]>[0],
+  client: TransactionClient,
   record: HistoricalImportWrite
 ): Promise<void> {
   const inserted = await client.query<{ id: number | string }>(
@@ -104,36 +119,39 @@ async function insertHistoricalRecord(
   }
 }
 
-export const holisticRolloverDb: HolisticRolloverDb = {
-  async candidates(fromAcademicYear, toAcademicYear) {
-    return loadRolloverCandidates(
-      (sql, params) => query<RolloverRow>(sql, params), fromAcademicYear, toAcademicYear
-    );
-  },
-  async apply(fromAcademicYear, toAcademicYear, actorUserId) {
-    return withTransaction(async (client) => {
-      await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-      const candidates = await loadRolloverCandidates(
-        async (sql, params) => (await client.query<RolloverRow>(sql, params)).rows,
-        fromAcademicYear,
-        toAcademicYear
+function createHolisticRolloverDb(database: Database): HolisticRolloverDb {
+  const { query, withTransaction } = database;
+  return {
+    async candidates(fromAcademicYear, toAcademicYear) {
+      return loadRolloverCandidates(
+        (sql, params) => query<RolloverRow>(sql, params), fromAcademicYear, toAcademicYear
       );
-      const counts = rolloverCounts(candidates);
-      for (const candidate of candidates.filter(({ eligible, alreadyMapped }) => eligible && !alreadyMapped)) {
-        await client.query(
-          `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+    },
+    async apply(fromAcademicYear, toAcademicYear, actorUserId) {
+      return withTransaction(async (client) => {
+        await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+        const candidates = await loadRolloverCandidates(
+          async (sql, params) => (await client.query<RolloverRow>(sql, params)).rows,
+          fromAcademicYear,
+          toAcademicYear
+        );
+        const counts = rolloverCounts(candidates);
+        for (const candidate of candidates.filter(({ eligible, alreadyMapped }) => eligible && !alreadyMapped)) {
+          await client.query(
+            `INSERT INTO holistic_mentorship_mentor_mentee_mappings
              (student_id, mentor_user_id, school_id, program_id, academic_year, started_at,
               assigned_by_user_id, assignment_source, inserted_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, now(), $6, 'academic_year_rollover', now(), now())
            ON CONFLICT (student_id, academic_year) WHERE ended_at IS NULL DO NOTHING`,
-          [candidate.studentId, candidate.mentorUserId, candidate.schoolId, PROGRAM_IDS.COE,
-            toAcademicYear, actorUserId]
-        );
-      }
-      return counts;
-    });
-  },
-};
+            [candidate.studentId, candidate.mentorUserId, candidate.schoolId, PROGRAM_IDS.COE,
+              toAcademicYear, actorUserId]
+          );
+        }
+        return counts;
+      });
+    },
+  };
+}
 
 type RolloverRow = {
   student_id: number | string;
