@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ withTransaction: vi.fn(), query: vi.fn() }));
 
-import { withTransaction } from "./db";
-import { requestHolisticProfileRegeneration } from "./holistic-profiles";
+import { query, withTransaction } from "./db";
+import { getHolisticProfileAdmin, requestHolisticProfileRegeneration } from "./holistic-profiles";
 
 const mockTransaction = vi.mocked(withTransaction);
+const mockQuery = vi.mocked(query);
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
@@ -14,6 +15,16 @@ describe("Holistic Profile regeneration", () => {
     vi.resetAllMocks();
     process.env.HOLISTIC_PROFILE_ETL_URL = "https://etl.example.test/holistic/regenerate";
     process.env.HOLISTIC_PROFILE_ETL_TOKEN = "machine-token";
+  });
+
+  it("parameterizes the current-year active-Mapping rule for Profile reads", async () => {
+    mockQuery.mockResolvedValue([]);
+
+    await getHolisticProfileAdmin(41, "2026-2027");
+
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery.mock.calls[0][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
+    expect(mockQuery.mock.calls[1][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
   });
 
   it("records actor, Student, Active configuration and force before sending only the request reference", async () => {

@@ -19,9 +19,9 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
          AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
                      WHERE mapping.student_id = journey.student_id AND mapping.program_id = $2
                        AND mapping.academic_year = $3
-                       AND ($3 <> '${CURRENT_ACADEMIC_YEAR}' OR mapping.ended_at IS NULL))
+                       AND ($3 <> $4 OR mapping.ended_at IS NULL))
        ORDER BY summary.position`,
-      [studentId, PROGRAM_IDS.COE, academicYear]
+      [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ request_key: string; state: RegenerationState; inserted_at: string; error_code: string | null }>(
       `SELECT request_key, state, inserted_at, error_code
@@ -30,9 +30,9 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
          AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
                      WHERE mapping.student_id = $1 AND mapping.program_id = $2
                        AND mapping.academic_year = $3
-                       AND ($3 <> '${CURRENT_ACADEMIC_YEAR}' OR mapping.ended_at IS NULL))
+                       AND ($3 <> $4 OR mapping.ended_at IS NULL))
        ORDER BY inserted_at DESC, id DESC LIMIT 1`,
-      [studentId, PROGRAM_IDS.COE, academicYear]
+      [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
   ]);
   return {
