@@ -304,27 +304,31 @@ function parseGrade(value: unknown): 11 | 12 | null {
   return grade === 11 || grade === 12 ? grade : null;
 }
 
-function parseDate(value: unknown, flexible = false): string | null {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
-  }
-  const raw = stringValue(value);
+function parseDateParts(raw: string, flexible: boolean) {
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) };
+
   const dmy = raw.match(
     flexible
       ? /^(\d{1,2})([\/.-])(\d{1,2})\2(\d{2}|\d{4})$/
       : /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/,
   );
-  const parts = iso
-    ? { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) }
-    : dmy
-      ? {
-          year: Number(flexible ? dmy[4] : dmy[3]) +
-            (flexible && dmy[4].length === 2 ? 2000 : 0),
-          month: Number(flexible ? dmy[3] : dmy[2]),
-          day: Number(dmy[1]),
-        }
-      : null;
+  if (!dmy) return null;
+
+  const year = flexible ? dmy[4] : dmy[3];
+  return {
+    year: Number(year) + (year.length === 2 ? 2000 : 0),
+    month: Number(flexible ? dmy[3] : dmy[2]),
+    day: Number(dmy[1]),
+  };
+}
+
+function parseDate(value: unknown, flexible = false): string | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+
+  const parts = parseDateParts(stringValue(value), flexible);
   if (!parts) return null;
 
   const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));

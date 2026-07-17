@@ -49,32 +49,40 @@ function displayStream(value: string | null) {
   return ({ engineering: "Engineering", medical: "Medical", ca: "CA", clat: "CLAT", nda: "NDA" } as Record<string, string>)[normalized] ?? value ?? "";
 }
 
+function valueOrBlank<T>(value: T | null | undefined): T | "" {
+  return value ?? "";
+}
+
+function displayDob(value: unknown): Date | "" {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string" || !value) return "";
+  return new Date(`${value.slice(0, 10)}T00:00:00Z`);
+}
+
+function displayBoard(value: string | null | undefined) {
+  if (value?.includes("CENTRAL BOARD")) return "CBSE";
+  return valueOrBlank(value);
+}
+
 function rowValues(student: Student) {
   const { category, cwsn } = categoryAndCwsn(student);
-  const board = student.g10_board?.includes("CENTRAL BOARD") ? "CBSE" : student.g10_board ?? "";
-  const rawDob: unknown = student.date_of_birth;
-  const dob = rawDob instanceof Date
-    ? rawDob
-    : typeof rawDob === "string" && rawDob
-      ? new Date(`${rawDob.slice(0, 10)}T00:00:00Z`)
-      : "";
   return [
-    student.grade ?? "",
+    valueOrBlank(student.grade),
     [student.first_name, student.last_name].filter(Boolean).join(" "),
-    dob,
-    student.gender ?? "",
+    displayDob(student.date_of_birth),
+    valueOrBlank(student.gender),
     category,
     cwsn,
-    student.pen_number ?? "",
-    board,
-    student.g10_roll_no ?? "",
-    student.board_stream ?? "",
+    valueOrBlank(student.pen_number),
+    displayBoard(student.g10_board),
+    valueOrBlank(student.g10_roll_no),
+    valueOrBlank(student.board_stream),
     displayStream(student.stream),
-    student.father_name ?? "",
-    student.phone ?? "",
-    student.annual_family_income ?? "",
-    student.apaar_id ?? "",
-    student.student_id ?? "",
+    valueOrBlank(student.father_name),
+    valueOrBlank(student.phone),
+    valueOrBlank(student.annual_family_income),
+    valueOrBlank(student.apaar_id),
+    valueOrBlank(student.student_id),
   ];
 }
 
