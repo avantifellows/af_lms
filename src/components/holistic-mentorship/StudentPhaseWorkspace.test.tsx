@@ -444,10 +444,11 @@ describe("StudentPhaseWorkspace", () => {
     });
 
     expect(navigateEvent.defaultPrevented).toBe(true);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
     await waitFor(() => expect(navigation.traverseTo).toHaveBeenCalledWith("previous-entry"));
     await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).answers).toEqual([
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(patchCall[1].body).answers).toEqual([
       { question_id: 91, answer: "Save before browser Back" },
     ]);
   });

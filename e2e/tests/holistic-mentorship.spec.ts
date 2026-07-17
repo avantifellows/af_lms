@@ -223,11 +223,30 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticAdminPage.setViewportSize({ width: 1280, height: 800 });
     await holisticAdminPage.goto("/admin/holistic-mentorship");
 
+    const program = holisticAdminPage.getByLabel("Program");
+    await expect(program).toBeDisabled();
+    await expect(program).toHaveValue("1");
+    await expect(holisticAdminPage.getByRole("columnheader", { name: "Availability" })).toBeVisible();
+    await expect(holisticAdminPage.getByRole("columnheader", { name: "Completed on" })).toBeVisible();
+
+    const progress = await holisticAdminPage.request.get(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=school&direction=asc"
+    );
+    expect(progress.status()).toBe(200);
+    const progressBody = await progress.json();
+    expect(progressBody.rows.some((row: { studentId: number }) => row.studentId === fixture.unassignedStudentId)).toBe(false);
+    const draftRow = progressBody.rows.find((row: { studentId: number }) => row.studentId === fixture.draftStudentId);
+    expect(draftRow).toMatchObject({ progress: "pending", phaseState: "active", answers: [] });
+
     const csv = await holisticAdminPage.request.get(
       "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=student_name&direction=asc&format=csv"
     );
     expect(csv.status()).toBe(200);
     expect(csv.headers()["content-type"]).toContain("text/csv");
+    const csvBody = await csv.text();
+    expect(csvBody).toContain("Academic Year,Program ID,Program Name");
+    expect(csvBody).toContain("Notes Author Name,Notes Author Email,Notes Last Edited At");
+    expect(csvBody).not.toMatch(/Student Profile|Student Context|profile_journey_id|mapping_id/i);
 
     await holisticAdminPage.getByRole("link", { name: /^Open / }).first().click();
     await expect(holisticAdminPage.getByText("Read-only", { exact: true })).toBeVisible();

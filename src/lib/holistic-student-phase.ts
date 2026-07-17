@@ -1,4 +1,4 @@
-import { PROGRAM_IDS } from "./constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
 import { query } from "./db";
 
 export type HolisticPhaseProgress = "pending" | "skipped" | "completed";
@@ -311,9 +311,17 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
      ) roster_program ON roster_program.program_id = mapping.program_id
      LEFT JOIN holistic_mentorship_profile_journeys journey ON journey.student_id = st.id
      WHERE mapping.student_id = $1 AND mapping.school_id = $2 AND mapping.program_id = $3
-       AND mapping.academic_year = $4 AND mapping.ended_at IS NULL
+       AND mapping.academic_year = $4
+       AND ($4 <> $5 OR mapping.ended_at IS NULL)
+     ORDER BY mapping.started_at DESC, mapping.id DESC
      LIMIT 1`,
-    [params.studentId, params.schoolId, PROGRAM_IDS.COE, params.academicYear]
+    [
+      params.studentId,
+      params.schoolId,
+      PROGRAM_IDS.COE,
+      params.academicYear,
+      CURRENT_ACADEMIC_YEAR,
+    ]
   );
   return students[0] ?? null;
 }

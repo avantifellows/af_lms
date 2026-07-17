@@ -12,10 +12,11 @@ export type HolisticProgressRow = {
   phaseId: number | null;
   phaseNumber: number | null;
   phaseTitle: string | null;
-  phaseState: "open" | "locked" | null;
+  phaseState: "active" | "open" | "locked" | null;
   progress: HolisticProgress;
   completedAt: string | null;
   notesAuthor: string | null;
+  notesAuthorEmail: string | null;
   notesLastEditedAt: string | null;
   answers: Array<{ position: number; question: string; answer: string }>;
 };

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
 import {
+  DEFAULT_HOLISTIC_PROGRESS_SORT,
   formatHolisticProgressCsv,
+  getHolisticProgressAcademicYears,
   getHolisticProgressOptions,
   listHolisticProgress,
   type HolisticProgress,
@@ -71,7 +73,7 @@ function filtersFrom(request: Request): { filters: HolisticProgressFilters; csv:
   const mentorUserId = positiveInteger(params.get("mentor_user_id"));
   const grade = optionalGrade(params.get("grade"));
   const progress = optionalEnum(params.get("progress"), PROGRESS);
-  const sort = enumWithDefault(params.get("sort"), SORTS, "student_name");
+  const sort = enumWithDefault(params.get("sort"), SORTS, DEFAULT_HOLISTIC_PROGRESS_SORT);
   const directions = new Set<HolisticProgressDirection>(["asc", "desc"]);
   const direction = enumWithDefault(params.get("direction"), directions, "asc");
   const format = optionalFormat(params.get("format"));
@@ -118,9 +120,14 @@ export async function GET(request: Request) {
       },
     });
   }
+  const [options, academicYears] = await Promise.all([
+    getHolisticProgressOptions(filters.academicYear),
+    getHolisticProgressAcademicYears(),
+  ]);
   return NextResponse.json({
     ...result,
-    options: await getHolisticProgressOptions(filters.academicYear),
+    options,
+    academicYears,
     pageSize: 50,
     refreshedAt: new Date().toISOString(),
   });

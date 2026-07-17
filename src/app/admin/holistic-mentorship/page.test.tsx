@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetServerSession, mockPageHeader, mockRedirect, mockRequireAccess } = vi.hoisted(
+const { mockGetServerSession, mockPageHeader, mockRedirect, mockRequireAccess, mockWorkspace } = vi.hoisted(
   () => ({
     mockGetServerSession: vi.fn(),
     mockPageHeader: vi.fn(({ title }: { title: string }) => <h1>{title}</h1>),
@@ -9,6 +9,7 @@ const { mockGetServerSession, mockPageHeader, mockRedirect, mockRequireAccess } 
       throw new Error(`REDIRECT:${url}`);
     }),
     mockRequireAccess: vi.fn(),
+    mockWorkspace: vi.fn(() => <div><button role="tab">Students & Progress</button><button role="tab">Phase Setup</button></div>),
   })
 );
 
@@ -20,6 +21,9 @@ vi.mock("@/lib/holistic-mentorship", () => ({
 }));
 vi.mock("@/components/PageHeader", () => ({
   default: mockPageHeader,
+}));
+vi.mock("@/components/holistic-mentorship/HolisticMentorshipWorkspace", () => ({
+  default: mockWorkspace,
 }));
 
 import HolisticMentorshipAdminPage from "./page";

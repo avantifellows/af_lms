@@ -294,6 +294,7 @@ describe("Holistic Student Phase derivation", () => {
     expect(result).toMatchObject({
       readOnly: true,
       selectedPhase: {
+        canEditNotes: false,
         draftSaved: true,
         context: {
           label: "Student Profile",
@@ -308,6 +309,61 @@ describe("Holistic Student Phase derivation", () => {
       },
     });
     expect(result?.selectedPhase).not.toHaveProperty("notes.answers");
+  });
+
+  it("opens an ended prior-year Mapping read-only with submitted Notes for Admin", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 11, entry_grade: 11,
+      }])
+      .mockResolvedValueOnce([{
+        id: 63, academic_year: "2025-2026", grade: 11, title: "Looking ahead",
+        position: 4, revision: 3, state: "open", guidance_markdown: "Reflect together.",
+      }])
+      .mockResolvedValueOnce([{
+        id: 81, phase_id: 63, text: "What helped?", position: 1,
+      }])
+      .mockResolvedValueOnce([{
+        phase_id: 63, to_state: "open", occurred_at: "2026-02-01T00:00:00Z",
+      }])
+      .mockResolvedValueOnce([{
+        academic_year: "2025-2026", started_at: "2026-01-01T00:00:00Z",
+      }])
+      .mockResolvedValueOnce([{
+        notes_id: 101, phase_id: 63, author_user_id: 9, author_name: "Divya Rao",
+        state: "submitted", revision: 2, first_submitted_at: "2026-03-01T00:00:00Z",
+        last_edited_at: "2026-03-02T00:00:00Z", question_id: 81,
+        question: "What helped?", question_position: 1, answer: "A weekly plan",
+      }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await getHolisticStudentPhase({
+      studentId: 41,
+      phaseId: 63,
+      schoolId: 4,
+      academicYear: "2025-2026",
+      role: "holistic_mentorship_admin",
+      canEdit: true,
+    });
+
+    const [mappingSql, mappingParams] = mockQuery.mock.calls[0];
+    expect(String(mappingSql)).toContain("($4 <> $5 OR mapping.ended_at IS NULL)");
+    expect(String(mappingSql)).toContain("ORDER BY mapping.started_at DESC, mapping.id DESC");
+    expect(mappingParams).toEqual([41, 4, 1, "2025-2026", "2026-2027"]);
+    expect(result).toMatchObject({
+      readOnly: true,
+      selectedPhase: {
+        phaseId: 63,
+        canEditNotes: false,
+        notes: {
+          state: "submitted",
+          authorName: "Divya Rao",
+          answers: [{ questionId: 81, question: "What helped?", answer: "A weekly plan" }],
+        },
+      },
+    });
   });
 
   it("shows an erased draft as a blank editable form to the replacement Mentor", async () => {

@@ -5,7 +5,10 @@ import PageHeader from "@/components/PageHeader";
 import StudentPhaseWorkspace from "@/components/holistic-mentorship/StudentPhaseWorkspace";
 import { authOptions } from "@/lib/auth";
 import { validateAcademicYear } from "@/lib/holistic-phase-plans";
-import { getHolisticStudentPhase } from "@/lib/holistic-student-phase";
+import {
+  getHolisticStudentPhase,
+  type HolisticStudentPhaseDetail,
+} from "@/lib/holistic-student-phase";
 import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipSession,
@@ -58,6 +61,37 @@ function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string
   return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
 }
 
+type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
+
+function unlockedPhase(phase: PhaseNavigationItem) {
+  return phase.phaseId !== null && "locked" in phase && !phase.locked;
+}
+
+function phaseInAcademicYear(phase: PhaseNavigationItem, academicYear: string) {
+  return "academicYear" in phase && phase.academicYear === academicYear;
+}
+
+function preferredPhase(phases: PhaseNavigationItem[]) {
+  return phases.find((phase) => "active" in phase && phase.active) ?? phases[0] ?? null;
+}
+
+function fallbackPhaseId(detail: HolisticStudentPhaseDetail, academicYear: string) {
+  const available = detail.phases.filter(unlockedPhase);
+  const currentYear = available.filter((phase) => phaseInAcademicYear(phase, academicYear));
+  return preferredPhase(currentYear)?.phaseId ?? preferredPhase(available)?.phaseId ?? null;
+}
+
+function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
+  studentId: number;
+  schoolCode: string;
+  academicYear: string;
+}, role: string) {
+  if (!("locked" in detail.selectedPhase) || !detail.selectedPhase.locked) return;
+  const phaseId = fallbackPhaseId(detail, request.academicYear);
+  if (phaseId) redirect(studentPhaseHref(request.studentId, phaseId, request.schoolCode, request.academicYear));
+  redirect(studentPhaseBackHref(role, request.schoolCode));
+}
+
 export default async function StudentPhasePage(props: StudentPhasePageProps) {
   const [session, request] = await Promise.all([
     getServerSession(authOptions),
@@ -75,22 +109,7 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
     canEdit: access.canEdit,
   });
   if (!detail) notFound();
-  if ("locked" in detail.selectedPhase && detail.selectedPhase.locked) {
-    const available = detail.phases.filter((phase) =>
-      phase.phaseId !== null && "locked" in phase && !phase.locked
-    );
-    const currentYear = available.filter((phase) =>
-      "academicYear" in phase && phase.academicYear === request.academicYear
-    );
-    const fallback = currentYear.find((phase) => "active" in phase && phase.active)
-      ?? currentYear[0]
-      ?? available.find((phase) => "active" in phase && phase.active)
-      ?? available[0];
-    if (fallback?.phaseId) {
-      redirect(studentPhaseHref(request.studentId, fallback.phaseId, request.schoolCode, request.academicYear));
-    }
-    redirect(studentPhaseBackHref(access.permission.role, request.schoolCode));
-  }
+  redirectFromLockedPhase(detail, request, access.permission.role);
 
   return (
     <div className="min-h-screen bg-bg">

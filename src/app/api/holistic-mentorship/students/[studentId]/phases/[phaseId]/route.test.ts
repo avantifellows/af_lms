@@ -55,6 +55,53 @@ describe("Holistic Student Phase API", () => {
     });
   });
 
+  it("returns prior-year Student detail read-only for a Holistic Mentorship Admin", async () => {
+    mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "holistic_mentorship_admin" },
+      canEdit: true,
+      school: { id: 4 },
+    });
+    mockDetail.mockResolvedValue({
+      student: { id: 41 },
+      selectedPhase: {
+        phaseId: 73,
+        canEditNotes: false,
+        notes: { state: "submitted", answers: [{ answer: "A weekly plan" }] },
+      },
+      readOnly: true,
+    });
+
+    const response = await GET(
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2025-2026") as never,
+      context
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "holistic@example.com" } },
+      "mapped_student_read",
+      { schoolCode: "SCH001", studentId: 41, academicYear: "2025-2026" }
+    );
+    expect(mockDetail).toHaveBeenCalledWith({
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2025-2026",
+      actorUserId: undefined,
+      role: "holistic_mentorship_admin",
+      canEdit: true,
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      readOnly: true,
+      selectedPhase: {
+        canEditNotes: false,
+        notes: { state: "submitted", answers: [{ answer: "A weekly plan" }] },
+      },
+    });
+  });
+
   it("does not read protected Phase data after a stale bookmark loses access", async () => {
     mockAccess.mockResolvedValue({ ok: false, status: 404, error: "Not found" });
 

@@ -38,6 +38,9 @@ type BrowserNavigateEvent = Event & {
   navigationType: string;
   destination: { key: string };
 };
+type NotesSnapshot = Pick<NotesEditorProps, "notes" | "notesRevision">;
+type NotesRouter = ReturnType<typeof useRouter>;
+type BeforeNotesNavigation = () => boolean | Promise<boolean>;
 const NOTES_REFRESH_URLS = "holistic-notes-refresh-urls";
 
 function browserNavigation() {
@@ -97,6 +100,33 @@ function initialEditorState(props: NotesEditorProps) {
 
 function canAutosaveNotes(editable: boolean, notesState: "draft" | "submitted") {
   return editable && notesState === "draft";
+}
+
+function canEditSubmittedNotes(editable: boolean, notesState: "draft" | "submitted") {
+  return editable && notesState === "submitted";
+}
+
+function enabledUnlessDisabled(enabled: boolean, disabled: boolean) {
+  return enabled && !disabled;
+}
+
+function initialNotesRevision(props: NotesEditorProps) {
+  return props.notes ? props.notes.revision : props.notesRevision;
+}
+
+function hasLocalNotesWork(answersChanged: boolean, status: NotesEditorStatus) {
+  return answersChanged || ["saving", "failed"].includes(status);
+}
+
+function needsDraftNavigationGuard({ finalWriting, canAutosave, answersChanged, status }: {
+  finalWriting: boolean;
+  canAutosave: boolean;
+  answersChanged: boolean;
+  status: NotesEditorStatus;
+}) {
+  if (finalWriting) return true;
+  if (!canAutosave) return false;
+  return hasLocalNotesWork(answersChanged, status);
 }
 
 function shouldShowNotesInputs(canAutosave: boolean, editingSubmitted: boolean) {
@@ -162,6 +192,133 @@ function useNotesMutation(props: NotesEditorProps, revisionRef: React.MutableRef
   }, [apiUrl, props.mappingId, props.phaseRevision, props.questions, revisionRef]);
 }
 
+function snapshotAnswers(questions: NotesEditorProps["questions"], snapshot: NotesSnapshot) {
+  return Object.fromEntries(questions.map(({ questionId }) => [
+    questionId,
+    snapshot.notes?.answers?.find((answer) => answer.questionId === questionId)?.answer ?? "",
+  ]));
+}
+
+function snapshotEditorState(snapshot: NotesSnapshot) {
+  if (!snapshot.notes) return { notesState: "draft" as const, status: "idle" as const };
+  return {
+    notesState: snapshot.notes.state,
+    status: snapshot.notes.state === "draft" ? "saved" as const : "idle" as const,
+  };
+}
+
+function shouldHydrateNotes({ serverRevision, acceptedRevision, authoritative, busy }: {
+  serverRevision: number;
+  acceptedRevision: number;
+  authoritative: boolean;
+  busy: boolean;
+}) {
+  if (serverRevision < acceptedRevision) return false;
+  if (!authoritative && serverRevision === acceptedRevision) return null;
+  return !busy;
+}
+
+function clickedNavigationAnchor(event: MouseEvent) {
+  const modified = [event.metaKey, event.ctrlKey, event.shiftKey, event.altKey].some(Boolean);
+  if (event.defaultPrevented || event.button !== 0 || modified) return null;
+  const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>("a") ?? null;
+  if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return null;
+  return anchor;
+}
+
+function followNavigationAnchor(anchor: HTMLAnchorElement, router: NotesRouter) {
+  const target = new URL(anchor.href, window.location.href);
+  if (target.origin === window.location.origin && !target.pathname.startsWith("/api/")) {
+    router.push(`${target.pathname}${target.search}${target.hash}`);
+    return;
+  }
+  window.location.assign(target.href);
+}
+
+function useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor, router }: {
+  beforeNavigation: BeforeNotesNavigation;
+  guardNeeded: boolean;
+  draftEditor: boolean;
+  router: NotesRouter;
+}) {
+  const historyGuardInFlight = useRef(false);
+  const replayingHistory = useRef(false);
+  const guardNeededRef = useRef(guardNeeded);
+  const beforeNavigationRef = useRef(beforeNavigation);
+  const draftEditorRef = useRef(draftEditor);
+
+  useEffect(() => {
+    guardNeededRef.current = guardNeeded;
+    beforeNavigationRef.current = beforeNavigation;
+    draftEditorRef.current = draftEditor;
+  }, [beforeNavigation, draftEditor, guardNeeded]);
+
+  useEffect(() => {
+    const navigation = browserNavigation();
+    if (!navigation) return;
+    const handleHistoryNavigation = (rawEvent: Event) => {
+      const event = rawEvent as BrowserNavigateEvent;
+      const cannotGuard = [replayingHistory.current, !guardNeededRef.current,
+        !event.cancelable, !event.destination.key].some(Boolean);
+      if (event.navigationType !== "traverse" || cannotGuard) return;
+      event.preventDefault();
+      if (historyGuardInFlight.current) return;
+      historyGuardInFlight.current = true;
+      const finishGuard = (allowed: boolean) => {
+        if (!allowed) {
+          historyGuardInFlight.current = false;
+          return;
+        }
+        if (draftEditorRef.current) markCurrentNotesForRefresh();
+        replayingHistory.current = true;
+        window.setTimeout(() => {
+          try {
+            void navigation.traverseTo(event.destination.key).committed.then(() => {
+              router.refresh();
+            }).catch(() => undefined).finally(() => {
+              replayingHistory.current = false;
+              historyGuardInFlight.current = false;
+            });
+          } catch {
+            replayingHistory.current = false;
+            historyGuardInFlight.current = false;
+          }
+        }, 0);
+      };
+      const decision = beforeNavigationRef.current();
+      if (typeof decision === "boolean") finishGuard(decision);
+      else void decision.then(finishGuard).catch(() => finishGuard(false));
+    };
+    navigation.addEventListener("navigate", handleHistoryNavigation);
+    return () => navigation.removeEventListener("navigate", handleHistoryNavigation);
+  }, [router]);
+
+  useEffect(() => {
+    if (!guardNeeded) return;
+    const handleClick = (event: MouseEvent) => {
+      const anchor = clickedNavigationAnchor(event);
+      if (!anchor) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void Promise.resolve(beforeNavigation()).then((allowed) => {
+        if (!allowed) return;
+        if (draftEditorRef.current) markCurrentNotesForRefresh();
+        followNavigationAnchor(anchor, router);
+      });
+    };
+    const handleUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    document.addEventListener("click", handleClick, true);
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      document.removeEventListener("click", handleClick, true);
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [beforeNavigation, guardNeeded, router]);
+}
+
 function PostSessionNotesEditor(props: NotesEditorProps) {
   const router = useRouter();
   const initialAnswers = initialNotesAnswers(props);
@@ -180,42 +337,31 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const inFlight = useRef<Promise<boolean> | null>(null);
   const autosaveTimer = useRef<number | null>(null);
   const textareas = useRef<Record<number, HTMLTextAreaElement | null>>({});
-  const historyGuardInFlight = useRef(false);
-  const replayingHistory = useRef(false);
-  const draftEditorRef = useRef(false);
-  const hydratedServerRevision = useRef(props.notes?.revision ?? props.notesRevision);
+  const hydratedServerRevision = useRef(initialNotesRevision(props));
   const mutationRevision = useRef(initialEditor.revision);
   const mutate = useNotesMutation(props, mutationRevision);
   const apiUrl = notesApiUrl(props);
   const canAutosave = canAutosaveNotes(props.editable, notesState);
-  const autosaveEnabled = canAutosave && !finalWriting;
-  draftEditorRef.current = canAutosave;
-  const localDirty = JSON.stringify(answers) !== JSON.stringify(savedAnswers)
-    || status === "saving" || status === "failed";
+  const autosaveEnabled = enabledUnlessDisabled(canAutosave, finalWriting);
+  const answersChanged = JSON.stringify(answers) !== JSON.stringify(savedAnswers);
+  const localDirty = hasLocalNotesWork(answersChanged, status);
   const localDirtyRef = useRef(localDirty);
   const finalWritingRef = useRef(finalWriting);
   localDirtyRef.current = localDirty;
   finalWritingRef.current = finalWriting;
 
-  const hydrateServerNotes = useCallback((snapshot: {
-    notes: NotesEditorProps["notes"];
-    notesRevision: number;
-  }, authoritative = false) => {
+  const hydrateServerNotes = useCallback((snapshot: NotesSnapshot, authoritative = false) => {
     const serverRevision = snapshot.notes?.revision ?? snapshot.notesRevision;
     const acceptedRevision = Math.max(hydratedServerRevision.current, mutationRevision.current);
-    if (serverRevision < acceptedRevision) return false;
-    if (!authoritative && serverRevision === acceptedRevision) return true;
-    if (localDirtyRef.current || finalWritingRef.current) return false;
-    const nextAnswers = Object.fromEntries(props.questions.map(({ questionId }) => [
-      questionId,
-      snapshot.notes?.answers?.find((answer) => answer.questionId === questionId)?.answer ?? "",
-    ]));
-    const nextEditor = snapshot.notes
-      ? {
-          notesState: snapshot.notes.state,
-          status: snapshot.notes.state === "draft" ? "saved" as const : "idle" as const,
-        }
-      : { notesState: "draft" as const, status: "idle" as const };
+    const decision = shouldHydrateNotes({
+      serverRevision,
+      acceptedRevision,
+      authoritative,
+      busy: localDirtyRef.current || finalWritingRef.current,
+    });
+    if (decision !== true) return decision === null;
+    const nextAnswers = snapshotAnswers(props.questions, snapshot);
+    const nextEditor = snapshotEditorState(snapshot);
     hydratedServerRevision.current = serverRevision;
     mutationRevision.current = serverRevision;
     saved.current = JSON.stringify(nextAnswers);
@@ -320,10 +466,13 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     return cancelAutosaveTimer;
   }, [answers, autosaveEnabled, cancelAutosaveTimer, pump]);
 
-  const submittedEditDirty = editingSubmitted && JSON.stringify(answers) !== JSON.stringify(savedAnswers);
-  const draftNeedsGuard = finalWriting || canAutosave && (
-    JSON.stringify(answers) !== JSON.stringify(savedAnswers) || status === "saving" || status === "failed"
-  );
+  const submittedEditDirty = editingSubmitted && answersChanged;
+  const draftNeedsGuard = needsDraftNavigationGuard({
+    finalWriting,
+    canAutosave,
+    answersChanged,
+    status,
+  });
   const discardSubmittedChanges = useCallback(() => {
     if (!window.confirm("Discard unsaved Notes changes?")) return false;
     setAnswers(savedAnswers);
@@ -340,82 +489,8 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     return draftNeedsGuard ? flushDraft() : true;
   }, [discardSubmittedChanges, draftNeedsGuard, finalWriting, flushDraft, submittedEditDirty]);
 
-  const guardNeeded = submittedEditDirty || draftNeedsGuard;
-  const guardNeededRef = useRef(guardNeeded);
-  const beforeNavigationRef = useRef(beforeNavigation);
-  guardNeededRef.current = guardNeeded;
-  beforeNavigationRef.current = beforeNavigation;
-
-  useEffect(() => {
-    const navigation = browserNavigation();
-    if (!navigation) return;
-    const handleHistoryNavigation = (rawEvent: Event) => {
-      const event = rawEvent as BrowserNavigateEvent;
-      if (event.navigationType !== "traverse" || replayingHistory.current || !guardNeededRef.current
-        || !event.cancelable || !event.destination.key) return;
-      event.preventDefault();
-      if (historyGuardInFlight.current) return;
-      historyGuardInFlight.current = true;
-      const destinationKey = event.destination.key;
-      const finishGuard = (allowed: boolean) => {
-        if (!allowed) {
-          historyGuardInFlight.current = false;
-          return;
-        }
-        if (draftEditorRef.current) markCurrentNotesForRefresh();
-        replayingHistory.current = true;
-        window.setTimeout(() => {
-          try {
-            void navigation.traverseTo(destinationKey).committed.then(() => {
-              router.refresh();
-            }).catch(() => undefined).finally(() => {
-              replayingHistory.current = false;
-              historyGuardInFlight.current = false;
-            });
-          } catch {
-            replayingHistory.current = false;
-            historyGuardInFlight.current = false;
-          }
-        }, 0);
-      };
-      const decision = beforeNavigationRef.current();
-      if (typeof decision === "boolean") finishGuard(decision);
-      else void decision.then(finishGuard).catch(() => finishGuard(false));
-    };
-    navigation.addEventListener("navigate", handleHistoryNavigation);
-    return () => navigation.removeEventListener("navigate", handleHistoryNavigation);
-  }, [router]);
-
-  useEffect(() => {
-    if (!guardNeeded) return;
-    const handleClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const anchor = (event.target as Element | null)?.closest("a");
-      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void Promise.resolve(beforeNavigation()).then((allowed) => {
-        if (!allowed) return;
-        if (draftEditorRef.current) markCurrentNotesForRefresh();
-        const target = new URL(anchor.href, window.location.href);
-        if (target.origin === window.location.origin && !target.pathname.startsWith("/api/")) {
-          router.push(`${target.pathname}${target.search}${target.hash}`);
-        } else {
-          window.location.assign(target.href);
-        }
-      });
-    };
-    const handleUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    document.addEventListener("click", handleClick, true);
-    window.addEventListener("beforeunload", handleUnload);
-    return () => {
-      document.removeEventListener("click", handleClick, true);
-      window.removeEventListener("beforeunload", handleUnload);
-    };
-  }, [beforeNavigation, guardNeeded, router]);
+  const guardNeeded = [submittedEditDirty, draftNeedsGuard].some(Boolean);
+  useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor: canAutosave, router });
 
   const retry = () => {
     void flushDraft();
@@ -505,18 +580,45 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
 
-  const showInputs = shouldShowNotesInputs(canAutosave, editingSubmitted);
-  if (!showInputs) {
-    return <><SubmittedNotesView questions={props.questions} answers={answers}
-      canEdit={props.editable && notesState === "submitted"} onEdit={beginCorrection} />
-      {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>;
-  }
-
-  return <EditableNotesForm questions={props.questions} answers={answers} status={status} error={error}
-    canRetry={autosaveEnabled && !conflict} editingSubmitted={editingSubmitted} disabled={finalWriting}
+  return <NotesEditorContent showInputs={shouldShowNotesInputs(canAutosave, editingSubmitted)}
+    questions={props.questions} answers={answers} status={status} error={error} success={success}
+    canEdit={canEditSubmittedNotes(props.editable, notesState)}
+    canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
+    editingSubmitted={editingSubmitted} disabled={finalWriting} onEdit={beginCorrection}
     onAnswerChange={updateAnswer}
     onTextarea={(questionId, element) => { textareas.current[questionId] = element; }}
     onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />;
+}
+
+function NotesEditorContent({ showInputs, questions, answers, status, error, success, canEdit,
+  canRetry, editingSubmitted, disabled, onEdit, onAnswerChange, onTextarea, onRetry,
+  onSaveCorrection, onCancelCorrection, onSubmit }: {
+  showInputs: boolean;
+  questions: NotesEditorProps["questions"];
+  answers: Record<number, string>;
+  status: NotesEditorStatus;
+  error: string;
+  success: string;
+  canEdit: boolean;
+  canRetry: boolean;
+  editingSubmitted: boolean;
+  disabled: boolean;
+  onEdit: () => void;
+  onAnswerChange: (questionId: number, answer: string) => void;
+  onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
+  onRetry: () => void;
+  onSaveCorrection: () => Promise<void>;
+  onCancelCorrection: () => void;
+  onSubmit: () => Promise<void>;
+}) {
+  if (showInputs) {
+    return <EditableNotesForm questions={questions} answers={answers} status={status} error={error}
+      canRetry={canRetry} editingSubmitted={editingSubmitted} disabled={disabled}
+      onAnswerChange={onAnswerChange} onTextarea={onTextarea} onRetry={onRetry}
+      onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />;
+  }
+  return <><SubmittedNotesView questions={questions} answers={answers} canEdit={canEdit} onEdit={onEdit} />
+    {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>;
 }
 
 function SubmittedNotesView({ questions, answers, canEdit, onEdit }: {

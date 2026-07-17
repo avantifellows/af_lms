@@ -4,20 +4,28 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: vi.fn() }));
 vi.mock("@/lib/holistic-progress", () => ({
+  DEFAULT_HOLISTIC_PROGRESS_SORT: "school",
   listHolisticProgress: vi.fn(),
   getHolisticProgressOptions: vi.fn(),
+  getHolisticProgressAcademicYears: vi.fn(),
   formatHolisticProgressCsv: vi.fn(),
 }));
 
 import { getServerSession } from "next-auth";
 import { GET } from "./route";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
-import { formatHolisticProgressCsv, getHolisticProgressOptions, listHolisticProgress } from "@/lib/holistic-progress";
+import {
+  formatHolisticProgressCsv,
+  getHolisticProgressAcademicYears,
+  getHolisticProgressOptions,
+  listHolisticProgress,
+} from "@/lib/holistic-progress";
 
 const mockSession = vi.mocked(getServerSession);
 const mockAccess = vi.mocked(requireHolisticMentorshipAccess);
 const mockList = vi.mocked(listHolisticProgress);
 const mockOptions = vi.mocked(getHolisticProgressOptions);
+const mockAcademicYears = vi.mocked(getHolisticProgressAcademicYears);
 const mockCsv = vi.mocked(formatHolisticProgressCsv);
 
 describe("Holistic progress API", () => {
@@ -27,6 +35,7 @@ describe("Holistic progress API", () => {
     mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission: { role: "admin" } } as never);
     mockList.mockResolvedValue({ rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
     mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
+    mockAcademicYears.mockResolvedValue(["2026-2027", "2025-2026"]);
   });
 
   it.each([
@@ -50,9 +59,13 @@ describe("Holistic progress API", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ rows: [], options: { schools: [], mentors: [], phases: [] } });
+    expect(body).toMatchObject({
+      rows: [],
+      options: { schools: [], mentors: [], phases: [] },
+      academicYears: ["2026-2027", "2025-2026"],
+    });
     expect(body.refreshedAt).toEqual(expect.any(String));
-    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ sort: "student_name", page: 1 }));
+    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ sort: "school", page: 1 }));
   });
 
   it("exports all matching rows with the same filters and sort", async () => {
@@ -62,6 +75,7 @@ describe("Holistic progress API", () => {
     expect(response.headers.get("content-type")).toContain("text/csv");
     expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ direction: "desc" }), { all: true });
     expect(mockOptions).not.toHaveBeenCalled();
+    expect(mockAcademicYears).not.toHaveBeenCalled();
   });
 
   it("returns policy denial before reading progress", async () => {

@@ -234,6 +234,29 @@ describe("requireHolisticMentorshipAccess", () => {
     }
   );
 
+  it.each(["admin", "holistic_mentorship_admin"] as const)(
+    "allows scoped %s prior-year Student drill-down without an active Mapping",
+    async (role) => {
+      mockQuery
+        .mockResolvedValueOnce([permissionRow(role)])
+        .mockResolvedValueOnce([
+          { id: 20, code: "SCH001", name: "School One", region: "North" },
+        ]);
+
+      await expect(
+        requireHolisticMentorshipAccess(
+          { user: { email: `${role}@example.com` } },
+          "mapped_student_read",
+          { schoolCode: "SCH001", studentId: 41, academicYear: "2025-2026" }
+        )
+      ).resolves.toMatchObject({ ok: true });
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(String(mockQuery.mock.calls.at(-1)?.[0])).not.toContain(
+        "holistic_mentorship_mentor_mentee_mappings"
+      );
+    }
+  );
+
   it.each(["program_manager", "program_admin"] as const)(
     "denies %s Student drill-down before protected Student data access",
     async (role) => {

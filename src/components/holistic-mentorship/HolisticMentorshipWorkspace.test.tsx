@@ -48,6 +48,7 @@ describe("HolisticMentorshipWorkspace", () => {
       json: async () => url.includes("/progress?") ? {
         rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
         options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        academicYears: ["2026-2027"],
         refreshedAt: "2026-07-17T10:00:00.000Z",
       } : { plan: null },
     })));
@@ -55,7 +56,7 @@ describe("HolisticMentorshipWorkspace", () => {
     render(<HolisticMentorshipWorkspace mode="admin" />);
 
     expect(screen.getByRole("tab", { name: "Students & Progress" })).toBeInTheDocument();
-    expect(await screen.findByText("No mapped Students match these filters.")).toBeInTheDocument();
+    expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
     expect(await screen.findByRole("button", { name: "Create blank Plan" })).toBeInTheDocument();

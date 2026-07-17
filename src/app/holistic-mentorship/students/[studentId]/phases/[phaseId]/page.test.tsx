@@ -69,6 +69,48 @@ describe("StudentPhasePage", () => {
     }));
   });
 
+  it("opens a prior-year Admin drill-down from Progress without requiring a current Mapping", async () => {
+    mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "holistic_mentorship_admin" },
+      school: { id: 4, name: "School One" },
+      canEdit: true,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [],
+      selectedPhase: {
+        phaseId: 73,
+        locked: false,
+        canEditNotes: false,
+        notes: { state: "submitted", answers: [{ answer: "A weekly plan" }] },
+      },
+      readOnly: true,
+    });
+    const priorYearProps = {
+      ...props,
+      searchParams: Promise.resolve({ school_code: "SCH001", academic_year: "2025-2026" }),
+    };
+
+    const { container } = render(await StudentPhasePage(priorYearProps));
+
+    expect(screen.getByRole("heading", { name: "Asha Rao" })).toBeInTheDocument();
+    expect(container.querySelector('a[href="/admin/holistic-mentorship"]')).toBeInTheDocument();
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "holistic@example.com" } },
+      "mapped_student_read",
+      { schoolCode: "SCH001", studentId: 41, academicYear: "2025-2026" }
+    );
+    expect(mockDetail).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 41,
+      phaseId: 73,
+      academicYear: "2025-2026",
+      role: "holistic_mentorship_admin",
+      canEdit: true,
+    }));
+  });
+
   it("redirects a Locked deep link to the Active available Phase in the requested year", async () => {
     mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
     mockAccess.mockResolvedValue({

@@ -2,10 +2,10 @@
 
 import { Download, ExternalLink, RefreshCw, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 import type { HolisticProgressRow } from "@/types/holistic-progress";
 
 type Row = HolisticProgressRow;
@@ -17,7 +17,7 @@ type Options = {
 type Payload = {
   rows: Row[];
   counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
-  options: Options; refreshedAt: string; pageSize: 50;
+  options: Options; academicYears: string[]; refreshedAt: string; pageSize: 50;
 };
 
 type ProgressFilters = {
@@ -36,7 +36,8 @@ type FilterChangeHandler = (event: React.ChangeEvent<HTMLInputElement | HTMLSele
 
 const EMPTY: Payload = {
   rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
-  options: { schools: [], mentors: [], phases: [] }, refreshedAt: "", pageSize: 50,
+  options: { schools: [], mentors: [], phases: [] }, academicYears: [CURRENT_ACADEMIC_YEAR],
+  refreshedAt: "", pageSize: 50,
 };
 const INITIAL_FILTERS: ProgressFilters = {
   academicYear: CURRENT_ACADEMIC_YEAR,
@@ -46,23 +47,42 @@ const INITIAL_FILTERS: ProgressFilters = {
   phase: "",
   progress: "",
   search: "",
-  sort: "student_name",
+  sort: "school",
   direction: "asc",
 };
+const VIEW_STATE_KEY = "holistic-progress-view";
+const SCROLL_KEY = "holistic-progress-scroll";
 
-function yearOptions() {
-  const start = Number(CURRENT_ACADEMIC_YEAR.slice(0, 4));
-  return Array.from({ length: 3 }, (_, index) => `${start - index}-${start - index + 1}`);
+function storedView() {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? "null") as {
+      filters?: Partial<ProgressFilters>;
+      page?: number;
+    } | null;
+    const filters = Object.fromEntries(Object.entries(stored?.filters ?? {})
+      .filter(([, value]) => typeof value === "string"));
+    return {
+      filters: { ...INITIAL_FILTERS, ...filters },
+      page: Number.isSafeInteger(stored?.page) && stored!.page! > 0 ? stored!.page! : 1,
+    };
+  } catch {
+    return { filters: INITIAL_FILTERS, page: 1 };
+  }
 }
 
 export default function ProgressWorkspace() {
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [page, setPage] = useState(1);
+  const [ready, setReady] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [data, setData] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [profileStudent, setProfileStudent] = useState<Row | null>(null);
+  const savedScroll = useRef(0);
+  const scrollRestored = useRef(false);
 
   const params = useMemo(() => {
     const value = new URLSearchParams({
@@ -96,10 +116,33 @@ export default function ProgressWorkspace() {
   }, [params]);
 
   useEffect(() => {
+    const stored = storedView();
+    savedScroll.current = Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
+    setFilters(stored.filters);
+    setPage(stored.page);
+    setReady(true);
+    const rememberScroll = () => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+    window.addEventListener("scroll", rememberScroll, { passive: true });
+    return () => window.removeEventListener("scroll", rememberScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    sessionStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ filters, page }));
+  }, [filters, page, ready]);
+
+  useEffect(() => {
+    if (!ready || loading || scrollRestored.current || savedScroll.current <= 0) return;
+    scrollRestored.current = true;
+    window.scrollTo({ top: savedScroll.current });
+  }, [loading, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, refresh]);
+  }, [load, ready, refresh]);
 
   const update = (name: ProgressFilterName): FilterChangeHandler => (event) => {
     setFilters((current) => ({ ...current, [name]: event.target.value }));
@@ -116,7 +159,30 @@ export default function ProgressWorkspace() {
     setPage(1);
   };
   const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
-  const exportHref = `/api/holistic-mentorship/progress?${params}&format=csv`;
+  const exportProgress = async () => {
+    const exportParams = new URLSearchParams(params);
+    exportParams.delete("page");
+    exportParams.set("format", "csv");
+    setExporting(true);
+    setExportError("");
+    try {
+      const response = await fetch(`/api/holistic-mentorship/progress?${exportParams}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Unable to export progress (${response.status})`);
+      }
+      const downloadUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = `holistic-progress-${filters.academicYear}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch (problem) {
+      setExportError(problem instanceof Error ? problem.message : "Unable to export progress");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="min-w-0 max-w-full space-y-5">
@@ -124,12 +190,15 @@ export default function ProgressWorkspace() {
       <ProgressFilterPanel
         filters={filters}
         options={data.options}
+        academicYears={data.academicYears}
         refreshedAt={data.refreshedAt}
         loading={loading}
-        exportHref={exportHref}
+        exporting={exporting}
+        exportError={exportError}
         onChange={update}
         onAcademicYearChange={updateAcademicYear}
         onRefresh={() => setRefresh((value) => value + 1)}
+        onExport={() => void exportProgress()}
         onDirectionChange={() => setFilters((current) => ({
           ...current,
           direction: current.direction === "asc" ? "desc" : "asc",
@@ -140,6 +209,7 @@ export default function ProgressWorkspace() {
         rows={data.rows}
         loading={loading}
         academicYear={filters.academicYear}
+        hasMappings={data.options.schools.length > 0}
         onOpenProfile={setProfileStudent}
       />
       <ProgressPagination page={page} totalPages={totalPages} onPageChange={setPage} />
@@ -167,22 +237,28 @@ function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
 function ProgressFilterPanel({
   filters,
   options,
+  academicYears,
   refreshedAt,
   loading,
-  exportHref,
+  exporting,
+  exportError,
   onChange,
   onAcademicYearChange,
   onRefresh,
+  onExport,
   onDirectionChange,
 }: {
   filters: ProgressFilters;
   options: Options;
+  academicYears: string[];
   refreshedAt: string;
   loading: boolean;
-  exportHref: string;
+  exporting: boolean;
+  exportError: string;
   onChange: (name: ProgressFilterName) => FilterChangeHandler;
   onAcademicYearChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onRefresh: () => void;
+  onExport: () => void;
   onDirectionChange: () => void;
 }) {
   return <div className="space-y-3 border-y border-border py-4">
@@ -193,9 +269,18 @@ function ProgressFilterPanel({
         <input className="min-h-11 w-full rounded-md border border-border bg-bg pl-10 pr-3 text-sm" value={filters.search}
           onChange={onChange("search")} placeholder="Student name or external ID" />
       </label>
-      <select aria-label="Academic Year" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.academicYear} onChange={onAcademicYearChange}>
-        {yearOptions().map((year) => <option key={year}>{year}</option>)}
-      </select>
+      <label className="text-xs font-medium text-text-muted">
+        Program
+        <select aria-label="Program" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm text-text-primary" value={PROGRAM_IDS.COE} disabled>
+          <option value={PROGRAM_IDS.COE}>{PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE]} (Program {PROGRAM_IDS.COE})</option>
+        </select>
+      </label>
+      <label className="text-xs font-medium text-text-muted">
+        Academic Year
+        <select aria-label="Academic Year" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm text-text-primary" value={filters.academicYear} onChange={onAcademicYearChange}>
+          {academicYears.map((year) => <option key={year}>{year}</option>)}
+        </select>
+      </label>
       <select aria-label="Phase lens" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={filters.phase} onChange={onChange("phase")}>
         <option value="">Active Phase for each Grade</option>
         {options.phases.map((item) => <option key={item.id} value={item.id}>Phase {item.number}: {item.title} (Grade {item.grade})</option>)}
@@ -216,6 +301,8 @@ function ProgressFilterPanel({
         <option value="skipped">Skipped</option><option value="no_active_phase">No active phase</option>
       </select>
     </div>
+    {filters.academicYear !== CURRENT_ACADEMIC_YEAR &&
+      <p className="text-sm font-medium text-text-muted">Earlier academic years are read-only.</p>}
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2 text-xs text-text-muted">
         <span>{refreshedAt ? `Last refreshed ${new Date(refreshedAt).toLocaleString()}` : "Not refreshed"}</span>
@@ -231,11 +318,12 @@ function ProgressFilterPanel({
         <button type="button" className="min-h-9 rounded-md border border-border px-3 text-xs" onClick={onDirectionChange}>
           {filters.direction === "asc" ? "Ascending" : "Descending"}
         </button>
-        <a href={exportHref} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-border bg-bg-card px-3 text-xs font-semibold hover:bg-hover-bg">
-          <Download aria-hidden="true" className="h-4 w-4" /> Export CSV
-        </a>
+        <Button type="button" variant="secondary" size="sm" onClick={onExport} disabled={exporting}>
+          <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
+        </Button>
       </div>
     </div>
+    {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
   </div>;
 }
 
@@ -243,37 +331,43 @@ function ProgressResults({
   rows,
   loading,
   academicYear,
+  hasMappings,
   onOpenProfile,
 }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
+  hasMappings: boolean;
   onOpenProfile: (row: Row) => void;
 }) {
   return <div aria-label="Student progress results" className="w-full min-w-0 max-w-full overflow-x-auto border-y border-border">
-    <table className="w-full min-w-[900px] text-left text-sm">
+    <table className="w-full min-w-[1200px] text-left text-sm">
       <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
         <th className="px-3 py-3">Student</th><th className="px-3 py-3">School</th><th className="px-3 py-3">Grade</th>
-        <th className="px-3 py-3">Mentor</th><th className="px-3 py-3">Phase</th><th className="px-3 py-3">Progress</th><th className="px-3 py-3"><span className="sr-only">Actions</span></th>
+        <th className="px-3 py-3">Mentor</th><th className="px-3 py-3">Phase</th><th className="px-3 py-3">Availability</th>
+        <th className="px-3 py-3">Progress</th><th className="px-3 py-3">Completed on</th><th className="px-3 py-3"><span className="sr-only">Actions</span></th>
       </tr></thead>
       <tbody className="divide-y divide-border">
-        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} onOpenProfile={onOpenProfile} />
+        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} hasMappings={hasMappings} onOpenProfile={onOpenProfile} />
       </tbody>
     </table>
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear, onOpenProfile }: {
+function ProgressRows({ rows, loading, academicYear, hasMappings, onOpenProfile }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
+  hasMappings: boolean;
   onOpenProfile: (row: Row) => void;
 }) {
   if (loading && rows.length === 0) {
-    return <tr><td colSpan={7} className="px-3 py-12 text-center text-text-muted">Loading mapped Students...</td></tr>;
+    return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted">Loading mapped Students...</td></tr>;
   }
   if (rows.length === 0) {
-    return <tr><td colSpan={7} className="px-3 py-12 text-center text-text-muted">No mapped Students match these filters.</td></tr>;
+    return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted">
+      {hasMappings ? "No mapped Students match these filters." : "No mapped Students exist for this Academic Year."}
+    </td></tr>;
   }
   return rows.map((row) => <ProgressRow key={row.studentId} row={row} academicYear={academicYear} onOpenProfile={onOpenProfile} />);
 }
@@ -283,21 +377,53 @@ function ProgressRow({ row, academicYear, onOpenProfile }: {
   academicYear: string;
   onOpenProfile: (row: Row) => void;
 }) {
-  const badgeVariant = row.progress === "completed" ? "success" : row.progress === "skipped" ? "warning" : "default";
   return <tr className="hover:bg-hover-bg/50">
     <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
     <td className="px-3 py-3"><p>{row.schoolName}</p><p className="text-xs text-text-muted">{row.schoolCode}</p></td>
-    <td className="px-3 py-3">{row.grade}</td><td className="px-3 py-3">{row.mentorName}</td>
-    <td className="px-3 py-3">{row.phaseNumber ? `Phase ${row.phaseNumber}: ${row.phaseTitle}` : "No active phase"}</td>
-    <td className="px-3 py-3"><Badge variant={badgeVariant}>{row.progress.replaceAll("_", " ")}</Badge></td>
-    <td className="px-3 py-3"><div className="flex justify-end gap-1">
-      <Button variant="icon" size="sm" aria-label={`Profile for ${row.studentName}`} onClick={() => onOpenProfile(row)}><Sparkles aria-hidden="true" className="h-4 w-4" /></Button>
-      {row.phaseId && <Link aria-label={`Open ${row.studentName}`} className="inline-flex min-h-9 items-center rounded-md p-2 text-accent hover:bg-hover-bg"
-        href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({ school_code: row.schoolCode, academic_year: academicYear })}`}>
-        <ExternalLink aria-hidden="true" className="h-4 w-4" />
-      </Link>}
-    </div></td>
+    <td className="px-3 py-3">{row.grade}</td><td className="px-3 py-3"><p>{row.mentorName}</p><p className="text-xs text-text-muted">{row.mentorEmail || "No email"}</p></td>
+    <td className="px-3 py-3"><PhaseName row={row} /></td>
+    <td className="px-3 py-3"><PhaseAvailability state={row.phaseState} /></td>
+    <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
+    <td className="px-3 py-3"><CompletionTime value={row.completedAt} /></td>
+    <td className="px-3 py-3"><ProgressActions row={row} academicYear={academicYear} onOpenProfile={onOpenProfile} /></td>
   </tr>;
+}
+
+function PhaseName({ row }: { row: Row }) {
+  if (row.phaseNumber === null) return <>No active phase</>;
+  return <>Phase {row.phaseNumber}: {row.phaseTitle}</>;
+}
+
+function PhaseAvailability({ state }: { state: Row["phaseState"] }) {
+  if (!state) return <span className="text-text-muted">-</span>;
+  const variant = state === "active" ? "success" : state === "open" ? "info" : "default";
+  return <Badge variant={variant}>{state[0].toUpperCase()}{state.slice(1)}</Badge>;
+}
+
+function ProgressBadge({ progress }: { progress: Row["progress"] }) {
+  const variant = progress === "completed" ? "success" : progress === "skipped" ? "warning" : "default";
+  return <Badge variant={variant}>{progress.replaceAll("_", " ")}</Badge>;
+}
+
+function CompletionTime({ value }: { value: string | null }) {
+  if (!value) return <span className="text-text-muted">-</span>;
+  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function ProgressActions({ row, academicYear, onOpenProfile }: {
+  row: Row;
+  academicYear: string;
+  onOpenProfile: (row: Row) => void;
+}) {
+  return <div className="flex justify-end gap-1">
+    <Button variant="icon" size="sm" aria-label={`Profile for ${row.studentName}`} onClick={() => onOpenProfile(row)}>
+      <Sparkles aria-hidden="true" className="h-4 w-4" />
+    </Button>
+    {row.phaseId && <Link aria-label={`Open ${row.studentName}`} className="inline-flex min-h-9 items-center rounded-md p-2 text-accent hover:bg-hover-bg"
+      href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({ school_code: row.schoolCode, academic_year: academicYear })}`}>
+      <ExternalLink aria-hidden="true" className="h-4 w-4" />
+    </Link>}
+  </div>;
 }
 
 function ProgressPagination({ page, totalPages, onPageChange }: {
