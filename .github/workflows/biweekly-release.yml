@@ -1,8 +1,10 @@
-name: Weekly Release
+name: Biweekly Release
 
-# Prototype (issue #219): weekly LLM-written release notes.
-# Run locally with act until trusted:
-#   act workflow_dispatch -W .github/workflows/weekly-release.yml \
+# Biweekly LLM-written release notes (issue #219).
+# GitHub cron can't express "every 14 days", so a weekly cron fires and the
+# gate step runs the job only on odd epoch-weeks: Jul 27 2026, Aug 10, … .
+# Manual runs bypass the gate. Local run:
+#   act workflow_dispatch -W .github/workflows/biweekly-release.yml \
 #     --secret-file .secrets --input provider=openrouter \
 #     -P ubuntu-latest=catthehacker/ubuntu:act-latest
 
@@ -16,27 +18,39 @@ on:
         default: anthropic
       window_days:
         description: Days of history to include
-        default: "7"
+        default: "14"
       thinking:
         description: Thinking effort (off/minimal/low/medium/high/xhigh/max)
         default: medium
-  # Enable after the prototype is trusted (Mondays 09:00 IST):
-  # schedule:
-  #   - cron: "30 3 * * 1"
+  schedule:
+    - cron: "30 3 * * 1" # Mondays 09:00 IST; gate skips every other week
 
 permissions:
   contents: write
 
 jobs:
-  weekly-release:
+  biweekly-release:
     runs-on: ubuntu-latest
     env:
       GH_REPO: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Biweekly gate
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
+             [ $(( $(date +%s) / 86400 / 7 % 2 )) -eq 1 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Off week — the biweekly cadence runs next Monday. Skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
 
       - name: Ensure gh and jq (preinstalled on hosted runners; act image lacks gh)
+        if: steps.gate.outputs.run == 'true'
         run: |
           command -v jq >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq jq; }
           if ! command -v gh >/dev/null; then
@@ -44,20 +58,21 @@ jobs:
             sudo mv /tmp/gh_*/bin/gh /usr/local/bin/gh
           fi
 
-      - name: Gather last week's work
+      - name: Gather the release window's work
         id: gather
+        if: steps.gate.outputs.run == 'true'
         env:
-          WINDOW_DAYS: ${{ inputs.window_days || '7' }}
+          WINDOW_DAYS: ${{ inputs.window_days || '14' }}
         run: bash release-notes/gather.sh
 
       - name: Set up Node
-        if: steps.gather.outputs.skip != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gather.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Install pi
-        if: steps.gather.outputs.skip != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gather.outputs.skip != 'true'
         # Pinned: the project moved from @mariozechner/pi-coding-agent (stuck at
         # 0.73.x, breaks on claude-sonnet-5 thinking) to @earendil-works.
         # 0.80.3+ speaks Anthropic adaptive thinking. --force overwrites a stale
@@ -65,7 +80,7 @@ jobs:
         run: npm install -g --force @earendil-works/pi-coding-agent@0.80.10
 
       - name: Generate release notes
-        if: steps.gather.outputs.skip != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gather.outputs.skip != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -89,7 +104,7 @@ jobs:
 
       - name: Create draft release
         id: release
-        if: steps.gather.outputs.skip != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gather.outputs.skip != 'true'
         run: |
           TAG="${{ steps.gather.outputs.tag }}"
           # Idempotent re-runs: replace an existing draft for the same tag.
@@ -97,17 +112,17 @@ jobs:
             --jq ".[] | select(.tagName == \"$TAG\" and .isDraft) | .tagName")
           [ -n "$EXISTING" ] && gh release delete "$TAG" --repo "$GH_REPO" --yes
           URL=$(gh release create "$TAG" --repo "$GH_REPO" --draft \
-            --title "Weekly release $TAG" --notes-file out/notes.md)
+            --title "Release $TAG" --notes-file out/notes.md)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Draft release: $URL"
 
       - name: Post to Discord
-        if: steps.gather.outputs.skip != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gather.outputs.skip != 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           jq -n \
-            --arg title "${GH_REPO#*/} — weekly release ${{ steps.gather.outputs.tag }} (draft)" \
+            --arg title "${GH_REPO#*/} — release ${{ steps.gather.outputs.tag }} (draft)" \
             --arg url "${{ steps.release.outputs.url }}" \
             --arg desc "$(head -c 4000 out/notes.md)" \
             '{embeds: [{title: $title, url: $url, description: $desc, color: 5793266}]}' \
