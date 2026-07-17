@@ -205,6 +205,38 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.rows[0].date_of_birth).toBe("2010-01-02");
   });
 
+  it.each(["2.1.2010", "02.01.2010", "2/1/10", "02-01-10", "2.1.10"])(
+    "accepts bulk DOB format %s",
+    async (dateOfBirth) => {
+      const row = [...validRowValues];
+      row[2] = dateOfBirth;
+      const result = await parseStudentAdditionUpload({
+        filename: "students.xlsx",
+        data: await workbookBuffer({ Template: [uploadHeaders, row] }),
+        today: new Date("2026-07-01T00:00:00Z"),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected valid upload");
+      expect(result.rows[0].date_of_birth).toBe("2010-01-02");
+    },
+  );
+
+  it("rejects leading-zero phone and CBSE roll numbers in bulk uploads", async () => {
+    const row = [...validRowValues];
+    row[8] = "02345678";
+    row[12] = "0876543210";
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [uploadHeaders, row] }),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected parsed upload");
+    expect(result.rejectedResults[0].field_errors.g10_roll_no).toContain("cannot start with zero");
+    expect(result.rejectedResults[0].field_errors.phone).toContain("cannot start with zero");
+  });
+
   it("returns a validation error for corrupt xlsx uploads", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xlsx",

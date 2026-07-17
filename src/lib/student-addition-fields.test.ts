@@ -76,6 +76,20 @@ describe("validateStudentAdditionInput", () => {
     expect(result.fieldErrors.student_name).toBe("Student Name should not contain '.'");
   });
 
+  it("rejects leading-zero phone and CBSE roll numbers", () => {
+    const result = validateStudentAdditionInput({
+      ...validInput,
+      phone: "0876543210",
+      g10_roll_no: "02345678",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.phone).toContain("cannot start with zero");
+    expect(result.fieldErrors.g10_roll_no).toContain("cannot start with zero");
+    expect(canonicalizeStudentEditPayload({ phone: "0876543210" }).ok).toBe(false);
+  });
+
   it("uses an 11-digit PEN as the canonical optional identifier", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, apaar_id: undefined, pen_number: "12345678901" },
@@ -190,9 +204,9 @@ describe("validateStudentAdditionInput", () => {
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors).toMatchObject({
       date_of_birth: "Date of Birth must be between 2000 and 2015",
-      phone: "Parents Phone Number must be exactly 10 digits",
+      phone: "Parents Phone Number must be exactly 10 digits and cannot start with zero",
       pen_number: "PEN must be exactly 11 digits and cannot start with zero",
-      g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits",
+      g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
       father_name: "Father Name must contain only letters",
     });
   });
@@ -237,7 +251,7 @@ describe("validateStudentAdditionInput", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors.g10_roll_no).toBe(
-      "CBSE Grade 10 Roll no must be exactly 8 digits",
+      "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
     );
   });
 

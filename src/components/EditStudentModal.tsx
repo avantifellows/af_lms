@@ -165,8 +165,8 @@ export default function EditStudentModal({
       return;
     }
 
-    if ("phone" in changed && !/^\d{10}$/.test(formData.phone)) {
-      setError("Parents Phone Number must be exactly 10 digits");
+    if ("phone" in changed && !/^[1-9]\d{9}$/.test(formData.phone)) {
+      setError("Parents Phone Number must be exactly 10 digits and cannot start with zero");
       setLoading(false);
       return;
     }
@@ -231,7 +231,7 @@ export default function EditStudentModal({
       ...prev,
       [name]:
         name === "phone"
-          ? digitsOnly(value).slice(0, 10)
+          ? digitsOnly(value).replace(/^0+/, "").slice(0, 10)
           : name === "father_name"
             ? lettersAndSpacesOnly(value)
             : value,

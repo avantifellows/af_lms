@@ -17,11 +17,13 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/StudentTable", () => ({
   __esModule: true,
-  default: (props: { canEdit?: boolean; canEditStudent?: boolean }) => (
+  default: (props: { canEdit?: boolean; canEditStudent?: boolean; selectedGrade?: string; selectedStream?: string }) => (
     <div
       data-testid="student-table"
       data-can-edit={String(props.canEdit)}
       data-can-edit-student={String(props.canEditStudent)}
+      data-grade={props.selectedGrade}
+      data-stream={props.selectedStream}
     />
   ),
 }));
@@ -150,5 +152,25 @@ describe("EnrollmentTabContent", () => {
     const table = screen.getByTestId("student-table");
     expect(table).toHaveAttribute("data-can-edit", "true");
     expect(table).toHaveAttribute("data-can-edit-student", "false");
+  });
+
+  it("applies grade and stream filters together", async () => {
+    const user = userEvent.setup();
+    render(
+      <EnrollmentTabContent
+        {...baseProps}
+        activeStudents={[
+          { grade: 11, stream: "engineering", student_program_ids: [64] },
+          { grade: 12, stream: "medical", student_program_ids: [64] },
+        ] as never}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Filter by Grade:"), "11");
+    await user.selectOptions(screen.getByLabelText("Filter by Stream:"), "engineering");
+
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-grade", "11");
+    expect(screen.getByTestId("student-table")).toHaveAttribute("data-stream", "engineering");
+    expect(screen.getByText("Showing 1 of 2 students")).toBeInTheDocument();
   });
 });

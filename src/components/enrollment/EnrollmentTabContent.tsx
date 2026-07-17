@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Upload } from "lucide-react";
+import { Download, Plus, Upload } from "lucide-react";
 import StudentTable, {
   type Grade,
   type Student,
@@ -64,6 +64,7 @@ export default function EnrollmentTabContent({
     programs[0]?.id ?? null,
   );
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  const [selectedStream, setSelectedStream] = useState<string>("all");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [createdStudentId, setCreatedStudentId] = useState<string | null>(null);
@@ -101,23 +102,34 @@ export default function EnrollmentTabContent({
       .sort((a, b) => a.grade - b.grade);
   }, [filteredActive]);
 
+  const streamOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const student of filteredActive) {
+      const stream = student.stream?.trim();
+      if (stream) counts.set(stream, (counts.get(stream) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [filteredActive]);
+
   // Recompute the program pills scoped to the selected grade so every number
   // (total, gender, category) corresponds to the applied program + grade.
   const scopedPrograms = useMemo(() => {
     const scopedActive =
-      selectedGrade === "all"
-        ? activeStudents
-        : activeStudents.filter((s) => s.grade === Number(selectedGrade));
+      activeStudents.filter((student) =>
+        (selectedGrade === "all" || student.grade === Number(selectedGrade)) &&
+        (selectedStream === "all" || student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+      );
     return programs.map((p) => buildProgramStats(scopedActive, p.id));
-  }, [programs, activeStudents, selectedGrade]);
+  }, [programs, activeStudents, selectedGrade, selectedStream]);
 
   // Active students of the selected program after the grade filter — drives
   // the "Showing X of Y" hint next to the dropdown.
-  const gradeFilteredActiveCount = useMemo(() => {
-    if (selectedGrade === "all") return filteredActive.length;
-    return filteredActive.filter((s) => s.grade === Number(selectedGrade))
-      .length;
-  }, [filteredActive, selectedGrade]);
+  const activeFilteredCount = useMemo(() =>
+    filteredActive.filter((student) =>
+      (selectedGrade === "all" || student.grade === Number(selectedGrade)) &&
+      (selectedStream === "all" || student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+    ).length,
+  [filteredActive, selectedGrade, selectedStream]);
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
 
@@ -191,9 +203,23 @@ export default function EnrollmentTabContent({
             </option>
           ))}
         </select>
-        {selectedGrade !== "all" && (
+        <label htmlFor="streamFilter" className="text-sm font-medium text-gray-700">
+          Filter by Stream:
+        </label>
+        <select
+          id="streamFilter"
+          value={selectedStream}
+          onChange={(event) => setSelectedStream(event.target.value)}
+          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20"
+        >
+          <option value="all">All Streams ({filteredActive.length})</option>
+          {streamOptions.map(([stream, count]) => (
+            <option key={stream} value={stream}>{stream} ({count})</option>
+          ))}
+        </select>
+        {(selectedGrade !== "all" || selectedStream !== "all") && (
           <span className="text-sm text-gray-500">
-            Showing {gradeFilteredActiveCount} of {filteredActive.length}{" "}
+            Showing {activeFilteredCount} of {filteredActive.length}{" "}
             students
           </span>
         )}
@@ -208,6 +234,22 @@ export default function EnrollmentTabContent({
             >
               <Upload className="h-4 w-4" aria-hidden="true" />
               Bulk Upload
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (selectedGrade !== "all") params.set("grade", selectedGrade);
+                if (selectedStream !== "all") params.set("stream", selectedStream);
+                window.location.assign(
+                  `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
+                );
+              }}
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Download List
             </Button>
             <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4" aria-hidden="true" />
@@ -224,6 +266,7 @@ export default function EnrollmentTabContent({
           onSelect={(id) => {
             setSelectedId(id);
             setSelectedGrade("all");
+            setSelectedStream("all");
           }}
         />
       )}
@@ -244,6 +287,7 @@ export default function EnrollmentTabContent({
         nvsStreams={nvsStreams}
         selectedGrade={selectedGrade}
         onGradeChange={setSelectedGrade}
+        selectedStream={selectedStream}
         hideGradeFilterUI
       />
 

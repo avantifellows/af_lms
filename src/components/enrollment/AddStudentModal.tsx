@@ -101,12 +101,12 @@ export default function AddStudentModal({
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      if (name === "phone") next.phone = digitsOnly(value).slice(0, 10);
+      if (name === "phone") next.phone = digitsOnly(value).replace(/^0+/, "").slice(0, 10);
       if (name === "pen_number") next.pen_number = digitsOnly(value).slice(0, 11);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
       if (name === "g10_roll_no") {
         next.g10_roll_no = prev.g10_board === CBSE_BOARD
-          ? digitsOnly(value).slice(0, 8)
+          ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
           : rollCharactersOnly(value).slice(0, G10_ROLL_MAX_LENGTH);
       }
       return next;

@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 ---
 
 # Student Addition
@@ -54,7 +54,7 @@ Current v1 fields:
 
 Father Name and Annual Family Income are optional in v1. Store them when present, validate Annual Family Income against the dropdown if present, and do not block creation when either is blank.
 
-Dropdowns come from the template exports. CBSE is the only board with an enforced numeric G10 roll format: exactly 8 digits. Other boards accept normalised alphanumeric Grade 10 rolls between 4 and 10 characters.
+Dropdowns come from the template exports. CBSE is the only board with an enforced numeric G10 roll format: exactly 8 digits without a leading zero. Other boards accept normalised alphanumeric Grade 10 rolls between 4 and 10 characters.
 
 No open implementation decisions remain in the PRD. School-login support/recovery is an ops runbook detail and intentionally out of scope for this implementation artifact.
 
@@ -75,6 +75,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
 - G10 roll normalisation: CBSE preserves an exact eight-digit text value. Others removes non-alphanumerics, uppercases, removes leading zeroes, then requires 4-10 characters.
 - Name normalisation: collapse spaces and proper-case words. Manual Add/Edit rejects a Student Name containing `.` with an explicit field error; bulk upload replaces each `.` with one space before normalisation.
+- Parents Phone Number is exactly 10 digits without a leading zero in Add, Bulk, and Edit. Bulk DOB additionally accepts `D.M.YYYY`, `DD.MM.YYYY`, and two-digit years with `/`, `-`, or `.`; manual Add/Edit keeps the existing date formats.
 - Bulk upload has no separate Grade selector; each nonblank row supplies Grade 11 or 12 and mixed-grade files are valid.
 - Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
 - Auth group is the constant `EnableStudents`.
@@ -97,8 +98,10 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Admin Batch Management accepts `nda` as batch metadata stream so operators can configure the NDA batches required by student addition.
 - Existing-Student Edit uses the shared Student Addition existing-Student gate before proxying canonical changed fields to DB Service `PATCH /api/lms/students/:student_id/update-with-enrollments`. The gate requires one current School and a current NVS Batch plus actor Program, role, feature, and School scope checks, but does not query or require a Centre. The shared field helper filters locked and ownership fields and applies the canonical name, contact, DOB, gender, CWSN/category, board, Grade 11/12, and NDA rules before the route derives actor/School/Program/enrollment context and safely maps upstream field errors. The roster shows Edit only for rows with a current NVS Batch. The modal keeps Student ID, PEN, G10 roll, and historical APAAR disabled even when blank, sends only changed fields (with CWSN/category as a pair), does not expose manual Batch selection, and refreshes the roster after success.
 - The enrollment tab uses all current batch program IDs, so a student enrolled in CoE and NVS appears in both program views and counts. Program-dropout audits provide `dropout_program_ids`, allowing the same student to appear as CoE Dropout and NVS Active at the same time.
+- The enrollment tab applies Grade and Stream filters together. For NVS, allowed write actors can export an Excel workbook with `Active` and `Dropout` sheets: Active follows both filters, while Dropout always contains every NVS dropout. The export mirrors the upload fields and appends historical APAAR ID and generated Student ID as the final columns.
 - Dropout accepts the opaque `student_pk_id` plus an explicit `program_id`. NVS reuses the Centre-free JNV-only existing-Student gate and derives Student ID or PEN server-side; other Programs retain their existing Centre-based Program dropout gate and Student ID or historical APAAR fallback. Non-admin actors need the target Program in their resolved scope, while the existing global-admin exception remains for newer centre Programs that are not in the hand-maintained JNV Program constants. Both paths proxy LMS `POST /api/student/dropout` to the DB Service program-dropout contract at `PATCH /api/dropout`.
 - LMS-audited DB Service dropout closes only the selected program batch and its group membership. It preserves other program batches, grade, school, and global status; when no current batch remains it applies the existing global dropout flow. Generic non-LMS `/api/dropout` callers retain the existing global behavior.
+- New LMS-audited NVS dropouts can be undone only in the same school and only when the exact prior NVS batch still exists, is open, and no other NVS batch is current. Undo restores that exact batch and membership; if NVS was the final active program, it also restores the exact school/grade records ended by global dropout and clears the generated dropout status. Legacy dropouts without the new audit metadata cannot be undone, and every undo writes a separate audit record.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
 - `csv-parse` and `exceljs` are installed in af_lms for upload parsing. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes only `rejected` rows, not skipped/already-existing rows.
 

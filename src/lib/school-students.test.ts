@@ -62,6 +62,7 @@ describe("getSchoolRoster", () => {
     expect(sql).toContain("SELECT er_latest.id");
     expect(sql).toContain("JOIN batch b ON b.id = er_batch.group_id");
     expect(sql).toContain("AS student_program_ids");
+    expect(sql).toContain("AS can_undo_nvs_dropout");
     expect(sql).toContain("s.pen_number");
     expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
     expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR]);

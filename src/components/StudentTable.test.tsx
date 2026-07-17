@@ -48,6 +48,8 @@ interface StudentOverrides {
   program_name?: string | null;
   program_id?: number | null;
   student_program_ids?: Array<number | string> | null;
+  dropout_program_ids?: Array<number | string> | null;
+  can_undo_nvs_dropout?: boolean;
   grade?: number | null;
   grade_id?: string | null;
   status?: string | null;
@@ -82,6 +84,12 @@ function makeStudent(overrides: StudentOverrides = {}) {
       : [has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS].filter(
           (programId): programId is number => programId !== null,
         ),
+    dropout_program_ids: has("dropout_program_ids")
+      ? overrides.dropout_program_ids!
+      : [],
+    can_undo_nvs_dropout: has("can_undo_nvs_dropout")
+      ? overrides.can_undo_nvs_dropout!
+      : false,
     grade: has("grade") ? overrides.grade! : 10,
     grade_id: has("grade_id") ? overrides.grade_id! : "g-10",
     status: has("status") ? overrides.status! : "active",
@@ -1004,6 +1012,62 @@ describe("StudentTable - Dropout modal", () => {
 
     await user.click(screen.getByText("Cancel"));
     expect(screen.queryByText("Mark as Dropout")).not.toBeInTheDocument();
+  });
+
+  it("undoes an audited NVS dropout from the Dropout tab", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+    vi.stubGlobal("fetch", mockFetch);
+    const dropped = makeStudent({
+      group_user_id: "d1",
+      student_pk_id: "spk-2",
+      first_name: "Dropped",
+      student_program_ids: [],
+      dropout_program_ids: [PROGRAM_IDS.NVS],
+      can_undo_nvs_dropout: true,
+      status: "dropout",
+    });
+
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        dropoutStudents={[dropped]}
+        grades={defaultGrades}
+        isAdmin
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (1)"));
+    await user.click(screen.getByRole("button", { name: "Undo Dropout" }));
+    expect(screen.getByText(/Restore.*previous NVS batch/)).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Undo Dropout" }).at(-1)!);
+
+    expect(mockFetch).toHaveBeenCalledWith("/api/student/dropout/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ student_pk_id: "spk-2" }),
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("does not offer undo for legacy dropouts without a restorable audit", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[]}
+        dropoutStudents={[makeStudent({
+          dropout_program_ids: [PROGRAM_IDS.NVS],
+          status: "dropout",
+        })]}
+        grades={defaultGrades}
+        isAdmin
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (1)"));
+    expect(screen.queryByRole("button", { name: "Undo Dropout" })).not.toBeInTheDocument();
   });
 
   it("refreshes after NVS dropout without locally hiding a multi-Program Student", async () => {

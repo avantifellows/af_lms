@@ -29,6 +29,7 @@ import { PROGRAM_IDS } from "./constants";
 import {
   requireStudentAdditionAccess,
   requireStudentAdditionStudentAccess,
+  requireStudentDropoutUndoAccess,
   requireStudentProgramDropoutAccess,
 } from "./student-addition-access";
 import type { UserPermission } from "./permissions";
@@ -450,6 +451,36 @@ describe("requireStudentAdditionStudentAccess", () => {
     const result = await requireStudentAdditionStudentAccess(session, "100");
 
     expect(result).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+});
+
+describe("requireStudentDropoutUndoAccess", () => {
+  it.each(["admin", "program_manager", "program_admin"] as const)(
+    "allows an NVS-scoped %s to undo an audited same-school dropout",
+    async (role) => {
+      mockGetResolvedPermission.mockResolvedValue(permission({ role }));
+
+      const result = await requireStudentDropoutUndoAccess(session, "100");
+
+      expect(result).toMatchObject({
+        ok: true,
+        programId: PROGRAM_IDS.NVS,
+        school: { code: "JNV001" },
+        actor: { role },
+      });
+      expect(mockQuery.mock.calls[0][0]).toContain("student_program_dropout_undo");
+    },
+  );
+
+  it("blocks undo when no eligible audit/same-school scope is found", async () => {
+    mockGetResolvedPermission.mockResolvedValue(permission({ role: "program_manager" }));
+    mockQuery.mockResolvedValue([]);
+
+    expect(await requireStudentDropoutUndoAccess(session, "100")).toEqual({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
   });
 });
 

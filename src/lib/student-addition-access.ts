@@ -260,6 +260,44 @@ async function getStudentEditScope(
   return rows.length === 1 ? rows[0] : null;
 }
 
+async function getStudentDropoutUndoScope(studentPkId: number | string) {
+  const rows = await query<StudentWriteScopeRow>(
+    `SELECT
+       sch.code,
+       sch.udise_code,
+       sch.region,
+       sch.af_school_category,
+       true AS has_program_enrollment
+     FROM student s
+     JOIN LATERAL (
+       SELECT er.group_id
+       FROM enrollment_record er
+       WHERE er.user_id = s.user_id AND er.group_type = 'school'
+       ORDER BY er.is_current DESC, er.updated_at DESC, er.id DESC
+       LIMIT 1
+     ) latest_school ON true
+     JOIN school sch ON sch.id = latest_school.group_id
+     WHERE s.id = $1
+       AND EXISTS (
+         SELECT 1
+         FROM lms_student_write_audits dropout
+         WHERE dropout.action = 'student_program_dropout'
+           AND dropout.program_id = $2
+           AND dropout.school_code = sch.code
+           AND (dropout.affected_identifiers ->> 'student_pk_id')::bigint = s.id
+           AND dropout.changed_values ? 'batch_enrollment_id'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM lms_student_write_audits undo
+             WHERE undo.action = 'student_program_dropout_undo'
+               AND (undo.affected_identifiers ->> 'dropout_audit_id')::bigint = dropout.id
+           )
+       )`,
+    [studentPkId, PROGRAM_IDS.NVS],
+  );
+  return rows.length === 1 ? rows[0] : null;
+}
+
 // fallow-ignore-next-line complexity
 export async function requireStudentAdditionStudentAccess(
   session: StudentAdditionSession | null,
@@ -276,6 +314,28 @@ export async function requireStudentAdditionStudentAccess(
   if (!(await hasSchoolAccess(permission, email, scope))) return deny(403);
 
   if (!scope.has_program_enrollment) return deny(403);
+  if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
+
+  return {
+    ok: true,
+    permission,
+    programId: PROGRAM_IDS.NVS,
+    school: { code: scope.code, udise_code: scope.udise_code },
+    actor: studentAdditionActor(permission, email),
+  };
+}
+
+export async function requireStudentDropoutUndoAccess(
+  session: StudentAdditionSession | null,
+  studentPkId: number | string,
+): Promise<StudentAdditionStudentAccessResult> {
+  const actor = await requireStudentWriteActor(session);
+  if (!actor.ok) return actor;
+
+  const { email, permission } = actor;
+  const scope = await getStudentDropoutUndoScope(studentPkId);
+  if (!scope || scope.af_school_category !== "JNV") return deny(403);
+  if (!(await hasSchoolAccess(permission, email, scope))) return deny(403);
   if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
 
   return {

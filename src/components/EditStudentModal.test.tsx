@@ -224,7 +224,7 @@ describe("EditStudentModal", () => {
     await user.type(getByName("phone"), "123");
     await user.click(screen.getByText("Save Changes"));
 
-    expect(await screen.findByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+    expect(await screen.findByText("Parents Phone Number must be exactly 10 digits and cannot start with zero")).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 

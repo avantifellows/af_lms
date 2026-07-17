@@ -61,6 +61,7 @@ export interface Student {
   program_id: number | null;
   student_program_ids?: Array<number | string> | null;
   dropout_program_ids?: Array<number | string> | null;
+  can_undo_nvs_dropout?: boolean;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
@@ -93,6 +94,7 @@ interface StudentTableProps {
   // when the parent renders its own filter control above.
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
+  selectedStream?: string;
   hideGradeFilterUI?: boolean;
 }
 
@@ -135,8 +137,10 @@ interface StudentCardProps {
   student: Student;
   canEditStudent: boolean;
   canDropout: boolean;
+  canUndoDropout: boolean;
   onEdit: () => void;
   onDropout: () => void;
+  onUndoDropout: () => void;
   isDropoutView?: boolean;
   /**
    * Bumped by the parent when something outside this card may have changed
@@ -161,8 +165,10 @@ function StudentCard({
   student,
   canEditStudent,
   canDropout,
+  canUndoDropout,
   onEdit,
   onDropout,
+  onUndoDropout,
   isDropoutView = false,
   documentsRefreshNonce,
 }: StudentCardProps) {
@@ -252,6 +258,13 @@ function StudentCard({
                 Dropout
               </Button>
             )}
+          </div>
+        )}
+        {canUndoDropout && isDropout && (
+          <div className="mt-3">
+            <Button variant="ghost" size="sm" onClick={onUndoDropout}>
+              Undo Dropout
+            </Button>
           </div>
         )}
       </div>
@@ -429,7 +442,7 @@ function DropoutModal({
 
       <p className="text-sm text-gray-900 mb-4">
         Are you sure you want to mark <strong>{studentName}</strong> as a
-        dropout from {programLabel}? This action cannot be undone.
+        dropout from {programLabel}?
       </p>
 
       <div className="flex justify-end gap-3">
@@ -438,6 +451,60 @@ function DropoutModal({
         </Button>
         <Button variant="danger" onClick={handleSubmit} disabled={loading}>
           {loading ? "Processing..." : "Confirm Dropout"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function UndoDropoutModal({
+  student,
+  isOpen,
+  onClose,
+  onConfirm,
+}: {
+  student: Student;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const name = [student.first_name, student.last_name].filter(Boolean).join(" ") || "this student";
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/student/dropout/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_pk_id: student.student_pk_id }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to undo dropout");
+      }
+      onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to undo dropout");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal open={isOpen} onClose={onClose} className="max-w-md p-6">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">Undo Dropout</h2>
+      {error && <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      <p className="mb-4 text-sm text-gray-900">
+        Restore <strong>{name}</strong> to their previous NVS batch?
+      </p>
+      <div className="flex justify-end gap-3">
+        <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
+        <Button onClick={handleSubmit} disabled={loading}>
+          {loading ? "Restoring..." : "Undo Dropout"}
         </Button>
       </div>
     </Modal>
@@ -460,10 +527,12 @@ export default function StudentTable({
   nvsStreams = [],
   selectedGrade: controlledGrade,
   onGradeChange,
+  selectedStream = "all",
   hideGradeFilterUI = false,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
+  const [undoStudent, setUndoStudent] = useState<Student | null>(null);
   // Grade filter can be controlled by the parent (to also scope summary pills)
   // or managed internally when used standalone.
   const [internalGrade, setInternalGrade] = useState<string>("all");
@@ -507,6 +576,17 @@ export default function StudentTable({
     return isAdmin || Boolean(userProgramIds?.includes(effectiveProgramId));
   };
 
+  const canUndoNvsDropout = (student: Student): boolean =>
+    Boolean(
+      canDropoutStudent &&
+      effectiveProgramId === PROGRAM_IDS.NVS &&
+      !isPasscodeUser &&
+      student.student_pk_id &&
+      student.can_undo_nvs_dropout &&
+      (isAdmin || userProgramIds?.includes(PROGRAM_IDS.NVS)) &&
+      student.dropout_program_ids?.map(Number).includes(PROGRAM_IDS.NVS),
+    );
+
   // Determine which students to show based on tab
   const currentStudents = activeTab === "active" ? students : dropoutStudents;
 
@@ -520,10 +600,10 @@ export default function StudentTable({
   ].sort((a, b) => a - b);
 
   // Filter students by selected grade
-  const filteredStudents =
-    selectedGrade === "all"
-      ? currentStudents
-      : currentStudents.filter((s) => s.grade === parseInt(selectedGrade));
+  const filteredStudents = currentStudents.filter((student) =>
+    (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
+    (selectedStream === "all" || student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+  );
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
   const handleTabChange = (tab: "active" | "dropout") => {
@@ -646,8 +726,12 @@ export default function StudentTable({
               canDropout={
                 activeTab === "active" && canDropoutFromSelectedProgram(student)
               }
+              canUndoDropout={
+                activeTab === "dropout" && canUndoNvsDropout(student)
+              }
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
+              onUndoDropout={() => setUndoStudent(student)}
               isDropoutView={activeTab === "dropout"}
               documentsRefreshNonce={documentsRefresh}
             />
@@ -680,6 +764,14 @@ export default function StudentTable({
             PROGRAM_ID_TO_LABEL[effectiveProgramId!] ||
             `Program ${effectiveProgramId}`
           }
+        />
+      )}
+      {undoStudent && (
+        <UndoDropoutModal
+          student={undoStudent}
+          isOpen
+          onClose={() => setUndoStudent(null)}
+          onConfirm={handleSave}
         />
       )}
     </>

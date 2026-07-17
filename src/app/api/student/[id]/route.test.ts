@@ -164,7 +164,7 @@ describe("PATCH /api/student/[id]", () => {
 
   it.each([
     [{ first_name: { injected: true } }, "Student Name must be text"],
-    [{ phone: "123" }, "Parents Phone Number must be exactly 10 digits"],
+    [{ phone: "0123456789" }, "Parents Phone Number must be exactly 10 digits and cannot start with zero"],
     [{ date_of_birth: "2016-01-01" }, "Date of Birth must be between 2000 and 2015"],
     [{ date_of_birth: "2008-02-31" }, "Date of Birth is not valid"],
     [{ grade: 10 }, "Grade must be 11 or 12"],

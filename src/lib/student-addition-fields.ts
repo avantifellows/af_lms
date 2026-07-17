@@ -304,17 +304,26 @@ function parseGrade(value: unknown): 11 | 12 | null {
   return grade === 11 || grade === 12 ? grade : null;
 }
 
-function parseDate(value: unknown): string | null {
+function parseDate(value: unknown, flexible = false): string | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.toISOString().slice(0, 10);
   }
   const raw = stringValue(value);
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const dmy = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  const dmy = raw.match(
+    flexible
+      ? /^(\d{1,2})([\/.-])(\d{1,2})\2(\d{2}|\d{4})$/
+      : /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/,
+  );
   const parts = iso
     ? { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) }
     : dmy
-      ? { year: Number(dmy[3]), month: Number(dmy[2]), day: Number(dmy[1]) }
+      ? {
+          year: Number(flexible ? dmy[4] : dmy[3]) +
+            (flexible && dmy[4].length === 2 ? 2000 : 0),
+          month: Number(flexible ? dmy[3] : dmy[2]),
+          day: Number(dmy[1]),
+        }
       : null;
   if (!parts) return null;
 
@@ -376,8 +385,8 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
   if (fields.father_name !== undefined && typeof fields.father_name !== "string") {
     return editError("father_name", "Father Name must be text");
   }
-  if (fields.phone !== undefined && (typeof fields.phone !== "string" || !/^\d{10}$/.test(fields.phone))) {
-    return editError("phone", "Parents Phone Number must be exactly 10 digits");
+  if (fields.phone !== undefined && (typeof fields.phone !== "string" || !/^[1-9]\d{9}$/.test(fields.phone))) {
+    return editError("phone", "Parents Phone Number must be exactly 10 digits and cannot start with zero");
   }
   if (fields.gender !== undefined && (typeof fields.gender !== "string" || ![...GENDER_SET, "Others"].includes(fields.gender))) {
     return editError("gender", "Gender must be Female, Male, or Other");
@@ -440,7 +449,7 @@ export function canonicalizeStudentEditPayload(input: Record<string, unknown>) {
 // fallow-ignore-next-line complexity
 export function validateStudentAdditionInput(
   input: StudentAdditionInput,
-  options: { today?: Date; rowNumber?: number; academicYear?: string } = {},
+  options: { today?: Date; rowNumber?: number; academicYear?: string; bulkUpload?: boolean } = {},
 ): StudentAdditionValidationResult {
   const today = options.today ?? new Date();
   const fieldErrors: Record<string, string> = {};
@@ -456,9 +465,15 @@ export function validateStudentAdditionInput(
     addError(fieldErrors, "student_name", "Student Name should not contain '.'");
   }
 
-  const date_of_birth = parseDate(input.date_of_birth);
+  const date_of_birth = parseDate(input.date_of_birth, options.bulkUpload);
   if (!date_of_birth) {
-    addError(fieldErrors, "date_of_birth", "Date of Birth must be DD/MM/YYYY or YYYY-MM-DD");
+    addError(
+      fieldErrors,
+      "date_of_birth",
+      options.bulkUpload
+        ? "Date of Birth must be DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, or use a 2-digit year"
+        : "Date of Birth must be DD/MM/YYYY or YYYY-MM-DD",
+    );
   } else if (date_of_birth < STUDENT_DOB_MIN || date_of_birth > STUDENT_DOB_MAX || date_of_birth > isoToday(today)) {
     addError(fieldErrors, "date_of_birth", "Date of Birth must be between 2000 and 2015");
   }
@@ -491,8 +506,8 @@ export function validateStudentAdditionInput(
   const g10_roll_no = normalizeG10RollNo(g10RollInput, g10BoardInput);
   if (!pen_number && !g10_roll_no) rowErrors.push("PEN or Grade 10 Roll no is required");
   if (g10RollInput) {
-    if (g10BoardInput === CBSE_BOARD && !/^\d{8}$/.test(g10_roll_no)) {
-      addError(fieldErrors, "g10_roll_no", "CBSE Grade 10 Roll no must be exactly 8 digits");
+    if (g10BoardInput === CBSE_BOARD && !/^[1-9]\d{7}$/.test(g10_roll_no)) {
+      addError(fieldErrors, "g10_roll_no", "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero");
     } else if (g10BoardInput !== CBSE_BOARD && !/^[A-Z0-9]{4,10}$/.test(g10_roll_no)) {
       addError(fieldErrors, "g10_roll_no", "Grade 10 Roll no must be 4 to 10 characters");
     }
@@ -511,8 +526,8 @@ export function validateStudentAdditionInput(
     addError(fieldErrors, "father_name", "Father Name must contain only letters");
   }
   const phone = stringValue(input.phone);
-  if (!/^\d{10}$/.test(phone)) {
-    addError(fieldErrors, "phone", "Parents Phone Number must be exactly 10 digits");
+  if (!/^[1-9]\d{9}$/.test(phone)) {
+    addError(fieldErrors, "phone", "Parents Phone Number must be exactly 10 digits and cannot start with zero");
   }
 
   const annual_family_income = stringValue(input.annual_family_income);

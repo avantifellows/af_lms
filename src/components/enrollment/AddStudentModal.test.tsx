@@ -202,7 +202,7 @@ describe("AddStudentModal", () => {
     await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
 
     expect(screen.getByLabelText("Grade 10 Roll no")).toHaveValue("ABC1234567");
-    expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits")).toBeInTheDocument();
+    expect(screen.getByText("CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Student" })).toBeDisabled();
   });
 
@@ -214,7 +214,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("PEN must be exactly 11 digits and cannot start with zero")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
-    expect(screen.getByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+    expect(screen.getByText("Parents Phone Number must be exactly 10 digits and cannot start with zero")).toBeInTheDocument();
   });
 
   it("marks required fields without showing Optional for annual family income", () => {

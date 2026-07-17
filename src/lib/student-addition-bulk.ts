@@ -143,7 +143,12 @@ function parseRowsFromAoA(
       ? parsedOriginalRowNumber
       : index + 2;
 
-    const validation = validateStudentAdditionInput(input, { today, rowNumber, academicYear });
+    const validation = validateStudentAdditionInput(input, {
+      today,
+      rowNumber,
+      academicYear,
+      bulkUpload: true,
+    });
     originalRows.set(rowNumber, original);
 
     if (!validation.ok) {
