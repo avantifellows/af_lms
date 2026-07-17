@@ -8,6 +8,10 @@ type Fixture = {
   draftStudentId: number;
   unassignedStudentId: number;
   formerStudentId: number;
+  profileGrade11StudentId: number;
+  historicalGrade12StudentId: number;
+  firstGrade11PhaseId: number;
+  firstGrade12PhaseId: number;
   activeGrade11PhaseId: number;
   activeGrade12PhaseId: number;
 };
@@ -25,6 +29,10 @@ test.describe("Holistic Mentorship release workflows", () => {
         draft_student_id: string;
         unassigned_student_id: string;
         former_student_id: string;
+        profile_grade_11_student_id: string;
+        historical_grade_12_student_id: string;
+        first_grade_11_phase_id: string;
+        first_grade_12_phase_id: string;
         grade_11_phase_id: string;
         grade_12_phase_id: string;
       }>(
@@ -52,6 +60,24 @@ test.describe("Holistic Mentorship release workflows", () => {
                  ORDER BY student.id LIMIT 1) AS unassigned_student_id,
                 (SELECT mapping.student_id FROM holistic_mentorship_mentor_mentee_mappings mapping
                  WHERE mapping.end_reason = 'synthetic_access_loss' LIMIT 1) AS former_student_id,
+                (SELECT journey.student_id FROM holistic_mentorship_profile_journeys journey
+                 JOIN holistic_mentorship_mentor_mentee_mappings mapping ON mapping.student_id = journey.student_id
+                   AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL
+                 WHERE journey.entry_grade = 11 ORDER BY journey.student_id LIMIT 1) AS profile_grade_11_student_id,
+                (SELECT notes.student_id FROM holistic_mentorship_historical_notes notes
+                 JOIN holistic_mentorship_mentor_mentee_mappings mapping ON mapping.student_id = notes.student_id
+                   AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL
+                 ORDER BY notes.student_id LIMIT 1) AS historical_grade_12_student_id,
+                (SELECT phase.id FROM holistic_mentorship_phases phase
+                 JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+                 JOIN grade ON grade.id = phase.grade_id
+                 WHERE plan.academic_year = '2026-2027' AND plan.program_id = 1
+                   AND grade.number = 11 AND phase.state = 'open' ORDER BY phase.position LIMIT 1) AS first_grade_11_phase_id,
+                (SELECT phase.id FROM holistic_mentorship_phases phase
+                 JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+                 JOIN grade ON grade.id = phase.grade_id
+                 WHERE plan.academic_year = '2026-2027' AND plan.program_id = 1
+                   AND grade.number = 12 AND phase.state = 'open' ORDER BY phase.position LIMIT 1) AS first_grade_12_phase_id,
                 (SELECT phase.id FROM holistic_mentorship_phases phase
                  JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
                  JOIN grade ON grade.id = phase.grade_id
@@ -78,12 +104,55 @@ test.describe("Holistic Mentorship release workflows", () => {
         draftStudentId: Number(row.draft_student_id),
         unassignedStudentId: Number(row.unassigned_student_id),
         formerStudentId: Number(row.former_student_id),
+        profileGrade11StudentId: Number(row.profile_grade_11_student_id),
+        historicalGrade12StudentId: Number(row.historical_grade_12_student_id),
+        firstGrade11PhaseId: Number(row.first_grade_11_phase_id),
+        firstGrade12PhaseId: Number(row.first_grade_12_phase_id),
         activeGrade11PhaseId: Number(row.grade_11_phase_id),
         activeGrade12PhaseId: Number(row.grade_12_phase_id),
       };
     } finally {
       await pool.end();
     }
+  });
+
+  test("Profile and Context sources follow the approved precedence", async ({
+    holisticTeacherPage,
+  }) => {
+    await holisticTeacherPage.goto(studentPhaseUrl(
+      fixture.profileGrade11StudentId,
+      fixture.firstGrade11PhaseId
+    ));
+    await expect(holisticTeacherPage.getByText("Student Profile", { exact: true })).toBeVisible();
+    for (const position of [1, 2, 3, 4, 5]) {
+      await expect(holisticTeacherPage.getByText(`Synthetic Question Set ${position}`, { exact: true })).toBeVisible();
+      await expect(holisticTeacherPage.getByText(`Synthetic summary ${position}.`, { exact: true })).toBeVisible();
+    }
+
+    await holisticTeacherPage.goto(studentPhaseUrl(
+      fixture.profileGrade11StudentId,
+      fixture.activeGrade11PhaseId
+    ));
+    await expect(holisticTeacherPage.getByText(
+      "From Phase 1 - Synthetic Grade 11 Completed",
+      { exact: true }
+    )).toBeVisible();
+    await expect(holisticTeacherPage.getByText("Synthetic mentoring note.", { exact: true })).toBeVisible();
+    await expect(holisticTeacherPage.getByText(/^Last updated /)).toBeVisible();
+    await expect(holisticTeacherPage.getByText("Synthetic Holistic Teacher", { exact: true })).toHaveCount(0);
+
+    await holisticTeacherPage.goto(studentPhaseUrl(
+      fixture.historicalGrade12StudentId,
+      fixture.firstGrade12PhaseId
+    ));
+    await expect(holisticTeacherPage.getByText("Historical notes", { exact: true })).toBeVisible();
+    for (const position of [1, 2, 3, 4]) {
+      await expect(holisticTeacherPage.getByText(
+        `Synthetic historical question ${position}?`,
+        { exact: true }
+      )).toBeVisible();
+    }
+    await expect(holisticTeacherPage.getByText("No response recorded", { exact: true })).toBeVisible();
   });
 
   test("eligible Teacher assigns a Student, submits Notes, and edits the official Notes", async ({
@@ -102,6 +171,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     const assignment = holisticTeacherPage.waitForResponse((response) =>
       response.url().endsWith("/api/holistic-mentorship/mappings") && response.request().method() === "POST"
     );
+    holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     await holisticTeacherPage.getByRole("button", { name: "Assign 1 selected" }).click();
     await expect((await assignment).status()).toBe(200);
 

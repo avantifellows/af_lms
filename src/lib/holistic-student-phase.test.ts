@@ -157,6 +157,89 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
+  it("does not move a Grade 11 Profile to Grade 12 when prior-year Phases are unavailable", () => {
+    expect(resolveHolisticStudentContext({
+      targetPhaseId: 25,
+      phases: [{ id: 25, number: 5, title: "Grade 12 start" }],
+      submittedNotes: [],
+      profile: [{ title: "Strengths", summary: "Patient problem solver" }],
+      historicalAnswers: null,
+      launchGrade12: false,
+      entryGradeFirstPhaseId: null,
+    })).toEqual({
+      label: null,
+      items: [],
+      missing: "No previous session notes available",
+    });
+  });
+
+  it("shows Profile unavailable only at an entry Phase without an Active Profile", () => {
+    const input = {
+      phases: [
+        { id: 11, number: 1, title: "Starting out" },
+        { id: 12, number: 2, title: "Following up" },
+      ],
+      submittedNotes: [],
+      profile: null,
+      historicalAnswers: null,
+      launchGrade12: false,
+      entryGradeFirstPhaseId: 11,
+    };
+
+    expect(resolveHolisticStudentContext({ ...input, targetPhaseId: 11 })).toEqual({
+      label: null,
+      items: [],
+      missing: "Profile unavailable",
+    });
+    expect(resolveHolisticStudentContext({ ...input, targetPhaseId: 12 })).toEqual({
+      label: null,
+      items: [],
+      missing: "No previous session notes available",
+    });
+  });
+
+  it("does not treat a Grade 11 entrant with a missing prior Mapping as launch Grade 12", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 12, entry_grade: 11,
+      }])
+      .mockResolvedValueOnce([{
+        id: 75, academic_year: "2026-2027", grade: 12, title: "Grade 12 start",
+        position: 5, revision: 1, state: "open", guidance_markdown: "Listen first.",
+      }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { title: "Strengths", summary: "Patient problem solver", position: 1 },
+      ])
+      .mockResolvedValueOnce([
+        { question: "Historical question 1", answer: "Historical answer", position: 1 },
+      ]);
+
+    const result = await getHolisticStudentPhase({
+      studentId: 41,
+      phaseId: 75,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result).toMatchObject({
+      selectedPhase: {
+        context: {
+          label: null,
+          items: [],
+          missing: "No previous session notes available",
+        },
+      },
+    });
+  });
+
   it("does not expose protected content for an applicable Locked Phase", async () => {
     mockQuery
       .mockResolvedValueOnce([{ student_id: 41, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])

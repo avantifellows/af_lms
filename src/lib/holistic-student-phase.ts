@@ -59,7 +59,7 @@ export type HolisticStudentContext = {
 } | {
   label: null;
   items: [];
-  missing: "No previous session notes available";
+  missing: "Profile unavailable" | "No previous session notes available";
 };
 
 export type HolisticPhaseSummary =
@@ -110,7 +110,7 @@ export function resolveHolisticStudentContext(input: {
   profile: Array<{ title: string; summary: string }> | null;
   historicalAnswers: Array<{ question: string; answer: string | null }> | null;
   launchGrade12: boolean;
-  entryGradeFirstPhaseId: number;
+  entryGradeFirstPhaseId: number | null;
 }): HolisticStudentContext {
   const targetIndex = input.phases.findIndex(({ id }) => id === input.targetPhaseId);
   const submittedByPhase = new Map(input.submittedNotes.map((notes) => [notes.phaseId, notes]));
@@ -135,11 +135,13 @@ export function resolveHolisticStudentContext(input: {
       })),
     };
   }
-  if (input.targetPhaseId === input.entryGradeFirstPhaseId && input.profile) {
-    return {
-      label: "Student Profile",
-      items: input.profile.map(({ title, summary }) => ({ label: title, content: summary })),
-    };
+  if (input.targetPhaseId === input.entryGradeFirstPhaseId) {
+    return input.profile
+      ? {
+          label: "Student Profile",
+          items: input.profile.map(({ title, summary }) => ({ label: title, content: summary })),
+        }
+      : { label: null, items: [], missing: "Profile unavailable" };
   }
   return {
     label: null,
@@ -375,7 +377,15 @@ async function loadPhaseRelations(
       `SELECT answer.question, answer.answer, answer.position
        FROM holistic_mentorship_historical_notes notes
        JOIN holistic_mentorship_historical_note_answers answer ON answer.historical_note_id = notes.id
-       WHERE notes.student_id = $1 ORDER BY answer.position`,
+       WHERE notes.id = (
+         SELECT selected.id FROM holistic_mentorship_historical_notes selected
+         WHERE selected.student_id = $1
+           AND selected.source_system IN ('approved_2025_holistic_export', 'synthetic_fixture')
+         ORDER BY (selected.source_system = 'approved_2025_holistic_export') DESC,
+                  selected.imported_at DESC, selected.id DESC
+         LIMIT 1
+       )
+       ORDER BY answer.position`,
       [params.studentId]
     ),
   ]);
@@ -533,9 +543,8 @@ function selectedPhaseContext(params: OpenSelectedPhaseParams) {
     historicalAnswers: params.historicalRows.length
       ? params.historicalRows.map(({ question, answer }) => ({ question, answer }))
       : null,
-    launchGrade12: params.currentGrade === 12 && !params.hasPriorYearMapping,
-    entryGradeFirstPhaseId: params.applicable.find(({ grade }) => grade === params.entryGrade)?.id ??
-      params.selected.id,
+    launchGrade12: params.currentGrade === 12 && params.entryGrade === 12 && !params.hasPriorYearMapping,
+    entryGradeFirstPhaseId: params.applicable.find(({ grade }) => grade === params.entryGrade)?.id ?? null,
   });
 }
 
