@@ -91,6 +91,7 @@ export type HolisticStudentPhaseDetail = {
     notes: null | {
       state: "draft" | "submitted";
       revision: number;
+      authorName: string | null;
       firstSubmittedAt: string | null;
       lastEditedAt: string;
       answers?: Array<{ questionId: number; question: string; answer: string }>;
@@ -216,6 +217,7 @@ type NotesRow = {
   notes_id: number | string;
   phase_id: number | string;
   author_user_id: number | string;
+  author_name: string | null;
   state: "draft" | "submitted";
   revision: number;
   first_submitted_at: string | null;
@@ -242,6 +244,7 @@ type StudentPhaseParams = {
 type PhaseNotes = {
   notesId: number;
   authorUserId: number;
+  authorName: string | null;
   state: "draft" | "submitted";
   revision: number;
   firstSubmittedAt: string | null;
@@ -352,11 +355,14 @@ async function loadPhaseRelations(
       [params.studentId, PROGRAM_IDS.COE, academicYears]
     ),
     query<NotesRow>(
-      `SELECT notes.id AS notes_id, notes.phase_id, notes.author_user_id, notes.state,
+      `SELECT notes.id AS notes_id, notes.phase_id, notes.author_user_id,
+              NULLIF(TRIM(COALESCE(author.first_name, '') || ' ' || COALESCE(author.last_name, '')), '') AS author_name,
+              notes.state,
               notes.revision, notes.first_submitted_at, notes.last_edited_at,
               question.id AS question_id, question.text AS question,
               question.position AS question_position, answer.answer
        FROM holistic_mentorship_post_session_notes notes
+       LEFT JOIN "user" author ON author.id = notes.author_user_id
        LEFT JOIN holistic_mentorship_post_session_answers answer ON answer.notes_id = notes.id
        LEFT JOIN holistic_mentorship_phase_questions question ON question.id = answer.question_id
        WHERE notes.student_id = $1 AND notes.phase_id = ANY($2::bigint[])
@@ -421,6 +427,7 @@ function groupNotes(rows: NotesRow[]): Map<number, PhaseNotes> {
     const notes = grouped.get(phaseId) ?? {
       notesId: Number(row.notes_id),
       authorUserId: Number(row.author_user_id),
+      authorName: row.author_name ?? null,
       state: row.state,
       revision: row.revision,
       firstSubmittedAt: row.first_submitted_at,
@@ -562,6 +569,7 @@ function visibleNotes(notes: PhaseNotes | undefined, canReadDraft: boolean, eras
   const detail = {
     state: notes.state,
     revision: notes.revision,
+    authorName: notes.authorName,
     firstSubmittedAt: notes.firstSubmittedAt,
     lastEditedAt: notes.lastEditedAt,
   };

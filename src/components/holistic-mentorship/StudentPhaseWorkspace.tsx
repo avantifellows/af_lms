@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Lock } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { Button } from "@/components/ui/Button";
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import GuidancePreview from "./GuidancePreview";
 
 type NotesEditorProps = {
@@ -20,12 +23,59 @@ type NotesEditorProps = {
   notes: null | {
     state: "draft" | "submitted";
     revision: number;
+    authorName?: string | null;
     answers?: Array<{ questionId: number; answer: string }>;
   };
+  onNotesSaved: (submitted: boolean) => void;
 };
 type NotesEditorStatus = "idle" | "saving" | "saved" | "failed";
 type OpenSelectedPhase = Extract<HolisticStudentPhaseDetail["selectedPhase"], { guidanceMarkdown: string }>;
 type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
+type BrowserNavigation = EventTarget & {
+  traverseTo: (key: string) => { committed: Promise<unknown> };
+};
+type BrowserNavigateEvent = Event & {
+  navigationType: string;
+  destination: { key: string };
+};
+const NOTES_REFRESH_URLS = "holistic-notes-refresh-urls";
+
+function browserNavigation() {
+  return (window as typeof window & { navigation?: BrowserNavigation }).navigation ?? null;
+}
+
+function notesRefreshUrls() {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(NOTES_REFRESH_URLS) ?? "[]");
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function markCurrentNotesForRefresh() {
+  try {
+    const urls = new Set(notesRefreshUrls());
+    urls.add(window.location.href);
+    window.sessionStorage.setItem(NOTES_REFRESH_URLS, JSON.stringify([...urls]));
+  } catch {
+    // The navigation guard still protects the write when session storage is unavailable.
+  }
+}
+
+function notesRefreshPending() {
+  return notesRefreshUrls().includes(window.location.href);
+}
+
+function clearCurrentNotesRefresh() {
+  try {
+    const urls = notesRefreshUrls().filter((url) => url !== window.location.href);
+    if (urls.length) window.sessionStorage.setItem(NOTES_REFRESH_URLS, JSON.stringify(urls));
+    else window.sessionStorage.removeItem(NOTES_REFRESH_URLS);
+  } catch {
+    // Nothing else needs cleanup when session storage is unavailable.
+  }
+}
 
 function initialNotesAnswers(props: NotesEditorProps) {
   return Object.fromEntries(props.questions.map(({ questionId }) => [
@@ -57,6 +107,10 @@ function hasBlankAnswer(questions: NotesEditorProps["questions"], answers: Recor
   return questions.some(({ questionId }) => !answers[questionId]?.trim());
 }
 
+function firstBlankQuestion(questions: NotesEditorProps["questions"], answers: Record<number, string>) {
+  return questions.find(({ questionId }) => !answers[questionId]?.trim())?.questionId ?? null;
+}
+
 function selectedOpenPhase(detail: HolisticStudentPhaseDetail): OpenSelectedPhase | null {
   const selected = detail.selectedPhase;
   if ("locked" in selected && !selected.locked && "guidanceMarkdown" in selected) return selected;
@@ -73,12 +127,15 @@ class NotesRequestError extends Error {
   }
 }
 
-function useNotesMutation(props: NotesEditorProps, initialRevision: number) {
-  const revision = useRef(initialRevision);
-  const apiUrl = `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}?${new URLSearchParams({
+function notesApiUrl(props: NotesEditorProps) {
+  return `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}?${new URLSearchParams({
     school_code: props.schoolCode,
     academic_year: props.academicYear,
   })}`;
+}
+
+function useNotesMutation(props: NotesEditorProps, revisionRef: React.MutableRefObject<number>) {
+  const apiUrl = notesApiUrl(props);
   return useCallback(async (
     action: "draft" | "submit" | "edit",
     value: Record<number, string>,
@@ -89,7 +146,7 @@ function useNotesMutation(props: NotesEditorProps, initialRevision: number) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action,
-        expected_revision: revision.current,
+        expected_revision: revisionRef.current,
         expected_mapping_id: props.mappingId,
         expected_phase_revision: props.phaseRevision,
         confirmed,
@@ -99,25 +156,115 @@ function useNotesMutation(props: NotesEditorProps, initialRevision: number) {
         })),
       }),
     });
-    const result = await response.json() as { revision?: number; error?: string };
+    const result = await response.json().catch(() => ({})) as { revision?: number; error?: string };
     if (!response.ok) throw new NotesRequestError(result.error || "Could not save Notes", response.status);
-    revision.current = result.revision ?? revision.current;
-  }, [apiUrl, props.mappingId, props.phaseRevision, props.questions]);
+    revisionRef.current = result.revision ?? revisionRef.current;
+  }, [apiUrl, props.mappingId, props.phaseRevision, props.questions, revisionRef]);
 }
 
 function PostSessionNotesEditor(props: NotesEditorProps) {
+  const router = useRouter();
   const initialAnswers = initialNotesAnswers(props);
   const initialEditor = initialEditorState(props);
   const [answers, setAnswers] = useState<Record<number, string>>(initialAnswers);
+  const [savedAnswers, setSavedAnswers] = useState<Record<number, string>>(initialAnswers);
   const [notesState, setNotesState] = useState(initialEditor.notesState);
   const [editingSubmitted, setEditingSubmitted] = useState(false);
   const [status, setStatus] = useState<NotesEditorStatus>(initialEditor.status);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [finalWriting, setFinalWriting] = useState(false);
   const saved = useRef(JSON.stringify(initialAnswers));
   const queued = useRef<Record<number, string> | null>(null);
   const inFlight = useRef<Promise<boolean> | null>(null);
-  const mutate = useNotesMutation(props, initialEditor.revision);
+  const autosaveTimer = useRef<number | null>(null);
+  const textareas = useRef<Record<number, HTMLTextAreaElement | null>>({});
+  const historyGuardInFlight = useRef(false);
+  const replayingHistory = useRef(false);
+  const draftEditorRef = useRef(false);
+  const hydratedServerRevision = useRef(props.notes?.revision ?? props.notesRevision);
+  const mutationRevision = useRef(initialEditor.revision);
+  const mutate = useNotesMutation(props, mutationRevision);
+  const apiUrl = notesApiUrl(props);
+  const canAutosave = canAutosaveNotes(props.editable, notesState);
+  const autosaveEnabled = canAutosave && !finalWriting;
+  draftEditorRef.current = canAutosave;
+  const localDirty = JSON.stringify(answers) !== JSON.stringify(savedAnswers)
+    || status === "saving" || status === "failed";
+  const localDirtyRef = useRef(localDirty);
+  const finalWritingRef = useRef(finalWriting);
+  localDirtyRef.current = localDirty;
+  finalWritingRef.current = finalWriting;
+
+  const hydrateServerNotes = useCallback((snapshot: {
+    notes: NotesEditorProps["notes"];
+    notesRevision: number;
+  }, authoritative = false) => {
+    const serverRevision = snapshot.notes?.revision ?? snapshot.notesRevision;
+    const acceptedRevision = Math.max(hydratedServerRevision.current, mutationRevision.current);
+    if (serverRevision < acceptedRevision) return false;
+    if (!authoritative && serverRevision === acceptedRevision) return true;
+    if (localDirtyRef.current || finalWritingRef.current) return false;
+    const nextAnswers = Object.fromEntries(props.questions.map(({ questionId }) => [
+      questionId,
+      snapshot.notes?.answers?.find((answer) => answer.questionId === questionId)?.answer ?? "",
+    ]));
+    const nextEditor = snapshot.notes
+      ? {
+          notesState: snapshot.notes.state,
+          status: snapshot.notes.state === "draft" ? "saved" as const : "idle" as const,
+        }
+      : { notesState: "draft" as const, status: "idle" as const };
+    hydratedServerRevision.current = serverRevision;
+    mutationRevision.current = serverRevision;
+    saved.current = JSON.stringify(nextAnswers);
+    queued.current = null;
+    setAnswers(nextAnswers);
+    setSavedAnswers(nextAnswers);
+    setNotesState(nextEditor.notesState);
+    setStatus(nextEditor.status);
+    setEditingSubmitted(false);
+    setError("");
+    setConflict(false);
+    return true;
+  }, [props.questions]);
+  const hydrateServerNotesRef = useRef(hydrateServerNotes);
+  hydrateServerNotesRef.current = hydrateServerNotes;
+
+  useEffect(() => {
+    hydrateServerNotes({ notes: props.notes, notesRevision: props.notesRevision });
+  }, [finalWriting, hydrateServerNotes, localDirty, props.notes, props.notesRevision]);
+
+  useEffect(() => {
+    if (!notesRefreshPending()) return;
+    const controller = new AbortController();
+    void fetch(apiUrl, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (response.ok) return response.json();
+        if ([401, 403, 404].includes(response.status)) {
+          clearCurrentNotesRefresh();
+          window.location.reload();
+        }
+        return null;
+      })
+      .then((detail: HolisticStudentPhaseDetail | null) => {
+        if (!detail || controller.signal.aborted) return;
+        const selected = selectedOpenPhase(detail);
+        if (!selected || selected.phaseId !== props.phaseId) return;
+        if (hydrateServerNotesRef.current({ notes: selected.notes, notesRevision: selected.notesRevision }, true)) {
+          if (selected.notes?.state === "draft") markCurrentNotesForRefresh();
+          else clearCurrentNotesRefresh();
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [apiUrl, props.phaseId]);
+
+  useEffect(() => {
+    if (notesState === "draft" && status === "saved") markCurrentNotesForRefresh();
+    if (notesState === "submitted") clearCurrentNotesRefresh();
+  }, [notesState, status]);
 
   const pump = useCallback(() => {
     if (inFlight.current) return inFlight.current;
@@ -130,10 +277,12 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         setConflict(false);
         try {
           await mutate("draft", value);
+          markCurrentNotesForRefresh();
           saved.current = JSON.stringify(value);
+          setSavedAnswers(value);
         } catch (caught) {
           setStatus("failed");
-          setError(caught instanceof Error ? caught.message : "Could not save Notes");
+          setError(caught instanceof NotesRequestError ? caught.message : "Could not save Notes");
           setConflict(caught instanceof NotesRequestError && caught.status === 409);
           return false;
         }
@@ -145,78 +294,228 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     return work;
   }, [mutate]);
 
-  const canAutosave = canAutosaveNotes(props.editable, notesState);
+  const cancelAutosaveTimer = useCallback(() => {
+    if (autosaveTimer.current === null) return;
+    window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = null;
+  }, []);
+
+  const flushDraft = useCallback(async () => {
+    cancelAutosaveTimer();
+    if (!canAutosave) return true;
+    if (JSON.stringify(answers) !== saved.current || status === "failed") queued.current = answers;
+    while (queued.current || inFlight.current) {
+      if (!(await pump())) return false;
+    }
+    return true;
+  }, [answers, canAutosave, cancelAutosaveTimer, pump, status]);
+
   useEffect(() => {
-    if (!canAutosave || JSON.stringify(answers) === saved.current) return;
-    const timer = window.setTimeout(() => {
+    if (!autosaveEnabled || JSON.stringify(answers) === saved.current) return;
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = null;
       queued.current = answers;
       void pump();
     }, 750);
-    return () => window.clearTimeout(timer);
-  }, [answers, canAutosave, pump]);
+    return cancelAutosaveTimer;
+  }, [answers, autosaveEnabled, cancelAutosaveTimer, pump]);
+
+  const submittedEditDirty = editingSubmitted && JSON.stringify(answers) !== JSON.stringify(savedAnswers);
+  const draftNeedsGuard = finalWriting || canAutosave && (
+    JSON.stringify(answers) !== JSON.stringify(savedAnswers) || status === "saving" || status === "failed"
+  );
+  const discardSubmittedChanges = useCallback(() => {
+    if (!window.confirm("Discard unsaved Notes changes?")) return false;
+    setAnswers(savedAnswers);
+    setEditingSubmitted(false);
+    setStatus("idle");
+    setError("");
+    setSuccess("");
+    setConflict(false);
+    return true;
+  }, [savedAnswers]);
+  const beforeNavigation = useCallback((): boolean | Promise<boolean> => {
+    if (finalWriting) return false;
+    if (submittedEditDirty) return discardSubmittedChanges();
+    return draftNeedsGuard ? flushDraft() : true;
+  }, [discardSubmittedChanges, draftNeedsGuard, finalWriting, flushDraft, submittedEditDirty]);
+
+  const guardNeeded = submittedEditDirty || draftNeedsGuard;
+  const guardNeededRef = useRef(guardNeeded);
+  const beforeNavigationRef = useRef(beforeNavigation);
+  guardNeededRef.current = guardNeeded;
+  beforeNavigationRef.current = beforeNavigation;
+
+  useEffect(() => {
+    const navigation = browserNavigation();
+    if (!navigation) return;
+    const handleHistoryNavigation = (rawEvent: Event) => {
+      const event = rawEvent as BrowserNavigateEvent;
+      if (event.navigationType !== "traverse" || replayingHistory.current || !guardNeededRef.current
+        || !event.cancelable || !event.destination.key) return;
+      event.preventDefault();
+      if (historyGuardInFlight.current) return;
+      historyGuardInFlight.current = true;
+      const destinationKey = event.destination.key;
+      const finishGuard = (allowed: boolean) => {
+        if (!allowed) {
+          historyGuardInFlight.current = false;
+          return;
+        }
+        if (draftEditorRef.current) markCurrentNotesForRefresh();
+        replayingHistory.current = true;
+        window.setTimeout(() => {
+          try {
+            void navigation.traverseTo(destinationKey).committed.then(() => {
+              router.refresh();
+            }).catch(() => undefined).finally(() => {
+              replayingHistory.current = false;
+              historyGuardInFlight.current = false;
+            });
+          } catch {
+            replayingHistory.current = false;
+            historyGuardInFlight.current = false;
+          }
+        }, 0);
+      };
+      const decision = beforeNavigationRef.current();
+      if (typeof decision === "boolean") finishGuard(decision);
+      else void decision.then(finishGuard).catch(() => finishGuard(false));
+    };
+    navigation.addEventListener("navigate", handleHistoryNavigation);
+    return () => navigation.removeEventListener("navigate", handleHistoryNavigation);
+  }, [router]);
+
+  useEffect(() => {
+    if (!guardNeeded) return;
+    const handleClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = (event.target as Element | null)?.closest("a");
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void Promise.resolve(beforeNavigation()).then((allowed) => {
+        if (!allowed) return;
+        if (draftEditorRef.current) markCurrentNotesForRefresh();
+        const target = new URL(anchor.href, window.location.href);
+        if (target.origin === window.location.origin && !target.pathname.startsWith("/api/")) {
+          router.push(`${target.pathname}${target.search}${target.hash}`);
+        } else {
+          window.location.assign(target.href);
+        }
+      });
+    };
+    const handleUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    document.addEventListener("click", handleClick, true);
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      document.removeEventListener("click", handleClick, true);
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [beforeNavigation, guardNeeded, router]);
 
   const retry = () => {
-    queued.current = answers;
-    void pump();
+    void flushDraft();
+  };
+  const focusFirstBlank = () => {
+    const questionId = firstBlankQuestion(props.questions, answers);
+    if (questionId !== null) textareas.current[questionId]?.focus();
   };
   const submit = async () => {
     if (hasBlankAnswer(props.questions, answers)) {
       setStatus("failed");
       setError("Answer every Question before submitting");
+      focusFirstBlank();
       return;
     }
-    queued.current = answers;
-    if (!(await pump()) || !window.confirm("Submit these Post-Session Notes?")) return;
+    setFinalWriting(true);
+    if (!(await flushDraft()) || !window.confirm("Submit these Post-Session Notes?")) {
+      setFinalWriting(false);
+      return;
+    }
     setStatus("saving");
+    setSuccess("");
     try {
       await mutate("submit", answers, true);
+      saved.current = JSON.stringify(answers);
+      setSavedAnswers(answers);
       setNotesState("submitted");
       setStatus("saved");
+      setSuccess("Notes submitted. Phase completed.");
+      props.onNotesSaved(true);
+      router.refresh();
     } catch (caught) {
       setStatus("failed");
-      setError(caught instanceof Error ? caught.message : "Could not submit Notes");
+      setError(caught instanceof NotesRequestError ? caught.message : "Could not submit Notes");
+      setConflict(caught instanceof NotesRequestError && caught.status === 409);
+    } finally {
+      setFinalWriting(false);
     }
   };
   const saveCorrection = async () => {
     if (hasBlankAnswer(props.questions, answers)) {
       setStatus("failed");
       setError("Answer every Question before saving");
+      focusFirstBlank();
+      return;
+    }
+    setFinalWriting(true);
+    if (!window.confirm("Save changes to submitted Notes?")) {
+      setFinalWriting(false);
       return;
     }
     setStatus("saving");
+    setSuccess("");
     try {
       await mutate("edit", answers, true);
       saved.current = JSON.stringify(answers);
+      setSavedAnswers(answers);
       setEditingSubmitted(false);
       setStatus("saved");
+      setSuccess("Submitted Notes updated.");
+      props.onNotesSaved(false);
+      router.refresh();
     } catch (caught) {
       setStatus("failed");
-      setError(caught instanceof Error ? caught.message : "Could not save Notes");
+      setError(caught instanceof NotesRequestError ? caught.message : "Could not save Notes");
+    } finally {
+      setFinalWriting(false);
     }
   };
 
   const beginCorrection = () => {
-    if (!window.confirm("Edit your submitted Post-Session Notes?")) return;
     setEditingSubmitted(true);
     setStatus("idle");
+    setSuccess("");
   };
   const cancelCorrection = () => {
-    setAnswers(initialAnswers);
+    if (JSON.stringify(answers) !== JSON.stringify(savedAnswers)) {
+      void discardSubmittedChanges();
+      return;
+    }
     setEditingSubmitted(false);
     setStatus("idle");
   };
   const updateAnswer = (questionId: number, answer: string) => {
     setAnswers((current) => ({ ...current, [questionId]: answer }));
+    setError("");
+    setSuccess("");
   };
 
   const showInputs = shouldShowNotesInputs(canAutosave, editingSubmitted);
   if (!showInputs) {
-    return <SubmittedNotesView questions={props.questions} answers={answers}
-      canEdit={props.editable && notesState === "submitted"} onEdit={beginCorrection} />;
+    return <><SubmittedNotesView questions={props.questions} answers={answers}
+      canEdit={props.editable && notesState === "submitted"} onEdit={beginCorrection} />
+      {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>;
   }
 
   return <EditableNotesForm questions={props.questions} answers={answers} status={status} error={error}
-    canRetry={canAutosave && !conflict} editingSubmitted={editingSubmitted} onAnswerChange={updateAnswer}
+    canRetry={autosaveEnabled && !conflict} editingSubmitted={editingSubmitted} disabled={finalWriting}
+    onAnswerChange={updateAnswer}
+    onTextarea={(questionId, element) => { textareas.current[questionId] = element; }}
     onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />;
 }
 
@@ -236,14 +535,16 @@ function SubmittedNotesView({ questions, answers, canEdit, onEdit }: {
 }
 
 function EditableNotesForm({ questions, answers, status, error, canRetry, editingSubmitted,
-  onAnswerChange, onRetry, onSaveCorrection, onCancelCorrection, onSubmit }: {
+  disabled, onAnswerChange, onTextarea, onRetry, onSaveCorrection, onCancelCorrection, onSubmit }: {
   questions: NotesEditorProps["questions"];
   answers: Record<number, string>;
   status: NotesEditorStatus;
   error: string;
   canRetry: boolean;
   editingSubmitted: boolean;
+  disabled: boolean;
   onAnswerChange: (questionId: number, answer: string) => void;
+  onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
   onRetry: () => void;
   onSaveCorrection: () => Promise<void>;
   onCancelCorrection: () => void;
@@ -253,21 +554,26 @@ function EditableNotesForm({ questions, answers, status, error, canRetry, editin
     {questions.map((question) => <label key={question.questionId}
       className="block space-y-1 text-sm font-semibold text-text-secondary">
       {question.text}
-      <textarea aria-label={question.text} rows={4} value={answers[question.questionId] ?? ""}
+      <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
+        aria-invalid={status === "failed" && !answers[question.questionId]?.trim()} rows={4}
+        disabled={disabled}
+        value={answers[question.questionId] ?? ""}
         onChange={(event) => onAnswerChange(question.questionId, event.target.value)}
         className="w-full resize-y rounded-md border border-border bg-bg-card p-3 font-normal text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20" />
     </label>)}
     <NotesEditorActions status={status} error={error} canRetry={canRetry} editingSubmitted={editingSubmitted}
+      disabled={disabled}
       onRetry={onRetry} onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />
   </>;
 }
 
 function NotesEditorActions({ status, error, canRetry, editingSubmitted, onRetry, onSaveCorrection,
-  onCancelCorrection, onSubmit }: {
+  disabled, onCancelCorrection, onSubmit }: {
   status: NotesEditorStatus;
   error: string;
   canRetry: boolean;
   editingSubmitted: boolean;
+  disabled: boolean;
   onRetry: () => void;
   onSaveCorrection: () => Promise<void>;
   onCancelCorrection: () => void;
@@ -278,13 +584,34 @@ function NotesEditorActions({ status, error, canRetry, editingSubmitted, onRetry
     {status === "saved" && <span className="text-sm font-medium text-success">Saved</span>}
     {status === "failed" && <>
       <span className="text-sm text-danger">{error}</span>
-      {canRetry && <Button type="button" variant="secondary" size="sm" onClick={onRetry}>Retry</Button>}
+      {canRetry && <Button type="button" variant="secondary" size="sm" disabled={disabled} onClick={onRetry}>Retry</Button>}
     </>}
     {editingSubmitted
-      ? <><Button type="button" onClick={() => void onSaveCorrection()} disabled={status === "saving"}>Save Changes</Button>
-          <Button type="button" variant="ghost" onClick={onCancelCorrection}>Cancel</Button></>
-      : <Button type="button" onClick={() => void onSubmit()} disabled={status === "saving"}>Submit Notes</Button>}
+      ? <><Button type="button" onClick={() => void onSaveCorrection()} disabled={disabled || status === "saving"}>Save Changes</Button>
+          <Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button></>
+      : <Button type="button" onClick={() => void onSubmit()} disabled={disabled || status === "saving"}>Submit Notes</Button>}
   </div>;
+}
+
+type PhaseStage = "Completed" | "Open" | "Skipped" | "Locked";
+
+function phaseStage(phase: PhaseNavigationItem): PhaseStage {
+  if (phase.phaseId === null || ("locked" in phase && phase.locked)) return "Locked";
+  if (phase.progress === "completed") return "Completed";
+  return phase.progress === "skipped" ? "Skipped" : "Open";
+}
+
+function PhaseStatusBadge({ stage }: { stage: PhaseStage }) {
+  const variant: Record<PhaseStage, BadgeVariant> = {
+    Completed: "success",
+    Open: "info",
+    Skipped: "warning",
+    Locked: "default",
+  };
+  return <Badge variant={variant[stage]} className="mt-1 gap-1 px-2 py-0.5">
+    {stage === "Locked" && <Lock aria-hidden="true" className="h-3 w-3" />}
+    {stage}
+  </Badge>;
 }
 
 export default function StudentPhaseWorkspace({
@@ -296,13 +623,24 @@ export default function StudentPhaseWorkspace({
   schoolCode: string;
   academicYear: string;
 }) {
+  const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<number>>(() => new Set());
+  const phases = detail.phases.map((phase) =>
+    phase.phaseId !== null && "locked" in phase && !phase.locked && completedPhaseIds.has(phase.phaseId)
+      ? { ...phase, progress: "completed" as const, draftSaved: false }
+      : phase
+  );
+  const selected = selectedOpenPhase(detail);
+  const visibleSelected = selected && completedPhaseIds.has(selected.phaseId)
+    ? { ...selected, progress: "completed" as const, draftSaved: false }
+    : selected;
   return (
     <div className="space-y-6">
       <StudentIdentity student={detail.student} readOnly={detail.readOnly} />
-      <PhaseNavigation studentId={detail.student.id} phases={detail.phases}
+      <PhaseNavigation studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
-      <SelectedPhaseContent phase={selectedOpenPhase(detail)} studentId={detail.student.id}
-        readOnly={detail.readOnly} schoolCode={schoolCode} academicYear={academicYear} />
+      <SelectedPhaseContent phase={visibleSelected} studentId={detail.student.id}
+        readOnly={detail.readOnly} schoolCode={schoolCode} academicYear={academicYear}
+        onSubmitted={(phaseId) => setCompletedPhaseIds((current) => new Set(current).add(phaseId))} />
     </div>
   );
 }
@@ -314,9 +652,6 @@ function StudentIdentity({ student, readOnly }: {
   return <header className="flex flex-col gap-1 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
     <div>
       <h1 className="text-2xl font-bold text-text-primary">{student.name}</h1>
-      <p className="text-sm text-text-muted">
-        Grade {student.grade}{student.externalStudentId ? ` · ${student.externalStudentId}` : ""}
-      </p>
     </div>
     {readOnly && <span className="text-sm font-medium text-text-muted">Read-only</span>}
   </header>;
@@ -334,7 +669,24 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
   schoolCode: string;
   academicYear: string;
 }) {
-  return <nav aria-label="Holistic Phases" className="flex gap-2 overflow-x-auto pb-2">
+  const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!new Set(["ArrowLeft", "ArrowRight", "Home", "End"]).has(event.key)) return;
+    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      '[role="tab"]:not([aria-disabled="true"])'
+    ));
+    if (!tabs.length) return;
+    const current = tabs.findIndex((tab) => tab === document.activeElement);
+    const start = current < 0 ? Math.max(0, tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true")) : current;
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? tabs.length - 1
+        : event.key === "ArrowRight" ? (start + 1) % tabs.length
+          : (start - 1 + tabs.length) % tabs.length;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+  };
+  return <nav role="tablist" aria-label="Holistic Phases" onKeyDown={onKeyDown}
+    className="flex gap-2 overflow-x-auto pb-2">
     {phases.map((phase) => <PhaseNavigationLink key={`${phase.number}-${phase.title}`} phase={phase}
       current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />)}
   </nav>;
@@ -348,54 +700,70 @@ function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYe
   academicYear: string;
 }) {
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
-    return <button type="button" disabled
+    return <button type="button" role="tab" aria-disabled="true" aria-selected="false" disabled
       className="min-h-11 shrink-0 rounded-md border border-border bg-bg-card-alt px-3 text-left text-sm text-text-muted opacity-60">
       <span className="block font-semibold">Phase {phase.number}</span>
       <span className="block max-w-40 truncate text-xs">{phase.title}</span>
+      <PhaseStatusBadge stage="Locked" />
     </button>;
   }
   const className = current
     ? "border-accent bg-accent text-text-on-accent"
     : "border-border bg-bg-card text-text-secondary hover:bg-hover-bg";
   return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear)}
-    aria-label={`Phase ${phase.number} - ${phase.title}`}
+    role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
+    aria-label={`Phase ${phase.number} - ${phase.title} - ${phaseStage(phase)}`}
     className={`min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm ${className}`}>
     <span className="block font-semibold">Phase {phase.number}</span>
     <span className="block max-w-40 truncate text-xs">{phase.title}</span>
+    <PhaseStatusBadge stage={phaseStage(phase)} />
   </Link>;
 }
 
-function SelectedPhaseContent({ phase, studentId, readOnly, schoolCode, academicYear }: {
+function SelectedPhaseContent({ phase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
   phase: OpenSelectedPhase | null;
   studentId: number;
   readOnly: boolean;
   schoolCode: string;
   academicYear: string;
+  onSubmitted: (phaseId: number) => void;
 }) {
+  const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
   if (!phase) {
     return <p className="border-y border-border py-10 text-center text-sm text-text-muted">This Phase is locked.</p>;
   }
   return <>
     <PhaseHeading phase={phase} />
-    <div className="grid gap-8 lg:grid-cols-2">
-      <StudentContext context={phase.context} />
-      <section aria-labelledby="guidance-heading" className="space-y-4 border-t border-border pt-4">
-        <h2 id="guidance-heading" className="text-lg font-semibold text-text-primary">Phase Guidance</h2>
-        <GuidancePreview markdown={phase.guidanceMarkdown} />
-      </section>
+    <div role="group" aria-label="Preparation panel" className="grid grid-cols-2 rounded-md border border-border lg:hidden">
+      <button type="button" aria-pressed={mobilePanel === "context"}
+        className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "context" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
+        onClick={() => setMobilePanel("context")}>Student Context</button>
+      <button type="button" aria-pressed={mobilePanel === "guidance"}
+        className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "guidance" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
+        onClick={() => setMobilePanel("guidance")}>Phase Guidance</button>
     </div>
-    <PostSessionNotes phase={phase} studentId={studentId} readOnly={readOnly}
-      schoolCode={schoolCode} academicYear={academicYear} />
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className={`${mobilePanel === "context" ? "block" : "hidden"} lg:block lg:h-[32rem] lg:overflow-y-auto lg:pr-3`}>
+        <StudentContext context={phase.context} />
+      </div>
+      <div className={`${mobilePanel === "guidance" ? "block" : "hidden"} lg:block lg:h-[32rem] lg:overflow-y-auto lg:pr-3`}>
+        <section aria-labelledby="guidance-heading" className="space-y-4 border-t border-border pt-4">
+          <h2 id="guidance-heading" className="text-lg font-semibold text-text-primary">Phase Guidance</h2>
+          <GuidancePreview markdown={phase.guidanceMarkdown} />
+        </section>
+      </div>
+    </div>
+    <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
+      phase={phase} studentId={studentId} readOnly={readOnly}
+      schoolCode={schoolCode} academicYear={academicYear} onSubmitted={() => onSubmitted(phase.phaseId)} />
   </>;
 }
 
 function PhaseHeading({ phase }: { phase: OpenSelectedPhase }) {
-  const progress = phase.progress[0].toUpperCase() + phase.progress.slice(1);
   return <section aria-labelledby="phase-heading" className="space-y-2">
     <div className="flex flex-wrap items-center gap-2">
       <h2 id="phase-heading" className="text-xl font-semibold text-text-primary">Phase {phase.number}: {phase.title}</h2>
-      {phase.active && <span className="rounded bg-success/10 px-2 py-1 text-xs font-semibold text-success">Active</span>}
-      <span className="rounded bg-bg-card-alt px-2 py-1 text-xs font-semibold text-text-secondary">{progress}</span>
+      <PhaseStatusBadge stage={phase.progress === "completed" ? "Completed" : phase.progress === "skipped" ? "Skipped" : "Open"} />
       {phase.draftSaved && <span className="text-xs font-medium text-text-muted">Draft saved</span>}
     </div>
   </section>;
@@ -423,24 +791,47 @@ function StudentContextBody({ context }: { context: OpenSelectedPhase["context"]
   </dl>;
 }
 
-function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear }: {
+function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
   phase: OpenSelectedPhase;
   studentId: number;
   readOnly: boolean;
   schoolCode: string;
   academicYear: string;
+  onSubmitted: () => void;
 }) {
+  const [visibleNotesOverride, setVisibleNotes] = useState<OpenSelectedPhase["notes"] | undefined>();
+  const visibleNotes = visibleNotesOverride === undefined ? phase.notes : visibleNotesOverride;
+  const apiUrl = `/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}?${new URLSearchParams({
+    school_code: schoolCode,
+    academic_year: academicYear,
+  })}`;
+
+  const refreshNotesMetadata = useCallback((submitted: boolean) => {
+    if (submitted) onSubmitted();
+    void fetch(apiUrl, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((detail: HolisticStudentPhaseDetail | null) => {
+        if (!detail) return;
+        const selected = selectedOpenPhase(detail);
+        if (selected?.phaseId === phase.phaseId) setVisibleNotes(selected.notes);
+      })
+      .catch(() => undefined);
+  }, [apiUrl, onSubmitted, phase.phaseId]);
+
   return <section aria-labelledby="notes-heading" className="space-y-4 border-t border-border pt-4">
     <h2 id="notes-heading" className="text-lg font-semibold text-text-primary">Post-Session Notes</h2>
-    {phase.notes && <NotesTimestamp notes={phase.notes} />}
-    <PostSessionNotesEditor studentId={studentId} phaseId={phase.phaseId} phaseRevision={phase.revision}
+    {visibleNotes && <NotesTimestamp notes={visibleNotes} />}
+    <PostSessionNotesEditor key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
+      studentId={studentId} phaseId={phase.phaseId} phaseRevision={phase.revision}
       mappingId={phase.mappingId} notesRevision={phase.notesRevision} schoolCode={schoolCode}
       academicYear={academicYear} editable={!readOnly && phase.canEditNotes}
-      questions={phase.questions} notes={phase.notes} />
+      questions={phase.questions} notes={phase.notes} onNotesSaved={refreshNotesMetadata} />
   </section>;
 }
 
 function NotesTimestamp({ notes }: { notes: NonNullable<OpenSelectedPhase["notes"]> }) {
-  const submitted = notes.firstSubmittedAt ? `Submitted ${formatDate(notes.firstSubmittedAt)}` : "Draft saved";
+  const submitted = notes.firstSubmittedAt
+    ? `${notes.authorName ? `Submitted by ${notes.authorName} on ` : "Submitted "}${formatDate(notes.firstSubmittedAt)}`
+    : "Draft saved";
   return <p className="text-xs text-text-muted">{submitted}{` · Last edited ${formatDate(notes.lastEditedAt)}`}</p>;
 }

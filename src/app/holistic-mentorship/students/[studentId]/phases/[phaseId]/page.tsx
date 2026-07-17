@@ -53,6 +53,11 @@ function studentPhaseBackHref(role: string, schoolCode: string) {
   return admin ? "/admin/holistic-mentorship" : `/school/${schoolCode}?tab=holistic_mentorship`;
 }
 
+function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string) {
+  const query = new URLSearchParams({ school_code: schoolCode, academic_year: academicYear });
+  return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
+}
+
 export default async function StudentPhasePage(props: StudentPhasePageProps) {
   const [session, request] = await Promise.all([
     getServerSession(authOptions),
@@ -70,6 +75,22 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
     canEdit: access.canEdit,
   });
   if (!detail) notFound();
+  if ("locked" in detail.selectedPhase && detail.selectedPhase.locked) {
+    const available = detail.phases.filter((phase) =>
+      phase.phaseId !== null && "locked" in phase && !phase.locked
+    );
+    const currentYear = available.filter((phase) =>
+      "academicYear" in phase && phase.academicYear === request.academicYear
+    );
+    const fallback = currentYear.find((phase) => "active" in phase && phase.active)
+      ?? currentYear[0]
+      ?? available.find((phase) => "active" in phase && phase.active)
+      ?? available[0];
+    if (fallback?.phaseId) {
+      redirect(studentPhaseHref(request.studentId, fallback.phaseId, request.schoolCode, request.academicYear));
+    }
+    redirect(studentPhaseBackHref(access.permission.role, request.schoolCode));
+  }
 
   return (
     <div className="min-h-screen bg-bg">
@@ -80,7 +101,8 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
         userEmail={session?.user?.email ?? undefined}
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <StudentPhaseWorkspace detail={detail} schoolCode={request.schoolCode} academicYear={request.academicYear} />
+        <StudentPhaseWorkspace key={detail.student.id} detail={detail}
+          schoolCode={request.schoolCode} academicYear={request.academicYear} />
       </main>
     </div>
   );

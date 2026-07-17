@@ -184,6 +184,8 @@ test.describe("Holistic Mentorship release workflows", () => {
     );
     await notes.fill("Synthetic submitted answer from the release workflow.");
     await expect((await autosave).status()).toBe(200);
+    await holisticTeacherPage.reload();
+    await expect(notes).toHaveValue("Synthetic submitted answer from the release workflow.");
 
     holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     const submit = holisticTeacherPage.waitForResponse((response) =>
@@ -191,15 +193,19 @@ test.describe("Holistic Mentorship release workflows", () => {
     );
     await holisticTeacherPage.getByRole("button", { name: "Submit Notes" }).click();
     await expect((await submit).status()).toBe(200);
+    await expect(holisticTeacherPage.getByText("Notes submitted. Phase completed.")).toBeVisible();
+    await expect(holisticTeacherPage.getByRole("tab", { name: / - Completed$/ })).toBeVisible();
+    await expect(holisticTeacherPage.getByText(/Submitted by Synthetic teacher on/)).toBeVisible();
 
-    holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     await holisticTeacherPage.getByRole("button", { name: "Edit Notes" }).click();
     await notes.fill("Synthetic corrected official answer.");
     const correction = holisticTeacherPage.waitForResponse((response) =>
       response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
     );
+    holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
     await holisticTeacherPage.getByRole("button", { name: "Save Changes" }).click();
     await expect((await correction).status()).toBe(200);
+    await expect(holisticTeacherPage.getByText("Submitted Notes updated.")).toBeVisible();
   });
 
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
