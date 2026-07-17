@@ -17,6 +17,18 @@ const regenerationRequest = {
   force: true,
 };
 
+function mockRegenerationClient(
+  scopeRows: Array<Record<string, unknown>>,
+  requestRows: Array<Record<string, unknown>> = []
+) {
+  const client = { query: vi.fn()
+    .mockResolvedValueOnce({ rows: scopeRows })
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({ rows: requestRows }) };
+  mockTransaction.mockImplementation(async (callback) => callback(client as never));
+  return client;
+}
+
 describe("Holistic Profile regeneration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -38,16 +50,19 @@ describe("Holistic Profile regeneration", () => {
   });
 
   it("records actor, Student, Active configuration and force before sending only the request reference", async () => {
-    const client = { query: vi.fn() };
-    client.query
-      .mockResolvedValueOnce({ rows: [{ actor_user_id: "9", student_id: "41", prompt_configuration_id: "6" }] })
-      .mockResolvedValueOnce({ rows: [{ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued" }] });
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    const client = mockRegenerationClient(
+      [{ actor_user_id: "9", student_id: "41", prompt_configuration_id: "6" }],
+      [{ request_key: requestKey, state: "queued" }]
+    );
     mockFetch.mockResolvedValue(new Response(null, { status: 202 }));
 
     const result = await requestHolisticProfileRegeneration(regenerationRequest);
 
-    expect(client.query.mock.calls[1][1]).toEqual([
+    expect(client.query.mock.calls[1]).toEqual([
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`holistic_profile_regeneration:${requestKey}`],
+    ]);
+    expect(client.query.mock.calls[2][1]).toEqual([
       "d16e7d82-dc60-4b79-a064-9ed80badc119", 9, 41, 6, true,
     ]);
     const scopeSql = String(client.query.mock.calls[0][0]);
@@ -69,8 +84,7 @@ describe("Holistic Profile regeneration", () => {
   });
 
   it("does not create or enqueue regeneration after an approved privacy deletion", async () => {
-    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [] }) };
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    const client = mockRegenerationClient([]);
 
     await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
       ok: false,
@@ -97,11 +111,10 @@ describe("Holistic Profile regeneration", () => {
   });
 
   it("keeps ambiguous delivery queued for a same-key retry", async () => {
-    const client = { query: vi.fn() };
-    client.query
-      .mockResolvedValueOnce({ rows: [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }] })
-      .mockResolvedValueOnce({ rows: [{ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued" }] });
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    mockRegenerationClient(
+      [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }],
+      [{ request_key: requestKey, state: "queued" }]
+    );
     mockFetch.mockRejectedValue(new TypeError("network failure"));
 
     await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
@@ -110,11 +123,10 @@ describe("Holistic Profile regeneration", () => {
   });
 
   it("does not enqueue an already-running idempotent request again", async () => {
-    const client = { query: vi.fn() };
-    client.query
-      .mockResolvedValueOnce({ rows: [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }] })
-      .mockResolvedValueOnce({ rows: [{ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "running" }] });
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    mockRegenerationClient(
+      [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }],
+      [{ request_key: requestKey, state: "running" }]
+    );
 
     await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
       ok: true, requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "running",
@@ -123,11 +135,9 @@ describe("Holistic Profile regeneration", () => {
   });
 
   it("rejects reuse of an idempotency key for a different request", async () => {
-    const client = { query: vi.fn() };
-    client.query
-      .mockResolvedValueOnce({ rows: [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }] })
-      .mockResolvedValueOnce({ rows: [] });
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    mockRegenerationClient([
+      { actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 },
+    ]);
 
     await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
       ok: false,
@@ -138,11 +148,10 @@ describe("Holistic Profile regeneration", () => {
   });
 
   it("records a confirmed enqueue rejection without changing the successful Profile", async () => {
-    const client = { query: vi.fn() };
-    client.query
-      .mockResolvedValueOnce({ rows: [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }] })
-      .mockResolvedValueOnce({ rows: [{ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued" }] });
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    mockRegenerationClient(
+      [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }],
+      [{ request_key: requestKey, state: "queued" }]
+    );
     mockFetch.mockResolvedValue(new Response(null, { status: 400 }));
     mockQuery.mockResolvedValue([{ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "failed" }]);
 
@@ -158,19 +167,59 @@ describe("Holistic Profile regeneration", () => {
     expect(mockQuery.mock.calls[0][0]).not.toContain("student_profiles");
   });
 
-  it("does not overwrite a request that ETL already bound to a run", async () => {
-    const client = { query: vi.fn() };
-    client.query
+  it.each([302, 408, 429, 503])(
+    "keeps a non-permanent ETL status %i queued without terminalizing the request",
+    async (status) => {
+      mockRegenerationClient(
+        [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }],
+        [{ request_key: requestKey, state: "queued" }]
+      );
+      mockFetch.mockResolvedValue(new Response(null, { status }));
+
+      await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
+        ok: true, requestKey, state: "queued", delivery: "ambiguous",
+      });
+      expect(mockQuery).not.toHaveBeenCalled();
+    }
+  );
+
+  it("retries the same queued request key after a transient ETL rejection", async () => {
+    const first = mockRegenerationClient(
+      [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }],
+      [{ request_key: requestKey, state: "queued" }]
+    );
+    const second = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }] })
-      .mockResolvedValueOnce({ rows: [{ request_key: requestKey, state: "queued" }] });
-    mockTransaction.mockImplementation(async (callback) => callback(client as never));
-    mockFetch.mockResolvedValue(new Response(null, { status: 503 }));
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ request_key: requestKey, state: "queued" }] }) };
+    mockTransaction
+      .mockImplementationOnce(async (callback) => callback(first as never))
+      .mockImplementationOnce(async (callback) => callback(second as never));
+    mockFetch
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+
+    await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toMatchObject({
+      ok: true, delivery: "ambiguous",
+    });
+    await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
+      ok: true, requestKey, state: "queued",
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not overwrite a request that ETL bound before a permanent rejection arrived", async () => {
+    mockRegenerationClient(
+      [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }],
+      [{ request_key: requestKey, state: "queued" }]
+    );
+    mockFetch.mockResolvedValue(new Response(null, { status: 409 }));
     mockQuery
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ request_key: requestKey, state: "queued" }]);
+      .mockResolvedValueOnce([{ request_key: requestKey, state: "running" }]);
 
     await expect(requestHolisticProfileRegeneration(regenerationRequest)).resolves.toEqual({
-      ok: true, requestKey, state: "queued", delivery: "ambiguous",
+      ok: true, requestKey, state: "running",
     });
 
     expect(mockQuery.mock.calls[0][0]).toContain("etl_run_id IS NULL");

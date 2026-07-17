@@ -10,6 +10,34 @@ import { addHolisticPhase, createHolisticPhasePlan, deleteHolisticPhase, getHoli
 
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
+const newPhase = {
+  academicYear: "2026-2027",
+  actorUserId: 9,
+  grade: 11 as const,
+  title: "Belonging",
+  guidanceMarkdown: "Discuss goals",
+  questions: [{ text: "What matters?" }],
+};
+
+function deletePhaseClient(laterPhase: Record<string, unknown>) {
+  return {
+    query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+      .mockResolvedValueOnce({ rows: [{
+        id: "21", phase_plan_id: "7", position: 2, revision: 1, state: "locked",
+        academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false,
+      }] })
+      .mockResolvedValueOnce({ rows: [laterPhase] })
+      .mockResolvedValue({ rows: [] }),
+  };
+}
+
+async function deletePhaseWithLater(laterPhase: Record<string, unknown>) {
+  const client = deletePhaseClient(laterPhase);
+  mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
+  const result = await deleteHolisticPhase({ phaseId: 21, expectedRevision: 1, actorUserId: 9 });
+  return { client, result };
+}
 
 describe("Holistic Phase Plans", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -129,7 +157,9 @@ describe("Holistic Phase Plans", () => {
   });
 
   it("does not delete a Phase that has ever opened", async () => {
-    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [{ id: "21", revision: 3, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: true, used: false }] }) };
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ id: "7" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "21", revision: 3, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: true, used: false }] }) };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
     await expect(deleteHolisticPhase({ phaseId: 21, expectedRevision: 3, actorUserId: 9 }))
@@ -139,6 +169,7 @@ describe("Holistic Phase Plans", () => {
   it("reorders never-opened Locked Phases without changing their stable IDs", async () => {
     const client = {
       query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "7" }] })
         .mockResolvedValueOnce({ rows: [
           { id: "21", phase_plan_id: "7", position: 1, revision: 1, state: "locked", frozen_at: null, ever_opened: false, used: false },
           { id: "22", phase_plan_id: "7", position: 2, revision: 2, state: "locked", frozen_at: null, ever_opened: false, used: false },
@@ -150,7 +181,9 @@ describe("Holistic Phase Plans", () => {
     await expect(reorderHolisticPhases({ academicYear: "2026-2027", actorUserId: 9, phases: [
       { id: 22, expectedRevision: 2 }, { id: 21, expectedRevision: 1 },
     ] })).resolves.toEqual({ ok: true });
-    expect(client.query.mock.calls[1][1]).toEqual([[22, 21]]);
+    expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
+    expect(String(client.query.mock.calls[1][0])).toContain("FOR UPDATE");
+    expect(client.query.mock.calls[2][1]).toEqual([[22, 21]]);
     expect(client.query.mock.calls.filter(([sql]) => String(sql).includes("phase_mutation_audits")))
       .toHaveLength(2);
   });
@@ -179,41 +212,41 @@ describe("Holistic Phase Plans", () => {
   it("audits a newly added Phase", async () => {
     const client = {
       query: vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: "7" }] })
         .mockResolvedValueOnce({ rows: [{ id: "21", phase_plan_id: "7" }] })
         .mockResolvedValue({ rows: [] }),
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(addHolisticPhase({
-      academicYear: "2026-2027",
-      actorUserId: 9,
-      grade: 11,
-      title: "Belonging",
-      guidanceMarkdown: "Discuss goals",
-      questions: [{ text: "What matters?" }],
-    })).resolves.toEqual({ ok: true, id: 21, revision: 1 });
+    await expect(addHolisticPhase(newPhase))
+      .resolves.toEqual({ ok: true, id: 21, revision: 1 });
 
+    expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
+    expect(client.query.mock.calls[0][1]).toEqual([1, "2026-2027"]);
+    expect(String(client.query.mock.calls[1][0])).toContain("MAX(position) + 1");
     expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "created", 9]);
   });
 
-  it("deletes a future mutable Phase, compacts later mutable positions, and audits both changes", async () => {
-    const client = {
-      query: vi.fn()
-        .mockResolvedValueOnce({ rows: [{
-          id: "21", phase_plan_id: "7", position: 2, revision: 1, state: "locked",
-          academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false,
-        }] })
-        .mockResolvedValueOnce({ rows: [{
-          id: "22", phase_plan_id: "7", position: 3, revision: 1, state: "locked",
-          frozen_at: null, ever_opened: false, used: false,
-        }] })
-        .mockResolvedValue({ rows: [] }),
-    };
+  it("returns before calculating a Phase position when the locked Plan is missing", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [] }) };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(deleteHolisticPhase({ phaseId: 21, expectedRevision: 1, actorUserId: 9 }))
-      .resolves.toEqual({ ok: true, id: 21 });
+    await expect(addHolisticPhase(newPhase))
+      .resolves.toEqual({ ok: false, status: 404, error: "Plan not found" });
 
+    expect(client.query).toHaveBeenCalledOnce();
+    expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
+  });
+
+  it("deletes a future mutable Phase, compacts later mutable positions, and audits both changes", async () => {
+    const { client, result } = await deletePhaseWithLater({
+      id: "22", phase_plan_id: "7", position: 3, revision: 1, state: "locked",
+      frozen_at: null, ever_opened: false, used: false,
+    });
+    expect(result).toEqual({ ok: true, id: 21 });
+
+    expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE OF plan");
+    expect(String(client.query.mock.calls[1][0])).toContain("FOR UPDATE");
     const auditArgs = client.query.mock.calls
       .filter(([sql]) => String(sql).includes("phase_mutation_audits"))
       .map(([, params]) => params);
@@ -226,26 +259,16 @@ describe("Holistic Phase Plans", () => {
   });
 
   it("rejects deletion when compaction would move an immutable Phase", async () => {
-    const client = {
-      query: vi.fn()
-        .mockResolvedValueOnce({ rows: [{
-          id: "21", phase_plan_id: "7", position: 2, revision: 1, state: "locked",
-          academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false,
-        }] })
-        .mockResolvedValueOnce({ rows: [{
-          id: "22", phase_plan_id: "7", position: 3, revision: 2, state: "open",
-          frozen_at: null, ever_opened: true, used: false,
-        }] }),
-    };
-    mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
-
-    await expect(deleteHolisticPhase({ phaseId: 21, expectedRevision: 1, actorUserId: 9 }))
-      .resolves.toEqual({
-        ok: false,
-        status: 422,
-        error: "Deleting this Phase would move an opened or used Phase",
-      });
-    expect(client.query).toHaveBeenCalledTimes(2);
+    const { client, result } = await deletePhaseWithLater({
+      id: "22", phase_plan_id: "7", position: 3, revision: 2, state: "open",
+      frozen_at: null, ever_opened: true, used: false,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 422,
+      error: "Deleting this Phase would move an opened or used Phase",
+    });
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   it("rejects raw HTML, embedded images, and unsafe Guidance links", async () => {

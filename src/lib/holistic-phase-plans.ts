@@ -50,6 +50,34 @@ type PhaseRow = {
 };
 type QuestionRow = { id: number | string; phase_id: number | string; text: string; position: number };
 
+async function lockPhasePlanForYear(
+  client: PoolClient,
+  academicYear: string
+): Promise<number | null> {
+  const plan = await client.query<{ id: number | string }>(
+    `SELECT id FROM holistic_mentorship_phase_plans
+     WHERE program_id = $1 AND academic_year = $2
+     FOR UPDATE`,
+    [PROGRAM_IDS.COE, academicYear]
+  );
+  return plan.rows[0] ? Number(plan.rows[0].id) : null;
+}
+
+async function lockPhasePlanForPhase(
+  client: PoolClient,
+  phaseId: number
+): Promise<number | null> {
+  const plan = await client.query<{ id: number | string }>(
+    `SELECT plan.id
+     FROM holistic_mentorship_phase_plans plan
+     JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
+     WHERE phase.id = $1
+     FOR UPDATE OF plan`,
+    [phaseId]
+  );
+  return plan.rows[0] ? Number(plan.rows[0].id) : null;
+}
+
 export type PhasePlanResult =
   | { ok: true; id?: number; revision?: number }
   | { ok: false; status: 404 | 409 | 422; error: string; currentRevision?: number };
@@ -406,6 +434,8 @@ export async function addHolisticPhase(params: {
     return { ok: false, status: 422, error: "Prior-year Plans are read-only" };
   }
   return withTransaction(async (client) => {
+    const planId = await lockPhasePlanForYear(client, params.academicYear);
+    if (!planId) return { ok: false, status: 404, error: "Plan not found" };
     const inserted = await client.query<{ id: number | string; phase_plan_id: number | string }>(
       `INSERT INTO holistic_mentorship_phases
          (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)
@@ -418,7 +448,6 @@ export async function addHolisticPhase(params: {
        RETURNING id, phase_plan_id`,
       [PROGRAM_IDS.COE, params.academicYear, params.title.trim(), params.guidanceMarkdown, params.grade]
     );
-    if (!inserted.rows[0]) return { ok: false, status: 404, error: "Plan not found" };
     const phaseId = Number(inserted.rows[0].id);
     for (const [index, question] of params.questions.entries()) {
       await client.query(
@@ -536,66 +565,82 @@ export async function setHolisticPhaseState(input: {
   return withTransaction((client) => setPhaseStateTransaction(client, input));
 }
 
-export async function deleteHolisticPhase(input: {
+type DeletePhaseInput = {
   phaseId: number;
   expectedRevision: number;
   actorUserId: number;
-}): Promise<PhasePlanResult> {
-  return withTransaction(async (client) => {
-    const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
-    if (checked.error) return checked.error;
-    const phase = checked.phase;
-    if (phase.state !== "locked" || phase.ever_opened || phase.used || phase.frozen_at) {
-      return { ok: false, status: 422, error: "Only never-opened, unused Locked Phases can be deleted" };
-    }
-    const later = await client.query<ReorderPhaseRow>(
-      `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
-              EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
-                      WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
-              EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
-                      WHERE n.phase_id = p.id) AS used
-       FROM holistic_mentorship_phases p
-       WHERE p.phase_plan_id = $1 AND p.position > $2
-       ORDER BY p.position FOR UPDATE`,
-      [Number(phase.phase_plan_id), phase.position]
-    );
-    if (later.rows.some(immutablePhase)) {
-      return { ok: false, status: 422, error: "Deleting this Phase would move an opened or used Phase" };
-    }
-    await client.query(`DELETE FROM holistic_mentorship_phase_questions WHERE phase_id = $1`, [input.phaseId]);
+};
+
+async function compactLaterPhases(
+  client: PoolClient,
+  laterPhases: ReorderPhaseRow[],
+  actorUserId: number
+) {
+  if (!laterPhases.length) return;
+  const laterIds = laterPhases.map((row) => Number(row.id));
+  await client.query(
+    `UPDATE holistic_mentorship_phases SET position = position + 10000
+     WHERE id = ANY($1::bigint[])`,
+    [laterIds]
+  );
+  await client.query(
+    `UPDATE holistic_mentorship_phases
+     SET position = position - 10001, revision = revision + 1, updated_at = NOW()
+     WHERE id = ANY($1::bigint[])`,
+    [laterIds]
+  );
+  for (const phase of laterPhases) {
     await recordPhaseMutation(
       client,
       Number(phase.phase_plan_id),
-      input.phaseId,
-      "deleted",
-      input.actorUserId
+      Number(phase.id),
+      "reordered",
+      actorUserId
     );
-    await client.query(`DELETE FROM holistic_mentorship_phases WHERE id = $1 AND revision = $2`, [input.phaseId, input.expectedRevision]);
-    if (later.rows.length) {
-      const laterIds = later.rows.map((row) => Number(row.id));
-      await client.query(
-        `UPDATE holistic_mentorship_phases SET position = position + 10000
-         WHERE id = ANY($1::bigint[])`,
-        [laterIds]
-      );
-      await client.query(
-        `UPDATE holistic_mentorship_phases
-         SET position = position - 10001, revision = revision + 1, updated_at = NOW()
-         WHERE id = ANY($1::bigint[])`,
-        [laterIds]
-      );
-      for (const phaseRow of later.rows) {
-        await recordPhaseMutation(
-          client,
-          Number(phaseRow.phase_plan_id),
-          Number(phaseRow.id),
-          "reordered",
-          input.actorUserId
-        );
-      }
-    }
-    return { ok: true, id: input.phaseId };
-  });
+  }
+}
+
+async function deletePhaseTransaction(
+  client: PoolClient,
+  input: DeletePhaseInput
+): Promise<PhasePlanResult> {
+  const planId = await lockPhasePlanForPhase(client, input.phaseId);
+  if (!planId) return { ok: false, status: 404, error: "Phase not found" };
+  const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
+  if (checked.error) return checked.error;
+  const phase = checked.phase;
+  if (immutablePhase(phase)) {
+    return { ok: false, status: 422, error: "Only never-opened, unused Locked Phases can be deleted" };
+  }
+  const later = await client.query<ReorderPhaseRow>(
+    `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
+            EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
+                    WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
+            EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
+                    WHERE n.phase_id = p.id) AS used
+     FROM holistic_mentorship_phases p
+     WHERE p.phase_plan_id = $1 AND p.position > $2
+     ORDER BY p.position FOR UPDATE`,
+    [Number(phase.phase_plan_id), phase.position]
+  );
+  if (later.rows.some(immutablePhase)) {
+    return { ok: false, status: 422, error: "Deleting this Phase would move an opened or used Phase" };
+  }
+  await client.query(`DELETE FROM holistic_mentorship_phase_questions WHERE phase_id = $1`, [input.phaseId]);
+  await recordPhaseMutation(
+    client,
+    Number(phase.phase_plan_id),
+    input.phaseId,
+    "deleted",
+    input.actorUserId
+  );
+  await client.query(`DELETE FROM holistic_mentorship_phases WHERE id = $1 AND revision = $2`, [input.phaseId, input.expectedRevision]);
+  await compactLaterPhases(client, later.rows, input.actorUserId);
+  return { ok: true, id: input.phaseId };
+}
+
+export async function deleteHolisticPhase(input: DeletePhaseInput): Promise<PhasePlanResult> {
+  return withTransaction((client) => deletePhaseTransaction(client, input));
 }
 
 async function loadReorderPhases(
@@ -710,6 +755,8 @@ async function reorderPhaseTransaction(
     actorUserId: number;
   }
 ): Promise<PhasePlanResult> {
+  const planId = await lockPhasePlanForYear(client, input.academicYear);
+  if (!planId) return { ok: false, status: 409, error: "Phase order changed" };
   const rows = await loadReorderPhases(client, input.academicYear);
   const validationError = validateReorder(rows, input.phases);
   if (validationError) return validationError;

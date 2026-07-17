@@ -95,6 +95,10 @@ export async function requestHolisticProfileRegeneration(params: {
     );
     const row = scope.rows[0];
     if (!row) return null;
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`holistic_profile_regeneration:${params.requestKey}`]
+    );
     const actorUserId = Number(row.actor_user_id);
     const configurationId = Number(row.prompt_configuration_id);
     const inserted = await client.query<{ request_key: string; state: RegenerationState }>(
@@ -131,6 +135,16 @@ export async function requestHolisticProfileRegeneration(params: {
     return { ok: true, requestKey: request.request_key, state: "queued", delivery: "ambiguous" };
   }
   if (response.ok) return { ok: true, requestKey: request.request_key, state: "queued" };
+  const permanentClientRejection = response.status >= 400 && response.status < 500 &&
+    response.status !== 408 && response.status !== 429;
+  if (!permanentClientRejection) {
+    return {
+      ok: true,
+      requestKey: request.request_key,
+      state: "queued",
+      delivery: "ambiguous",
+    };
+  }
 
   const failed = await query<{ request_key: string; state: RegenerationState }>(
     `UPDATE holistic_mentorship_regeneration_requests
