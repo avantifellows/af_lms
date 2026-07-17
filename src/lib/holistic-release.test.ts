@@ -45,7 +45,7 @@ describe("Holistic release preflight", () => {
 
     const questions = Array.from({ length: 34 }, (_, index) => ({
       questionId: `q${index + 1}`,
-      position: index + 1,
+      position: index + 2,
       questionSetTitle: `Set ${Math.min(Math.floor(index / 7) + 1, 5)}`,
     }));
     const result = await runHolisticReleasePreflight({
@@ -72,6 +72,7 @@ describe("Holistic release preflight", () => {
 
     expect(result.ok).toBe(false);
     expect(result.blockers).toEqual([
+      "Approved Grade 11 Profile Form structure is invalid",
       "Approved Grade 12 Profile Form structure is invalid",
       "1 BigQuery User identity is missing from LMS",
       "1 BigQuery User identity is ambiguous in LMS",
@@ -91,6 +92,7 @@ describe("Holistic release preflight", () => {
     expect(result.warnings).toEqual(["1 eligible Student has no successful Active-configuration Profile"]);
     expect(calls.every((sql) => /^\s*(?:\/\*[\s\S]*?\*\/\s*)?(?:WITH\b|SELECT\b)/i.test(sql))).toBe(true);
     expect(calls.every((sql) => !/\b(?:insert|update|delete|alter|drop|create)\b/i.test(sql))).toBe(true);
+    expect(calls.find((sql) => sql.includes("preflight_historical"))).toContain("COUNT(DISTINCT student.id)");
   });
 
   it("uses db-service migrations and declares the complete synthetic local fixture", () => {

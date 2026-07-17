@@ -11,6 +11,7 @@ const APPROVED_PROFILE_FORMS = {
     sessionId: "EnableStudents_6a4deca8e030ebe34669fb0f",
   },
 } as const;
+const APPROVED_PROFILE_THEME_COUNTS = [3, 6, 7, 8, 10];
 
 type Query = <T extends Record<string, unknown> = Record<string, unknown>>(
   sql: string,
@@ -145,7 +146,7 @@ export async function runHolisticReleasePreflight(params: {
       `/* preflight_historical */
        WITH source_student(business_student_id) AS (SELECT unnest($1::text[])), matches AS (
          SELECT source_student.business_student_id,
-                COUNT(student.id) AS match_count,
+                COUNT(DISTINCT student.id) AS match_count,
                 BOOL_OR(centre_students.grade = 12 AND centre_students.program_id = $2
                   AND centre_students.academic_year = $3
                   AND student.status IS DISTINCT FROM 'dropout') AS eligible
@@ -166,10 +167,16 @@ export async function runHolisticReleasePreflight(params: {
     const form = params.profileSource.forms.find((candidate) => candidate.grade === grade);
     const approved = APPROVED_PROFILE_FORMS[grade];
     const ids = new Set(form?.questions.map(({ questionId }) => questionId));
-    const positions = new Set(form?.questions.map(({ position }) => position));
-    const sets = new Set(form?.questions.map(({ questionSetTitle }) => questionSetTitle));
+    const positions = form?.questions.map(({ position }) => position).sort((a, b) => a - b) ?? [];
+    const themes = new Map<string, number>();
+    for (const { questionSetTitle } of form?.questions ?? []) {
+      themes.set(questionSetTitle, (themes.get(questionSetTitle) ?? 0) + 1);
+    }
+    const themeCounts = [...themes.values()].sort((a, b) => a - b);
     if (!form || form.formId !== approved.formId || form.sessionId !== approved.sessionId ||
-        form.questions.length !== 34 || ids.size !== 34 || positions.size !== 34 || sets.size !== 5) {
+        form.questions.length !== 34 || ids.size !== 34 ||
+        positions.some((position, index) => position !== index + 1) ||
+        !APPROVED_PROFILE_THEME_COUNTS.every((count, index) => themeCounts[index] === count)) {
       blockers.push(`Approved Grade ${grade} Profile Form structure is invalid`);
     }
   }

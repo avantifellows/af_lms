@@ -89,6 +89,12 @@ test.describe("Holistic Mentorship release workflows", () => {
   test("eligible Teacher assigns a Student, submits Notes, and edits the official Notes", async ({
     holisticTeacherPage,
   }) => {
+    for (const width of [1280, 375]) {
+      await holisticTeacherPage.setViewportSize({ width, height: 800 });
+      await openTeacherWorkspace(holisticTeacherPage);
+      await expectNoPageOverflow(holisticTeacherPage);
+    }
+    await holisticTeacherPage.setViewportSize({ width: 1280, height: 800 });
     await openTeacherWorkspace(holisticTeacherPage);
     const unassigned = holisticTeacherPage.locator(`input[aria-label^="Select "]:not(:disabled)`).first();
     await expect(unassigned).toBeVisible();
@@ -129,9 +135,17 @@ test.describe("Holistic Mentorship release workflows", () => {
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
     holisticAdminPage,
   }) => {
+    for (const width of [1280, 375]) {
+      await holisticAdminPage.setViewportSize({ width, height: 800 });
+      await holisticAdminPage.goto("/admin/holistic-mentorship");
+      await expect(holisticAdminPage.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
+      await expect(holisticAdminPage.getByLabel("Student progress results").locator("tbody tr").first()).toBeVisible();
+      await holisticAdminPage.getByRole("tab", { name: "Phase Setup" }).click();
+      await expect(holisticAdminPage.getByText("Synthetic Grade 11 Active")).toBeVisible();
+      await expectNoPageOverflow(holisticAdminPage);
+    }
+    await holisticAdminPage.setViewportSize({ width: 1280, height: 800 });
     await holisticAdminPage.goto("/admin/holistic-mentorship");
-    await expect(holisticAdminPage.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
-    await expect(holisticAdminPage.getByLabel("Student progress results").locator("tbody tr").first()).toBeVisible();
 
     const csv = await holisticAdminPage.request.get(
       "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=student_name&direction=asc&format=csv"
@@ -145,6 +159,16 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticAdminPage.getByRole("tab", { name: "Phase Setup" }).click();
     await expect(holisticAdminPage.getByText("Synthetic Grade 11 Active")).toBeVisible();
     await expect(holisticAdminPage.getByText("Open · Active", { exact: true }).first()).toBeVisible();
+    await holisticAdminPage.getByText("Synthetic Grade 11 Locked", { exact: true }).click();
+    holisticAdminPage.once("dialog", (dialog) => dialog.accept());
+    const phaseOpen = holisticAdminPage.waitForResponse((response) =>
+      response.url().endsWith("/api/holistic-mentorship/phase-plans") &&
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"state"') === true
+    );
+    await holisticAdminPage.getByRole("button", { name: "Open Phase" }).click();
+    await expect((await phaseOpen).status()).toBe(200);
+    const openedPhase = holisticAdminPage.getByText("Synthetic Grade 11 Locked", { exact: true }).locator("..").locator("..");
+    await expect(openedPhase.getByText("Open · Active", { exact: true })).toBeVisible();
 
     await holisticAdminPage.getByRole("tab", { name: "Students & Progress" }).click();
     await holisticAdminPage.route("**/api/holistic-mentorship/profiles/*", async (route) => {
@@ -203,7 +227,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     }
 
     await pmPage.goto("/admin/holistic-mentorship");
-    expect(await pmPage.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
+    await expectNoPageOverflow(pmPage);
   });
 });
 
@@ -222,4 +246,8 @@ function studentPhaseUrl(studentId: number, phaseId: number) {
 
 async function apiStatus(page: Page, url: string, method: string, body: unknown) {
   return (await page.request.fetch(url, { method, data: body })).status();
+}
+
+async function expectNoPageOverflow(page: Page) {
+  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
 }
