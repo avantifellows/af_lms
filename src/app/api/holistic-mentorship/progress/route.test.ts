@@ -1,0 +1,63 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: vi.fn() }));
+vi.mock("@/lib/holistic-progress", () => ({
+  listHolisticProgress: vi.fn(),
+  getHolisticProgressOptions: vi.fn(),
+  formatHolisticProgressCsv: vi.fn(),
+}));
+
+import { getServerSession } from "next-auth";
+import { GET } from "./route";
+import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
+import { formatHolisticProgressCsv, getHolisticProgressOptions, listHolisticProgress } from "@/lib/holistic-progress";
+
+const mockSession = vi.mocked(getServerSession);
+const mockAccess = vi.mocked(requireHolisticMentorshipAccess);
+const mockList = vi.mocked(listHolisticProgress);
+const mockOptions = vi.mocked(getHolisticProgressOptions);
+const mockCsv = vi.mocked(formatHolisticProgressCsv);
+
+describe("Holistic progress API", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
+    mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission: { role: "admin" } } as never);
+    mockList.mockResolvedValue({ rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
+    mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
+  });
+
+  it("rejects non-allowlisted filters without querying progress", async () => {
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&sort=sql") as never);
+
+    expect(response.status).toBe(422);
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown response format", async () => {
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=xlsx") as never);
+    expect(response.status).toBe(422);
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
+  it("returns current results, selectors, and a refresh timestamp", async () => {
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&page=1") as never);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ rows: [], options: { schools: [], mentors: [], phases: [] } });
+    expect(body.refreshedAt).toEqual(expect.any(String));
+    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ sort: "student_name", page: 1 }));
+  });
+
+  it("exports all matching rows with the same filters and sort", async () => {
+    mockCsv.mockReturnValue("Academic Year\r\n2026-2027");
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=csv&direction=desc") as never);
+
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ direction: "desc" }), { all: true });
+    expect(mockOptions).not.toHaveBeenCalled();
+  });
+});

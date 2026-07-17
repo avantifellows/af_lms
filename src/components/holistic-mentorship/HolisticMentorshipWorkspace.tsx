@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Card } from "@/components/ui";
 import PhasePlanSetup from "./PhasePlanSetup";
+import ProgressWorkspace from "./ProgressWorkspace";
 import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
 
 type WorkspaceMode = "teacher" | "admin";
@@ -41,7 +42,7 @@ export default function HolisticMentorshipWorkspace({
   const Icon = active.icon;
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 max-w-full space-y-4">
       <div className="flex flex-wrap gap-2 border-b border-border pb-3" role="tablist">
         {workspaces.map((workspace) => (
           <button
@@ -70,6 +71,8 @@ export default function HolisticMentorshipWorkspace({
         <TeacherMappingWorkspace schoolCode={schoolCode} view={active.id as "assign" | "mentees"} />
       ) : mode === "admin" && active.id === "phases" ? (
         <PhasePlanSetup />
+      ) : mode === "admin" && active.id === "progress" ? (
+        <ProgressWorkspace />
       ) : (
         <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">
           <Icon aria-hidden="true" className="h-7 w-7 text-text-muted" />

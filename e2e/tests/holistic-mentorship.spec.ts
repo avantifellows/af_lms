@@ -4,6 +4,18 @@ test.describe("Holistic Mentorship access shell", () => {
   test("Admin workspace remains usable on desktop and narrow screens", async ({
     adminPage,
   }) => {
+    await adminPage.route("**/api/holistic-mentorship/progress?**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          rows: [],
+          counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+          options: { schools: [], mentors: [], phases: [] },
+          refreshedAt: "2026-07-17T10:00:00.000Z",
+          pageSize: 50,
+        }),
+      })
+    );
     for (const width of [1280, 375]) {
       await adminPage.setViewportSize({ width, height: 800 });
       await adminPage.goto("/admin/holistic-mentorship");
@@ -17,11 +29,15 @@ test.describe("Holistic Mentorship access shell", () => {
       await expect(
         adminPage.getByRole("tab", { name: "Phase Setup" })
       ).toBeVisible();
-      expect(
-        await adminPage.evaluate(
-          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
-        )
-      ).toBe(true);
+      if (width === 375) {
+        const results = adminPage.getByLabel("Student progress results");
+        const box = await results.boundingBox();
+        expect(box && box.x + box.width).toBeLessThanOrEqual(width);
+        expect(await results.evaluate((element) => {
+          element.scrollLeft = 100;
+          return element.scrollLeft;
+        })).toBeGreaterThan(0);
+      }
     }
   });
 

@@ -14,7 +14,7 @@ export default async function HolisticMentorshipAdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen overflow-x-clip bg-bg">
       <PageHeader
         title="Holistic Mentorship"
         subtitle="Program 1"

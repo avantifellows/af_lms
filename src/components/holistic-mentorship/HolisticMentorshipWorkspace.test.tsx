@@ -43,12 +43,19 @@ describe("HolisticMentorshipWorkspace", () => {
   });
 
   it("shows the Program-wide Admin progress and setup workspaces", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: null }) }));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: async () => url.includes("/progress?") ? {
+        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      } : { plan: null },
+    })));
     const user = userEvent.setup();
     render(<HolisticMentorshipWorkspace mode="admin" />);
 
     expect(screen.getByRole("tab", { name: "Students & Progress" })).toBeInTheDocument();
-    expect(screen.getByText("No mapped Students to show yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No mapped Students match these filters.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
     expect(await screen.findByRole("button", { name: "Create blank Plan" })).toBeInTheDocument();
