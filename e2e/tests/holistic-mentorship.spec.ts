@@ -1,50 +1,225 @@
+import type { Page } from "@playwright/test";
+
 import { expect, test } from "../fixtures/auth";
+import { getTestPool } from "../helpers/db";
 
-test.describe("Holistic Mentorship access shell", () => {
-  test("Admin workspace remains usable on desktop and narrow screens", async ({
-    adminPage,
-  }) => {
-    await adminPage.route("**/api/holistic-mentorship/progress?**", (route) =>
-      route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          rows: [],
-          counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
-          options: { schools: [], mentors: [], phases: [] },
-          refreshedAt: "2026-07-17T10:00:00.000Z",
-          pageSize: 50,
-        }),
-      })
-    );
-    for (const width of [1280, 375]) {
-      await adminPage.setViewportSize({ width, height: 800 });
-      await adminPage.goto("/admin/holistic-mentorship");
+type Fixture = {
+  schoolCode: string;
+  draftStudentId: number;
+  unassignedStudentId: number;
+  formerStudentId: number;
+  activeGrade11PhaseId: number;
+  activeGrade12PhaseId: number;
+};
 
-      await expect(
-        adminPage.getByRole("heading", { name: "Holistic Mentorship" })
-      ).toBeVisible();
-      await expect(
-        adminPage.getByRole("tab", { name: "Students & Progress" })
-      ).toBeVisible();
-      await expect(
-        adminPage.getByRole("tab", { name: "Phase Setup" })
-      ).toBeVisible();
-      if (width === 375) {
-        const results = adminPage.getByLabel("Student progress results");
-        const box = await results.boundingBox();
-        expect(box && box.x + box.width).toBeLessThanOrEqual(width);
-        expect(await results.evaluate((element) => {
-          element.scrollLeft = 100;
-          return element.scrollLeft;
-        })).toBeGreaterThan(0);
-      }
+let fixture: Fixture;
+
+test.describe("Holistic Mentorship release workflows", () => {
+  test.describe.configure({ mode: "serial" });
+
+  test.beforeAll(async () => {
+    const pool = getTestPool();
+    try {
+      const result = await pool.query<{
+        school_code: string;
+        draft_student_id: string;
+        unassigned_student_id: string;
+        former_student_id: string;
+        grade_11_phase_id: string;
+        grade_12_phase_id: string;
+      }>(
+        `SELECT school.code AS school_code,
+                (SELECT notes.student_id FROM holistic_mentorship_post_session_notes notes
+                 WHERE notes.state = 'draft' LIMIT 1) AS draft_student_id,
+                (SELECT student.id FROM "group" school_group
+                 JOIN group_user school_member ON school_member.group_id = school_group.id
+                 JOIN student ON student.user_id = school_member.user_id
+                 JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student.user_id
+                   AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = '2026-2027'
+                   AND grade_enrollment.is_current IS TRUE
+                 JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number = 11
+                 JOIN LATERAL (
+                   SELECT batch.program_id FROM enrollment_record batch_enrollment
+                   JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
+                   JOIN batch ON batch.id = batch_group.child_id
+                   WHERE batch_enrollment.user_id = student.user_id
+                     AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
+                   ORDER BY array_position(ARRAY[1, 2, 64]::int[], batch.program_id), batch_enrollment.id LIMIT 1
+                 ) roster_program ON roster_program.program_id = 1
+                 WHERE school_group.type = 'school' AND school_group.child_id = centre.school_id AND NOT EXISTS (
+                     SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
+                     WHERE mapping.student_id = student.id AND mapping.academic_year = '2026-2027' AND mapping.ended_at IS NULL)
+                 ORDER BY student.id LIMIT 1) AS unassigned_student_id,
+                (SELECT mapping.student_id FROM holistic_mentorship_mentor_mentee_mappings mapping
+                 WHERE mapping.end_reason = 'synthetic_access_loss' LIMIT 1) AS former_student_id,
+                (SELECT phase.id FROM holistic_mentorship_phases phase
+                 JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+                 JOIN grade ON grade.id = phase.grade_id
+                 WHERE plan.academic_year = '2026-2027' AND plan.program_id = 1
+                   AND grade.number = 11 AND phase.state = 'open' ORDER BY phase.position DESC LIMIT 1) AS grade_11_phase_id,
+                (SELECT phase.id FROM holistic_mentorship_phases phase
+                 JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+                 JOIN grade ON grade.id = phase.grade_id
+                 WHERE plan.academic_year = '2026-2027' AND plan.program_id = 1
+                   AND grade.number = 12 AND phase.state = 'open' ORDER BY phase.position DESC LIMIT 1) AS grade_12_phase_id
+         FROM user_permission fixture_permission
+         JOIN school ON school.code = fixture_permission.school_codes[1]
+         JOIN centres centre ON centre.school_id = school.id
+         WHERE LOWER(fixture_permission.email) = 'e2e-holistic-teacher@test.local'
+           AND centre.program_id = 1 AND centre.is_active IS TRUE
+           AND EXISTS (SELECT 1 FROM holistic_mentorship_phases phase
+             JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+             WHERE plan.program_id = 1 AND plan.academic_year = '2026-2027')
+         ORDER BY centre.school_id LIMIT 1`
+      );
+      const row = result.rows[0];
+      fixture = {
+        schoolCode: row.school_code,
+        draftStudentId: Number(row.draft_student_id),
+        unassignedStudentId: Number(row.unassigned_student_id),
+        formerStudentId: Number(row.former_student_id),
+        activeGrade11PhaseId: Number(row.grade_11_phase_id),
+        activeGrade12PhaseId: Number(row.grade_12_phase_id),
+      };
+    } finally {
+      await pool.end();
     }
   });
 
-  test("excluded roles cannot open the Admin workspace", async ({ pmPage }) => {
+  test("eligible Teacher assigns a Student, submits Notes, and edits the official Notes", async ({
+    holisticTeacherPage,
+  }) => {
+    await openTeacherWorkspace(holisticTeacherPage);
+    const unassigned = holisticTeacherPage.locator(`input[aria-label^="Select "]:not(:disabled)`).first();
+    await expect(unassigned).toBeVisible();
+    await unassigned.check();
+    const assignment = holisticTeacherPage.waitForResponse((response) =>
+      response.url().endsWith("/api/holistic-mentorship/mappings") && response.request().method() === "POST"
+    );
+    await holisticTeacherPage.getByRole("button", { name: "Assign 1 selected" }).click();
+    await expect((await assignment).status()).toBe(200);
+
+    await holisticTeacherPage.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
+    const notes = holisticTeacherPage.getByLabel("What support will help next?");
+    await expect(notes).toBeVisible();
+    const autosave = holisticTeacherPage.waitForResponse((response) =>
+      response.url().includes(`/students/${fixture.draftStudentId}/phases/`) &&
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"draft"') === true
+    );
+    await notes.fill("Synthetic submitted answer from the release workflow.");
+    await expect((await autosave).status()).toBe(200);
+
+    holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
+    const submit = holisticTeacherPage.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"submit"') === true
+    );
+    await holisticTeacherPage.getByRole("button", { name: "Submit Notes" }).click();
+    await expect((await submit).status()).toBe(200);
+
+    holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
+    await holisticTeacherPage.getByRole("button", { name: "Edit Notes" }).click();
+    await notes.fill("Synthetic corrected official answer.");
+    const correction = holisticTeacherPage.waitForResponse((response) =>
+      response.request().method() === "PATCH" && response.request().postData()?.includes('"action":"edit"') === true
+    );
+    await holisticTeacherPage.getByRole("button", { name: "Save Changes" }).click();
+    await expect((await correction).status()).toBe(200);
+  });
+
+  test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
+    holisticAdminPage,
+  }) => {
+    await holisticAdminPage.goto("/admin/holistic-mentorship");
+    await expect(holisticAdminPage.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
+    await expect(holisticAdminPage.getByLabel("Student progress results").locator("tbody tr").first()).toBeVisible();
+
+    const csv = await holisticAdminPage.request.get(
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=student_name&direction=asc&format=csv"
+    );
+    expect(csv.status()).toBe(200);
+    expect(csv.headers()["content-type"]).toContain("text/csv");
+
+    await holisticAdminPage.getByRole("link", { name: /^Open / }).first().click();
+    await expect(holisticAdminPage.getByText("Read-only", { exact: true })).toBeVisible();
+    await holisticAdminPage.goto("/admin/holistic-mentorship");
+    await holisticAdminPage.getByRole("tab", { name: "Phase Setup" }).click();
+    await expect(holisticAdminPage.getByText("Synthetic Grade 11 Active")).toBeVisible();
+    await expect(holisticAdminPage.getByText("Open · Active", { exact: true }).first()).toBeVisible();
+
+    await holisticAdminPage.getByRole("tab", { name: "Students & Progress" }).click();
+    await holisticAdminPage.route("**/api/holistic-mentorship/profiles/*", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ state: "queued" }) });
+      } else {
+        await route.continue();
+      }
+    });
+    await holisticAdminPage.getByRole("button", { name: /^Profile for / }).first().click();
+    holisticAdminPage.once("dialog", (dialog) => dialog.accept());
+    await holisticAdminPage.getByRole("button", { name: "Regenerate Profile" }).click();
+    await expect(holisticAdminPage.getByRole("status")).toHaveText("Regeneration queued.");
+  });
+
+  test("global Admin and Holistic Admin have distinct role and deletion gates", async ({
+    adminPage,
+    holisticAdminPage,
+  }) => {
+    const adminDeletion = await apiStatus(adminPage,
+      `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
+    expect(adminDeletion).toBe(422);
+    const scopedDeletion = await apiStatus(holisticAdminPage,
+      `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
+    expect(scopedDeletion).toBe(403);
+    const adminRole = await apiStatus(adminPage, "/api/admin/users", "POST", {});
+    expect(adminRole).not.toBe(403);
+    const scopedRole = await apiStatus(holisticAdminPage, "/api/admin/users", "POST", {});
+    expect(scopedRole).toBe(403);
+  });
+
+  test("former Mentor loses stale-link access and excluded roles receive server-side 403 on desktop and mobile", async ({
+    formerMentorPage,
+    pmPage,
+    programAdminPage,
+    passcodePage,
+  }) => {
+    const stale = await formerMentorPage.request.get(
+      `/api/holistic-mentorship/students/${fixture.formerStudentId}/phases/${fixture.activeGrade12PhaseId}` +
+      `?school_code=${fixture.schoolCode}&academic_year=2026-2027`
+    );
+    expect(stale.status()).toBe(404);
+
+    for (const page of [pmPage, programAdminPage, passcodePage]) {
+      const desktopResponse = await page.request.get(
+        "/api/holistic-mentorship/progress?academic_year=2026-2027"
+      );
+      expect(desktopResponse.status()).toBe(403);
+      await page.setViewportSize({ width: 375, height: 800 });
+      const mobileResponse = await page.request.get(
+        "/api/holistic-mentorship/progress?academic_year=2026-2027"
+      );
+      expect(mobileResponse.status()).toBe(403);
+      await page.goto("/admin/holistic-mentorship");
+      await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
+    }
+
     await pmPage.goto("/admin/holistic-mentorship");
-    await expect(
-      pmPage.getByRole("heading", { name: "Holistic Mentorship" })
-    ).not.toBeVisible();
+    expect(await pmPage.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
   });
 });
+
+async function openTeacherWorkspace(page: Page) {
+  await page.goto(`/school/${fixture.schoolCode}`);
+  const tab = page.getByRole("button", { name: "Holistic Mentorship", exact: true });
+  await expect(tab).toBeVisible();
+  await tab.click();
+  await expect(page.getByRole("tab", { name: "Assign Students" })).toBeVisible();
+}
+
+function studentPhaseUrl(studentId: number, phaseId: number) {
+  return `/holistic-mentorship/students/${studentId}/phases/${phaseId}` +
+    `?school_code=${fixture.schoolCode}&academic_year=2026-2027`;
+}
+
+async function apiStatus(page: Page, url: string, method: string, body: unknown) {
+  return (await page.request.fetch(url, { method, data: body })).status();
+}
