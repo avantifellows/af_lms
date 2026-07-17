@@ -4,7 +4,6 @@ import {
   runHistoricalHolisticNotesImport,
   runHolisticMappingRollover,
   type HistoricalHolisticNoteSource,
-  type HolisticRolloverCandidate,
 } from "./holistic-operations";
 
 const questions = [1, 2, 3, 4].map((position) => ({
@@ -14,7 +13,7 @@ const questions = [1, 2, 3, 4].map((position) => ({
 }));
 
 describe("Historical Holistic Notes import entrypoint", () => {
-  it("defaults to dry-run and reconciles the approved 42/39/3/10/11 baseline without writes", async () => {
+  it("does not count empty skipped records as nullable Mentor attributions", async () => {
     const records: HistoricalHolisticNoteSource[] = [
       ...Array.from({ length: 32 }, (_, index) => ({
         businessStudentId: `eligible-${index}`,
@@ -59,16 +58,17 @@ describe("Historical Holistic Notes import entrypoint", () => {
     });
 
     expect(report).toMatchObject({
-      ok: true,
+      ok: false,
       mode: "dry-run",
       counts: {
         safeCandidates: 42,
         writes: 39,
         emptySkips: 3,
-        nullableMentors: 10,
+        nullableMentors: 7,
         quarantinedUnmatched: 11,
       },
     });
+    expect(report.blockers).toContain("Reconciliation counts differ from the approved 42/39/3/10/11 baseline");
     expect(insert).not.toHaveBeenCalled();
   });
 
@@ -174,8 +174,19 @@ describe("Historical Holistic Notes import entrypoint", () => {
 });
 
 describe("Holistic Mapping rollover entrypoint", () => {
+  it("rejects a target that is not the next Academic Year before data access", async () => {
+    const db = { candidates: vi.fn(), apply: vi.fn() };
+    await expect(runHolisticMappingRollover({
+      fromAcademicYear: "2026-2027",
+      toAcademicYear: "2028-2029",
+      actorUserId: 7,
+      db,
+    })).rejects.toThrow("Rollover target must be the next Academic Year");
+    expect(db.candidates).not.toHaveBeenCalled();
+  });
+
   it("defaults to dry-run and reports carried, skipped, and ineligible aggregates without writes", async () => {
-    const insert = vi.fn();
+    const apply = vi.fn();
     const report = await runHolisticMappingRollover({
       fromAcademicYear: "2026-2027",
       toAcademicYear: "2027-2028",
@@ -186,7 +197,7 @@ describe("Holistic Mapping rollover entrypoint", () => {
           { studentId: 2, mentorUserId: 12, schoolId: 102, eligible: true, alreadyMapped: true },
           { studentId: 3, mentorUserId: 13, schoolId: 103, eligible: false, alreadyMapped: false },
         ],
-        insert,
+        apply,
       },
     });
 
@@ -195,14 +206,11 @@ describe("Holistic Mapping rollover entrypoint", () => {
       mode: "dry-run",
       counts: { carried: 1, skipped: 1, ineligible: 1 },
     });
-    expect(insert).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it("atomically carries eligible pairs once and treats an unchanged rerun as skipped", async () => {
     let alreadyMapped = false;
-    const insert = vi.fn(async (candidates: HolisticRolloverCandidate[]) => {
-      if (candidates.length) alreadyMapped = true;
-    });
     const input = {
       mode: "apply" as const,
       fromAcademicYear: "2026-2027", toAcademicYear: "2027-2028", actorUserId: 7,
@@ -210,13 +218,18 @@ describe("Holistic Mapping rollover entrypoint", () => {
         candidates: async () => [{
           studentId: 1, mentorUserId: 11, schoolId: 101, eligible: true, alreadyMapped,
         }],
-        insert,
+        apply: vi.fn(async () => {
+          const counts = alreadyMapped
+            ? { carried: 0, skipped: 1, ineligible: 0 }
+            : { carried: 1, skipped: 0, ineligible: 0 };
+          alreadyMapped = true;
+          return counts;
+        }),
       },
     };
 
     expect((await runHolisticMappingRollover(input)).counts).toEqual({ carried: 1, skipped: 0, ineligible: 0 });
     expect((await runHolisticMappingRollover(input)).counts).toEqual({ carried: 0, skipped: 1, ineligible: 0 });
-    expect(insert).toHaveBeenCalledTimes(2);
-    expect(insert.mock.calls[1][0]).toEqual([]);
+    expect(input.db.apply).toHaveBeenCalledTimes(2);
   });
 });
