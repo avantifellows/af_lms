@@ -25,6 +25,8 @@ describe("Holistic Profile regeneration", () => {
     expect(mockQuery).toHaveBeenCalledTimes(2);
     expect(mockQuery.mock.calls[0][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
     expect(mockQuery.mock.calls[1][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
+    expect(mockQuery.mock.calls[1][0]).toContain("configuration.state = 'active'");
+    expect(mockQuery.mock.calls[1][0]).toContain("configuration.id = request.prompt_configuration_id");
   });
 
   it("records actor, Student, Active configuration and force before sending only the request reference", async () => {
@@ -71,5 +73,24 @@ describe("Holistic Profile regeneration", () => {
     })).resolves.toEqual({
       ok: true, requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued", delivery: "ambiguous",
     });
+  });
+
+  it("records a confirmed enqueue rejection without changing the successful Profile", async () => {
+    const client = { query: vi.fn() };
+    client.query
+      .mockResolvedValueOnce({ rows: [{ actor_user_id: 9, student_id: 41, prompt_configuration_id: 6 }] })
+      .mockResolvedValueOnce({ rows: [{ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued" }] });
+    mockTransaction.mockImplementation(async (callback) => callback(client as never));
+    mockFetch.mockResolvedValue(new Response(null, { status: 400 }));
+    mockQuery.mockResolvedValue([]);
+
+    await expect(requestHolisticProfileRegeneration({
+      email: "admin@example.com", studentId: 41,
+      requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119", force: true,
+    })).resolves.toEqual({ ok: false, status: 502, error: "Profile regeneration was rejected" });
+
+    expect(mockQuery).toHaveBeenCalledOnce();
+    expect(mockQuery.mock.calls[0][0]).toContain("UPDATE holistic_mentorship_regeneration_requests");
+    expect(mockQuery.mock.calls[0][0]).not.toContain("student_profiles");
   });
 });

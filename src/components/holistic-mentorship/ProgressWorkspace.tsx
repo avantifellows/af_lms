@@ -88,6 +88,13 @@ export default function ProgressWorkspace() {
     setter(event.target.value);
     setPage(1);
   };
+  const updateAcademicYear = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    setAcademicYear(event.target.value);
+    setSchool("");
+    setMentor("");
+    setPhase("");
+    setPage(1);
+  };
   const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
   const exportHref = `/api/holistic-mentorship/progress?${params}&format=csv`;
   const counts = [
@@ -115,7 +122,7 @@ export default function ProgressWorkspace() {
             <input className="min-h-11 w-full rounded-md border border-border bg-bg pl-10 pr-3 text-sm" value={search}
               onChange={update(setSearch)} placeholder="Student name or external ID" />
           </label>
-          <select aria-label="Academic Year" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={academicYear} onChange={update(setAcademicYear)}>
+          <select aria-label="Academic Year" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={academicYear} onChange={updateAcademicYear}>
             {yearOptions().map((year) => <option key={year}>{year}</option>)}
           </select>
           <select aria-label="Phase lens" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm" value={phase} onChange={update(setPhase)}>
@@ -196,7 +203,7 @@ export default function ProgressWorkspace() {
 }
 
 function ProfilePanel({ student, academicYear, onClose }: { student: Row; academicYear: string; onClose: () => void }) {
-  const [profile, setProfile] = useState<{ summaries: Array<{ position: number; title: string; summary: string }>; regeneration: null | { state: string; requestedAt: string } } | null>(null);
+  const [profile, setProfile] = useState<{ summaries: Array<{ position: number; title: string; summary: string }>; regeneration: null | { requestKey: string; state: string; requestedAt: string } } | null>(null);
   const [message, setMessage] = useState("");
   const load = useCallback(async () => {
     const response = await fetch(`/api/holistic-mentorship/profiles/${student.studentId}?academic_year=${academicYear}`);
@@ -209,9 +216,12 @@ function ProfilePanel({ student, academicYear, onClose }: { student: Row; academ
   }, [load]);
   const regenerate = async () => {
     if (!window.confirm(`Regenerate ${student.studentName}'s Profile from the approved source?`)) return;
+    const requestKey = profile?.regeneration?.state === "queued"
+      ? profile.regeneration.requestKey
+      : crypto.randomUUID();
     const response = await fetch(`/api/holistic-mentorship/profiles/${student.studentId}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request_key: crypto.randomUUID(), force: true }),
+      body: JSON.stringify({ request_key: requestKey, force: true }),
     });
     const body = await response.json();
     setMessage(response.ok ? "Regeneration queued." : body.error || "Unable to queue regeneration");

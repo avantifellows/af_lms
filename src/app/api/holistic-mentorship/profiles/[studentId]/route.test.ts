@@ -50,4 +50,17 @@ describe("Holistic Profile admin API", () => {
     expect(mockAccess).toHaveBeenCalledWith(expect.anything(), "profile_regenerate");
     expect(requestHolisticProfileRegeneration).toHaveBeenCalledWith(expect.objectContaining({ email: "admin@example.com", studentId: 41 }));
   });
+
+  it("returns policy denial before reading or regenerating a Profile", async () => {
+    mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+
+    const response = await GET(
+      new Request("http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027") as never,
+      { params: Promise.resolve({ studentId: "41" }) }
+    );
+
+    expect(response.status).toBe(403);
+    expect(getHolisticProfileAdmin).not.toHaveBeenCalled();
+    expect(requestHolisticProfileRegeneration).not.toHaveBeenCalled();
+  });
 });

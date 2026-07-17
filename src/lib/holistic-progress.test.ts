@@ -71,8 +71,12 @@ describe("Holistic progress", () => {
       "2026-2027",
     ]);
     const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("AND ($2 <> $11 OR mapping.ended_at IS NULL)");
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
+    expect(sql).toContain("WHEN notes.state = 'submitted' THEN 'completed'");
+    expect(sql).toContain("ELSE 'pending'");
     expect(sql).toContain("notes.state = 'submitted' THEN notes.last_edited_at");
+    expect(sql).toContain("student_name ASC NULLS LAST, external_student_id ASC NULLS LAST, student_id ASC");
     expect(result.counts).toEqual({
       totalMapped: 73,
       pending: 30,

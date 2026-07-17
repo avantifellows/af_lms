@@ -29,8 +29,11 @@ describe("Holistic progress API", () => {
     mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
   });
 
-  it("rejects non-allowlisted filters without querying progress", async () => {
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&sort=sql") as never);
+  it.each([
+    "sort=sql", "direction=sideways", "progress=unknown", "grade=10", "phase_id=0",
+    "mentor_user_id=-1", "page=0", "school_code=bad%20code", `search=${"x".repeat(101)}`,
+  ])("rejects non-allowlisted filter %s without querying progress", async (filter) => {
+    const response = await GET(new Request(`http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&${filter}`) as never);
 
     expect(response.status).toBe(422);
     expect(mockList).not.toHaveBeenCalled();
@@ -59,5 +62,14 @@ describe("Holistic progress API", () => {
     expect(response.headers.get("content-type")).toContain("text/csv");
     expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ direction: "desc" }), { all: true });
     expect(mockOptions).not.toHaveBeenCalled();
+  });
+
+  it("returns policy denial before reading progress", async () => {
+    mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027") as never);
+
+    expect(response.status).toBe(403);
+    expect(mockList).not.toHaveBeenCalled();
   });
 });

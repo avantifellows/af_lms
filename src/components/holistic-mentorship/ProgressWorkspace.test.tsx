@@ -46,4 +46,45 @@ describe("ProgressWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   });
+
+  it("clears year-specific selectors when the Academic Year changes", async () => {
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.change(screen.getByLabelText("Phase lens"), { target: { value: "70" } });
+    fireEvent.change(screen.getByLabelText("Filter by School"), { target: { value: "SCH001" } });
+    fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText("Academic Year"), { target: { value: "2025-2026" } });
+
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
+      "/api/holistic-mentorship/progress?academic_year=2025-2026&page=1&sort=student_name&direction=asc",
+      expect.anything()
+    ));
+  });
+
+  it("reuses a queued regeneration request key for idempotent delivery retry", async () => {
+    const requestKey = "d16e7d82-dc60-4b79-a064-9ed80badc119";
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
+      if (input.includes("/profiles/41") && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, requestKey, state: "queued" })));
+      }
+      if (input.includes("/profiles/41")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          summaries: [], regeneration: { requestKey, state: "queued", requestedAt: "2026-07-17T10:00:00.000Z" },
+        })));
+      }
+      return Promise.resolve(new Response(JSON.stringify(payload)));
+    }));
+
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.click(screen.getByRole("button", { name: "Profile for Student One" }));
+    await screen.findByText("Regeneration status:");
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate Profile" }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/holistic-mentorship/profiles/41",
+      expect.objectContaining({ body: JSON.stringify({ request_key: requestKey, force: true }) })
+    ));
+  });
 });

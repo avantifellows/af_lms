@@ -24,14 +24,16 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
       [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ request_key: string; state: RegenerationState; inserted_at: string; error_code: string | null }>(
-      `SELECT request_key, state, inserted_at, error_code
-       FROM holistic_mentorship_regeneration_requests
-       WHERE student_id = $1
+      `SELECT request.request_key, request.state, request.inserted_at, request.error_code
+       FROM holistic_mentorship_regeneration_requests request
+       JOIN holistic_mentorship_prompt_configurations configuration
+         ON configuration.id = request.prompt_configuration_id AND configuration.state = 'active'
+       WHERE request.student_id = $1
          AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
                      WHERE mapping.student_id = $1 AND mapping.program_id = $2
                        AND mapping.academic_year = $3
                        AND ($3 <> $4 OR mapping.ended_at IS NULL))
-       ORDER BY inserted_at DESC, id DESC LIMIT 1`,
+       ORDER BY request.inserted_at DESC, request.id DESC LIMIT 1`,
       [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
   ]);
