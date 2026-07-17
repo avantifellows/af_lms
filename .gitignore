@@ -84,3 +84,7 @@ centre_name_mapping_template.csv
 
 # Roster data (PII) — regenerated locally from the sheet/DB, never committed
 scripts/data/pm/
+
+# release-runner prototype
+.secrets
+out/
