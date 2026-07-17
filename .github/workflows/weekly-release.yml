@@ -17,6 +17,9 @@ on:
       window_days:
         description: Days of history to include
         default: "7"
+      thinking:
+        description: Thinking effort (off/minimal/low/medium/high/xhigh/max)
+        default: medium
   # Enable after the prototype is trusted (Mondays 09:00 IST):
   # schedule:
   #   - cron: "30 3 * * 1"
@@ -55,7 +58,11 @@ jobs:
 
       - name: Install pi
         if: steps.gather.outputs.skip != 'true'
-        run: npm install -g @mariozechner/pi-coding-agent
+        # Pinned: the project moved from @mariozechner/pi-coding-agent (stuck at
+        # 0.73.x, breaks on claude-sonnet-5 thinking) to @earendil-works.
+        # 0.80.3+ speaks Anthropic adaptive thinking. --force overwrites a stale
+        # `pi` bin left in act's reused tool cache by the old package name.
+        run: npm install -g --force @earendil-works/pi-coding-agent@0.80.10
 
       - name: Generate release notes
         if: steps.gather.outputs.skip != 'true'
@@ -63,16 +70,15 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           PROVIDER: ${{ inputs.provider || 'anthropic' }}
+          THINKING: ${{ inputs.thinking || 'medium' }}
         run: |
           if [ "$PROVIDER" = "openrouter" ]; then
             MODEL="deepseek/deepseek-v4-flash"
           else
             MODEL="claude-sonnet-5"
           fi
-          # --thinking off: claude-sonnet-5 rejects pi 0.70.x's legacy thinking
-          # param unless disabled; notes-writing doesn't need it anyway.
           pi -p --no-session --no-tools --no-skills --no-extensions --no-context-files \
-             --thinking off --provider "$PROVIDER" --model "$MODEL" \
+             --thinking "$THINKING" --provider "$PROVIDER" --model "$MODEL" \
              --system-prompt "$(cat release-notes/system-prompt.md)" \
              "$(cat out/context.md)" > out/notes.md
           test -s out/notes.md
