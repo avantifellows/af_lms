@@ -212,6 +212,32 @@ async function teacherAccess(params: {
   };
 }
 
+function programAccess(params: {
+  email: string;
+  permission: UserPermission;
+  canEdit: boolean;
+  action: HolisticMentorshipAction;
+  school?: HolisticMentorshipSchool;
+}): HolisticMentorshipAccessResult {
+  const actorUserId = params.permission.user_id == null
+    ? undefined
+    : Number(params.permission.user_id);
+  if (
+    params.action === "privacy_delete" &&
+    (!Number.isSafeInteger(actorUserId) || (actorUserId ?? 0) < 1)
+  ) {
+    return denied(403, "Forbidden");
+  }
+  return {
+    ok: true,
+    email: params.email,
+    permission: params.permission,
+    canEdit: params.canEdit,
+    actorUserId,
+    school: params.school,
+  };
+}
+
 export async function requireHolisticMentorshipAccess(
   session: HolisticMentorshipSession,
   action: HolisticMentorshipAction,
@@ -246,5 +272,11 @@ export async function requireHolisticMentorshipAccess(
     });
   }
 
-  return { ok: true, email, permission, canEdit: access.canEdit, school };
+  return programAccess({
+    email,
+    permission,
+    canEdit: access.canEdit,
+    action,
+    school,
+  });
 }

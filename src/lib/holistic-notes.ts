@@ -74,6 +74,10 @@ async function loadScope(
        WHERE mapping.student_id = $2 AND mapping.school_id = $3
          AND mapping.program_id = $4 AND mapping.academic_year = $5
          AND mapping.ended_at IS NULL AND plan.program_id = $4
+         AND NOT EXISTS (
+           SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
+           WHERE deletion.student_id = mapping.student_id
+         )
          AND (
            (plan.academic_year = $5 AND phase_grade.number = current_grade.number)
            OR (plan.academic_year = $6 AND current_grade.number = 12

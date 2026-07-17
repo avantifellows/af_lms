@@ -72,6 +72,7 @@ describe("Holistic Post-Session Notes", () => {
 
     expect(client.query.mock.calls[0][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
     expect(String(client.query.mock.calls[0][0])).toContain("phase_grade.number = current_grade.number");
+    expect(String(client.query.mock.calls[0][0])).toContain("holistic_mentorship_privacy_deletions");
   });
 
   it("creates and freezes the first non-empty draft atomically", async () => {

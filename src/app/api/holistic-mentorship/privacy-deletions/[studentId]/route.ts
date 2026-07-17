@@ -19,7 +19,14 @@ export async function POST(request: Request, context: RouteContext) {
       reason.length < 10 || reason.length > 500) {
     return NextResponse.json({ error: "Approved deletion and reason are required" }, { status: 422 });
   }
-  const result = await deleteHolisticStudentContent({ email: access.email, studentId, reason });
+  if (!access.actorUserId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const result = await deleteHolisticStudentContent({
+    actorUserId: access.actorUserId,
+    studentId,
+    reason,
+  });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   return NextResponse.json({
     ...result,

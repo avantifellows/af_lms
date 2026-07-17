@@ -120,8 +120,11 @@ record this checklist:
   drill-down, inspect the downloaded CSV, and request Profile regeneration.
 - Cross-repo: observe the regeneration complete in `etl-next`, then confirm the
   new active Profile appears in AF LMS without exposing raw answers.
-- Global Admin: verify role management and approved deletion gates. Verify the
-  Holistic Admin cannot use either global-only gate.
+- Global Admin: verify role management and approved deletion gates. On a
+  disposable Student, confirm Profile, Post-Session, and Historical answer
+  content is erased once, the immutable content-free tombstone remains, and
+  regeneration cannot restore content. Verify the Holistic Admin cannot use
+  either global-only gate.
 - Excluded program manager, program admin, and passcode actors: verify direct API
   requests return server-side `403` on desktop and mobile, with no hidden or
   overlapping controls.

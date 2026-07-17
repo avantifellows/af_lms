@@ -86,6 +86,10 @@ export async function requestHolisticProfileRegeneration(params: {
        WHERE LOWER(permission.email) = LOWER($1) AND permission.revoked_at IS NULL
          AND permission.read_only IS NOT TRUE
          AND permission.role IN ('admin', 'holistic_mentorship_admin')
+         AND NOT EXISTS (
+           SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
+           WHERE deletion.student_id = student.id
+         )
        LIMIT 1 FOR UPDATE OF permission, student, configuration`,
       [params.email, params.studentId, PROGRAM_IDS.COE]
     );

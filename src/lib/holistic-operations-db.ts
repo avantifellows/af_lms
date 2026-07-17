@@ -38,7 +38,11 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
        )
        SELECT source.business_student_id, student.id AS student_id,
               mentor.user_id AS mentor_user_id,
-              roster.school_id IS NOT NULL AND student.status IS DISTINCT FROM 'dropout' AS eligible
+              roster.school_id IS NOT NULL AND student.status IS DISTINCT FROM 'dropout'
+                AND NOT EXISTS (
+                  SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
+                  WHERE deletion.student_id = student.id
+                ) AS eligible
        FROM source
        JOIN student ON student.student_id = source.business_student_id
        JOIN "user" student_user ON student_user.id = student.user_id

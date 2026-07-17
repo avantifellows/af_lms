@@ -314,6 +314,20 @@ describe("requireHolisticMentorshipAccess", () => {
     mockQuery.mockResolvedValueOnce([permissionRow("admin")]);
     await expect(requireHolisticMentorshipAccess(
       { user: { email: "admin@example.com" } }, "privacy_delete"
-    )).resolves.toMatchObject({ ok: true, canEdit: true });
+    )).resolves.toMatchObject({ ok: true, canEdit: true, actorUserId: 10 });
+  });
+
+  it("fails closed when a global Admin has no canonical User ID", async () => {
+    mockQuery.mockResolvedValueOnce([permissionRow("admin", { user_id: null })]);
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "admin@example.com" } }, "privacy_delete"
+    )).resolves.toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("denies approved privacy deletion to a read-only global Admin", async () => {
+    mockQuery.mockResolvedValueOnce([permissionRow("admin", { read_only: true })]);
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "admin@example.com" } }, "privacy_delete"
+    )).resolves.toMatchObject({ ok: false, status: 403 });
   });
 });

@@ -59,6 +59,7 @@ describe("Holistic operator database adapter", () => {
     expect(text).not.toContain("school.program_ids");
     expect(text).not.toContain("batch_enrollment");
     expect(text).toContain("centre.school_id = roster.school_id");
+    expect(text).toContain("holistic_mentorship_privacy_deletions");
     expect(text).toContain("teacher.exit_date IS NULL");
     expect(text).toContain(
       "LOWER(BTRIM(teacher.teacher_id)) = LOWER(BTRIM(source.source_mentor_id))"
