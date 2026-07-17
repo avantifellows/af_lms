@@ -53,6 +53,10 @@ function shouldShowNotesInputs(canAutosave: boolean, editingSubmitted: boolean) 
   return canAutosave || editingSubmitted;
 }
 
+function hasBlankAnswer(questions: NotesEditorProps["questions"], answers: Record<number, string>) {
+  return questions.some(({ questionId }) => !answers[questionId]?.trim());
+}
+
 function selectedOpenPhase(detail: HolisticStudentPhaseDetail): OpenSelectedPhase | null {
   const selected = detail.selectedPhase;
   if ("locked" in selected && !selected.locked && "guidanceMarkdown" in selected) return selected;
@@ -69,24 +73,13 @@ class NotesRequestError extends Error {
   }
 }
 
-function PostSessionNotesEditor(props: NotesEditorProps) {
-  const initialAnswers = initialNotesAnswers(props);
-  const initialEditor = initialEditorState(props);
-  const [answers, setAnswers] = useState<Record<number, string>>(initialAnswers);
-  const [notesState, setNotesState] = useState(initialEditor.notesState);
-  const [editingSubmitted, setEditingSubmitted] = useState(false);
-  const [status, setStatus] = useState<NotesEditorStatus>(initialEditor.status);
-  const [error, setError] = useState("");
-  const [conflict, setConflict] = useState(false);
-  const revision = useRef(initialEditor.revision);
-  const saved = useRef(JSON.stringify(initialAnswers));
-  const queued = useRef<Record<number, string> | null>(null);
-  const inFlight = useRef<Promise<boolean> | null>(null);
+function useNotesMutation(props: NotesEditorProps, initialRevision: number) {
+  const revision = useRef(initialRevision);
   const apiUrl = `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}?${new URLSearchParams({
     school_code: props.schoolCode,
     academic_year: props.academicYear,
   })}`;
-  const mutate = useCallback(async (
+  return useCallback(async (
     action: "draft" | "submit" | "edit",
     value: Record<number, string>,
     confirmed = false
@@ -110,6 +103,21 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     if (!response.ok) throw new NotesRequestError(result.error || "Could not save Notes", response.status);
     revision.current = result.revision ?? revision.current;
   }, [apiUrl, props.mappingId, props.phaseRevision, props.questions]);
+}
+
+function PostSessionNotesEditor(props: NotesEditorProps) {
+  const initialAnswers = initialNotesAnswers(props);
+  const initialEditor = initialEditorState(props);
+  const [answers, setAnswers] = useState<Record<number, string>>(initialAnswers);
+  const [notesState, setNotesState] = useState(initialEditor.notesState);
+  const [editingSubmitted, setEditingSubmitted] = useState(false);
+  const [status, setStatus] = useState<NotesEditorStatus>(initialEditor.status);
+  const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
+  const saved = useRef(JSON.stringify(initialAnswers));
+  const queued = useRef<Record<number, string> | null>(null);
+  const inFlight = useRef<Promise<boolean> | null>(null);
+  const mutate = useNotesMutation(props, initialEditor.revision);
 
   const pump = useCallback(() => {
     if (inFlight.current) return inFlight.current;
@@ -152,7 +160,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     void pump();
   };
   const submit = async () => {
-    if (props.questions.some(({ questionId }) => !answers[questionId]?.trim())) {
+    if (hasBlankAnswer(props.questions, answers)) {
       setStatus("failed");
       setError("Answer every Question before submitting");
       return;
@@ -170,7 +178,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     }
   };
   const saveCorrection = async () => {
-    if (props.questions.some(({ questionId }) => !answers[questionId]?.trim())) {
+    if (hasBlankAnswer(props.questions, answers)) {
       setStatus("failed");
       setError("Answer every Question before saving");
       return;

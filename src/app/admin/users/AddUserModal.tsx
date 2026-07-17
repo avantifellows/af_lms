@@ -356,7 +356,19 @@ function StandardAccessFields(props: AccessFieldsProps) {
     </div>
     <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access (cannot edit students)" />
     <ProgramsField selected={props.selectedPrograms} onToggle={props.onToggleProgram} />
-    <ScopePicker {...props} />
+    <ScopePicker
+      level={props.level}
+      regions={props.regions}
+      selectedRegions={props.selectedRegions}
+      selectedSchools={props.selectedSchools}
+      schoolSearch={props.schoolSearch}
+      searchResults={props.searchResults}
+      schoolCodeToName={props.schoolCodeToName}
+      onToggleRegion={props.onToggleRegion}
+      onSchoolSearchChange={props.onSchoolSearchChange}
+      onAddSchool={props.onAddSchool}
+      onRemoveSchool={props.onRemoveSchool}
+    />
   </>;
 }
 
@@ -390,7 +402,21 @@ function ProgramsField({ selected, onToggle }: { selected: number[]; onToggle: (
   </div>;
 }
 
-function ScopePicker(props: AccessFieldsProps) {
+type ScopePickerProps = Pick<AccessFieldsProps,
+  | "level"
+  | "regions"
+  | "selectedRegions"
+  | "selectedSchools"
+  | "schoolSearch"
+  | "searchResults"
+  | "schoolCodeToName"
+  | "onToggleRegion"
+  | "onSchoolSearchChange"
+  | "onAddSchool"
+  | "onRemoveSchool"
+>;
+
+function ScopePicker(props: ScopePickerProps) {
   if (props.level === 2) {
     return <RegionPicker regions={props.regions} selected={props.selectedRegions} onToggle={props.onToggleRegion} />;
   }
