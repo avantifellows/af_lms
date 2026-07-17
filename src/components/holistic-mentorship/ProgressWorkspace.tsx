@@ -19,6 +19,15 @@ type Payload = {
   counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
   options: Options; academicYears: string[]; refreshedAt: string; pageSize: 50;
 };
+type RegenerationState = "queued" | "running" | "completed" | "failed";
+type ProfilePayload = {
+  summaries: Array<{ position: number; title: string; summary: string }>;
+  regeneration: null | {
+    requestKey: string;
+    state: RegenerationState;
+    requestedAt: string;
+  };
+};
 
 type ProgressFilters = {
   academicYear: string;
@@ -52,6 +61,52 @@ const INITIAL_FILTERS: ProgressFilters = {
 };
 const VIEW_STATE_KEY = "holistic-progress-view";
 const SCROLL_KEY = "holistic-progress-scroll";
+
+async function jsonObject(response: Response): Promise<Record<string, unknown> | null> {
+  return response.json().catch(() => null) as Promise<Record<string, unknown> | null>;
+}
+
+function responseError(body: Record<string, unknown> | null, fallback: string) {
+  return typeof body?.error === "string" ? body.error : fallback;
+}
+
+function regenerationVariant(state: RegenerationState) {
+  if (state === "completed") return "success" as const;
+  if (state === "failed") return "danger" as const;
+  return "info" as const;
+}
+
+async function fetchProfile(studentId: number, academicYear: string): Promise<ProfilePayload> {
+  const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}?academic_year=${academicYear}`);
+  const body = await jsonObject(response);
+  if (!response.ok) throw new Error(responseError(body, `Unable to load Profile (${response.status})`));
+  if (!body || !Array.isArray(body.summaries)) throw new Error("Unable to load Profile");
+  return body as ProfilePayload;
+}
+
+function regenerationSuccessMessage(body: Record<string, unknown> | null) {
+  if (body?.delivery === "ambiguous") return "Regeneration queued. Delivery is not yet confirmed.";
+  const state = typeof body?.state === "string" ? body.state : "queued";
+  return state === "queued" ? "Regeneration queued." : `Regeneration is ${state}.`;
+}
+
+async function queueProfileRegeneration(studentId: number, requestKey: string) {
+  try {
+    const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_key: requestKey, force: true }),
+    });
+    const body = await jsonObject(response);
+    return response.ok
+      ? { message: { error: false, text: regenerationSuccessMessage(body) }, refresh: true }
+      : { message: { error: true, text: responseError(body, `Unable to queue regeneration (${response.status})`) }, refresh: true };
+  } catch {
+    return {
+      message: { error: true, text: "Could not confirm regeneration. Refresh status before retrying." },
+      refresh: false,
+    };
+  }
+}
 
 function storedView() {
   try {
@@ -440,13 +495,25 @@ function ProgressPagination({ page, totalPages, onPageChange }: {
   </div>;
 }
 
-function ProfilePanel({ student, academicYear, onClose }: { student: Row; academicYear: string; onClose: () => void }) {
-  const [profile, setProfile] = useState<{ summaries: Array<{ position: number; title: string; summary: string }>; regeneration: null | { requestKey: string; state: string; requestedAt: string } } | null>(null);
-  const [message, setMessage] = useState("");
+function useProfilePanel(student: Row, academicYear: string) {
+  const [profile, setProfile] = useState<ProfilePayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [statusKnown, setStatusKnown] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [actionMessage, setActionMessage] = useState<{ error: boolean; text: string } | null>(null);
   const load = useCallback(async () => {
-    const response = await fetch(`/api/holistic-mentorship/profiles/${student.studentId}?academic_year=${academicYear}`);
-    const body = await response.json();
-    if (response.ok) setProfile(body); else setMessage(body.error || "Unable to load Profile");
+    setLoading(true);
+    setStatusKnown(false);
+    setLoadError("");
+    try {
+      setProfile(await fetchProfile(student.studentId, academicYear));
+      setStatusKnown(true);
+    } catch (problem) {
+      setLoadError(problem instanceof Error ? problem.message : "Unable to load Profile");
+    } finally {
+      setLoading(false);
+    }
   }, [academicYear, student.studentId]);
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -457,25 +524,46 @@ function ProfilePanel({ student, academicYear, onClose }: { student: Row; academ
     const requestKey = profile?.regeneration?.state === "queued"
       ? profile.regeneration.requestKey
       : crypto.randomUUID();
-    const response = await fetch(`/api/holistic-mentorship/profiles/${student.studentId}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request_key: requestKey, force: true }),
-    });
-    const body = await response.json();
-    setMessage(response.ok ? "Regeneration queued." : body.error || "Unable to queue regeneration");
-    await load();
+    setSubmitting(true);
+    setStatusKnown(false);
+    setActionMessage(null);
+    const result = await queueProfileRegeneration(student.studentId, requestKey);
+    setActionMessage(result.message);
+    if (result.refresh) await load();
+    setSubmitting(false);
   };
+  return { profile, loading, statusKnown, submitting, loadError, actionMessage, load, regenerate };
+}
+
+function ProfilePanel({ student, academicYear, onClose }: { student: Row; academicYear: string; onClose: () => void }) {
+  const panel = useProfilePanel(student, academicYear);
+  const running = panel.profile?.regeneration?.state === "running";
   return <div role="dialog" aria-modal="true" aria-label={`${student.studentName} Profile`} className="fixed inset-0 z-50 flex justify-end bg-black/30">
     <div className="h-full w-full max-w-xl overflow-y-auto bg-bg-card p-6 shadow-xl">
       <div className="flex items-start justify-between gap-4 border-b border-border pb-4"><div><h2 className="text-lg font-semibold">{student.studentName}</h2><p className="text-sm text-text-muted">Student Profile</p></div>
         <Button variant="secondary" size="sm" onClick={onClose}>Close</Button></div>
       <div className="space-y-4 py-5">
-        {profile?.regeneration && <p className="text-sm">Regeneration status: <Badge>{profile.regeneration.state}</Badge></p>}
-        {profile?.summaries.length === 0 && <p className="text-sm text-text-muted">Profile unavailable for the Active configuration.</p>}
-        {profile?.summaries.map((summary) => <section key={summary.position} className="border-b border-border pb-4"><h3 className="text-sm font-semibold">{summary.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{summary.summary}</p></section>)}
-        {message && <p role="status" className="text-sm text-text-secondary">{message}</p>}
-        <Button onClick={regenerate}><RefreshCw aria-hidden="true" className="h-4 w-4" /> Regenerate Profile</Button>
+        <ProfilePanelContent {...panel} />
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={!panel.statusKnown || panel.submitting || running} onClick={panel.regenerate} aria-busy={panel.submitting}>
+            <RefreshCw aria-hidden="true" className="h-4 w-4" /> Regenerate Profile
+          </Button>
+          <Button variant="secondary" disabled={panel.loading || panel.submitting} onClick={() => void panel.load()}>
+            Refresh Status
+          </Button>
+        </div>
       </div>
     </div>
   </div>;
+}
+
+function ProfilePanelContent({ profile, loading, loadError, actionMessage }: ReturnType<typeof useProfilePanel>) {
+  return <>
+    {profile?.regeneration && <p className="text-sm">Regeneration status: <Badge variant={regenerationVariant(profile.regeneration.state)}>{profile.regeneration.state}</Badge></p>}
+    {loading && <p className="text-sm text-text-muted">Refreshing Profile status...</p>}
+    {profile?.summaries.length === 0 && <p className="text-sm text-text-muted">Profile unavailable for the Active configuration.</p>}
+    {profile?.summaries.map((summary) => <section key={summary.position} className="border-b border-border pb-4"><h3 className="text-sm font-semibold">{summary.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{summary.summary}</p></section>)}
+    {loadError && <p role="alert" className="text-sm text-danger">{loadError}</p>}
+    {actionMessage && <p role={actionMessage.error ? "alert" : "status"} className={actionMessage.error ? "text-sm text-danger" : "text-sm text-text-secondary"}>{actionMessage.text}</p>}
+  </>;
 }

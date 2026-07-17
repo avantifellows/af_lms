@@ -196,4 +196,107 @@ describe("ProgressWorkspace", () => {
       expect.objectContaining({ body: JSON.stringify({ request_key: requestKey, force: true }) })
     ));
   });
+
+  it("does not create another request while regeneration is running", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input.includes("/profiles/41")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          summaries: [],
+          regeneration: {
+            requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119",
+            state: "running",
+            requestedAt: "2026-07-17T10:00:00.000Z",
+          },
+        })));
+      }
+      return Promise.resolve(new Response(JSON.stringify(payload)));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.click(screen.getByRole("button", { name: "Profile for Student One" }));
+    await screen.findByText("running", { exact: true });
+
+    expect(screen.getByRole("button", { name: "Regenerate Profile" })).toBeDisabled();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("waits for stored status and prevents duplicate regeneration requests", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    let resolveProfile!: (response: Response) => void;
+    let resolveRegeneration!: (response: Response) => void;
+    const profileResponse = new Promise<Response>((resolve) => { resolveProfile = resolve; });
+    const regenerationResponse = new Promise<Response>((resolve) => { resolveRegeneration = resolve; });
+    const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
+      if (input.includes("/profiles/41") && init?.method === "POST") return regenerationResponse;
+      if (input.includes("/profiles/41")) return profileResponse;
+      return Promise.resolve(new Response(JSON.stringify(payload)));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.click(screen.getByRole("button", { name: "Profile for Student One" }));
+
+    const regenerate = screen.getByRole("button", { name: "Regenerate Profile" });
+    expect(regenerate).toBeDisabled();
+    resolveProfile(new Response(JSON.stringify({ summaries: [], regeneration: null })));
+    await waitFor(() => expect(regenerate).toBeEnabled());
+
+    fireEvent.click(regenerate);
+    fireEvent.click(regenerate);
+    expect(regenerate).toBeDisabled();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+
+    resolveRegeneration(new Response(JSON.stringify({ state: "queued" }), { status: 202 }));
+    await screen.findByText("Regeneration queued.");
+  });
+
+  it("fails safely when Profile status cannot be read as JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string) => Promise.resolve(
+      input.includes("/profiles/41")
+        ? new Response("gateway failure", { status: 502 })
+        : new Response(JSON.stringify(payload))
+    )));
+
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.click(screen.getByRole("button", { name: "Profile for Student One" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load Profile (502)");
+    expect(screen.getByRole("button", { name: "Regenerate Profile" })).toBeDisabled();
+  });
+
+  it("shows a safe retry error when regeneration returns non-JSON", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    let profileReads = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string, init?: RequestInit) => {
+      if (input.includes("/profiles/41") && init?.method === "POST") {
+        return Promise.resolve(new Response("sensitive upstream details", { status: 502 }));
+      }
+      if (input.includes("/profiles/41")) {
+        profileReads += 1;
+        return Promise.resolve(new Response(JSON.stringify({
+          summaries: [{ position: 1, title: "Strengths", summary: "Stored summary" }],
+          regeneration: profileReads > 1
+            ? { requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "failed", requestedAt: "2026-07-17T10:00:00.000Z" }
+            : null,
+        })));
+      }
+      return Promise.resolve(new Response(JSON.stringify(payload)));
+    }));
+
+    render(<ProgressWorkspace />);
+    await screen.findByText("Student One");
+    fireEvent.click(screen.getByRole("button", { name: "Profile for Student One" }));
+    await screen.findByText("Stored summary");
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate Profile" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to queue regeneration (502)");
+    expect(screen.queryByText("sensitive upstream details")).not.toBeInTheDocument();
+    expect(screen.getByText("failed", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Stored summary")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Regenerate Profile" })).toBeEnabled();
+  });
 });

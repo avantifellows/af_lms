@@ -92,6 +92,24 @@ describe("requireHolisticMentorshipAccess", () => {
     ).resolves.toMatchObject({ ok: false, status: 403 });
   });
 
+  it.each([
+    ["admin", true],
+    ["holistic_mentorship_admin", true],
+    ["teacher", false],
+    ["program_manager", false],
+    ["program_admin", false],
+  ] as const)("applies Profile regeneration access for %s", async (role, allowed) => {
+    mockQuery.mockResolvedValueOnce([permissionRow(role)]);
+
+    const result = await requireHolisticMentorshipAccess(
+      { user: { email: `${role}@example.com` } },
+      "profile_regenerate"
+    );
+
+    expect(result.ok).toBe(allowed);
+    if (!allowed) expect(result).toMatchObject({ status: 403 });
+  });
+
   it("lets Program-wide Admins read mapped Student data but not mutate Mappings", async () => {
     mockQuery.mockResolvedValueOnce([permissionRow("holistic_mentorship_admin")]);
     await expect(

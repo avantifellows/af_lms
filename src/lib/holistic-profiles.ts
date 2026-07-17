@@ -79,6 +79,9 @@ export async function requestHolisticProfileRegeneration(params: {
          AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
        JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
        JOIN batch ON batch.id = batch_group.child_id AND batch.program_id = $3
+       JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
+         AND grade_enrollment.group_type = 'grade' AND grade_enrollment.is_current IS TRUE
+       JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
        JOIN holistic_mentorship_prompt_configurations configuration ON configuration.state = 'active'
        WHERE LOWER(permission.email) = LOWER($1) AND permission.revoked_at IS NULL
          AND permission.read_only IS NOT TRUE
@@ -118,18 +121,32 @@ export async function requestHolisticProfileRegeneration(params: {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ environment }),
+      signal: AbortSignal.timeout(15_000),
     });
   } catch {
     return { ok: true, requestKey: request.request_key, state: "queued", delivery: "ambiguous" };
   }
   if (response.ok) return { ok: true, requestKey: request.request_key, state: "queued" };
 
-  await query(
+  const failed = await query<{ request_key: string; state: RegenerationState }>(
     `UPDATE holistic_mentorship_regeneration_requests
      SET state = 'failed', etl_run_id = $2, error_code = 'enqueue_rejected',
          error_message = 'ETL rejected the regeneration request', updated_at = NOW()
-     WHERE request_key = $1 AND state = 'queued'`,
+     WHERE request_key = $1 AND state = 'queued' AND etl_run_id IS NULL
+     RETURNING request_key, state`,
     [request.request_key, `rejected-${request.request_key}`]
   );
-  return { ok: false, status: 502, error: "Profile regeneration was rejected" };
+  if (failed.length > 0) {
+    return { ok: false, status: 502, error: "Profile regeneration was rejected" };
+  }
+
+  const current = await query<{ request_key: string; state: RegenerationState }>(
+    `SELECT request_key, state FROM holistic_mentorship_regeneration_requests
+     WHERE request_key = $1 LIMIT 1`,
+    [request.request_key]
+  );
+  const state = current[0]?.state ?? "queued";
+  return state === "queued"
+    ? { ok: true, requestKey: request.request_key, state, delivery: "ambiguous" }
+    : { ok: true, requestKey: request.request_key, state };
 }
