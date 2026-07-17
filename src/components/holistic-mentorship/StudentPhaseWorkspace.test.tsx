@@ -208,7 +208,9 @@ describe("StudentPhaseWorkspace", () => {
     await act(async () => vi.advanceTimersByTimeAsync(750));
 
     expect(screen.getByRole("textbox", { name: "What helped?" })).toHaveValue("My unsaved local edit");
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).expected_revision).toBe(2);
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(patchCall).toBeDefined();
+    expect(JSON.parse(String(patchCall![1]?.body)).expected_revision).toBe(2);
   });
 
   it("does not roll back a saved local revision when stale server props arrive", async () => {

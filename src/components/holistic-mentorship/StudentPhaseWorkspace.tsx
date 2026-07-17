@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { Button } from "@/components/ui/Button";
@@ -321,8 +321,7 @@ function useNotesNavigationGuard({ beforeNavigation, guardNeeded, draftEditor, r
   }, [beforeNavigation, guardNeeded, router]);
 }
 
-function PostSessionNotesEditor(props: NotesEditorProps) {
-  const router = useRouter();
+function useNotesEditorState(props: NotesEditorProps) {
   const initialAnswers = initialNotesAnswers(props);
   const initialEditor = initialEditorState(props);
   const [answers, setAnswers] = useState<Record<number, string>>(initialAnswers);
@@ -335,41 +334,68 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false);
   const [finalWriting, setFinalWriting] = useState(false);
-  const saved = useRef(JSON.stringify(initialAnswers));
-  const queued = useRef<Record<number, string> | null>(null);
-  const inFlight = useRef<Promise<boolean> | null>(null);
-  const autosaveTimer = useRef<number | null>(null);
-  const textareas = useRef<Record<number, HTMLTextAreaElement | null>>({});
-  const hydratedServerRevision = useRef(initialNotesRevision(props));
-  const mutationRevision = useRef(initialEditor.revision);
-  const validationErrorId = useId();
-  const mutate = useNotesMutation(props, mutationRevision);
-  const apiUrl = notesApiUrl(props);
-  const canAutosave = canAutosaveNotes(props.editable, notesState);
-  const autosaveEnabled = enabledUnlessDisabled(canAutosave, finalWriting);
-  const answersChanged = JSON.stringify(answers) !== JSON.stringify(savedAnswers);
-  const localDirty = hasLocalNotesWork(answersChanged, status);
-  const localDirtyRef = useRef(localDirty);
-  const finalWritingRef = useRef(finalWriting);
-  localDirtyRef.current = localDirty;
-  finalWritingRef.current = finalWriting;
 
-  const hydrateServerNotes = useCallback((snapshot: NotesSnapshot, authoritative = false) => {
+  return {
+    initialAnswers,
+    initialRevision: initialEditor.revision,
+    answers, setAnswers, savedAnswers, setSavedAnswers, notesState, setNotesState,
+    editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
+    validationError, setValidationError, success, setSuccess, conflict, setConflict,
+    finalWriting, setFinalWriting,
+  };
+}
+
+type NotesEditorState = ReturnType<typeof useNotesEditorState>;
+
+function useNotesEditorRefs(
+  props: NotesEditorProps,
+  state: Pick<NotesEditorState, "initialAnswers" | "initialRevision">
+) {
+  const savedRef = useRef(JSON.stringify(state.initialAnswers));
+  const queuedRef = useRef<Record<number, string> | null>(null);
+  const inFlightRef = useRef<Promise<boolean> | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const textareasRef = useRef<Record<number, HTMLTextAreaElement | null>>({});
+  const hydratedServerRevisionRef = useRef(initialNotesRevision(props));
+  const mutationRevisionRef = useRef(state.initialRevision);
+  return {
+    savedRef, queuedRef, inFlightRef, autosaveTimerRef, textareasRef, hydratedServerRevisionRef,
+    mutationRevisionRef,
+  };
+}
+
+type NotesEditorRefs = ReturnType<typeof useNotesEditorRefs>;
+
+function useNotesHydration({ props, apiUrl, state, refs, localDirty }: {
+  props: NotesEditorProps;
+  apiUrl: string;
+  state: NotesEditorState;
+  refs: NotesEditorRefs;
+  localDirty: boolean;
+}) {
+  const {
+    setAnswers, setSavedAnswers, setNotesState, setStatus, setEditingSubmitted,
+    setError, setValidationError, setConflict, finalWriting, notesState, status,
+  } = state;
+  const {
+    hydratedServerRevisionRef, mutationRevisionRef, savedRef, queuedRef,
+  } = refs;
+  const hydrateServerNotes = useEffectEvent((snapshot: NotesSnapshot, authoritative = false) => {
     const serverRevision = snapshot.notes?.revision ?? snapshot.notesRevision;
-    const acceptedRevision = Math.max(hydratedServerRevision.current, mutationRevision.current);
+    const acceptedRevision = Math.max(hydratedServerRevisionRef.current, mutationRevisionRef.current);
     const decision = shouldHydrateNotes({
       serverRevision,
       acceptedRevision,
       authoritative,
-      busy: localDirtyRef.current || finalWritingRef.current,
+      busy: localDirty || finalWriting,
     });
     if (decision !== true) return decision === null;
     const nextAnswers = snapshotAnswers(props.questions, snapshot);
     const nextEditor = snapshotEditorState(snapshot);
-    hydratedServerRevision.current = serverRevision;
-    mutationRevision.current = serverRevision;
-    saved.current = JSON.stringify(nextAnswers);
-    queued.current = null;
+    hydratedServerRevisionRef.current = serverRevision;
+    mutationRevisionRef.current = serverRevision;
+    savedRef.current = JSON.stringify(nextAnswers);
+    queuedRef.current = null;
     setAnswers(nextAnswers);
     setSavedAnswers(nextAnswers);
     setNotesState(nextEditor.notesState);
@@ -379,13 +405,11 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setValidationError("");
     setConflict(false);
     return true;
-  }, [props.questions]);
-  const hydrateServerNotesRef = useRef(hydrateServerNotes);
-  hydrateServerNotesRef.current = hydrateServerNotes;
+  });
 
   useEffect(() => {
     hydrateServerNotes({ notes: props.notes, notesRevision: props.notesRevision });
-  }, [finalWriting, hydrateServerNotes, localDirty, props.notes, props.notesRevision]);
+  }, [finalWriting, localDirty, props.notes, props.notesRevision]);
 
   useEffect(() => {
     if (!notesRefreshPending()) return;
@@ -403,7 +427,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
         if (!detail || controller.signal.aborted) return;
         const selected = selectedOpenPhase(detail);
         if (!selected || selected.phaseId !== props.phaseId) return;
-        if (hydrateServerNotesRef.current({ notes: selected.notes, notesRevision: selected.notesRevision }, true)) {
+        if (hydrateServerNotes({ notes: selected.notes, notesRevision: selected.notesRevision }, true)) {
           if (selected.notes?.state === "draft") markCurrentNotesForRefresh();
           else clearCurrentNotesRefresh();
         }
@@ -416,20 +440,30 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     if (notesState === "draft" && status === "saved") markCurrentNotesForRefresh();
     if (notesState === "submitted") clearCurrentNotesRefresh();
   }, [notesState, status]);
+}
 
+function useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabled }: {
+  state: NotesEditorState;
+  refs: NotesEditorRefs;
+  mutate: ReturnType<typeof useNotesMutation>;
+  canAutosave: boolean;
+  autosaveEnabled: boolean;
+}) {
+  const { answers, status, setStatus, setError, setConflict, setSavedAnswers } = state;
+  const { queuedRef, inFlightRef, autosaveTimerRef, savedRef } = refs;
   const pump = useCallback(() => {
-    if (inFlight.current) return inFlight.current;
+    if (inFlightRef.current) return inFlightRef.current;
     const work = (async () => {
-      while (queued.current) {
-        const value = queued.current;
-        queued.current = null;
+      while (queuedRef.current) {
+        const value = queuedRef.current;
+        queuedRef.current = null;
         setStatus("saving");
         setError("");
         setConflict(false);
         try {
           await mutate("draft", value);
           markCurrentNotesForRefresh();
-          saved.current = JSON.stringify(value);
+          savedRef.current = JSON.stringify(value);
           setSavedAnswers(value);
         } catch (caught) {
           setStatus("failed");
@@ -440,36 +474,60 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
       }
       setStatus("saved");
       return true;
-    })().finally(() => { inFlight.current = null; });
-    inFlight.current = work;
+    })().finally(() => { inFlightRef.current = null; });
+    inFlightRef.current = work;
     return work;
-  }, [mutate]);
+  }, [inFlightRef, mutate, queuedRef, savedRef, setConflict, setError, setSavedAnswers, setStatus]);
 
   const cancelAutosaveTimer = useCallback(() => {
-    if (autosaveTimer.current === null) return;
-    window.clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = null;
-  }, []);
+    if (autosaveTimerRef.current === null) return;
+    window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = null;
+  }, [autosaveTimerRef]);
 
   const flushDraft = useCallback(async () => {
     cancelAutosaveTimer();
     if (!canAutosave) return true;
-    if (JSON.stringify(answers) !== saved.current || status === "failed") queued.current = answers;
-    while (queued.current || inFlight.current) {
+    if (JSON.stringify(answers) !== savedRef.current || status === "failed") queuedRef.current = answers;
+    while (queuedRef.current || inFlightRef.current) {
       if (!(await pump())) return false;
     }
     return true;
-  }, [answers, canAutosave, cancelAutosaveTimer, pump, status]);
+  }, [answers, canAutosave, cancelAutosaveTimer, inFlightRef, pump, queuedRef, savedRef, status]);
 
   useEffect(() => {
-    if (!autosaveEnabled || JSON.stringify(answers) === saved.current) return;
-    autosaveTimer.current = window.setTimeout(() => {
-      autosaveTimer.current = null;
-      queued.current = answers;
+    if (!autosaveEnabled || JSON.stringify(answers) === savedRef.current) return;
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      queuedRef.current = answers;
       void pump();
     }, 750);
     return cancelAutosaveTimer;
-  }, [answers, autosaveEnabled, cancelAutosaveTimer, pump]);
+  }, [answers, autosaveEnabled, autosaveTimerRef, cancelAutosaveTimer, pump, queuedRef, savedRef]);
+
+  return flushDraft;
+}
+
+function PostSessionNotesEditor(props: NotesEditorProps) {
+  const router = useRouter();
+  const state = useNotesEditorState(props);
+  const {
+    answers, setAnswers, savedAnswers, setSavedAnswers, notesState, setNotesState,
+    editingSubmitted, setEditingSubmitted, status, setStatus, error, setError,
+    validationError, setValidationError, success, setSuccess, conflict, setConflict,
+    finalWriting, setFinalWriting,
+  } = state;
+  const answersChanged = JSON.stringify(answers) !== JSON.stringify(savedAnswers);
+  const localDirty = hasLocalNotesWork(answersChanged, status);
+  const refs = useNotesEditorRefs(props, state);
+  const { savedRef, textareasRef, mutationRevisionRef } = refs;
+  const validationErrorId = useId();
+  const mutate = useNotesMutation(props, mutationRevisionRef);
+  const apiUrl = notesApiUrl(props);
+  const canAutosave = canAutosaveNotes(props.editable, notesState);
+  const autosaveEnabled = enabledUnlessDisabled(canAutosave, finalWriting);
+  useNotesHydration({ props, apiUrl, state, refs, localDirty });
+  const flushDraft = useNotesDraftAutosave({ state, refs, mutate, canAutosave, autosaveEnabled });
 
   const submittedEditDirty = editingSubmitted && answersChanged;
   const draftNeedsGuard = needsDraftNavigationGuard({
@@ -488,7 +546,8 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
     setConflict(false);
     return true;
-  }, [savedAnswers]);
+  }, [savedAnswers, setAnswers, setConflict, setEditingSubmitted, setError, setStatus,
+    setSuccess, setValidationError]);
   const beforeNavigation = useCallback((): boolean | Promise<boolean> => {
     if (finalWriting) return false;
     if (submittedEditDirty) return discardSubmittedChanges();
@@ -503,7 +562,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
   };
   const focusFirstBlank = () => {
     const questionId = firstBlankQuestion(props.questions, answers);
-    if (questionId !== null) textareas.current[questionId]?.focus();
+    if (questionId !== null) textareasRef.current[questionId]?.focus();
   };
   const submit = async () => {
     if (hasBlankAnswer(props.questions, answers)) {
@@ -521,7 +580,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
     try {
       await mutate("submit", answers, true);
-      saved.current = JSON.stringify(answers);
+      savedRef.current = JSON.stringify(answers);
       setSavedAnswers(answers);
       setNotesState("submitted");
       setStatus("saved");
@@ -552,7 +611,7 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
     try {
       await mutate("edit", answers, true);
-      saved.current = JSON.stringify(answers);
+      savedRef.current = JSON.stringify(answers);
       setSavedAnswers(answers);
       setEditingSubmitted(false);
       setStatus("saved");
@@ -589,50 +648,26 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
 
-  return <NotesEditorContent showInputs={shouldShowNotesInputs(canAutosave, editingSubmitted)}
-    questions={props.questions} answers={answers} status={status} error={error}
-    validationError={validationError} validationErrorId={validationErrorId} success={success}
-    canEdit={canEditSubmittedNotes(props.editable, notesState)}
-    canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)}
-    editingSubmitted={editingSubmitted} disabled={finalWriting} onEdit={beginCorrection}
-    onAnswerChange={updateAnswer}
-    onTextarea={(questionId, element) => { textareas.current[questionId] = element; }}
-    onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />;
+  return <NotesEditorContent
+    showInputs={shouldShowNotesInputs(canAutosave, editingSubmitted)}
+    editable={<EditableNotesForm questions={props.questions} answers={answers} status={status} error={error}
+      validationError={validationError} validationErrorId={validationErrorId}
+      canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)} editingSubmitted={editingSubmitted}
+      disabled={finalWriting} onAnswerChange={updateAnswer}
+      onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
+      onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />}
+    submitted={<><SubmittedNotesView questions={props.questions} answers={answers}
+      canEdit={canEditSubmittedNotes(props.editable, notesState)} onEdit={beginCorrection} />
+      {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>}
+  />;
 }
 
-function NotesEditorContent({ showInputs, questions, answers, status, error, validationError,
-  validationErrorId, success, canEdit,
-  canRetry, editingSubmitted, disabled, onEdit, onAnswerChange, onTextarea, onRetry,
-  onSaveCorrection, onCancelCorrection, onSubmit }: {
+function NotesEditorContent({ showInputs, editable, submitted }: {
   showInputs: boolean;
-  questions: NotesEditorProps["questions"];
-  answers: Record<number, string>;
-  status: NotesEditorStatus;
-  error: string;
-  validationError: string;
-  validationErrorId: string;
-  success: string;
-  canEdit: boolean;
-  canRetry: boolean;
-  editingSubmitted: boolean;
-  disabled: boolean;
-  onEdit: () => void;
-  onAnswerChange: (questionId: number, answer: string) => void;
-  onTextarea: (questionId: number, element: HTMLTextAreaElement | null) => void;
-  onRetry: () => void;
-  onSaveCorrection: () => Promise<void>;
-  onCancelCorrection: () => void;
-  onSubmit: () => Promise<void>;
+  editable: ReactNode;
+  submitted: ReactNode;
 }) {
-  if (showInputs) {
-    return <EditableNotesForm questions={questions} answers={answers} status={status} error={error}
-      validationError={validationError} validationErrorId={validationErrorId}
-      canRetry={canRetry} editingSubmitted={editingSubmitted} disabled={disabled}
-      onAnswerChange={onAnswerChange} onTextarea={onTextarea} onRetry={onRetry}
-      onSaveCorrection={onSaveCorrection} onCancelCorrection={onCancelCorrection} onSubmit={onSubmit} />;
-  }
-  return <><SubmittedNotesView questions={questions} answers={answers} canEdit={canEdit} onEdit={onEdit} />
-    {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>;
+  return showInputs ? editable : submitted;
 }
 
 function SubmittedNotesView({ questions, answers, canEdit, onEdit }: {

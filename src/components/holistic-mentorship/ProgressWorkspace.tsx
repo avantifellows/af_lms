@@ -125,16 +125,70 @@ function storedView() {
   }
 }
 
-export default function ProgressWorkspace() {
-  const [filters, setFilters] = useState(INITIAL_FILTERS);
-  const [page, setPage] = useState(1);
-  const [ready, setReady] = useState(false);
+function useProgressData(params: URLSearchParams, ready: boolean) {
   const [refresh, setRefresh] = useState(0);
   const [data, setData] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/holistic-mentorship/progress?${params}`, { signal });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Unable to load progress");
+      setData(body);
+      setError("");
+    } catch (problem) {
+      if ((problem as Error).name !== "AbortError") setError((problem as Error).message);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [params]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load, ready, refresh]);
+
+  return { data, loading, error, reload: () => setRefresh((value) => value + 1) };
+}
+
+function useProgressExport(params: URLSearchParams, academicYear: string) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const exportProgress = async () => {
+    const exportParams = new URLSearchParams(params);
+    exportParams.delete("page");
+    exportParams.set("format", "csv");
+    setExporting(true);
+    setExportError("");
+    try {
+      const response = await fetch(`/api/holistic-mentorship/progress?${exportParams}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Unable to export progress (${response.status})`);
+      }
+      const downloadUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = `holistic-progress-${academicYear}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch (problem) {
+      setExportError(problem instanceof Error ? problem.message : "Unable to export progress");
+    } finally {
+      setExporting(false);
+    }
+  };
+  return { exporting, exportError, exportProgress };
+}
+
+export default function ProgressWorkspace() {
+  const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [page, setPage] = useState(1);
+  const [ready, setReady] = useState(false);
   const [profileStudent, setProfileStudent] = useState<Row | null>(null);
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
@@ -155,27 +209,17 @@ export default function ProgressWorkspace() {
     return value;
   }, [filters, page]);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/holistic-mentorship/progress?${params}`, { signal });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to load progress");
-      setData(body);
-      setError("");
-    } catch (problem) {
-      if ((problem as Error).name !== "AbortError") setError((problem as Error).message);
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, [params]);
+  const { data, loading, error, reload } = useProgressData(params, ready);
+  const { exporting, exportError, exportProgress } = useProgressExport(params, filters.academicYear);
 
   useEffect(() => {
     const stored = storedView();
     savedScroll.current = Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
-    setFilters(stored.filters);
-    setPage(stored.page);
-    setReady(true);
+    queueMicrotask(() => {
+      setFilters(stored.filters);
+      setPage(stored.page);
+      setReady(true);
+    });
     const rememberScroll = () => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
     window.addEventListener("scroll", rememberScroll, { passive: true });
     return () => window.removeEventListener("scroll", rememberScroll);
@@ -192,13 +236,6 @@ export default function ProgressWorkspace() {
     window.scrollTo({ top: savedScroll.current });
   }, [loading, ready]);
 
-  useEffect(() => {
-    if (!ready) return;
-    const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
-  }, [load, ready, refresh]);
-
   const update = (name: ProgressFilterName): FilterChangeHandler => (event) => {
     setFilters((current) => ({ ...current, [name]: event.target.value }));
     setPage(1);
@@ -214,31 +251,6 @@ export default function ProgressWorkspace() {
     setPage(1);
   };
   const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
-  const exportProgress = async () => {
-    const exportParams = new URLSearchParams(params);
-    exportParams.delete("page");
-    exportParams.set("format", "csv");
-    setExporting(true);
-    setExportError("");
-    try {
-      const response = await fetch(`/api/holistic-mentorship/progress?${exportParams}`);
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(body?.error || `Unable to export progress (${response.status})`);
-      }
-      const downloadUrl = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = downloadUrl;
-      anchor.download = `holistic-progress-${filters.academicYear}.csv`;
-      anchor.click();
-      URL.revokeObjectURL(downloadUrl);
-    } catch (problem) {
-      setExportError(problem instanceof Error ? problem.message : "Unable to export progress");
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressCounts counts={data.counts} />
@@ -252,7 +264,7 @@ export default function ProgressWorkspace() {
         exportError={exportError}
         onChange={update}
         onAcademicYearChange={updateAcademicYear}
-        onRefresh={() => setRefresh((value) => value + 1)}
+        onRefresh={reload}
         onExport={() => void exportProgress()}
         onDirectionChange={() => setFilters((current) => ({
           ...current,

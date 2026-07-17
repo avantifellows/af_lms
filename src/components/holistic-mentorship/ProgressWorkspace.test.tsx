@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ProgressWorkspace from "./ProgressWorkspace";
@@ -116,13 +117,13 @@ describe("ProgressWorkspace", () => {
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
 
-    render(<ProgressWorkspace />);
+    render(<StrictMode><ProgressWorkspace /></StrictMode>);
 
     expect(await screen.findByText("Student One")).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+    expect(vi.mocked(fetch).mock.calls).toEqual([[
       "/api/holistic-mentorship/progress?academic_year=2026-2027&page=2&sort=progress&direction=desc&school_code=SCH001&grade=11&mentor_user_id=9&phase_id=70&progress=completed&search=Student",
-      expect.anything()
-    ));
+      expect.anything(),
+    ]]);
     expect(screen.getByLabelText("Filter by School")).toHaveValue("SCH001");
     expect(screen.getByLabelText("Sort results")).toHaveValue("progress");
     expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
