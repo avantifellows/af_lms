@@ -39,18 +39,18 @@ export async function requireStaffAdmin(
 
 // --- Schema readiness ---
 
-export interface StaffSchemaReady {
+interface StaffSchemaReady {
   ok: true;
 }
 
-export interface StaffSchemaUnavailable {
+interface StaffSchemaUnavailable {
   ok: false;
   status: 503;
   error: "Staff management schema unavailable";
   details: string[];
 }
 
-export type StaffSchemaStatus = StaffSchemaReady | StaffSchemaUnavailable;
+type StaffSchemaStatus = StaffSchemaReady | StaffSchemaUnavailable;
 
 export const STAFF_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "staff", column: "id" },
@@ -104,7 +104,7 @@ async function loadStaffSchemaStatus(): Promise<StaffSchemaStatus> {
 
 const staffSchemaChecker = makeSchemaChecker(loadStaffSchemaStatus);
 
-export function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
+function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
   return staffSchemaChecker.check();
 }
 

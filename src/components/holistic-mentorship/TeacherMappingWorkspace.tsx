@@ -355,17 +355,44 @@ function MappingRow({ student, view, canEdit, mine, selected, busy, schoolCode, 
   onRemove: (student: Student) => Promise<void>;
 }) {
   return <tr>
-    {view === "assign" && canEdit && <td className="px-3 py-3">
-      <input type="checkbox" aria-label={`Select ${student.name}`} checked={selected} disabled={mine}
-        onChange={() => onToggle(student.studentId)} />
-    </td>}
+    <MappingSelectCell view={view} canEdit={canEdit} student={student} selected={selected}
+      mine={mine} onToggle={onToggle} />
     <td className="px-3 py-3 font-medium text-text-primary">
       {student.name}
       {student.externalStudentId && <span className="block text-xs font-normal text-text-muted">{student.externalStudentId}</span>}
     </td>
     <td className="px-3 py-3">{student.grade}</td>
     <td className="px-3 py-3">{mine ? "You" : student.ownership?.mentorName ?? "Unassigned"}</td>
-    {view === "mentees" && <td className="px-3 py-3 text-right">
+    <MappingActionsCell view={view} student={student} canEdit={canEdit} busy={busy}
+      schoolCode={schoolCode} onRemove={onRemove} />
+  </tr>;
+}
+
+function MappingSelectCell({ view, canEdit, student, selected, mine, onToggle }: {
+  view: "assign" | "mentees";
+  canEdit: boolean;
+  student: Student;
+  selected: boolean;
+  mine: boolean;
+  onToggle: (studentId: number) => void;
+}) {
+  if (view !== "assign" || !canEdit) return null;
+  return <td className="px-3 py-3">
+    <input type="checkbox" aria-label={`Select ${student.name}`} checked={selected} disabled={mine}
+      onChange={() => onToggle(student.studentId)} />
+  </td>;
+}
+
+function MappingActionsCell({ view, student, canEdit, busy, schoolCode, onRemove }: {
+  view: "assign" | "mentees";
+  student: Student;
+  canEdit: boolean;
+  busy: boolean;
+  schoolCode: string;
+  onRemove: (student: Student) => Promise<void>;
+}) {
+  if (view !== "mentees") return null;
+  return <td className="px-3 py-3 text-right">
       <div className="flex justify-end gap-2">
         {student.activePhaseId && <Link
           href={`/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${new URLSearchParams({ school_code: schoolCode, academic_year: CURRENT_ACADEMIC_YEAR })}`}
@@ -380,8 +407,7 @@ function MappingRow({ student, view, canEdit, mine, selected, busy, schoolCode, 
           </button>
         )}
       </div>
-    </td>}
-  </tr>;
+    </td>;
 }
 
 function AssignSelectedButton({ view, selectedCount, busy, onAssign }: {

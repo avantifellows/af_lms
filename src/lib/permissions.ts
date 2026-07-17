@@ -173,7 +173,7 @@ export interface ProgramPermissionContext {
   hasCoEOrNodal: boolean;
 }
 
-export interface SchoolPasscode {
+interface SchoolPasscode {
   schoolCode: string;
   passcode: string; // 8 digits
 }

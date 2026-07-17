@@ -18,10 +18,14 @@ import {
   hasMultipleSchools,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
+  type FeatureAccessResult,
+  type ProgramPermissionContext,
+  type UserPermission,
 } from "@/lib/permissions";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
-import { type Grade } from "@/components/StudentTable";
+import { type Grade, type Student } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
+import { type DataIssue } from "@/lib/school-student-list-data-issues";
 import PageHeader from "@/components/PageHeader";
 import SchoolTabs from "@/components/SchoolTabs";
 import { Badge, Card } from "@/components/ui";
@@ -30,10 +34,14 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
+import { buildProgramStats } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
-import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
+import {
+  requireHolisticMentorshipAccess,
+  type HolisticMentorshipSession,
+} from "@/lib/holistic-mentorship";
+import { type ReactNode } from "react";
 
 interface School {
   id: string;
@@ -264,6 +272,311 @@ function AcademicMentorshipSchoolTab({
   );
 }
 
+function SchoolAccessMessage({
+  title,
+  message,
+  href,
+}: {
+  title: string;
+  message: string;
+  href: string;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <Card elevation="xl" className="max-w-md p-8 text-center">
+        <h1 className="mb-2 text-xl font-bold text-red-600">{title}</h1>
+        <p className="mb-4 text-gray-600">{message}</p>
+        <Link href={href} className="text-accent hover:text-accent-hover">
+          {href === "/" ? "Return to login" : "Return to dashboard"}
+        </Link>
+      </Card>
+    </div>
+  );
+}
+
+function EnrollmentSchoolTab({
+  students,
+  dataIssues,
+  studentsAccess,
+  programContext,
+  isPasscodeUser,
+  isAdmin,
+  grades,
+  batches,
+  nvsStreams,
+  schoolCode,
+}: {
+  students: Student[];
+  dataIssues: DataIssue[];
+  studentsAccess: FeatureAccessResult;
+  programContext: ProgramPermissionContext;
+  isPasscodeUser: boolean;
+  isAdmin: boolean;
+  grades: Grade[];
+  batches: Batch[];
+  nvsStreams: string[];
+  schoolCode: string;
+}) {
+  const activeStudents = students.filter((student) => student.status !== "dropout");
+  const dropoutStudents = students.filter((student) => student.status === "dropout");
+  const programsWithStudents = new Set<number>();
+  for (const student of activeStudents) {
+    if (student.program_id !== null) programsWithStudents.add(Number(student.program_id));
+  }
+  const candidatePrograms = isPasscodeUser || isAdmin
+    ? PROGRAM_IDS_ORDERED
+    : programContext.programIds;
+  const programStatsList = candidatePrograms
+    .filter((id) => programsWithStudents.has(id))
+    .map((id) => buildProgramStats(activeStudents, id));
+
+  return (
+    <div>
+      {dataIssues.length > 0 && (
+        <div className="mb-4">
+          <details className="rounded-lg border border-amber-200 bg-amber-50">
+            <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100">
+              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
+            </summary>
+            <div className="space-y-2 px-4 pb-3">
+              {dataIssues.map((issue) => (
+                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
+                  <span className="mt-0.5 h-4 w-4 shrink-0 text-amber-500">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </span>
+                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
+      <EnrollmentTabContent
+        programs={programStatsList}
+        activeStudents={activeStudents}
+        dropoutStudents={dropoutStudents}
+        canEdit={studentsAccess.canEdit}
+        userProgramIds={isPasscodeUser ? null : programContext.programIds}
+        isPasscodeUser={isPasscodeUser}
+        isAdmin={isAdmin}
+        grades={grades}
+        batches={batches}
+        nvsStreams={nvsStreams}
+        schoolCode={schoolCode}
+      />
+    </div>
+  );
+}
+
+function academicMentorshipManageHref(
+  permission: UserPermission | null,
+  schoolCode: string
+): string | undefined {
+  if (permission?.role !== "admin" && permission?.role !== "program_admin") return undefined;
+  return `/admin/academic-mentorship?${new URLSearchParams({
+    school_code: schoolCode,
+    academic_year: CURRENT_ACADEMIC_YEAR,
+  }).toString()}`;
+}
+
+async function loadAcademicTeacherMentees(
+  permission: UserPermission | null,
+  canView: boolean,
+  schoolId: number
+): Promise<AcademicMentorshipTeacherMentee[] | undefined> {
+  if (!canView || permission?.role !== "teacher") return undefined;
+  const mentorUserId = await getAcademicMentorshipActorUserId(permission.email, permission);
+  if (mentorUserId === null) return undefined;
+  return listAcademicMentorshipTeacherMentees({
+    schoolId,
+    academicYear: CURRENT_ACADEMIC_YEAR,
+    mentorUserId,
+  });
+}
+
+async function loadAcademicMentorshipGroups(
+  permission: UserPermission | null,
+  canView: boolean,
+  schoolId: number
+): Promise<AcademicMentorshipMappingGroup[] | undefined> {
+  if (!canView || permission?.role === "teacher") return undefined;
+  return listAcademicMentorshipMappings({
+    schoolId,
+    academicYear: CURRENT_ACADEMIC_YEAR,
+    includeHistory: false,
+  });
+}
+
+async function buildAcademicMentorshipContent({
+  permission,
+  canView,
+  school,
+}: {
+  permission: UserPermission | null;
+  canView: boolean;
+  school: School;
+}): Promise<ReactNode> {
+  const schoolId = Number(school.id);
+  const [mentees, groups] = await Promise.all([
+    loadAcademicTeacherMentees(permission, canView, schoolId),
+    loadAcademicMentorshipGroups(permission, canView, schoolId),
+  ]);
+
+  return (
+    <AcademicMentorshipSchoolTab
+      mode={permission?.role === "teacher" ? "teacher" : "overview"}
+      mentees={mentees}
+      groups={groups}
+      manageHref={academicMentorshipManageHref(permission, school.code)}
+    />
+  );
+}
+
+type SchoolTab = { id: string; label: string; content: ReactNode };
+
+async function buildHolisticMentorshipContent({
+  session,
+  permission,
+  schoolCode,
+  access,
+}: {
+  session: HolisticMentorshipSession;
+  permission: UserPermission | null;
+  schoolCode: string;
+  access: FeatureAccessResult;
+}): Promise<ReactNode | null> {
+  if (!access.canView) return null;
+  const isTeacher = permission?.role === "teacher";
+  const holisticAccess = await requireHolisticMentorshipAccess(
+    session,
+    isTeacher ? "roster_view" : "program_read",
+    { schoolCode }
+  );
+  if (!holisticAccess.ok) return null;
+  if (isTeacher) {
+    return (
+      <HolisticMentorshipWorkspace
+        mode="teacher"
+        schoolCode={schoolCode}
+        canEdit={holisticAccess.canEdit}
+      />
+    );
+  }
+  return (
+    <section className="space-y-4">
+      <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
+        Holistic Mentorship
+      </h2>
+      <Link
+        href="/admin/holistic-mentorship"
+        className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-semibold text-text-on-accent hover:bg-accent-hover"
+      >
+        Open Program workspace
+      </Link>
+    </section>
+  );
+}
+
+async function buildSchoolTabs({
+  session,
+  permission,
+  school,
+  enrollmentContent,
+  academicMentorshipContent,
+  curriculumAccess,
+  performanceAccess,
+  mentorshipAccess,
+  holisticMentorshipAccess,
+  visitsAccess,
+  quizSessionsAccess,
+}: {
+  session: HolisticMentorshipSession;
+  permission: UserPermission | null;
+  school: School;
+  enrollmentContent: ReactNode;
+  academicMentorshipContent: ReactNode;
+  curriculumAccess: FeatureAccessResult;
+  performanceAccess: FeatureAccessResult;
+  mentorshipAccess: FeatureAccessResult;
+  holisticMentorshipAccess: FeatureAccessResult;
+  visitsAccess: FeatureAccessResult;
+  quizSessionsAccess: FeatureAccessResult;
+}): Promise<SchoolTab[]> {
+  const holisticContent = await buildHolisticMentorshipContent({
+    session,
+    permission,
+    schoolCode: school.code,
+    access: holisticMentorshipAccess,
+  });
+  const tabs: SchoolTab[] = [
+    { id: "enrollment", label: "Enrollment", content: enrollmentContent },
+  ];
+  if (curriculumAccess.canView) {
+    tabs.push({
+      id: "curriculum",
+      label: "Curriculum",
+      content: <CurriculumTab schoolCode={school.code} schoolName={school.name} canEdit={curriculumAccess.canEdit} />,
+    });
+  }
+  if (performanceAccess.canView) {
+    tabs.push({
+      id: "performance",
+      label: "Performance",
+      content: <PerformanceTab schoolUdise={school.udise_code || school.code} />,
+    });
+  }
+  if (quizSessionsAccess.canView) {
+    tabs.push({
+      id: "quiz_sessions",
+      label: "Quiz Sessions",
+      content: <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />,
+    });
+  }
+  if (mentorshipAccess.canView) {
+    tabs.push({ id: "mentorship", label: "Academic Mentorship", content: academicMentorshipContent });
+  }
+  if (holisticContent) {
+    tabs.push({ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticContent });
+  }
+  if (visitsAccess.canView) {
+    tabs.push({
+      id: "visits",
+      label: "School Visits",
+      content: <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />,
+    });
+  }
+  return tabs;
+}
+
+function SchoolPageLayout({
+  school,
+  tabs,
+  backHref,
+  userEmail,
+}: {
+  school: School;
+  tabs: SchoolTab[];
+  backHref?: string;
+  userEmail?: string;
+}) {
+  const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
+  return (
+    <div className="min-h-screen bg-bg">
+      <PageHeader
+        title={school.name}
+        subtitle={subtitle}
+        backHref={backHref}
+        userEmail={userEmail}
+      />
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <SchoolTabs tabs={tabs} defaultTab="enrollment" />
+      </main>
+    </div>
+  );
+}
+
 export default async function SchoolPage({ params }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
@@ -282,25 +595,14 @@ export default async function SchoolPage({ params }: PageProps) {
   const isPasscodeUser = session.isPasscodeUser;
   const passcodeSchoolCode = session.schoolCode;
 
-  // For passcode users, only allow access to their school
-  if (isPasscodeUser) {
-    if (passcodeSchoolCode !== school.code) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <Card elevation="xl" className="p-8 max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">
-              Access Denied
-            </h1>
-            <p className="text-gray-600 mb-4">
-              Your passcode only grants access to a different school.
-            </p>
-            <Link href="/" className="text-accent hover:text-accent-hover">
-              Return to login
-            </Link>
-          </Card>
-        </div>
-      );
-    }
+  if (isPasscodeUser && passcodeSchoolCode !== school.code) {
+    return (
+      <SchoolAccessMessage
+        title="Access Denied"
+        message="Your passcode only grants access to a different school."
+        href="/"
+      />
+    );
   }
 
   // Single DB call for permission — reuse everywhere
@@ -308,49 +610,16 @@ export default async function SchoolPage({ params }: PageProps) {
     ? await getResolvedPermission(session.user.email)
     : null;
 
-  // For Google users, check school access
-  if (!isPasscodeUser) {
-    if (!permission) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <Card elevation="xl" className="p-8 max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">
-              Access Denied
-            </h1>
-            <p className="text-gray-600 mb-4">
-              You don&apos;t have permission to view this school.
-            </p>
-            <Link
-              href="/dashboard"
-              className="text-accent hover:text-accent-hover"
-            >
-              Return to dashboard
-            </Link>
-          </Card>
-        </div>
-      );
-    }
-
-    if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <Card elevation="xl" className="p-8 max-w-md text-center">
-            <h1 className="text-xl font-bold text-red-600 mb-2">
-              Access Denied
-            </h1>
-            <p className="text-gray-600 mb-4">
-              You don&apos;t have permission to view this school.
-            </p>
-            <Link
-              href="/dashboard"
-              className="text-accent hover:text-accent-hover"
-            >
-              Return to dashboard
-            </Link>
-          </Card>
-        </div>
-      );
-    }
+  if (!isPasscodeUser && (
+    !permission || !canAccessSchoolSync(permission, school.code, school.region || undefined)
+  )) {
+    return (
+      <SchoolAccessMessage
+        title="Access Denied"
+        message="You don't have permission to view this school."
+        href="/dashboard"
+      />
+    );
   }
 
   if (permission?.role === "holistic_mentorship_admin") {
@@ -362,22 +631,11 @@ export default async function SchoolPage({ params }: PageProps) {
 
   if (!isPasscodeUser && !programContext.hasAccess) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card elevation="xl" className="p-8 max-w-md text-center">
-          <h1 className="text-xl font-bold text-red-600 mb-2">
-            No Program Access
-          </h1>
-          <p className="text-gray-600 mb-4">
-            You are not assigned to any programs. Please contact an administrator.
-          </p>
-          <Link
-            href="/dashboard"
-            className="text-accent hover:text-accent-hover"
-          >
-            Return to dashboard
-          </Link>
-        </Card>
-      </div>
+      <SchoolAccessMessage
+        title="No Program Access"
+        message="You are not assigned to any programs. Please contact an administrator."
+        href="/dashboard"
+      />
     );
   }
 
@@ -391,16 +649,6 @@ export default async function SchoolPage({ params }: PageProps) {
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
 
-  const holisticAccess = holisticMentorshipAccess.canView
-    ? permission?.role === "teacher"
-      ? await requireHolisticMentorshipAccess(session, "roster_view", {
-          schoolCode: school.code,
-        })
-      : await requireHolisticMentorshipAccess(session, "program_read", {
-          schoolCode: school.code,
-        })
-    : null;
-
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
   // shared with the Performance deep-dive so both surfaces always agree.
@@ -411,190 +659,51 @@ export default async function SchoolPage({ params }: PageProps) {
       getBatchesWithMetadata(),
     ]);
 
-  // Separate active and dropout students (all students visible; editability is per-row)
-  const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
-  const dropoutStudents = dedupedStudents.filter((s) => s.status === "dropout");
-
-  // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
-
-  // Programs that have at least one active student at this school
-  const programsWithStudents = new Set(
-    activeStudents
-      .map((s) => (s.program_id != null ? Number(s.program_id) : null))
-      .filter((v): v is number => v != null)
-  );
-
-  // Programs the user is allowed to see for the enrollment cards.
-  // Admins + passcode users see every program present at the school; everyone
-  // else sees the intersection of their effective programs with what's here.
-  // Effective = explicit program_ids ∪ seat-derived (programContext.programIds),
-  // so a teacher seated at a centre sees that centre's program even when their
-  // explicit program_ids is empty.
   const isAdmin = permission?.role === "admin";
-  const visibleProgramIds = (isPasscodeUser || isAdmin
-    ? PROGRAM_IDS_ORDERED
-    : programContext.programIds
-  ).filter((id) => programsWithStudents.has(id));
-
-  const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
-    buildProgramStats(activeStudents, id)
-  );
-
-  // Check if user has access to multiple schools (to show/hide back arrow)
   const multipleSchools = !isPasscodeUser && hasMultipleSchools(permission);
-
-  const subtitle = `${school.district}, ${school.state} | Code: ${school.code}${school.udise_code ? ` | UDISE: ${school.udise_code}` : ""}`;
-
-  // Determine back link based on role
   const backHref = multipleSchools ? "/dashboard" : undefined;
-
-  // Build tabs
   const enrollmentContent = (
-    <div>
-      {/* Data Issues Banner */}
-      {dataIssues.length > 0 && (
-        <div className="mb-4">
-          <details className="bg-amber-50 border border-amber-200 rounded-lg">
-            <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-amber-800 hover:bg-amber-100 rounded-lg transition-colors">
-              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
-            </summary>
-            <div className="px-4 pb-3 space-y-2">
-              {dataIssues.map((issue) => (
-                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
-                  <span className="shrink-0 mt-0.5 w-4 h-4 text-amber-500">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                    </svg>
-                  </span>
-                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-      )}
-
-      {/* Per-program enrollment stats + student table (both filtered by selected program) */}
-      <EnrollmentTabContent
-        programs={programStatsList}
-        activeStudents={activeStudents}
-        dropoutStudents={dropoutStudents}
-        canEdit={studentsAccess.canEdit}
-        userProgramIds={isPasscodeUser ? null : programContext.programIds}
-        isPasscodeUser={isPasscodeUser ?? false}
-        isAdmin={isAdmin}
-        grades={grades}
-        batches={batches}
-        nvsStreams={nvsStreams}
-        schoolCode={school.code}
-      />
-    </div>
-  );
-
-  const performanceContent = (
-    <PerformanceTab schoolUdise={school.udise_code || school.code} />
-  );
-
-  const schoolId = Number(school.id);
-  const isAcademicMentorshipManager =
-    permission?.role === "admin" || permission?.role === "program_admin";
-  const mentorshipManageHref = isAcademicMentorshipManager
-    ? `/admin/academic-mentorship?${new URLSearchParams({
-        school_code: school.code,
-        academic_year: CURRENT_ACADEMIC_YEAR,
-      }).toString()}`
-    : undefined;
-  const teacherMentorUserId =
-    mentorshipAccess.canView && permission?.role === "teacher"
-      ? await getAcademicMentorshipActorUserId(permission.email, permission)
-      : null;
-  const teacherMentees =
-    teacherMentorUserId !== null
-      ? await listAcademicMentorshipTeacherMentees({
-          schoolId,
-          academicYear: CURRENT_ACADEMIC_YEAR,
-          mentorUserId: teacherMentorUserId,
-        })
-      : null;
-  const mentorshipGroups =
-    mentorshipAccess.canView && permission?.role !== "teacher"
-      ? await listAcademicMentorshipMappings({
-          schoolId,
-          academicYear: CURRENT_ACADEMIC_YEAR,
-          includeHistory: false,
-        })
-      : null;
-  const mentorshipContent = (
-    <AcademicMentorshipSchoolTab
-      mode={permission?.role === "teacher" ? "teacher" : "overview"}
-      mentees={teacherMentees ?? undefined}
-      groups={mentorshipGroups ?? undefined}
-      manageHref={mentorshipManageHref}
-    />
-  );
-  const holisticMentorshipContent =
-    holisticAccess?.ok && permission?.role === "teacher" ? (
-      <HolisticMentorshipWorkspace
-        mode="teacher"
-        schoolCode={school.code}
-        canEdit={holisticAccess.canEdit}
-      />
-    ) : holisticAccess?.ok ? (
-      <section className="space-y-4">
-        <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
-          Holistic Mentorship
-        </h2>
-        <Link
-          href="/admin/holistic-mentorship"
-          className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-semibold text-text-on-accent hover:bg-accent-hover"
-        >
-          Open Program workspace
-        </Link>
-      </section>
-    ) : null;
-
-  const visitsContent = (
-    <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />
-  );
-
-  const quizSessionsContent = (
-    <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />
-  );
-
-  const curriculumContent = (
-    <CurriculumTab
+    <EnrollmentSchoolTab
+      students={dedupedStudents}
+      dataIssues={dataIssues}
+      studentsAccess={studentsAccess}
+      programContext={programContext}
+      isPasscodeUser={Boolean(isPasscodeUser)}
+      isAdmin={isAdmin}
+      grades={grades}
+      batches={batches}
+      nvsStreams={nvsStreams}
       schoolCode={school.code}
-      schoolName={school.name}
-      canEdit={curriculumAccess.canEdit}
     />
   );
-
-  // Tab visibility driven by feature permission matrix
-  const tabs = [
-    { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-    ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
-    ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
-    ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Academic Mentorship", content: mentorshipContent }] : []),
-    ...(holisticMentorshipContent
-      ? [{ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticMentorshipContent }]
-      : []),
-    ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
-  ];
+  const academicMentorshipContent = await buildAcademicMentorshipContent({
+    permission,
+    canView: mentorshipAccess.canView,
+    school,
+  });
+  const tabs = await buildSchoolTabs({
+    session,
+    permission,
+    school,
+    enrollmentContent,
+    academicMentorshipContent,
+    curriculumAccess,
+    performanceAccess,
+    mentorshipAccess,
+    holisticMentorshipAccess,
+    visitsAccess,
+    quizSessionsAccess,
+  });
 
   return (
-    <div className="min-h-screen bg-bg">
-      <PageHeader
-        title={school.name}
-        subtitle={subtitle}
-        backHref={backHref}
-        userEmail={isPasscodeUser ? `School ${passcodeSchoolCode}` : session.user?.email || undefined}
-      />
-
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <SchoolTabs tabs={tabs} defaultTab="enrollment" />
-      </main>
-    </div>
+    <SchoolPageLayout
+      school={school}
+      tabs={tabs}
+      backHref={backHref}
+      userEmail={isPasscodeUser
+        ? `School ${passcodeSchoolCode}`
+        : session.user?.email || undefined}
+    />
   );
 }

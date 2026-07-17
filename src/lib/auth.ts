@@ -16,7 +16,7 @@ export const DEV_LOGIN_PERSONAS = {
   read_only: { email: "e2e-holistic-read-only@test.local", name: "Dev Read-Only" },
 } as const;
 
-export type DevPersonaKey = keyof typeof DEV_LOGIN_PERSONAS;
+type DevPersonaKey = keyof typeof DEV_LOGIN_PERSONAS;
 
 const providers: Provider[] = [
   GoogleProvider({
