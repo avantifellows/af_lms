@@ -66,7 +66,7 @@ describe("GET NVS student export", () => {
     vi.mocked(getSchoolRoster).mockResolvedValue({
       issues: [],
       students: [
-        student(),
+        student({ date_of_birth: new Date("2010-01-02T00:00:00Z") }),
         student({ group_user_id: "2", student_pk_id: "101", first_name: "Meera", grade: 12, stream: "medical" }),
         student({
           group_user_id: "3",

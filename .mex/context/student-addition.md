@@ -144,6 +144,8 @@ Passed browser checks covered:
 
 NDA batch metadata is an operational prerequisite. The isolated QA database used one Grade 11 and one Grade 12 NDA batch fixture because the shared local snapshot did not yet contain the planned NDA batches.
 
+On 2026-07-17, the follow-up feedback was browser-tested again with Playwright against a freshly recreated E2E database. Combined Grade/Stream controls, the two-sheet NVS download, final APAAR/Student ID columns, leading-zero input blocking, and absence of page errors passed. The first run exposed that live Postgres can return DOB as a `Date` rather than a string in the export path; the route was fixed to support both representations and the browser check then passed.
+
 ## Batch Mapping
 Initial prod check showed `batch.metadata.grade + batch.metadata.stream` was ambiguous for NVS because both old `EnableStudents_11_25` / `EnableStudents_12_25` batches and new Lakshya `2027` / `2028` batches carried the same metadata. The team cleared conflicting metadata on the old batches; prod recheck on 2026-06-30 showed exactly one matching NVS batch for each v1 Grade x Primary Stream pair.
 

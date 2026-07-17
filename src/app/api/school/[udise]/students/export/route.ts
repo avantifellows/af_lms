@@ -52,7 +52,12 @@ function displayStream(value: string | null) {
 function rowValues(student: Student) {
   const { category, cwsn } = categoryAndCwsn(student);
   const board = student.g10_board?.includes("CENTRAL BOARD") ? "CBSE" : student.g10_board ?? "";
-  const dob = student.date_of_birth ? new Date(`${student.date_of_birth.slice(0, 10)}T00:00:00Z`) : "";
+  const rawDob: unknown = student.date_of_birth;
+  const dob = rawDob instanceof Date
+    ? rawDob
+    : typeof rawDob === "string" && rawDob
+      ? new Date(`${rawDob.slice(0, 10)}T00:00:00Z`)
+      : "";
   return [
     student.grade ?? "",
     [student.first_name, student.last_name].filter(Boolean).join(" "),
