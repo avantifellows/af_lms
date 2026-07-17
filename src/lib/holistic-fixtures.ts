@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
 import { PROGRAM_IDS } from "./constants";
@@ -286,13 +287,13 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
     [planId, holisticAdminUserId]
   );
 
+  const syntheticPrompt = "Synthetic prompt only.";
   const configurationResult = await client.query<{ id: number | string }>(
     `/* fixture_configuration */
      WITH prompt AS (
        INSERT INTO holistic_mentorship_prompt_versions
          (version, template_text, template_hash, inserted_at, updated_at)
-       VALUES ('synthetic-e2e-v1', 'Synthetic prompt only.',
-         'fca93cce16e022db0c7fd9586ba31f10a7b2c2aa868f98e55d3e1a7b55f79e15', now(), now())
+       VALUES ('synthetic-e2e-v1', $1, $2, now(), now())
        ON CONFLICT (version) DO UPDATE SET updated_at = holistic_mentorship_prompt_versions.updated_at
        RETURNING id
      ), created AS (
@@ -303,7 +304,8 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
        ON CONFLICT (prompt_version_id, model_id) DO NOTHING RETURNING id
      )
      SELECT id FROM created UNION ALL
-     SELECT id FROM holistic_mentorship_prompt_configurations WHERE state = 'active' LIMIT 1`
+     SELECT id FROM holistic_mentorship_prompt_configurations WHERE state = 'active' LIMIT 1`,
+    [syntheticPrompt, createHash("sha256").update(syntheticPrompt).digest("hex")]
   );
   const configurationId = Number(configurationResult.rows[0].id);
 
