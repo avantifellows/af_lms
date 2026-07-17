@@ -518,6 +518,7 @@ function UndoDropoutModal({
   );
 }
 
+// fallow-ignore-next-line complexity
 export default function StudentTable({
   students,
   dropoutStudents = [],

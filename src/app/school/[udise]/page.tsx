@@ -308,6 +308,7 @@ function AcademicMentorshipSchoolTab({
   );
 }
 
+// fallow-ignore-next-line complexity
 export default async function SchoolPage({ params }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;

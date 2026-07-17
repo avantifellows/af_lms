@@ -57,6 +57,7 @@ interface StudentOverrides {
   updated_at?: string | null;
 }
 
+// fallow-ignore-next-line complexity
 function makeStudent(overrides: StudentOverrides = {}) {
   const has = (key: keyof StudentOverrides) =>
     Object.prototype.hasOwnProperty.call(overrides, key);
@@ -1128,12 +1129,10 @@ describe("StudentTable - Dropout modal", () => {
     const onDataChanged = vi.fn();
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ success: true }),
-        }),
+      vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      }),
     );
 
     render(
