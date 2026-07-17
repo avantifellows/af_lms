@@ -2,7 +2,7 @@
 
 import { ArrowRight, Search, UserMinus, UserPlus } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
@@ -112,10 +112,8 @@ export default function TeacherMappingWorkspace({
   view: "assign" | "mentees";
   canEdit?: boolean;
 }) {
-  const initial = useMemo(() => savedFilters(schoolCode), [schoolCode]);
-  const [search, setSearch] = useState(initial.search);
-  const [grade, setGrade] = useState<SavedFilters["grade"]>(initial.grade);
-  const [assignment, setAssignment] = useState<SavedFilters["assignment"]>(initial.assignment);
+  const [filters, setFilters] = useState(() => savedFilters(schoolCode));
+  const { search, grade, assignment } = filters;
   const [students, setStudents] = useState<Student[]>([]);
   const [actorUserId, setActorUserId] = useState<number | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
@@ -182,6 +180,11 @@ export default function TeacherMappingWorkspace({
     );
   };
 
+  const changeFilter = (updates: Partial<SavedFilters>) => {
+    setSelected([]);
+    setFilters((current) => ({ ...current, ...updates }));
+  };
+
   const assign = async () => {
     const choices = visible.filter((student) => selected.includes(student.studentId));
     const reassigned = choices.filter(
@@ -237,9 +240,9 @@ export default function TeacherMappingWorkspace({
         grade={grade}
         assignment={assignment}
         view={view}
-        onSearchChange={(value) => { setSelected([]); setSearch(value); }}
-        onGradeChange={(value) => { setSelected([]); setGrade(value); }}
-        onAssignmentChange={(value) => { setSelected([]); setAssignment(value); }}
+        onSearchChange={(search) => changeFilter({ search })}
+        onGradeChange={(grade) => changeFilter({ grade })}
+        onAssignmentChange={(assignment) => changeFilter({ assignment })}
       />
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
       {success && <p role="status" className="text-sm text-success">{success}</p>}
@@ -255,9 +258,13 @@ export default function TeacherMappingWorkspace({
         onToggle={toggle}
         onRemove={remove}
       />
-      {canEdit && (
-        <AssignSelectedButton view={view} selectedCount={selected.length} busy={busy} onAssign={assign} />
-      )}
+      <AssignSelectedButton
+        view={view}
+        canEdit={canEdit}
+        selectedCount={selected.length}
+        busy={busy}
+        onAssign={assign}
+      />
     </div>
   );
 }
@@ -406,13 +413,14 @@ function MappingActionsCell({ view, student, canEdit, busy, schoolCode, onRemove
     </td>;
 }
 
-function AssignSelectedButton({ view, selectedCount, busy, onAssign }: {
+function AssignSelectedButton({ view, canEdit, selectedCount, busy, onAssign }: {
   view: "assign" | "mentees";
+  canEdit: boolean;
   selectedCount: number;
   busy: boolean;
   onAssign: () => Promise<void>;
 }) {
-  if (view !== "assign" || selectedCount === 0) return null;
+  if (!canEdit || view !== "assign" || selectedCount === 0) return null;
   return <div className="flex justify-end">
     <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-4 font-semibold text-text-on-accent hover:bg-accent-hover disabled:opacity-50"
       disabled={busy} onClick={() => void onAssign()}>
