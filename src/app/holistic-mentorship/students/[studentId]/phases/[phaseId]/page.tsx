@@ -46,6 +46,7 @@ export default async function StudentPhasePage({
     academicYear,
     actorUserId: access.actorUserId,
     role: access.permission.role,
+    canEdit: access.canEdit,
   });
   if (!detail) notFound();
 

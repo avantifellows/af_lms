@@ -28,6 +28,7 @@ describe("Holistic Student Phase API", () => {
       ok: true,
       actorUserId: 9,
       permission: { role: "teacher" },
+      canEdit: false,
       school: { id: 4 },
     });
     mockDetail.mockResolvedValue({ student: { id: 41 }, selectedPhase: { phaseId: 73 } });
@@ -50,6 +51,7 @@ describe("Holistic Student Phase API", () => {
       academicYear: "2026-2027",
       actorUserId: 9,
       role: "teacher",
+      canEdit: false,
     });
   });
 

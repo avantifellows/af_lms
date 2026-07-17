@@ -40,6 +40,7 @@ export async function GET(
     academicYear,
     actorUserId: access.actorUserId,
     role: access.permission.role,
+    canEdit: access.canEdit,
   });
   return detail
     ? NextResponse.json(detail)

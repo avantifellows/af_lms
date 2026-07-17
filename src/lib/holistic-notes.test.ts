@@ -11,7 +11,31 @@ const mockQuery = vi.mocked(query);
 describe("Holistic Post-Session Notes", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("does not create Notes for an empty initial draft", async () => {
+  it("validates the Phase before treating an empty initial draft as a no-op", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "locked" }] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await expect(saveHolisticNotes({
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [{ questionId: 91, answer: "   " }],
+    })).resolves.toEqual({ ok: false, status: 422, error: "Phase is not Open" });
+
+    expect(client.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not create Notes for a valid empty initial draft", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
     await expect(saveHolisticNotes({
       mode: "draft",
       studentId: 41,
@@ -23,7 +47,31 @@ describe("Holistic Post-Session Notes", () => {
       answers: [{ questionId: 91, answer: "   " }],
     })).resolves.toEqual({ ok: true, changed: false, revision: 0 });
 
-    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(client.query).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows applicable prior-year Grade 11 Notes for a current Grade 12 Mentee", async () => {
+    const client = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "91" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "501", revision: 1 }] })
+      .mockResolvedValue({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await saveHolisticNotes({
+      mode: "draft",
+      studentId: 41,
+      phaseId: 70,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [{ questionId: 91, answer: "Finish earlier work" }],
+    });
+
+    expect(client.query.mock.calls[0][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
+    expect(String(client.query.mock.calls[0][0])).toContain("phase_grade.number = current_grade.number");
   });
 
   it("creates and freezes the first non-empty draft atomically", async () => {

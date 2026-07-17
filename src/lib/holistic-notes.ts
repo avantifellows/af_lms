@@ -20,9 +20,8 @@ export type HolisticNotesResult =
   | { ok: false; status: 403 | 404 | 409 | 422; error: string; currentRevision?: number };
 
 export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNotesResult> {
-  if (input.mode === "draft" && input.expectedRevision === 0 && !input.answers.some(({ answer }) => answer.trim())) {
-    return { ok: true, changed: false, revision: 0 };
-  }
+  const academicYearStart = Number(input.academicYear.slice(0, 4));
+  const priorAcademicYear = `${academicYearStart - 1}-${academicYearStart}`;
 
   try {
     return await withTransaction(async (client) => {
@@ -35,14 +34,36 @@ export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNote
       `SELECT mapping.id AS mapping_id, mapping.mentor_user_id,
               phase.revision AS phase_revision, phase.state AS phase_state
        FROM holistic_mentorship_mentor_mentee_mappings mapping
+       JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
+       JOIN "user" student_user ON student_user.id = st.user_id
+       JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
+         AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = $5
+         AND grade_enrollment.is_current IS TRUE
+       JOIN grade current_grade ON current_grade.id = grade_enrollment.group_id
+         AND current_grade.number IN (11, 12)
        JOIN holistic_mentorship_phases phase ON phase.id = $1
        JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+       JOIN grade phase_grade ON phase_grade.id = phase.grade_id
+       LEFT JOIN holistic_mentorship_profile_journeys journey ON journey.student_id = st.id
+       LEFT JOIN LATERAL (
+         SELECT true AS has_prior_mapping
+         FROM holistic_mentorship_mentor_mentee_mappings prior_mapping
+         WHERE prior_mapping.student_id = mapping.student_id
+           AND prior_mapping.program_id = $4 AND prior_mapping.academic_year = $6
+         LIMIT 1
+       ) prior_history ON true
        WHERE mapping.student_id = $2 AND mapping.school_id = $3
          AND mapping.program_id = $4 AND mapping.academic_year = $5
          AND mapping.ended_at IS NULL AND plan.program_id = $4
-         AND plan.academic_year = $5
+         AND (
+           (plan.academic_year = $5 AND phase_grade.number = current_grade.number)
+           OR (plan.academic_year = $6 AND current_grade.number = 12
+             AND phase_grade.number = 11 AND prior_history.has_prior_mapping IS TRUE
+             AND COALESCE(journey.entry_grade, 11) = 11)
+         )
        FOR UPDATE OF mapping, phase`,
-      [input.phaseId, input.studentId, input.schoolId, PROGRAM_IDS.COE, input.academicYear]
+      [input.phaseId, input.studentId, input.schoolId, PROGRAM_IDS.COE,
+        input.academicYear, priorAcademicYear]
     );
     const current = scope.rows[0];
     if (!current) return { ok: false, status: 404, error: "Not found" };
@@ -64,6 +85,9 @@ export async function saveHolisticNotes(input: NotesInput): Promise<HolisticNote
     const questionIds = new Set(questions.rows.map(({ id }) => Number(id)));
     if (input.answers.some(({ questionId }) => !questionIds.has(questionId))) {
       return { ok: false, status: 422, error: "Answer does not belong to this Phase" };
+    }
+    if (input.mode === "draft" && input.expectedRevision === 0 && !input.answers.some(({ answer }) => answer.trim())) {
+      return { ok: true, changed: false, revision: 0 };
     }
 
     const found = await client.query<{

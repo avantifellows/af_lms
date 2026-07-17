@@ -175,6 +175,7 @@ describe("Holistic Student Phase derivation", () => {
       academicYear: "2026-2027",
       actorUserId: 9,
       role: "teacher",
+      canEdit: true,
     })).resolves.toEqual({
       student: { id: 41, name: "Asha", externalStudentId: "S41", grade: 11 },
       phases: [{ phaseId: 73, number: 1, title: "Getting started", locked: true }],
@@ -204,6 +205,7 @@ describe("Holistic Student Phase derivation", () => {
       schoolId: 4,
       academicYear: "2026-2027",
       role: "holistic_mentorship_admin",
+      canEdit: true,
     });
 
     expect(result).toMatchObject({
@@ -247,6 +249,7 @@ describe("Holistic Student Phase derivation", () => {
       academicYear: "2026-2027",
       actorUserId: 10,
       role: "teacher",
+      canEdit: true,
     });
 
     expect(result).toMatchObject({
@@ -257,6 +260,33 @@ describe("Holistic Student Phase derivation", () => {
         canEditNotes: true,
         notes: null,
       },
+    });
+  });
+
+  it("keeps a read-only Teacher's Notes controls read-only", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])
+      .mockResolvedValueOnce([{ id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 5, state: "open", guidance_markdown: "Listen first." }])
+      .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await getHolisticStudentPhase({
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: false,
+    });
+
+    expect(result).toMatchObject({
+      readOnly: true,
+      selectedPhase: { canEditNotes: false },
     });
   });
 });

@@ -236,6 +236,7 @@ export async function getHolisticStudentPhase(params: {
   academicYear: string;
   actorUserId?: number;
   role: string;
+  canEdit: boolean;
 }): Promise<HolisticStudentPhaseDetail | null> {
   const students = await query<StudentRow>(
     `SELECT st.id AS student_id, mapping.id AS mapping_id,
@@ -436,7 +437,7 @@ export async function getHolisticStudentPhase(params: {
       },
       phases,
       selectedPhase: selectedSummary,
-      readOnly: params.role !== "teacher",
+      readOnly: params.role !== "teacher" || !params.canEdit,
     };
   }
 
@@ -480,7 +481,7 @@ export async function getHolisticStudentPhase(params: {
       revision: selected.revision,
       mappingId: Number(student.mapping_id),
       notesRevision: selectedNotes?.revision ?? 0,
-      canEditNotes: params.role === "teacher" &&
+      canEditNotes: params.role === "teacher" && params.canEdit &&
         (!selectedNotes || selectedNotes.authorUserId === params.actorUserId || erasedDraftForActor),
       guidanceMarkdown: selected.guidance_markdown,
       context,
@@ -493,7 +494,7 @@ export async function getHolisticStudentPhase(params: {
         ...((selectedNotes.state === "submitted" || canReadDraft) ? { answers: selectedNotes.answers } : {}),
       } : null,
     },
-    readOnly: params.role !== "teacher",
+    readOnly: params.role !== "teacher" || !params.canEdit,
   };
 }
 import { PROGRAM_IDS } from "./constants";
