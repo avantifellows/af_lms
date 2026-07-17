@@ -50,7 +50,7 @@ async function studentPhaseAccess(
 
 function studentPhaseBackHref(role: string, schoolCode: string) {
   const admin = role === "admin" || role === "holistic_mentorship_admin";
-  return admin ? "/admin/holistic-mentorship" : `/school/${schoolCode}?tab=holistic-mentorship`;
+  return admin ? "/admin/holistic-mentorship" : `/school/${schoolCode}?tab=holistic_mentorship`;
 }
 
 export default async function StudentPhasePage(props: StudentPhasePageProps) {

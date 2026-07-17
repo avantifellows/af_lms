@@ -42,9 +42,11 @@ function studentsForView(students: Student[], view: "assign" | "mentees", actorU
 export default function TeacherMappingWorkspace({
   schoolCode,
   view,
+  canEdit = true,
 }: {
   schoolCode: string;
   view: "assign" | "mentees";
+  canEdit?: boolean;
 }) {
   const initial = useMemo(() => savedFilters(schoolCode), [schoolCode]);
   const [search, setSearch] = useState(initial.search);
@@ -176,6 +178,7 @@ export default function TeacherMappingWorkspace({
         loading={loading}
         students={visible}
         view={view}
+        canEdit={canEdit}
         actorUserId={actorUserId}
         selected={selected}
         busy={busy}
@@ -183,7 +186,9 @@ export default function TeacherMappingWorkspace({
         onToggle={toggle}
         onRemove={remove}
       />
-      <AssignSelectedButton view={view} selectedCount={selected.length} busy={busy} onAssign={assign} />
+      {canEdit && (
+        <AssignSelectedButton view={view} selectedCount={selected.length} busy={busy} onAssign={assign} />
+      )}
     </div>
   );
 }
@@ -208,10 +213,11 @@ function MappingFilters({ search, grade, onSearchChange, onGradeChange }: {
   </div>;
 }
 
-function MappingResults({ loading, students, view, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
+function MappingResults({ loading, students, view, canEdit, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
   loading: boolean;
   students: Student[];
   view: "assign" | "mentees";
+  canEdit: boolean;
   actorUserId: number | null;
   selected: number[];
   busy: boolean;
@@ -225,13 +231,14 @@ function MappingResults({ loading, students, view, actorUserId, selected, busy, 
       {view === "assign" ? "No eligible Students to show yet." : "No Mentees assigned yet."}
     </p>;
   }
-  return <MappingTable students={students} view={view} actorUserId={actorUserId} selected={selected}
+  return <MappingTable students={students} view={view} canEdit={canEdit} actorUserId={actorUserId} selected={selected}
     busy={busy} schoolCode={schoolCode} onToggle={onToggle} onRemove={onRemove} />;
 }
 
-function MappingTable({ students, view, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
+function MappingTable({ students, view, canEdit, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
   students: Student[];
   view: "assign" | "mentees";
+  canEdit: boolean;
   actorUserId: number | null;
   selected: number[];
   busy: boolean;
@@ -242,22 +249,23 @@ function MappingTable({ students, view, actorUserId, selected, busy, schoolCode,
   return <div className="overflow-x-auto border-y border-border">
     <table className="w-full min-w-[640px] text-left text-sm">
       <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
-        {view === "assign" && <th className="w-12 px-3 py-3"><span className="sr-only">Select</span></th>}
+        {view === "assign" && canEdit && <th className="w-12 px-3 py-3"><span className="sr-only">Select</span></th>}
         <th className="px-3 py-3">Student</th><th className="px-3 py-3">Grade</th><th className="px-3 py-3">Current Mentor</th>
         {view === "mentees" && <th className="w-56 px-3 py-3"><span className="sr-only">Actions</span></th>}
       </tr></thead>
       <tbody className="divide-y divide-border">
         {students.map((student) => <MappingRow key={student.studentId} student={student} view={view}
-          mine={student.ownership?.mentorUserId === actorUserId} selected={selected.includes(student.studentId)}
+          canEdit={canEdit} mine={student.ownership?.mentorUserId === actorUserId} selected={selected.includes(student.studentId)}
           busy={busy} schoolCode={schoolCode} onToggle={onToggle} onRemove={onRemove} />)}
       </tbody>
     </table>
   </div>;
 }
 
-function MappingRow({ student, view, mine, selected, busy, schoolCode, onToggle, onRemove }: {
+function MappingRow({ student, view, canEdit, mine, selected, busy, schoolCode, onToggle, onRemove }: {
   student: Student;
   view: "assign" | "mentees";
+  canEdit: boolean;
   mine: boolean;
   selected: boolean;
   busy: boolean;
@@ -266,7 +274,7 @@ function MappingRow({ student, view, mine, selected, busy, schoolCode, onToggle,
   onRemove: (student: Student) => Promise<void>;
 }) {
   return <tr>
-    {view === "assign" && <td className="px-3 py-3">
+    {view === "assign" && canEdit && <td className="px-3 py-3">
       <input type="checkbox" aria-label={`Select ${student.name}`} checked={selected} disabled={mine}
         onChange={() => onToggle(student.studentId)} />
     </td>}
@@ -284,10 +292,12 @@ function MappingRow({ student, view, mine, selected, busy, schoolCode, onToggle,
           className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-3 font-medium text-text-on-accent hover:bg-accent-hover">
           Open <ArrowRight aria-hidden="true" className="h-4 w-4" />
         </Link>}
-        <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-medium hover:bg-hover-bg disabled:opacity-50"
-          disabled={busy} onClick={() => void onRemove(student)}>
-          <UserMinus aria-hidden="true" className="h-4 w-4" /> Remove
-        </button>
+        {canEdit && (
+          <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-medium hover:bg-hover-bg disabled:opacity-50"
+            disabled={busy} onClick={() => void onRemove(student)}>
+            <UserMinus aria-hidden="true" className="h-4 w-4" /> Remove
+          </button>
+        )}
       </div>
     </td>}
   </tr>;

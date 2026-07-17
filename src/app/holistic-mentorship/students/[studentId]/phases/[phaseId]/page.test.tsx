@@ -28,6 +28,24 @@ const props = {
 describe("StudentPhasePage", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("returns a Teacher to the active Holistic Mentorship School tab", async () => {
+    mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "teacher" },
+      school: { id: 4, name: "School One" },
+      actorUserId: 9,
+      canEdit: true,
+    });
+    mockDetail.mockResolvedValue({ student: { name: "Asha Rao" } });
+
+    const { container } = render(await StudentPhasePage(props));
+
+    expect(
+      container.querySelector('a[href="/school/SCH001?tab=holistic_mentorship"]')
+    ).toBeInTheDocument();
+  });
+
   it("renders the same read-only Student/Phase page for a Holistic Mentorship Admin", async () => {
     mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
     mockAccess.mockResolvedValue({ ok: true, permission: { role: "holistic_mentorship_admin" }, school: { id: 4 } });

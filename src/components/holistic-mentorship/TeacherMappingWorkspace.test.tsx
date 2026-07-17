@@ -69,4 +69,31 @@ describe("TeacherMappingWorkspace", () => {
       "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027"
     );
   });
+
+  it("keeps a read-only Teacher's roster visible without Mapping controls", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        actorUserId: 9,
+        students: [{
+          studentId: 41,
+          name: "Asha Rao",
+          externalStudentId: "ST-41",
+          grade: 11,
+          activePhaseId: 73,
+          ownership: { mappingId: 81, mentorUserId: 9, mentorName: "Nila Sen" },
+        }],
+      }),
+    }));
+
+    const { rerender } = render(
+      <TeacherMappingWorkspace schoolCode="SCH001" view="assign" canEdit={false} />
+    );
+    expect(await screen.findByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+
+    rerender(<TeacherMappingWorkspace schoolCode="SCH001" view="mentees" canEdit={false} />);
+    expect(await screen.findByRole("link", { name: "Open Asha Rao" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+  });
 });

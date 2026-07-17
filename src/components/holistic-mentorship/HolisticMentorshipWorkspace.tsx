@@ -24,9 +24,11 @@ const WORKSPACES = {
 export default function HolisticMentorshipWorkspace({
   mode,
   schoolCode,
+  canEdit = true,
 }: {
   mode: WorkspaceMode;
   schoolCode?: string;
+  canEdit?: boolean;
 }) {
   const workspaces = WORKSPACES[mode];
   const [activeId, setActiveId] = useState<string>(() => {
@@ -68,7 +70,11 @@ export default function HolisticMentorshipWorkspace({
       </div>
 
       {mode === "teacher" && schoolCode ? (
-        <TeacherMappingWorkspace schoolCode={schoolCode} view={active.id as "assign" | "mentees"} />
+        <TeacherMappingWorkspace
+          schoolCode={schoolCode}
+          view={active.id as "assign" | "mentees"}
+          canEdit={canEdit}
+        />
       ) : mode === "admin" && active.id === "phases" ? (
         <PhasePlanSetup />
       ) : mode === "admin" && active.id === "progress" ? (
