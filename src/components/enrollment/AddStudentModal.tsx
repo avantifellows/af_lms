@@ -62,6 +62,7 @@ function rollCharactersOnly(value: string) {
   return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
 }
 
+// fallow-ignore-next-line complexity
 export default function AddStudentModal({
   open,
   schoolUdise,
