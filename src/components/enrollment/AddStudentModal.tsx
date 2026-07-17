@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { X } from "lucide-react";
 
 import { Button, FormSection, Input, Modal, Select } from "@/components/ui";
@@ -12,7 +12,7 @@ import {
   G10_ROLL_MAX_LENGTH,
   G10_ROLL_MIN_LENGTH,
   G10_BOARD_OPTIONS,
-  GENDER_OPTIONS,
+  STUDENT_ADDITION_GENDER_OPTIONS,
   STREAM_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
@@ -20,13 +20,14 @@ import {
   validateStudentAdditionInput,
   type StudentAdditionInput,
 } from "@/lib/student-addition-fields";
+import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 
 interface AddStudentModalProps {
   open: boolean;
   schoolUdise: string;
   schoolCode: string;
   onClose: () => void;
-  onCreated: (studentId: string | null) => void;
+  onCreated: (studentId: string | null, penNumber: string | null) => void;
 }
 
 const initialForm: Record<keyof StudentAdditionInput, string> = {
@@ -37,6 +38,7 @@ const initialForm: Record<keyof StudentAdditionInput, string> = {
   category: "",
   physically_handicapped: "",
   apaar_id: "",
+  pen_number: "",
   g10_board: "",
   g10_roll_no: "",
   board_stream: "",
@@ -60,6 +62,7 @@ function rollCharactersOnly(value: string) {
   return value.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
 }
 
+// fallow-ignore-next-line complexity
 export default function AddStudentModal({
   open,
   schoolUdise,
@@ -71,8 +74,15 @@ export default function AddStudentModal({
   const [touched, setTouched] = useState<Partial<Record<keyof StudentAdditionInput, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serviceFieldErrors, setServiceFieldErrors] = useState<Record<string, string>>({});
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const validation = useMemo(() => validateStudentAdditionInput(form), [form]);
+  const validation = useMemo(
+    () => validateStudentAdditionInput(form, {
+      academicYear: deriveLmsEnrollmentPeriod().academic_year,
+    }),
+    [form],
+  );
   const canSubmit = validation.ok && !submitting;
 
   useEffect(() => {
@@ -80,23 +90,25 @@ export default function AddStudentModal({
       setForm(initialForm);
       setTouched({});
       setError(null);
+      setServiceFieldErrors({});
       setSubmitting(false);
     }
   }, [open]);
 
+  useEffect(() => {
+    if (error) scrollContainerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
+  }, [error]);
+
   const setField = (name: keyof StudentAdditionInput, value: string) => {
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      if (name === "phone") next.phone = digitsOnly(value).slice(0, 10);
-      if (name === "apaar_id") next.apaar_id = digitsOnly(value).slice(0, 12);
+      if (name === "phone") next.phone = digitsOnly(value).replace(/^0+/, "").slice(0, 10);
+      if (name === "pen_number") next.pen_number = digitsOnly(value).slice(0, 11);
       if (name === "father_name") next.father_name = lettersAndSpacesOnly(value);
       if (name === "g10_roll_no") {
         next.g10_roll_no = prev.g10_board === CBSE_BOARD
-          ? digitsOnly(value).slice(0, 8)
+          ? digitsOnly(value).replace(/^0+/, "").slice(0, 8)
           : rollCharactersOnly(value).slice(0, G10_ROLL_MAX_LENGTH);
-      }
-      if (name === "g10_board" && value === CBSE_BOARD) {
-        next.g10_roll_no = digitsOnly(prev.g10_roll_no).slice(0, 8);
       }
       return next;
     });
@@ -106,17 +118,22 @@ export default function AddStudentModal({
       ...(name === "g10_board" && value === CBSE_BOARD && form.g10_roll_no ? { g10_roll_no: true } : {}),
     }));
     setError(null);
+    setServiceFieldErrors({});
   };
 
   const touchField = (name: keyof StudentAdditionInput) => {
     setTouched((prev) => ({ ...prev, [name]: true }));
+    const normalizedName = validation.row.student_name;
+    if (name === "student_name" && normalizedName && !form.student_name.includes(".")) {
+      setForm((prev) => ({ ...prev, student_name: normalizedName }));
+    }
   };
 
   const fieldError = (name: keyof StudentAdditionInput) =>
-    touched[name] ? validation.fieldErrors[name] : undefined;
+    serviceFieldErrors[name] ?? (touched[name] ? validation.fieldErrors[name] : undefined);
 
   const identityError =
-    touched.apaar_id || touched.g10_roll_no ? validation.rowErrors[0] : undefined;
+    touched.pen_number || touched.g10_roll_no ? validation.rowErrors[0] : undefined;
 
   const errorClassName = "border-danger focus:border-danger focus:ring-danger/20";
   const renderLabel = (label: string, required = false) => (
@@ -222,23 +239,22 @@ export default function AddStudentModal({
     return (
       <div>
         <label htmlFor="g10_board" className={labelClassName}>{renderLabel("G10 board", true)}</label>
-        <Input
+        <Select
           id="g10_board"
           name="g10_board"
           aria-label="G10 board"
-          list="g10-board-options"
           value={form.g10_board}
           onChange={(event) => setField("g10_board", event.target.value)}
           onBlur={() => touchField("g10_board")}
           aria-invalid={errorText ? true : undefined}
           aria-describedby={errorText ? errorId : undefined}
-          className={errorText ? errorClassName : ""}
-        />
-        <datalist id="g10-board-options">
+          className={`w-full ${errorText ? errorClassName : ""}`}
+        >
+          <option value="">Select...</option>
           {G10_BOARD_OPTIONS.map((option) => (
-            <option key={option} value={option} />
+            <option key={option} value={option}>{option}</option>
           ))}
-        </datalist>
+        </Select>
         {errorText && (
           <p id={errorId} className="mt-1 text-xs text-danger">
             {errorText}
@@ -266,6 +282,7 @@ export default function AddStudentModal({
           inputMode={isCbseBoard ? "numeric" : "text"}
           minLength={isCbseBoard ? 8 : G10_ROLL_MIN_LENGTH}
           maxLength={isCbseBoard ? 8 : G10_ROLL_MAX_LENGTH}
+          disabled={!form.g10_board}
           value={form.g10_roll_no}
           onChange={(event) => setField("g10_roll_no", event.target.value)}
           onBlur={() => touchField("g10_roll_no")}
@@ -291,8 +308,8 @@ export default function AddStudentModal({
     if (validation.generatedStudentId) {
       return `Student ID will be ${validation.generatedStudentId}`;
     }
-    if (form.apaar_id.trim() && !form.g10_roll_no.trim()) {
-      return "APAAR-only: no Student ID will be generated.";
+    if (form.pen_number.trim() && !form.g10_roll_no.trim()) {
+      return "PEN-only: no Student ID will be generated.";
     }
     return "Student ID is generated as G12 passing year + Grade 10 Roll no.";
   })();
@@ -314,16 +331,36 @@ export default function AddStudentModal({
         body: JSON.stringify(form),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.details || body.error || "Failed to add student");
-
       const result = body.results?.[0];
-      if (result?.status === "created") {
-        onCreated(result.generated_student_id ?? result.normalized?.student_id ?? null);
-        onClose();
-      } else if (result?.status === "already_exists") {
+      if (result?.status === "already_exists") {
         setError(formatStudentAdditionExistingMatch(result.existing_match, schoolCode));
-      } else if (result?.status === "rejected") {
-        setError([...(result.row_errors ?? []), ...Object.values(result.field_errors ?? {})][0] || "Student was rejected");
+        return;
+      }
+      if (result?.status === "rejected") {
+        const fieldErrors = result.field_errors ?? {};
+        setServiceFieldErrors(fieldErrors);
+        setError([...(result.row_errors ?? []), ...Object.values(fieldErrors)][0] || "Student was rejected");
+        return;
+      }
+      if (!response.ok) {
+        const rejected = body.results?.[0];
+        const fieldErrors = body.field_errors ?? rejected?.field_errors ?? {};
+        setServiceFieldErrors(fieldErrors);
+        throw new Error(
+          Object.values(fieldErrors)[0] as string ||
+          body.row_errors?.[0] ||
+          rejected?.row_errors?.[0] ||
+          body.error ||
+          "Failed to add student",
+        );
+      }
+
+      if (result?.status === "created") {
+        onCreated(
+          result.generated_student_id ?? result.normalized?.student_id ?? null,
+          form.pen_number.trim() || null,
+        );
+        onClose();
       } else {
         setError("Student was not created");
       }
@@ -347,7 +384,7 @@ export default function AddStudentModal({
       </div>
 
       <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        <div ref={scrollContainerRef} className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
               {error}
@@ -363,10 +400,10 @@ export default function AddStudentModal({
                 max: STUDENT_DOB_MAX,
               })}
               {selectField("grade", "Grade", ["11", "12"], "Select...", true)}
-              {selectField("gender", "Gender", GENDER_OPTIONS, "Select...", true)}
+              {selectField("gender", "Gender", STUDENT_ADDITION_GENDER_OPTIONS, "Select...", true)}
               {selectField("category", "Category", CATEGORY_OPTIONS, "Select...", true)}
-              {selectField("physically_handicapped", "Physical Handicapped", ["Yes", "No"], "Select...", true)}
-              {inputField("apaar_id", "APAAR ID", "text", "numeric", false, {}, true)}
+              {selectField("physically_handicapped", "CWSN", ["Yes", "No"], "Select...", true)}
+              {inputField("pen_number", "PEN", "text", "numeric", false, { maxLength: 11 }, true)}
             </div>
           </FormSection>
 
@@ -407,7 +444,7 @@ export default function AddStudentModal({
 
           <p className="text-xs text-text-muted">
             <span className="text-danger">*</span> Mandatory fields.{" "}
-            <span className="text-accent">#</span> Either APAAR ID or Grade 10 Roll no is compulsory.
+            <span className="text-accent">#</span> Either PEN or Grade 10 Roll no is compulsory.
           </p>
         </div>
 

@@ -2,20 +2,64 @@ import { describe, expect, it } from "vitest";
 
 import {
   CBSE_BOARD,
+  canonicalizeStudentEditPayload,
+  formatStudentAdditionExistingMatch,
   generateStudentId,
   validateStudentAdditionInput,
 } from "./student-addition-fields";
 
+describe("canonicalizeStudentEditPayload", () => {
+  it("normalizes partial edit fields with the canonical student contract", () => {
+    expect(canonicalizeStudentEditPayload({
+      first_name: "  ravi  KUMAR ",
+      father_name: " suresh. KUMAR ",
+      gender: "Others",
+      category: "Gen-EWS",
+      physically_handicapped: true,
+      g10_board: "Others",
+    })).toEqual({
+      ok: true,
+      fields: {
+        first_name: "Ravi Kumar",
+        father_name: "Suresh Kumar",
+        gender: "Other",
+        category: "PWD-EWS",
+        physically_handicapped: true,
+        g10_board: "Others",
+      },
+    });
+  });
+
+  it("rejects periods in manually edited student names", () => {
+    expect(canonicalizeStudentEditPayload({ first_name: "Ravi.Kumar" })).toEqual({
+      ok: false,
+      error: "Student Name should not contain '.'",
+      field_errors: { first_name: "Student Name should not contain '.'" },
+    });
+  });
+
+  it("rejects incomplete CWSN/category edits", () => {
+    expect(canonicalizeStudentEditPayload({ physically_handicapped: true })).toEqual({
+      ok: false,
+      error: "CWSN and Category must be updated together",
+      field_errors: {
+        physically_handicapped: "CWSN and Category must be updated together",
+        category: "CWSN and Category must be updated together",
+      },
+    });
+  });
+});
+
 const validInput = {
   grade: "11",
-  student_name: " asha  k. kumar ",
+  student_name: " asha  k kumar ",
   date_of_birth: "02/01/2010",
   gender: "Female",
   category: "Gen",
   physically_handicapped: "No",
-  apaar_id: "123456789012",
+  pen_number: "12345678901",
   g10_board: CBSE_BOARD,
-  g10_roll_no: "1234 5678",
+  g10_roll_no: "12345678",
   board_stream: "PCM",
   stream: "Engineering",
   father_name: " ravi  kumar ",
@@ -24,6 +68,87 @@ const validInput = {
 };
 
 describe("validateStudentAdditionInput", () => {
+  it("rejects periods in manually entered student names", () => {
+    const result = validateStudentAdditionInput({ ...validInput, student_name: "Asha.Kumar" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.student_name).toBe("Student Name should not contain '.'");
+  });
+
+  it("rejects leading-zero phone and CBSE roll numbers", () => {
+    const result = validateStudentAdditionInput({
+      ...validInput,
+      phone: "0876543210",
+      g10_roll_no: "02345678",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.phone).toContain("cannot start with zero");
+    expect(result.fieldErrors.g10_roll_no).toContain("cannot start with zero");
+    expect(canonicalizeStudentEditPayload({ phone: "0876543210" }).ok).toBe(false);
+  });
+
+  it("uses an 11-digit PEN as the canonical optional identifier", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput, apaar_id: undefined, pen_number: "12345678901" },
+      { today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid input");
+    expect(result.row).toMatchObject({ pen_number: "12345678901" });
+    expect(result.row).not.toHaveProperty("apaar_id");
+  });
+
+  it("normalizes revised NVS board, roll, CWSN, gender, DOB, and NDA values", () => {
+    const result = validateStudentAdditionInput(
+      {
+        ...validInput,
+        pen_number: "12345678901",
+        apaar_id: undefined,
+        date_of_birth: "2-1-2010",
+        gender: "Others",
+        category: "Gen-EWS",
+        physically_handicapped: "Yes",
+        g10_board: "Others",
+        g10_roll_no: "00 ab-12 z",
+        stream: "NDA",
+      },
+      { today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid input");
+    expect(result.row).toMatchObject({
+      date_of_birth: "2010-01-02",
+      gender: "Other",
+      category: "PWD-EWS",
+      physically_handicapped: true,
+      g10_board: "Others",
+      g10_roll_no: "AB12Z",
+      stream: "nda",
+    });
+    expect(result.generatedStudentId).toBe("2028AB12Z");
+  });
+
+  it.each([
+    ["2/1/2010", "2010-01-02"],
+    ["02/01/2010", "2010-01-02"],
+    ["2-1-2010", "2010-01-02"],
+    ["02-01-2010", "2010-01-02"],
+    ["2010-01-02", "2010-01-02"],
+    [new Date("2010-01-02T00:00:00Z"), "2010-01-02"],
+  ])("accepts the supported DOB value %s", (date_of_birth, expected) => {
+    const result = validateStudentAdditionInput(
+      { ...validInput, date_of_birth },
+      { today: new Date("2026-07-01T00:00:00Z") },
+    );
+
+    expect(result.row.date_of_birth).toBe(expected);
+  });
+
   it("normalizes the canonical single-student fields and generates the Grade 11 Student ID", () => {
     const result = validateStudentAdditionInput(validInput, {
       today: new Date("2026-07-01T00:00:00Z"),
@@ -38,7 +163,7 @@ describe("validateStudentAdditionInput", () => {
       gender: "Female",
       category: "Gen",
       physically_handicapped: false,
-      apaar_id: "123456789012",
+      pen_number: "12345678901",
       g10_board: CBSE_BOARD,
       g10_roll_no: "12345678",
       board_stream: "PCM",
@@ -50,7 +175,7 @@ describe("validateStudentAdditionInput", () => {
     expect(result.generatedStudentId).toBe("202812345678");
   });
 
-  it("allows APAAR-only rows and leaves Student ID blank", () => {
+  it("allows PEN-only rows and leaves Student ID blank", () => {
     const result = validateStudentAdditionInput(
       { ...validInput, grade: "12", g10_roll_no: "" },
       { today: new Date("2026-07-01T00:00:00Z") },
@@ -68,7 +193,7 @@ describe("validateStudentAdditionInput", () => {
         ...validInput,
         date_of_birth: "2099-01-01",
         phone: "12345",
-        apaar_id: "123",
+        pen_number: "01234567890",
         g10_roll_no: "ABC123",
         father_name: "Ravi123",
       },
@@ -79,9 +204,9 @@ describe("validateStudentAdditionInput", () => {
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors).toMatchObject({
       date_of_birth: "Date of Birth must be between 2000 and 2015",
-      phone: "Parents Phone Number must be exactly 10 digits",
-      apaar_id: "APAAR ID must be exactly 12 digits",
-      g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits",
+      phone: "Parents Phone Number must be exactly 10 digits and cannot start with zero",
+      pen_number: "PEN must be exactly 11 digits and cannot start with zero",
+      g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
       father_name: "Father Name must contain only letters",
     });
   });
@@ -90,9 +215,9 @@ describe("validateStudentAdditionInput", () => {
     const result = validateStudentAdditionInput(
       {
         ...validInput,
-        apaar_id: "",
-        g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
-        g10_roll_no: " ab 12 z ",
+        pen_number: "",
+        g10_board: "Others",
+        g10_roll_no: " 00 ab-12 z ",
       },
       { today: new Date("2026-07-01T00:00:00Z") },
     );
@@ -101,6 +226,33 @@ describe("validateStudentAdditionInput", () => {
     if (!result.ok) throw new Error("expected valid input");
     expect(result.row.g10_roll_no).toBe("AB12Z");
     expect(result.generatedStudentId).toBe("2028AB12Z");
+  });
+
+  it("rejects an Others roll that becomes too short after normalization", () => {
+    const result = validateStudentAdditionInput({
+      ...validInput,
+      g10_board: "Others",
+      g10_roll_no: "0000",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.g10_roll_no).toBe(
+      "Grade 10 Roll no must be 4 to 10 characters",
+    );
+  });
+
+  it("rejects CBSE rolls that are not already exactly eight digits", () => {
+    const result = validateStudentAdditionInput({
+      ...validInput,
+      g10_roll_no: "1234-5678",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.g10_roll_no).toBe(
+      "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
+    );
   });
 
   it("derives Student ID passing year from the configured academic year", () => {
@@ -114,8 +266,8 @@ describe("validateStudentAdditionInput", () => {
     const result = validateStudentAdditionInput(
       {
         ...validInput,
-        apaar_id: "",
-        g10_board: "RAJASTHAN BOARD OF SECONDARY EDUCATION",
+        pen_number: "",
+        g10_board: "Others",
         g10_roll_no: "ab12z",
       },
       { academicYear: "2027-2028" },
@@ -123,5 +275,27 @@ describe("validateStudentAdditionInput", () => {
 
     expect(result.ok).toBe(true);
     expect(result.generatedStudentId).toBe("2029AB12Z");
+  });
+});
+
+describe("formatStudentAdditionExistingMatch", () => {
+  it("includes every available safe identity", () => {
+    expect(
+      formatStudentAdditionExistingMatch(
+        {
+          student_id: "2028AB12Z",
+          pen_number: "12345678901",
+          apaar_id: "123456789012",
+          school_code: "JNV001",
+        },
+        "JNV001",
+      ),
+    ).toContain("Student ID: 2028AB12Z | PEN: 12345678901 | APAAR: 123456789012");
+  });
+
+  it("does not claim a same-school match when school details are unavailable", () => {
+    expect(
+      formatStudentAdditionExistingMatch({ student_id: "2028AB12Z" }, "JNV001"),
+    ).toBe("This student already exists. Student ID: 2028AB12Z.");
   });
 });

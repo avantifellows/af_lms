@@ -14,6 +14,7 @@ const baseStudent = {
   date_of_birth: "2008-05-15T00:00:00.000Z",
   gender: "Male",
   student_id: "202812345678",
+  pen_number: "12345678901",
   apaar_id: "123456789012",
   category: "OBC",
   physically_handicapped: false,
@@ -83,15 +84,19 @@ describe("EditStudentModal", () => {
     expect(getByName("date_of_birth")).toHaveValue("2008-05-15");
     expect(getByName("category")).toHaveValue("OBC");
     expect(getByName("physically_handicapped")).not.toBeChecked();
-    expect(getByName("g10_board")).toHaveValue("RAJASTHAN BOARD OF SECONDARY EDUCATION");
+    expect(getByName("g10_board")).toHaveValue("Others");
     expect(getByName("grade")).toHaveValue("11");
     expect(getByName("stream")).toHaveValue("engineering");
 
     const gender = getByName("gender") as HTMLSelectElement;
     expect([...gender.options].map((option) => option.value)).toEqual(
-      expect.arrayContaining(["Female", "Male", "Others"]),
+      expect.arrayContaining(["Female", "Male", "Other"]),
     );
-    expect([...gender.options].map((option) => option.value)).not.toContain("Other");
+    expect([...gender.options].map((option) => option.value)).not.toContain("Others");
+
+    const stream = getByName("stream") as HTMLSelectElement;
+    expect([...stream.options].map((option) => option.value)).toContain("nda");
+    expect(screen.getByText("CWSN")).toBeInTheDocument();
 
     const boardStream = getByName("board_stream") as HTMLSelectElement;
     expect([...boardStream.options].map((option) => option.value)).toEqual(
@@ -106,6 +111,7 @@ describe("EditStudentModal", () => {
     );
 
     expect(screen.getByDisplayValue("202812345678")).toBeDisabled();
+    expect(screen.getByDisplayValue("12345678901")).toBeDisabled();
     expect(screen.getByDisplayValue("123456789012")).toBeDisabled();
     expect(screen.getByDisplayValue("ABC123")).toBeDisabled();
     expect(screen.getByDisplayValue("JNV NVS")).toBeDisabled();
@@ -116,12 +122,55 @@ describe("EditStudentModal", () => {
     expect(document.querySelector('[name="batch_group_id"]')).toBeNull();
   });
 
+  it("keeps the local database date when serialization uses the prior UTC day", () => {
+    renderModal({
+      student: {
+        ...baseStudent,
+        date_of_birth: "2008-05-14T18:30:00.000Z",
+      },
+    });
+
+    expect(getByName("date_of_birth")).toHaveValue("2008-05-15");
+  });
+
   it("initializes the name field with the full existing student name", () => {
     renderModal({
       student: { ...baseStudent, first_name: "Ravi", last_name: "Kumar" },
     });
 
     expect(getByName("first_name")).toHaveValue("Ravi Kumar");
+  });
+
+  it("reverse-maps a stored PWD category for editing", () => {
+    renderModal({
+      student: { ...baseStudent, category: "PWD-EWS", physically_handicapped: true },
+    });
+
+    expect(getByName("category")).toHaveValue("Gen-EWS");
+    expect(getByName("physically_handicapped")).toBeChecked();
+  });
+
+  it("keeps blank identities disabled", () => {
+    renderModal({
+      student: {
+        ...baseStudent,
+        student_id: null,
+        pen_number: null,
+        apaar_id: null,
+        g10_roll_no: null,
+      },
+    });
+
+    const lockedInputs = screen
+      .getByText("Locked Identity")
+      .parentElement?.querySelectorAll("input:disabled");
+    expect(lockedInputs).toHaveLength(5);
+    expect([...lockedInputs!].slice(0, 4).map((input) => (input as HTMLInputElement).value)).toEqual([
+      "—",
+      "—",
+      "—",
+      "—",
+    ]);
   });
 
   it("submits only PRD-editable fields and refreshes on success", async () => {
@@ -131,10 +180,10 @@ describe("EditStudentModal", () => {
 
     await user.clear(getByName("first_name"));
     await user.type(getByName("first_name"), "Ravi Updated");
-    fireEvent.change(getByName("gender"), { target: { value: "Others" } });
+    fireEvent.change(getByName("gender"), { target: { value: "Other" } });
     fireEvent.click(getByName("physically_handicapped"));
     fireEvent.change(getByName("grade"), { target: { value: "12" } });
-    fireEvent.change(getByName("stream"), { target: { value: "medical" } });
+    fireEvent.change(getByName("stream"), { target: { value: "nda" } });
 
     await user.click(screen.getByText("Save Changes"));
 
@@ -151,9 +200,10 @@ describe("EditStudentModal", () => {
     expect(body).toEqual({
       first_name: "Ravi Updated",
       last_name: "",
-      gender: "Others",
+      gender: "Other",
+      category: "OBC",
       physically_handicapped: true,
-      stream: "medical",
+      stream: "nda",
       grade: 12,
     });
     expect(body).not.toHaveProperty("student_id");
@@ -174,7 +224,19 @@ describe("EditStudentModal", () => {
     await user.type(getByName("phone"), "123");
     await user.click(screen.getByText("Save Changes"));
 
-    expect(await screen.findByText("Parents Phone Number must be exactly 10 digits")).toBeInTheDocument();
+    expect(await screen.findByText("Parents Phone Number must be exactly 10 digits and cannot start with zero")).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects periods in the student name", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.clear(getByName("first_name"));
+    await user.type(getByName("first_name"), "Ravi.Kumar");
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(await screen.findByText("Student Name should not contain '.'")).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -239,7 +301,7 @@ describe("EditStudentModal", () => {
     });
 
     fireEvent.change(getByName("g10_board"), {
-      target: { value: "CENTRAL BOARD OF SECONDARY EDUCATION" },
+      target: { value: "CBSE" },
     });
     await user.click(screen.getByText("Save Changes"));
 

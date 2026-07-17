@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-06-25
+last_updated: 2026-07-15
 ---
 
 # Permissions
@@ -45,6 +45,8 @@ A `read_only` flag downgrades any `edit` to `view`.
 - **Passcode users** (`opts.isPasscodeUser`): `students` → `edit`, everything else → `none`.
 
 Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, null program_id (unassigned) is editable by anyone with feature edit, otherwise the record's `program_id` must be in the user's programs.
+
+Student Addition writes deliberately use a stricter gate than `ownsRecord`: admin, program admin, and program manager roles must all have the target Program in their resolved Program context. Global admins still resolve all Programs; an admin explicitly scoped only to CoE cannot edit or drop an NVS student.
 
 ## Scope resolution — `getResolvedPermission` vs `getUserPermission`
 - `getUserPermission(email)` — bare row from `user_permission` (only `revoked_at IS NULL`). Use for role/feature checks that don't touch school scope.

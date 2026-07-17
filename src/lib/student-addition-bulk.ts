@@ -2,12 +2,6 @@ import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
 
 import {
-  ANNUAL_FAMILY_INCOME_OPTIONS,
-  BOARD_STREAM_OPTIONS,
-  CATEGORY_OPTIONS,
-  G10_BOARD_OPTIONS,
-  GENDER_OPTIONS,
-  STREAM_OPTIONS,
   STUDENT_ADDITION_UPLOAD_COLUMNS,
   validateStudentAdditionInput,
   type LmsStudentAdditionRow,
@@ -43,7 +37,6 @@ export type StudentAdditionUploadParseResult =
 interface ParseUploadInput {
   filename: string;
   data: Buffer;
-  selectedGrade: 11 | 12;
   today?: Date;
   academicYear?: string;
 }
@@ -100,11 +93,16 @@ function validationToRejectedResult(
 
 function parseRowsFromAoA(
   rows: unknown[][],
-  selectedGrade: 11 | 12,
   today?: Date,
   academicYear?: string,
 ): StudentAdditionUploadParseResult {
   const headers = (rows[0] ?? []).map(text);
+  if (headers.includes("APAAR ID") || !headers.includes("PEN Number")) {
+    return {
+      ok: false,
+      error: "This workbook uses the old APAAR template. Download the latest PEN-based template and upload it again.",
+    };
+  }
   const missing = missingColumns(headers);
   if (missing.length > 0) {
     return { ok: false, error: `Missing required columns: ${missing.join(", ")}` };
@@ -136,7 +134,7 @@ function parseRowsFromAoA(
     for (const column of STUDENT_ADDITION_UPLOAD_COLUMNS) {
       const value = text(sourceRow[headerIndex.get(column.label) ?? -1]);
       original[column.label] = value;
-      input[column.key] = value;
+      input[column.key] = column.key === "student_name" ? value.replace(/\./g, " ") : value;
     }
 
     const parsedOriginalRowNumber =
@@ -145,29 +143,16 @@ function parseRowsFromAoA(
       ? parsedOriginalRowNumber
       : index + 2;
 
-    const validation = validateStudentAdditionInput(input, { today, rowNumber, academicYear });
+    const validation = validateStudentAdditionInput(input, {
+      today,
+      rowNumber,
+      academicYear,
+      bulkUpload: true,
+    });
     originalRows.set(rowNumber, original);
 
     if (!validation.ok) {
       rejectedResults.push(validationToRejectedResult(validation, original));
-      return;
-    }
-
-    if (validation.row.grade !== selectedGrade) {
-      rejectedResults.push(
-        validationToRejectedResult(
-          {
-            ok: false,
-            row: validation.row,
-            generatedStudentId: validation.generatedStudentId,
-            fieldErrors: {
-              grade: `Grade must match the selected upload grade ${selectedGrade}`,
-            },
-            rowErrors: [],
-          },
-          original,
-        ),
-      );
       return;
     }
 
@@ -183,7 +168,7 @@ function parseRowsFromAoA(
   };
 }
 
-function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYear?: string) {
+function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
   let rows: unknown[][];
   try {
     rows = parse(data.toString("utf8"), {
@@ -194,18 +179,23 @@ function parseCsv(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYe
   } catch {
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
-  return parseRowsFromAoA(rows, selectedGrade, today, academicYear);
+  return parseRowsFromAoA(rows, today, academicYear);
 }
 
-async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date, academicYear?: string) {
+async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
   } catch {
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
-  const sheet = workbook.getWorksheet("Template") ?? workbook.worksheets[0];
-  if (!sheet) return { ok: false, error: "Workbook has no sheets" } as const;
+  const sheet = workbook.getWorksheet("Template");
+  if (!sheet) {
+    return {
+      ok: false,
+      error: "Workbook must include a Template sheet. Download the latest template and upload it again.",
+    } as const;
+  }
 
   const rows: unknown[][] = [];
   for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
@@ -216,13 +206,12 @@ async function parseXlsx(data: Buffer, selectedGrade: 11 | 12, today?: Date, aca
     }
     rows.push(values);
   }
-  return parseRowsFromAoA(rows, selectedGrade, today, academicYear);
+  return parseRowsFromAoA(rows, today, academicYear);
 }
 
 export async function parseStudentAdditionUpload({
   filename,
   data,
-  selectedGrade,
   today,
   academicYear,
 }: ParseUploadInput): Promise<StudentAdditionUploadParseResult> {
@@ -234,36 +223,12 @@ export async function parseStudentAdditionUpload({
   }
 
   if (filename.toLowerCase().endsWith(".csv")) {
-    return parseCsv(data, selectedGrade, today, academicYear);
+    return parseCsv(data, today, academicYear);
   }
 
   if (filename.toLowerCase().endsWith(".xlsx")) {
-    return parseXlsx(data, selectedGrade, today, academicYear);
+    return parseXlsx(data, today, academicYear);
   }
 
   return { ok: true, rows: [], rejectedResults: [], totalRows: 0, originalRows: new Map() };
-}
-
-export async function buildStudentAdditionTemplateWorkbook(): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  const template = workbook.addWorksheet("Template");
-  template.addRow(STUDENT_ADDITION_UPLOAD_COLUMNS.map((column) => column.label));
-  template.getColumn(3).numFmt = "dd/mm/yyyy";
-  template.getColumn(7).numFmt = "@";
-  template.getColumn(9).numFmt = "@";
-
-  const options = workbook.addWorksheet("Options");
-  options.addRows([
-    ["Field", "Allowed values"],
-    ["Gender", GENDER_OPTIONS.join(" | ")],
-    ["Category", CATEGORY_OPTIONS.join(" | ")],
-    ["Physical Handicapped / Vikalang", "Yes | No"],
-    ["G10 board", G10_BOARD_OPTIONS.join(" | ")],
-    ["Board Stream", BOARD_STREAM_OPTIONS.join(" | ")],
-    ["Primary Exam preparing for", STREAM_OPTIONS.join(" | ")],
-    ["Yearly / Annual Family Income", ANNUAL_FAMILY_INCOME_OPTIONS.join(" | ")],
-  ]);
-
-  const buffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(buffer);
 }

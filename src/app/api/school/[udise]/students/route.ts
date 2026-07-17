@@ -1,3 +1,6 @@
+import { readFile } from "fs/promises";
+import path from "path";
+
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
@@ -5,7 +8,6 @@ import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
-  buildStudentAdditionTemplateWorkbook,
   parseStudentAdditionUpload,
   type StudentAdditionUploadRowResult,
 } from "@/lib/student-addition-bulk";
@@ -21,7 +23,7 @@ interface RouteSchool {
   code: string;
   udise_code: string | null;
   region: string | null;
-  centre_program_ids: Array<number | string> | null;
+  af_school_category: string | null;
 }
 
 interface StudentAdditionAccess {
@@ -48,6 +50,39 @@ const EMPTY_TOTALS = {
   rejected: 0,
 };
 const MAX_STUDENT_ADDITION_UPLOAD_BYTES = 5 * 1024 * 1024;
+const STUDENT_ADDITION_TEMPLATE = path.join(
+  process.cwd(),
+  process.env.NODE_ENV === "production" ? ".next/server/assets" : "src/assets",
+  "nvs-student-addition-template.xlsx",
+);
+
+function safeFields(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(keys.filter((key) => key in record).map((key) => [key, record[key]]));
+}
+
+function safeUpstreamResults(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((result) => {
+    const safe = safeFields(result, [
+      "row_number", "status", "generated_student_id", "field_errors", "row_errors",
+    ]) ?? {};
+    const record = result as Record<string, unknown>;
+    const normalized = safeFields(record.normalized, [
+      "student_id", "pen_number", "student_name", "g10_roll_no",
+    ]);
+    const existingMatch = safeFields(record.existing_match, [
+      "matched_identifier", "student_id", "pen_number", "apaar_id", "student_name",
+      "school_name", "school_code", "udise_code", "district", "state", "grade", "program", "stream",
+    ]);
+    return {
+      ...safe,
+      ...(normalized ? { normalized } : {}),
+      ...(existingMatch ? { existing_match: existingMatch } : {}),
+    };
+  });
+}
 
 function isUploadFile(value: FormDataEntryValue | null): value is File {
   return typeof value === "object" &&
@@ -100,14 +135,9 @@ async function resolveSchoolAndAccess(
        sch.code,
        sch.udise_code,
        sch.region,
-       COALESCE(
-         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
-         ARRAY[]::int[]
-       ) AS centre_program_ids
+       sch.af_school_category
      FROM school sch
-     LEFT JOIN centres c ON c.school_id = sch.id AND c.is_active = true
      WHERE sch.udise_code = $1 OR sch.code = $1
-     GROUP BY sch.id, sch.code, sch.udise_code, sch.region
      LIMIT 1`,
     [udise],
   );
@@ -141,6 +171,7 @@ function countTotals(results: Array<{ status: DbServiceResult["status"] }>) {
   );
 }
 
+// fallow-ignore-next-line complexity
 async function proxyRowsToDbService({
   access,
   school,
@@ -177,9 +208,16 @@ async function proxyRowsToDbService({
   });
 
   if (!response.ok) {
-    const details = await response.text();
+    const upstream = response.headers.get("content-type")?.includes("application/json")
+      ? await response.json().catch(() => null) as Record<string, unknown> | null
+      : null;
     return NextResponse.json(
-      { error: details || "Failed to create student", details },
+      {
+        error: "Student could not be created",
+        ...(upstream?.field_errors ? { field_errors: upstream.field_errors } : {}),
+        ...(upstream?.row_errors ? { row_errors: upstream.row_errors } : {}),
+        ...(upstream?.results ? { results: safeUpstreamResults(upstream.results) } : {}),
+      },
       { status: response.status },
     );
   }
@@ -195,10 +233,6 @@ async function bulkUploadResponse(
 ) {
   const form = await request.formData();
   const file = form.get("file");
-  const selectedGrade = Number(form.get("grade"));
-  if (selectedGrade !== 11 && selectedGrade !== 12) {
-    return NextResponse.json({ error: "Select Grade 11 or 12 before upload" }, { status: 400 });
-  }
   if (!isUploadFile(file)) {
     return NextResponse.json({ error: "Upload a .xlsx or rejected-row .csv file" }, { status: 400 });
   }
@@ -210,7 +244,6 @@ async function bulkUploadResponse(
   const parsed = await parseStudentAdditionUpload({
     filename: uploadFilename(file),
     data: Buffer.from(await file.arrayBuffer()),
-    selectedGrade,
     academicYear: period.academic_year,
   });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -235,9 +268,11 @@ async function bulkUploadResponse(
     },
     period,
   });
-  if (response.status !== 200) return response;
-
+  const status = response.status;
   const body = await response.json();
+  if (!Array.isArray(body.results)) {
+    return NextResponse.json(body, { status });
+  }
   const dbResults = (body.results ?? []).map((result: DbServiceResult) => ({
     ...result,
     original: parsed.originalRows.get(result.row_number) ?? {},
@@ -250,7 +285,7 @@ async function bulkUploadResponse(
     ...body,
     totals: countTotals(results),
     results,
-  });
+  }, { status });
 }
 
 export async function POST(
@@ -292,11 +327,11 @@ export async function GET(
   const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
 
-  const workbook = await buildStudentAdditionTemplateWorkbook();
+  const workbook = await readFile(STUDENT_ADDITION_TEMPLATE);
   return new NextResponse(new Uint8Array(workbook), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": 'attachment; filename="lms-student-addition-template.xlsx"',
+      "Content-Disposition": 'attachment; filename="nvs-student-addition-template.xlsx"',
     },
   });
 }

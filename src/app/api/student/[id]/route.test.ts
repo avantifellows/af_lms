@@ -69,14 +69,20 @@ describe("PATCH /api/student/[id]", () => {
     const req = jsonRequest("http://localhost/api/student/100", {
       method: "PATCH",
       body: {
-        first_name: "Ravi Kumar",
+        first_name: "  ravi  KUMAR ",
         last_name: "",
+        father_name: " suresh. KUMAR ",
         gender: "Others",
+        category: "Gen-EWS",
+        physically_handicapped: true,
         grade: 12,
-        stream: "medical",
-        g10_board: "CENTRAL BOARD OF SECONDARY EDUCATION",
+        stream: "nda",
+        g10_board: "Others",
         batch_group_id: "locked-client-value",
         student_id: "locked-client-value",
+        pen_number: "locked-client-value",
+        g10_roll_no: "locked-client-value",
+        apaar_id: "locked-client-value",
       },
     });
 
@@ -110,10 +116,13 @@ describe("PATCH /api/student/[id]", () => {
       academic_year: "2026-2027",
       first_name: "Ravi Kumar",
       last_name: "",
-      gender: "Others",
+      father_name: "Suresh Kumar",
+      gender: "Other",
+      category: "PWD-EWS",
+      physically_handicapped: true,
       grade: 12,
-      stream: "medical",
-      g10_board: "CENTRAL BOARD OF SECONDARY EDUCATION",
+      stream: "nda",
+      g10_board: "Others",
     });
   });
 
@@ -154,9 +163,18 @@ describe("PATCH /api/student/[id]", () => {
   });
 
   it.each([
-    [{ phone: "123" }, "Parents Phone Number must be exactly 10 digits"],
+    [{ first_name: { injected: true } }, "Student Name must be text"],
+    [{ phone: "0123456789" }, "Parents Phone Number must be exactly 10 digits and cannot start with zero"],
     [{ date_of_birth: "2016-01-01" }, "Date of Birth must be between 2000 and 2015"],
+    [{ date_of_birth: "2008-02-31" }, "Date of Birth is not valid"],
     [{ grade: 10 }, "Grade must be 11 or 12"],
+    [{ gender: "Unknown" }, "Gender must be Female, Male, or Other"],
+    [{ g10_board: "State Board" }, "G10 board must be CBSE or Others"],
+    [{ stream: "space" }, "Primary Exam preparing for is not valid"],
+    [{ board_stream: "Science" }, "Board Stream is not valid"],
+    [{ category: "Invalid", physically_handicapped: false }, "Category is not valid"],
+    [{ physically_handicapped: "Yes" }, "CWSN must be true or false"],
+    [{ annual_family_income: "A lot" }, "Annual Family Income is not valid"],
   ])("rejects invalid editable values", async (body, message) => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     const req = jsonRequest("http://localhost/api/student/100", { method: "PATCH", body });
@@ -197,7 +215,7 @@ describe("PATCH /api/student/[id]", () => {
 
     const req = jsonRequest("http://localhost/api/student/100", {
       method: "PATCH",
-      body: { g10_board: "CENTRAL BOARD OF SECONDARY EDUCATION" },
+      body: { g10_board: "CBSE" },
     });
     const res = await PATCH(req as never, params);
 
@@ -208,17 +226,10 @@ describe("PATCH /api/student/[id]", () => {
       field_errors: {
         g10_board: "CBSE Grade 10 Roll no must be exactly 8 digits",
       },
-      details: {
-        error: {
-          code: "invalid_g10_roll_for_board",
-          message: "CBSE Grade 10 Roll no must be exactly 8 digits",
-          fields: ["g10_board"],
-        },
-      },
     });
   });
 
-  it("surfaces non-json DB Service errors with their upstream status", async () => {
+  it("hides non-json DB Service errors while preserving their upstream status", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockFetch.mockResolvedValue(new Response("Student not found", { status: 404 }));
     const req = jsonRequest("http://localhost/api/student/100", {
@@ -230,8 +241,9 @@ describe("PATCH /api/student/[id]", () => {
 
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toBe("Student not found");
+    expect(json.error).toBe("Failed to update student");
     expect(json.field_errors).toEqual({});
+    expect(json).not.toHaveProperty("details");
   });
 
   it("returns 500 on fetch exception", async () => {

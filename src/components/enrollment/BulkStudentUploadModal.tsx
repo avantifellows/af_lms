@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, Upload, X } from "lucide-react";
 
-import { Button, Input, Modal, Select } from "@/components/ui";
+import { Button, Input, Modal } from "@/components/ui";
 import {
   buildRejectedRowsCsv,
   formatStudentAdditionExistingMatch,
@@ -47,11 +47,13 @@ const emptyTotals: UploadTotals = {
   rejected: 0,
 };
 
-function firstRowIssue(result: UploadResult, schoolCode: string): string {
-  return [
+function rowIssues(result: UploadResult, schoolCode: string): string {
+  const issues = [
     ...Object.values(result.field_errors ?? {}),
     ...(result.row_errors ?? []),
-  ][0] ?? (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
+  ];
+  return issues.join("; ") ||
+    (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
 }
 
 // fallow-ignore-next-line complexity
@@ -62,7 +64,6 @@ export default function BulkStudentUploadModal({
   onClose,
   onUploaded,
 }: BulkStudentUploadModalProps) {
-  const [grade, setGrade] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,16 +71,15 @@ export default function BulkStudentUploadModal({
   const [results, setResults] = useState<UploadResult[]>([]);
 
   const rejectedCsvHref = useMemo(() => {
-    if (!results.some((result) => result.status === "rejected")) return null;
-    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results))}`;
-  }, [results]);
+    if (!results.some((result) => result.status !== "created")) return null;
+    return `data:text/csv;charset=utf-8,${encodeURIComponent(buildRejectedRowsCsv(results, schoolCode))}`;
+  }, [results, schoolCode]);
 
-  const done = (totals?.created ?? 0) + (totals?.already_exists ?? 0);
-  const toGo = (totals?.duplicate_in_file ?? 0) + (totals?.rejected ?? 0);
+  const done = totals?.created ?? 0;
+  const toGo = (totals?.total ?? 0) - done;
 
   useEffect(() => {
     if (!open) {
-      setGrade("");
       setFile(null);
       setSubmitting(false);
       setError(null);
@@ -91,7 +91,7 @@ export default function BulkStudentUploadModal({
   // fallow-ignore-next-line complexity
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!grade || !file) return;
+    if (!file) return;
 
     setSubmitting(true);
     setError(null);
@@ -99,7 +99,6 @@ export default function BulkStudentUploadModal({
     setResults([]);
     try {
       const body = new FormData();
-      body.append("grade", grade);
       body.append("file", file);
 
       const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
@@ -146,34 +145,18 @@ export default function BulkStudentUploadModal({
           <div className="flex flex-wrap items-center gap-3">
             <a
               href={`/api/school/${encodeURIComponent(schoolUdise)}/students`}
-              download="lms-student-addition-template.xlsx"
+              download="nvs-student-addition-template.xlsx"
               className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-border bg-bg-card px-4 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               Download template
             </a>
             <p className="text-sm text-text-secondary">
-              Student ID is generated as G12 passing year + Grade 10 Roll no. APAAR-only rows do not get a Student ID. CBSE needs exactly 8 digits; other boards need 4 to 10 characters.
+              Each row supplies Grade 11 or 12. PEN or Grade 10 Roll no is required; CBSE roll numbers need exactly 8 digits.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[180px_1fr]">
-            <div>
-              <label htmlFor="bulk-grade" className="block text-sm font-medium text-text-secondary">
-                Upload grade
-              </label>
-              <Select
-                id="bulk-grade"
-                value={grade}
-                onChange={(event) => setGrade(event.target.value)}
-                className="w-full"
-              >
-                <option value="">Select...</option>
-                <option value="11">11</option>
-                <option value="12">12</option>
-              </Select>
-            </div>
-            <div>
+          <div>
               <label htmlFor="bulk-file" className="block text-sm font-medium text-text-secondary">
                 Student upload file
               </label>
@@ -183,7 +166,6 @@ export default function BulkStudentUploadModal({
                 accept=".xlsx,.csv"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               />
-            </div>
           </div>
 
           {totals && (
@@ -214,6 +196,7 @@ export default function BulkStudentUploadModal({
                     <thead className="bg-bg-card-alt text-text-muted">
                       <tr>
                         <th className="px-3 py-2 font-medium">Row</th>
+                        <th className="px-3 py-2 font-medium">Grade</th>
                         <th className="px-3 py-2 font-medium">Status</th>
                         <th className="px-3 py-2 font-medium">Student</th>
                         <th className="px-3 py-2 font-medium">Issue</th>
@@ -223,11 +206,12 @@ export default function BulkStudentUploadModal({
                       {results.map((result) => (
                         <tr key={`${result.row_number}-${result.status}`} className="border-t border-border">
                           <td className="px-3 py-2">{result.row_number}</td>
+                          <td className="px-3 py-2">{String(result.original?.Grade ?? "")}</td>
                           <td className="px-3 py-2">{result.status}</td>
                           <td className="px-3 py-2">
                             {String(result.original?.["Student Name"] ?? result.generated_student_id ?? "")}
                           </td>
-                          <td className="px-3 py-2">{firstRowIssue(result, schoolCode)}</td>
+                          <td className="px-3 py-2">{rowIssues(result, schoolCode)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -242,7 +226,7 @@ export default function BulkStudentUploadModal({
           <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!grade || !file || submitting}>
+          <Button type="submit" disabled={!file || submitting}>
             <Upload className="h-4 w-4" aria-hidden="true" />
             {submitting ? "Uploading..." : "Upload students"}
           </Button>

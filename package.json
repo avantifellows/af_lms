@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && mkdir -p .next/server/assets && cp src/assets/nvs-student-addition-template.xlsx .next/server/assets/",
     "start": "next start",
     "lint": "eslint",
     "fallow": "fallow",

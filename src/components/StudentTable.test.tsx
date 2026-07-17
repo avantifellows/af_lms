@@ -40,6 +40,7 @@ interface StudentOverrides {
   email?: string | null;
   date_of_birth?: string | null;
   student_id?: string | null;
+  pen_number?: string | null;
   apaar_id?: string | null;
   category?: string | null;
   stream?: string | null;
@@ -47,6 +48,8 @@ interface StudentOverrides {
   program_name?: string | null;
   program_id?: number | null;
   student_program_ids?: Array<number | string> | null;
+  dropout_program_ids?: Array<number | string> | null;
+  can_undo_nvs_dropout?: boolean;
   grade?: number | null;
   grade_id?: string | null;
   status?: string | null;
@@ -69,6 +72,7 @@ function makeStudent(overrides: StudentOverrides = {}) {
       ? overrides.date_of_birth!
       : "2010-05-15",
     student_id: has("student_id") ? overrides.student_id! : "STU001",
+    pen_number: has("pen_number") ? overrides.pen_number! : "12345678901",
     apaar_id: has("apaar_id") ? overrides.apaar_id! : "APAAR001",
     category: has("category") ? overrides.category! : "Gen",
     stream: has("stream") ? overrides.stream! : "science",
@@ -77,7 +81,15 @@ function makeStudent(overrides: StudentOverrides = {}) {
     program_id: has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS,
     student_program_ids: has("student_program_ids")
       ? overrides.student_program_ids!
-      : null,
+      : [has("program_id") ? overrides.program_id! : PROGRAM_IDS.NVS].filter(
+          (programId): programId is number => programId !== null,
+        ),
+    dropout_program_ids: has("dropout_program_ids")
+      ? overrides.dropout_program_ids!
+      : [],
+    can_undo_nvs_dropout: has("can_undo_nvs_dropout")
+      ? overrides.can_undo_nvs_dropout!
+      : false,
     grade: has("grade") ? overrides.grade! : 10,
     grade_id: has("grade_id") ? overrides.grade_id! : "g-10",
     status: has("status") ? overrides.status! : "active",
@@ -92,6 +104,7 @@ function makeStudent(overrides: StudentOverrides = {}) {
     email: string | null;
     date_of_birth: string | null;
     student_id: string | null;
+    pen_number: string | null;
     apaar_id: string | null;
     category: string | null;
     stream: string | null;
@@ -121,12 +134,13 @@ beforeEach(() => {
 // ─── 1. Renders student cards with correct info ──────────────────────────────
 
 describe("StudentTable - rendering", () => {
-  it("renders student name, grade badge, student_id, apaar_id, and DOB", () => {
+  it("renders Student ID, PEN, historical APAAR, and DOB", () => {
     const student = makeStudent({
       first_name: "Priya",
       last_name: "Patel",
       grade: 9,
       student_id: "S100",
+      pen_number: "12345678901",
       apaar_id: "AP100",
       date_of_birth: "2011-03-20",
     });
@@ -136,6 +150,7 @@ describe("StudentTable - rendering", () => {
     expect(screen.getByText("Priya Patel")).toBeInTheDocument();
     expect(screen.getByText("Grade 9")).toBeInTheDocument();
     expect(screen.getByText("S100")).toBeInTheDocument();
+    expect(screen.getByText("12345678901")).toBeInTheDocument();
     expect(screen.getByText("AP100")).toBeInTheDocument();
     // en-IN format: "20 Mar 2011"
     expect(screen.getByText("20 Mar 2011")).toBeInTheDocument();
@@ -456,6 +471,7 @@ describe("StudentTable - Edit button visibility", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
@@ -495,6 +511,7 @@ describe("StudentTable - Edit button hidden", () => {
         canEdit={true}
         canEditStudent={false}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(
@@ -513,6 +530,7 @@ describe("StudentTable - Edit button hidden", () => {
         grades={defaultGrades}
         canEdit={true}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(
@@ -529,12 +547,33 @@ describe("StudentTable - Edit button hidden", () => {
 // ─── 8. Dropout button for active editable students ─────────────────────────
 
 describe("StudentTable - Dropout button", () => {
+  it("keeps non-NVS centre-program dropout visible for global admins", () => {
+    render(
+      <StudentTable
+        students={[
+          makeStudent({
+            program_id: PROGRAM_IDS.COE,
+            student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+          }),
+        ]}
+        selectedProgramId={PROGRAM_IDS.COE}
+        grades={defaultGrades}
+        canDropoutStudent
+        isAdmin
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
+  });
+
   it("shows Dropout button for active editable student", () => {
     render(
       <StudentTable
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Dropout")).toBeInTheDocument();
@@ -558,6 +597,7 @@ describe("StudentTable - Dropout button", () => {
         students={[makeStudent({ first_name: "TestDrop" })]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -584,7 +624,7 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("admin can edit NVS students", () => {
+  it("admin without NVS scope cannot edit NVS students", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
@@ -594,7 +634,7 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("admin cannot edit non-NVS students through the Student Addition gate", () => {
@@ -610,7 +650,7 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("admin can edit a mixed-program row with an NVS current batch", () => {
+  it("admin without NVS scope cannot edit a mixed-program row", () => {
     const student = makeStudent({
       program_id: PROGRAM_IDS.COE,
       student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
@@ -624,11 +664,11 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("non-admin can edit student with null program_id", () => {
-    const student = makeStudent({ program_id: null });
+  it("hides Edit when the roster has no current NVS Batch", () => {
+    const student = makeStudent({ program_id: null, student_program_ids: [] });
     render(
       <StudentTable
         students={[student]}
@@ -639,7 +679,7 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
-    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("non-admin with NVS program access can edit NVS students", () => {
@@ -905,6 +945,7 @@ describe("StudentTable - Edit modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -919,6 +960,7 @@ describe("StudentTable - Edit modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -940,6 +982,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent({ first_name: "Ravi", last_name: "Kumar" })]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -949,6 +992,7 @@ describe("StudentTable - Dropout modal", () => {
     expect(
       screen.getByText(/Are you sure you want to mark/),
     ).toBeInTheDocument();
+    expect(screen.getByText(/dropout from JNV NVS/)).toBeInTheDocument();
     expect(screen.getByText("Confirm Dropout")).toBeInTheDocument();
   });
 
@@ -959,6 +1003,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -969,7 +1014,63 @@ describe("StudentTable - Dropout modal", () => {
     expect(screen.queryByText("Mark as Dropout")).not.toBeInTheDocument();
   });
 
-  it("submits dropout and calls router.refresh on success", async () => {
+  it("undoes an audited NVS dropout from the Dropout tab", async () => {
+    const user = userEvent.setup();
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+    vi.stubGlobal("fetch", mockFetch);
+    const dropped = makeStudent({
+      group_user_id: "d1",
+      student_pk_id: "spk-2",
+      first_name: "Dropped",
+      student_program_ids: [],
+      dropout_program_ids: [PROGRAM_IDS.NVS],
+      can_undo_nvs_dropout: true,
+      status: "dropout",
+    });
+
+    render(
+      <StudentTable
+        students={[makeStudent()]}
+        dropoutStudents={[dropped]}
+        grades={defaultGrades}
+        isAdmin
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (1)"));
+    await user.click(screen.getByRole("button", { name: "Undo Dropout" }));
+    expect(screen.getByText(/Restore.*previous NVS batch/)).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Undo Dropout" }).at(-1)!);
+
+    expect(mockFetch).toHaveBeenCalledWith("/api/student/dropout/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ student_pk_id: "spk-2" }),
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("does not offer undo for legacy dropouts without a restorable audit", async () => {
+    const user = userEvent.setup();
+    render(
+      <StudentTable
+        students={[]}
+        dropoutStudents={[makeStudent({
+          dropout_program_ids: [PROGRAM_IDS.NVS],
+          status: "dropout",
+        })]}
+        grades={defaultGrades}
+        isAdmin
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    await user.click(screen.getByText("Dropout (1)"));
+    expect(screen.queryByRole("button", { name: "Undo Dropout" })).not.toBeInTheDocument();
+  });
+
+  it("refreshes after NVS dropout without locally hiding a multi-Program Student", async () => {
     const user = userEvent.setup();
     const mockFetch = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -979,9 +1080,15 @@ describe("StudentTable - Dropout modal", () => {
 
     render(
       <StudentTable
-        students={[makeStudent({ student_id: "STU-DROP" })]}
+        students={[
+          makeStudent({
+            student_id: "STU-DROP",
+            student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+          }),
+        ]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -999,14 +1106,21 @@ describe("StudentTable - Dropout modal", () => {
       expect(screen.queryByText("Mark as Dropout")).not.toBeInTheDocument();
     });
     expect(mockRefresh).toHaveBeenCalled();
+    expect(screen.getByText("Aarav Sharma")).toBeInTheDocument();
   });
 
-  it("shows error when dropout API fails", async () => {
+  it("keeps the modal retryable after repeated dropout failures", async () => {
     const user = userEvent.setup();
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      json: async () => ({ error: "Student not found" }),
-    });
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Student not found" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Student is no longer in JNV NVS" }),
+      });
     vi.stubGlobal("fetch", mockFetch);
 
     render(
@@ -1014,6 +1128,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1025,6 +1140,14 @@ describe("StudentTable - Dropout modal", () => {
     });
     // Modal should remain open
     expect(screen.getByText("Mark as Dropout")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Confirm Dropout"));
+    await vi.waitFor(() => {
+      expect(
+        screen.getByText("Student is no longer in JNV NVS"),
+      ).toBeInTheDocument();
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it("uses student_pk_id as the dropout identifier", async () => {
@@ -1046,6 +1169,7 @@ describe("StudentTable - Dropout modal", () => {
         ]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1073,6 +1197,7 @@ describe("StudentTable - Dropout modal", () => {
         students={[makeStudent({ first_name: null, last_name: null })]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1220,6 +1345,7 @@ describe("StudentTable - Dropout modal error edge cases", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 
@@ -1244,6 +1370,7 @@ describe("StudentTable - Dropout modal error edge cases", () => {
         students={[makeStudent()]}
         grades={defaultGrades}
         isAdmin={true}
+        userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
 

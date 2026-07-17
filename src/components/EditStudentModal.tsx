@@ -8,9 +8,10 @@ import { DocumentsList } from "@/components/documents/DocumentsList";
 import {
   ANNUAL_FAMILY_INCOME_OPTIONS,
   BOARD_STREAM_OPTIONS,
+  CBSE_BOARD,
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
-  GENDER_OPTIONS,
+  STUDENT_ADDITION_GENDER_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
 } from "@/lib/student-addition-fields";
@@ -39,6 +40,7 @@ const STREAM_OPTIONS = [
   { value: "medical", label: "Medical" },
   { value: "ca", label: "CA" },
   { value: "clat", label: "CLAT" },
+  { value: "nda", label: "NDA" },
 ] as const;
 
 function formatDateForInput(dateString: string | null): string {
@@ -46,9 +48,17 @@ function formatDateForInput(dateString: string | null): string {
   try {
     const date = new Date(dateString);
     if (Number.isNaN(date.getTime())) return "";
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(date.getUTCDate()).padStart(2, "0");
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+        .formatToParts(date)
+        .map(({ type, value }) => [type, value]),
+    );
+    const { year, month, day } = parts;
     return `${year}-${month}-${day}`;
   } catch {
     return "";
@@ -58,7 +68,10 @@ function formatDateForInput(dateString: string | null): string {
 function legacyPwdCategory(category: string | null) {
   if (!category?.startsWith("PWD-")) return { category: category || "", pwd: false };
   const value = category.replace("PWD-", "");
-  return { category: value === "General" ? "Gen" : value, pwd: true };
+  return {
+    category: value === "General" || value === "Gen" ? "Gen" : value === "EWS" ? "Gen-EWS" : value,
+    pwd: true,
+  };
 }
 
 function fullName(student: Student) {
@@ -70,7 +83,7 @@ function initialFormData(student: Student) {
   return {
     first_name: fullName(student),
     phone: student.phone || "",
-    gender: student.gender || "",
+    gender: student.gender === "Others" ? "Other" : student.gender || "",
     date_of_birth: formatDateForInput(student.date_of_birth),
     category: legacyCategory.category,
     physically_handicapped: Boolean(student.physically_handicapped ?? legacyCategory.pwd),
@@ -78,7 +91,7 @@ function initialFormData(student: Student) {
     board_stream: student.board_stream || "",
     father_name: student.father_name || "",
     annual_family_income: student.annual_family_income || "",
-    g10_board: student.g10_board || "",
+    g10_board: student.g10_board === CBSE_BOARD ? CBSE_BOARD : "Others",
     grade: student.grade ? String(student.grade) : "",
   };
 }
@@ -146,8 +159,14 @@ export default function EditStudentModal({
       return;
     }
 
-    if ("phone" in changed && !/^\d{10}$/.test(formData.phone)) {
-      setError("Parents Phone Number must be exactly 10 digits");
+    if ("first_name" in changed && formData.first_name.includes(".")) {
+      setFieldErrors({ first_name: "Student Name should not contain '.'" });
+      setLoading(false);
+      return;
+    }
+
+    if ("phone" in changed && !/^[1-9]\d{9}$/.test(formData.phone)) {
+      setError("Parents Phone Number must be exactly 10 digits and cannot start with zero");
       setLoading(false);
       return;
     }
@@ -170,6 +189,10 @@ export default function EditStudentModal({
     const payload: Record<string, unknown> = { ...changed };
     if ("first_name" in changed) payload.last_name = "";
     if ("grade" in changed) payload.grade = formData.grade ? Number(formData.grade) : undefined;
+    if ("category" in changed || "physically_handicapped" in changed) {
+      payload.category = formData.category;
+      payload.physically_handicapped = formData.physically_handicapped;
+    }
 
     try {
       const response = await fetch(`/api/student/${student.student_pk_id}`, {
@@ -208,7 +231,7 @@ export default function EditStudentModal({
       ...prev,
       [name]:
         name === "phone"
-          ? digitsOnly(value).slice(0, 10)
+          ? digitsOnly(value).replace(/^0+/, "").slice(0, 10)
           : name === "father_name"
             ? lettersAndSpacesOnly(value)
             : value,
@@ -377,7 +400,7 @@ export default function EditStudentModal({
                     <p className={errorClassName}>{fieldErrors.date_of_birth}</p>
                   )}
                 </div>
-                {selectField("gender", "Gender", GENDER_OPTIONS)}
+                {selectField("gender", "Gender", STUDENT_ADDITION_GENDER_OPTIONS)}
                 {selectField("category", "Category", CATEGORY_OPTIONS)}
                 <label className="mt-6 flex w-fit cursor-pointer items-center gap-2">
                   <input
@@ -387,7 +410,7 @@ export default function EditStudentModal({
                     onChange={handleChange}
                     className="h-4 w-4 rounded border-2 border-border text-accent focus:ring-accent/20"
                   />
-                  <span className={labelClassName}>Physical Handicapped / Vikalang</span>
+                  <span className={labelClassName}>CWSN</span>
                 </label>
                 {textField("phone", "Parents Phone Number", "tel")}
                 {textField("father_name", "Father Name")}
@@ -424,6 +447,10 @@ export default function EditStudentModal({
                 <div>
                   <label className={labelClassName}>Student ID</label>
                   <input type="text" value={student.student_id || "—"} disabled className={inputClassName} />
+                </div>
+                <div>
+                  <label className={labelClassName}>PEN</label>
+                  <input type="text" value={student.pen_number || "—"} disabled className={inputClassName} />
                 </div>
                 <div>
                   <label className={labelClassName}>APAAR ID</label>

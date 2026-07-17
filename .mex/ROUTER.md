@@ -22,7 +22,7 @@ edges:
     condition: when working on self-service student addition, bulk upload, lateral entry, or school-facing edit/delete rollout
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-07-14
+last_updated: 2026-07-17
 ---
 
 # Session Bootstrap
@@ -43,7 +43,7 @@ Then read this file fully before doing anything else in this session.
 
 **Not yet built / in progress:**
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
-- Student Addition #155 is implemented in AF LMS for NVS one-by-one add, bulk upload, existing-student edit, and program-specific dropout; multi-program students appear under every current program, and dropping one program preserves their other program enrollments.
+- Student Addition #197 revision is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; every row not written is counted as to go and included in rejected-row CSV retry, with same-school versus other-school details for existing Students.
 
 **Known issues:**
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).

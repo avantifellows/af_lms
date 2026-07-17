@@ -39,6 +39,7 @@ export async function getSchoolRoster(
       u.state,
       u.pincode,
       s.student_id,
+      s.pen_number,
       s.apaar_id,
       s.category,
       s.physically_handicapped,
@@ -69,6 +70,20 @@ export async function getSchoolRoster(
       p.program_id,
       sp.student_program_ids,
       dp.dropout_program_ids,
+      EXISTS (
+        SELECT 1
+        FROM lms_student_write_audits dropout
+        WHERE dropout.action = 'student_program_dropout'
+          AND dropout.program_id = 64
+          AND (dropout.affected_identifiers ->> 'student_pk_id')::bigint = s.id
+          AND dropout.changed_values ? 'batch_enrollment_id'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM lms_student_write_audits undo
+            WHERE undo.action = 'student_program_dropout_undo'
+              AND (undo.affected_identifiers ->> 'dropout_audit_id')::bigint = dropout.id
+          )
+      ) AS can_undo_nvs_dropout,
       GREATEST(s.updated_at, u.updated_at) as updated_at
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
