@@ -327,13 +327,13 @@ type AccessFieldsProps = {
   onRemoveSchool: (code: string) => void;
 };
 
-function AccessFields(props: AccessFieldsProps) {
-  if (props.role === "admin") {
+function AccessFields({ role, ...props }: AccessFieldsProps) {
+  if (role === "admin") {
     return <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
       Admins automatically get access to all schools, all programs, and full edit permissions.
     </div>;
   }
-  if (props.role === "holistic_mentorship_admin") {
+  if (role === "holistic_mentorship_admin") {
     return <>
       <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
         Access includes all Program 1 Schools and only Holistic Mentorship.
@@ -344,7 +344,7 @@ function AccessFields(props: AccessFieldsProps) {
   return <StandardAccessFields {...props} />;
 }
 
-function StandardAccessFields(props: AccessFieldsProps) {
+function StandardAccessFields(props: Omit<AccessFieldsProps, "role">) {
   return <>
     <div>
       <label className={labelClassName}>School Access</label>
