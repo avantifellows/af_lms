@@ -85,6 +85,24 @@ function assignmentSuccess(choices: Student[], reassigned: Student[]): string {
   return `Assigned ${studentCount(choices.length)} to you, including ${studentCount(reassigned.length)} reassigned from another Mentor.`;
 }
 
+async function mappingChangeError(
+  method: "POST" | "DELETE",
+  body: unknown,
+  networkError: string
+): Promise<string> {
+  try {
+    const response = await fetch("/api/holistic-mentorship/mappings", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    return response.ok ? "" : data.error || "Mapping changed; review the refreshed roster";
+  } catch {
+    return networkError;
+  }
+}
+
 export default function TeacherMappingWorkspace({
   schoolCode,
   view,
@@ -172,26 +190,15 @@ export default function TeacherMappingWorkspace({
     const takeover = reassigned.length > 0;
     if (!window.confirm(assignmentConfirmation(choices, reassigned))) return;
     setBusy(true);
-    let problem = "";
-    try {
-      const response = await fetch("/api/holistic-mentorship/mappings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_code: schoolCode,
-          academic_year: CURRENT_ACADEMIC_YEAR,
-          takeover_confirmed: takeover,
-          selections: choices.map((student) => ({
-            student_id: student.studentId,
-            expected_mapping_id: student.ownership?.mappingId ?? null,
-          })),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) problem = data.error || "Mapping changed; review the refreshed roster";
-    } catch {
-      problem = "Unable to update Mappings";
-    }
+    const problem = await mappingChangeError("POST", {
+      school_code: schoolCode,
+      academic_year: CURRENT_ACADEMIC_YEAR,
+      takeover_confirmed: takeover,
+      selections: choices.map((student) => ({
+        student_id: student.studentId,
+        expected_mapping_id: student.ownership?.mappingId ?? null,
+      })),
+    }, "Unable to update Mappings");
     const refreshed = await load();
     if (problem) {
       setMessage(problem);
@@ -206,26 +213,15 @@ export default function TeacherMappingWorkspace({
       `Remove ${student.name} from My Mentees? The Student will become unassigned and you will lose access to their Holistic Mentorship data.`
     )) return;
     setBusy(true);
-    let problem = "";
-    try {
-      const response = await fetch("/api/holistic-mentorship/mappings", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_code: schoolCode,
-          academic_year: CURRENT_ACADEMIC_YEAR,
-          confirmed: true,
-          mappings: [{
-            student_id: student.studentId,
-            expected_mapping_id: student.ownership.mappingId,
-          }],
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) problem = data.error || "Mapping changed; review the refreshed roster";
-    } catch {
-      problem = "Unable to remove Mapping";
-    }
+    const problem = await mappingChangeError("DELETE", {
+      school_code: schoolCode,
+      academic_year: CURRENT_ACADEMIC_YEAR,
+      confirmed: true,
+      mappings: [{
+        student_id: student.studentId,
+        expected_mapping_id: student.ownership.mappingId,
+      }],
+    }, "Unable to remove Mapping");
     const refreshed = await load();
     if (problem) setMessage(problem);
     if (!problem && refreshed) {
