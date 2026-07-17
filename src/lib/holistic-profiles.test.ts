@@ -13,7 +13,8 @@ vi.stubGlobal("fetch", mockFetch);
 describe("Holistic Profile regeneration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.HOLISTIC_PROFILE_ETL_URL = "https://etl.example.test/holistic/regenerate";
+    process.env.APP_ENV = "staging";
+    process.env.HOLISTIC_PROFILE_ETL_URL = "https://etl.example.test/api/internal/holistic-profiles/regeneration-requests/";
     process.env.HOLISTIC_PROFILE_ETL_TOKEN = "machine-token";
   });
 
@@ -49,14 +50,28 @@ describe("Holistic Profile regeneration", () => {
     ]);
     expect(client.query.mock.calls[0][0]).toContain("permission.read_only IS NOT TRUE");
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://etl.example.test/holistic/regenerate",
+      "https://etl.example.test/api/internal/holistic-profiles/regeneration-requests/d16e7d82-dc60-4b79-a064-9ed80badc119/enqueue",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ Authorization: "Bearer machine-token" }),
-        body: JSON.stringify({ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119" }),
+        body: JSON.stringify({ environment: "staging" }),
       })
     );
     expect(result).toEqual({ ok: true, requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued" });
+  });
+
+  it("fails closed before writing when the ETL environment is not configured", async () => {
+    process.env.APP_ENV = "dev";
+
+    await expect(requestHolisticProfileRegeneration({
+      email: "admin@example.com",
+      studentId: 41,
+      requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119",
+      force: true,
+    })).resolves.toEqual({ ok: false, status: 500, error: "Profile regeneration is not configured" });
+
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("keeps ambiguous delivery queued for a same-key retry", async () => {

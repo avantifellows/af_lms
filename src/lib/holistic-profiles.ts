@@ -57,9 +57,12 @@ export async function requestHolisticProfileRegeneration(params: {
   | { ok: true; requestKey: string; state: RegenerationState; delivery?: "ambiguous" }
   | { ok: false; status: 404 | 409 | 500 | 502; error: string }
 > {
-  const endpoint = process.env.HOLISTIC_PROFILE_ETL_URL;
+  const endpoint = process.env.HOLISTIC_PROFILE_ETL_URL?.replace(/\/+$/, "");
   const token = process.env.HOLISTIC_PROFILE_ETL_TOKEN;
-  if (!endpoint || !token) return { ok: false, status: 500, error: "Profile regeneration is not configured" };
+  const environment = process.env.APP_ENV;
+  if (!endpoint || !token || (environment !== "staging" && environment !== "production")) {
+    return { ok: false, status: 500, error: "Profile regeneration is not configured" };
+  }
   const request = await withTransaction(async (client) => {
     const scope = await client.query<{
       actor_user_id: number | string;
@@ -111,10 +114,10 @@ export async function requestHolisticProfileRegeneration(params: {
 
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(`${endpoint}/${encodeURIComponent(request.request_key)}/enqueue`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ request_key: request.request_key }),
+      body: JSON.stringify({ environment }),
     });
   } catch {
     return { ok: true, requestKey: request.request_key, state: "queued", delivery: "ambiguous" };
