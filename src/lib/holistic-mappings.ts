@@ -165,31 +165,18 @@ async function lockEligibleStudents(
 ) {
   const eligible = await client.query<{ student_id: number | string }>(
     `SELECT st.id AS student_id
-     FROM group_user gu_school
-     JOIN "group" school_group
-       ON school_group.id = gu_school.group_id AND school_group.type = 'school' AND school_group.child_id = $1
-     JOIN "user" u ON u.id = gu_school.user_id
-     JOIN student st ON st.user_id = u.id
-     JOIN enrollment_record er_grade
-       ON er_grade.user_id = u.id AND er_grade.group_type = 'grade'
-      AND er_grade.academic_year = $2 AND er_grade.is_current = true
-     JOIN grade gr ON gr.id = er_grade.group_id
-     JOIN LATERAL (
-       SELECT b.program_id
-       FROM enrollment_record er_batch
-       JOIN "group" batch_group
-         ON batch_group.id = er_batch.group_id AND batch_group.type = 'batch'
-       JOIN batch b ON b.id = batch_group.child_id
-       WHERE er_batch.user_id = u.id
-         AND er_batch.group_type = 'batch'
-         AND er_batch.is_current = true
-       ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id), er_batch.id
-       LIMIT 1
-     ) roster_program ON true
-     WHERE roster_program.program_id = $3
+     FROM centre_students roster_student
+     JOIN centres roster_centre
+       ON roster_centre.id = roster_student.centre_id
+      AND roster_centre.school_id = $1
+      AND roster_centre.program_id = $3
+      AND roster_centre.is_active IS TRUE
+     JOIN student st ON st.user_id = roster_student.user_id
+     WHERE roster_student.academic_year = $2
+       AND roster_student.program_id = $3
        AND st.id = ANY($4::bigint[])
        AND st.status IS DISTINCT FROM 'dropout'
-       AND gr.number IN (11, 12)
+       AND roster_student.grade IN (11, 12)
      ORDER BY st.id
          FOR UPDATE OF st`,
     [params.schoolId, params.academicYear, PROGRAM_IDS.COE, params.studentIds]
@@ -437,41 +424,25 @@ export async function listHolisticAssignmentRoster(params: {
     `SELECT st.id AS student_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
             st.student_id AS external_student_id,
-            gr.number AS grade,
+            roster_student.grade,
             active_phase.id AS active_phase_id,
             mapping.id AS mapping_id,
             mapping.mentor_user_id,
             NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name
-     FROM group_user gu_school
-     JOIN "group" school_group
-       ON school_group.id = gu_school.group_id
-      AND school_group.type = 'school'
-      AND school_group.child_id = $1
-     JOIN "user" u ON u.id = gu_school.user_id
+     FROM centre_students roster_student
+     JOIN centres roster_centre
+       ON roster_centre.id = roster_student.centre_id
+      AND roster_centre.school_id = $1
+      AND roster_centre.program_id = $3
+      AND roster_centre.is_active IS TRUE
+     JOIN "user" u ON u.id = roster_student.user_id
      JOIN student st ON st.user_id = u.id
-     JOIN enrollment_record er_grade
-       ON er_grade.user_id = u.id
-      AND er_grade.group_type = 'grade'
-      AND er_grade.academic_year = $2
-      AND er_grade.is_current = true
-     JOIN grade gr ON gr.id = er_grade.group_id
-     JOIN LATERAL (
-       SELECT b.program_id
-       FROM enrollment_record er_batch
-       JOIN "group" batch_group
-         ON batch_group.id = er_batch.group_id AND batch_group.type = 'batch'
-       JOIN batch b ON b.id = batch_group.child_id
-       WHERE er_batch.user_id = u.id
-         AND er_batch.group_type = 'batch'
-         AND er_batch.is_current = true
-       ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id), er_batch.id
-       LIMIT 1
-     ) roster_program ON true
      LEFT JOIN LATERAL (
        SELECT phase.id
        FROM holistic_mentorship_phase_plans plan
        JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id AND phase.state = 'open'
-       JOIN grade phase_grade ON phase_grade.id = phase.grade_id AND phase_grade.number = gr.number
+       JOIN grade phase_grade
+         ON phase_grade.id = phase.grade_id AND phase_grade.number = roster_student.grade
        WHERE plan.program_id = $3 AND plan.academic_year = $2
        ORDER BY phase.position DESC
        LIMIT 1
@@ -483,13 +454,14 @@ export async function listHolisticAssignmentRoster(params: {
       AND mapping.program_id = $3
       AND mapping.ended_at IS NULL
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
-     WHERE st.status IS DISTINCT FROM 'dropout'
-       AND gr.number IN (11, 12)
-       AND roster_program.program_id = $3
+     WHERE roster_student.academic_year = $2
+       AND roster_student.program_id = $3
+       AND st.status IS DISTINCT FROM 'dropout'
+       AND roster_student.grade IN (11, 12)
        AND ($4 = '%%' OR st.student_id ILIKE $4 OR
             TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $4)
-       AND ($5::int IS NULL OR gr.number = $5)
-     ORDER BY gr.number, name NULLS LAST, st.student_id`,
+       AND ($5::int IS NULL OR roster_student.grade = $5)
+     ORDER BY roster_student.grade, name NULLS LAST, st.student_id`,
     [
       params.schoolId,
       params.academicYear,

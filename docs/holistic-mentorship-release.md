@@ -72,6 +72,19 @@ For Historical import, reconcile the approved worked counts before execution:
 42 safe candidates, 39 written records, 3 empty-answer skips, 10 nullable Mentor
 attributions, and 11 unmatched source IDs quarantined. Record the current source
 fingerprint and verify that a no-op rerun changes zero rows.
+
+Prepare the private grouped input deterministically from the reviewed CSV snapshot
+and private 53-ID JSON allowlist before dry-run/apply. The preparer validates the
+expanded Sheet shape, retains source timestamps in the grouped provenance, writes
+the output with owner-only permissions, and prints only aggregate counts plus the
+snapshot hash:
+
+```bash
+npm run holistic:prepare-history -- \
+  --source-csv=/secure/path/mentorship-form-responses.csv \
+  --reviewed-student-ids=/secure/path/approved-student-ids.json \
+  --output=/secure/path/historical-grouped.json
+```
 For Profiles, compare eligible Student IDs, exact BigQuery identities, approved
 Form structure, successful active-configuration Profiles, and failed/skipped
 generation counts. Investigate every difference; do not fill gaps manually.

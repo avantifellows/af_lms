@@ -56,9 +56,13 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ]);
 
     const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("FROM centre_students roster_student");
+    expect(sql).toContain("roster_centre.school_id = $1");
+    expect(sql).toContain("roster_student.academic_year = $2");
+    expect(sql).toContain("roster_student.program_id = $3");
     expect(sql).toContain("st.status IS DISTINCT FROM 'dropout'");
-    expect(sql).toContain("gr.number IN (11, 12)");
-    expect(sql).toContain("roster_program.program_id = $3");
+    expect(sql).toContain("roster_student.grade IN (11, 12)");
+    expect(sql).not.toContain("enrollment_record");
     expect(sql).toContain("ORDER BY phase.position DESC");
     expect(sql).toContain("mapping.school_id = $1");
     expect(sql).toContain("mapping.program_id = $3");
@@ -99,6 +103,10 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(String(mockClientQuery.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
     expect(mockClientQuery.mock.calls[0][1]).toEqual(["holistic_mentorship_mentor:9"]);
     expect(sql).toContain("FOR UPDATE OF st");
+    expect(sql).toContain("FROM centre_students roster_student");
+    expect(sql).toContain("roster_centre.school_id = $1");
+    expect(sql).toContain("roster_student.academic_year = $2");
+    expect(sql).not.toContain("enrollment_record");
     expect(sql).toContain("ORDER BY st.id\n         FOR UPDATE OF st");
     expect(sql).toContain("FOR UPDATE");
     const inserts = mockClientQuery.mock.calls.filter(([text]) =>

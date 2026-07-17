@@ -290,29 +290,43 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
   const students = await query<StudentRow>(
     `SELECT st.id AS student_id, mapping.id AS mapping_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
-            st.student_id AS external_student_id, g.number AS grade, journey.entry_grade
+            st.student_id AS external_student_id,
+            COALESCE(current_roster.grade, historical_grade.grade) AS grade,
+            journey.entry_grade
      FROM holistic_mentorship_mentor_mentee_mappings mapping
      JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
      JOIN "user" u ON u.id = st.user_id
-     JOIN group_user membership ON membership.user_id = u.id
-     JOIN "group" school_group ON school_group.id = membership.group_id
-       AND school_group.type = 'school' AND school_group.child_id = mapping.school_id
-     JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = u.id
-       AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = mapping.academic_year
-       AND grade_enrollment.is_current IS TRUE
-     JOIN grade g ON g.id = grade_enrollment.group_id AND g.number IN (11, 12)
-     JOIN LATERAL (
-       SELECT b.program_id FROM enrollment_record batch_enrollment
-       JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
-       JOIN batch b ON b.id = batch_group.child_id
-       WHERE batch_enrollment.user_id = u.id AND batch_enrollment.group_type = 'batch'
-         AND batch_enrollment.is_current IS TRUE
-       ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id), batch_enrollment.id LIMIT 1
-     ) roster_program ON roster_program.program_id = mapping.program_id
+     LEFT JOIN LATERAL (
+       SELECT roster_student.grade
+       FROM centre_students roster_student
+       JOIN centres roster_centre
+         ON roster_centre.id = roster_student.centre_id
+        AND roster_centre.school_id = mapping.school_id
+        AND roster_centre.program_id = mapping.program_id
+        AND roster_centre.is_active IS TRUE
+       WHERE roster_student.user_id = u.id
+         AND roster_student.academic_year = mapping.academic_year
+         AND roster_student.program_id = mapping.program_id
+         AND roster_student.grade IN (11, 12)
+       LIMIT 1
+     ) current_roster ON mapping.academic_year = $5
+     LEFT JOIN LATERAL (
+       SELECT historical_grade.number AS grade
+       FROM enrollment_record historical_enrollment
+       JOIN grade historical_grade
+         ON historical_grade.id = historical_enrollment.group_id
+        AND historical_grade.number IN (11, 12)
+       WHERE historical_enrollment.user_id = u.id
+         AND historical_enrollment.group_type = 'grade'
+         AND historical_enrollment.academic_year = mapping.academic_year
+       ORDER BY historical_enrollment.is_current DESC, historical_enrollment.id DESC
+       LIMIT 1
+     ) historical_grade ON mapping.academic_year <> $5
      LEFT JOIN holistic_mentorship_profile_journeys journey ON journey.student_id = st.id
      WHERE mapping.student_id = $1 AND mapping.school_id = $2 AND mapping.program_id = $3
        AND mapping.academic_year = $4
        AND ($4 <> $5 OR mapping.ended_at IS NULL)
+       AND COALESCE(current_roster.grade, historical_grade.grade) IS NOT NULL
      ORDER BY mapping.started_at DESC, mapping.id DESC
      LIMIT 1`,
     [

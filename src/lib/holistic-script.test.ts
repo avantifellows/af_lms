@@ -10,6 +10,9 @@ const validSource = [{
   businessStudentId: "student-1",
   sourceRecordKey: "record-1",
   sourceMentorId: null,
+  sourceStartedAt: "2025-12-17 10:00:00",
+  sourceEndedAt: null,
+  sourceTimezone: "Asia/Calcutta",
   questions: [{ position: 1, question: "Question 1", answer: "Answer 1" }],
 }];
 
@@ -35,5 +38,16 @@ describe("Holistic operator script helpers", () => {
     expect(isHistoricalHolisticNotesSource([
       { ...validSource[0], questions: [{ position: 1, question: "Q", answer: 1 }] },
     ])).toBe(false);
+    expect(isHistoricalHolisticNotesSource([
+      { ...validSource[0], questions: [{ position: 1, question: "   ", answer: null }] },
+    ])).toBe(false);
+    expect(isHistoricalHolisticNotesSource([{
+      ...validSource[0],
+      sourceStartedAt: "not-a-timestamp",
+    }])).toBe(false);
+    expect(isHistoricalHolisticNotesSource([{
+      ...validSource[0],
+      sourceEndedAt: "2025-12-17 09:59:59",
+    }])).toBe(false);
   });
 });

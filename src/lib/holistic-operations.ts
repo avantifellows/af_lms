@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
 
+import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
+
 export type HolisticOperationMode = "dry-run" | "apply";
 
 export interface HistoricalHolisticNoteSource {
   businessStudentId: string;
   sourceRecordKey: string;
   sourceMentorId: string | null;
+  sourceStartedAt: string;
+  sourceEndedAt: string | null;
+  sourceTimezone: "Asia/Calcutta";
   questions: Array<{
     position: number;
     question: string;
@@ -26,7 +31,7 @@ export interface HistoricalImportSource {
 
 export interface HistoricalImportDb {
   resolve(source: HistoricalHolisticNoteSource[]): Promise<ResolvedHistoricalStudent[]>;
-  existing(studentIds: number[], sourceSystem: string): Promise<Set<number>>;
+  existing(studentIds: number[], sourceSystem: string): Promise<Map<number, string>>;
   insert(records: HistoricalImportWrite[]): Promise<void>;
 }
 
@@ -36,6 +41,9 @@ export interface HistoricalImportWrite {
   sourceRecordKey: string;
   sourceFingerprint: string;
   sourceSnapshot: string;
+  sourceStartedAt: string;
+  sourceEndedAt: string | null;
+  sourceTimezone: "Asia/Calcutta";
   actorUserId: number;
   questions: HistoricalHolisticNoteSource["questions"];
 }
@@ -80,9 +88,11 @@ export async function runHistoricalHolisticNotesImport(params: {
   }
 
   const blockers: string[] = [];
-  if (source.some((row) => row.questions.length !== 4 ||
-      row.questions.some((question, index) => question.position !== index + 1))) {
-    blockers.push("Source records must contain Question positions 1, 2, 3, and 4 exactly once");
+  if (source.some((row) => !hasValidHistoricalSourceProvenance(row) ||
+      row.questions.length !== 4 ||
+      row.questions.some((question, index) =>
+        question.position !== index + 1 || !question.question.trim()))) {
+    blockers.push("Source records must contain approved provenance and Question positions 1 through 4");
   }
   const safe = source.filter((row) => {
     const matches = byBusinessId.get(row.businessStudentId) ?? [];
@@ -100,7 +110,7 @@ export async function runHistoricalHolisticNotesImport(params: {
   if (wrongScope) blockers.push(`${wrongScope} source Students are outside the approved current roster`);
 
   const substantive = safe.filter((row) => row.questions.some(({ answer }) => answer?.trim()));
-  const nullableMentors = substantive.filter(
+  const nullableMentors = safe.filter(
     (row) => byBusinessId.get(row.businessStudentId)?.[0].mentorUserId == null
   ).length;
   const counts = {
@@ -119,24 +129,56 @@ export async function runHistoricalHolisticNotesImport(params: {
   ) {
     blockers.push("Reconciliation counts differ from the approved 42/39/3/10/11 baseline");
   }
-  if (mode === "apply" && (!params.actorUserId || !params.sourceSnapshot?.trim())) {
+  if (mode === "apply" &&
+      (!Number.isSafeInteger(params.actorUserId) || (params.actorUserId ?? 0) < 1 ||
+        !params.sourceSnapshot?.trim())) {
     blockers.push("Apply requires actor and source-snapshot metadata");
   }
 
-  const resolved = substantive.map((row) => ({ row, match: byBusinessId.get(row.businessStudentId)![0] }));
+  const resolved = substantive.map((row) => ({
+    row,
+    match: byBusinessId.get(row.businessStudentId)![0],
+    sourceFingerprint: historicalSourceFingerprint(row),
+  }));
   const existing = await params.db.existing(resolved.map(({ match }) => match.studentId), HISTORICAL_SOURCE_SYSTEM);
+  const fingerprintConflicts = resolved.filter(({ match, sourceFingerprint }) =>
+    existing.has(match.studentId) && existing.get(match.studentId) !== sourceFingerprint
+  ).length;
+  if (fingerprintConflicts) {
+    blockers.push(`${fingerprintConflicts} existing Historical Notes records have different source content`);
+  }
   const writes = resolved.filter(({ match }) => !existing.has(match.studentId)).map(({ row, match }) => ({
     studentId: match.studentId,
     mentorUserId: match.mentorUserId,
     sourceRecordKey: row.sourceRecordKey,
-    sourceFingerprint: createHash("sha256").update(JSON.stringify(row)).digest("hex"),
+    sourceFingerprint: historicalSourceFingerprint(row),
     sourceSnapshot: params.sourceSnapshot ?? "dry-run",
+    sourceStartedAt: row.sourceStartedAt,
+    sourceEndedAt: row.sourceEndedAt,
+    sourceTimezone: row.sourceTimezone,
     actorUserId: params.actorUserId ?? 0,
     questions: row.questions,
   }));
   counts.writes = writes.length;
   if (mode === "apply" && blockers.length === 0) await params.db.insert(writes);
   return { ok: blockers.length === 0, mode, blockers, counts };
+}
+
+function historicalSourceFingerprint(row: HistoricalHolisticNoteSource): string {
+  const canonicalSource = {
+    businessStudentId: row.businessStudentId,
+    sourceRecordKey: row.sourceRecordKey,
+    sourceMentorId: row.sourceMentorId,
+    sourceStartedAt: row.sourceStartedAt,
+    sourceEndedAt: row.sourceEndedAt,
+    sourceTimezone: row.sourceTimezone,
+    questions: row.questions.map(({ position, question, answer }) => ({
+      position,
+      question,
+      answer,
+    })),
+  };
+  return createHash("sha256").update(JSON.stringify(canonicalSource)).digest("hex");
 }
 
 export interface HolisticRolloverCandidate {

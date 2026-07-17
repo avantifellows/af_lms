@@ -147,6 +147,15 @@ describe("requireHolisticMentorshipAccess", () => {
       actorUserId: 10,
       school: { id: 20, code: "SCH001" },
     });
+
+    const schoolLookup = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM school")
+    );
+    expect(String(schoolLookup?.[0])).toContain("FROM centres centre");
+    expect(String(schoolLookup?.[0])).toContain("centre.school_id = school.id");
+    expect(String(schoolLookup?.[0])).toContain("centre.program_id = $2");
+    expect(String(schoolLookup?.[0])).not.toContain("school.program_ids");
+    expect(schoolLookup?.[1]).toEqual(["SCH001", 1]);
   });
 
   it("returns a safe 404 before checking Teacher eligibility", async () => {

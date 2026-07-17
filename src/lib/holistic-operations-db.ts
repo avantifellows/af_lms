@@ -43,32 +43,36 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
        JOIN student ON student.student_id = source.business_student_id
        JOIN "user" student_user ON student_user.id = student.user_id
        LEFT JOIN LATERAL (
-         SELECT school_group.child_id AS school_id
-         FROM group_user school_membership
-         JOIN "group" school_group ON school_group.id = school_membership.group_id
-           AND school_group.type = 'school'
-         JOIN school ON school.id = school_group.child_id
-           AND $4 = ANY(COALESCE(school.program_ids, '{}'))
-         JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
-           AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = $3
-           AND grade_enrollment.is_current IS TRUE
-         JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number = 12
-         JOIN enrollment_record batch_enrollment ON batch_enrollment.user_id = student_user.id
-           AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
-         JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
-         JOIN batch ON batch.id = batch_group.child_id AND batch.program_id = $4
-         WHERE school_membership.user_id = student_user.id
+         SELECT DISTINCT centre.school_id
+         FROM centre_students roster_student
+         JOIN centres centre ON centre.id = roster_student.centre_id
+         WHERE roster_student.user_id = student_user.id
+           AND roster_student.academic_year = $3
+           AND roster_student.grade = 12
+           AND roster_student.program_id = $4
        ) roster ON TRUE
        LEFT JOIN LATERAL (
-         SELECT CASE WHEN COUNT(*) = 1 THEN MIN(teacher.user_id) END AS user_id
-         FROM teacher WHERE teacher.teacher_id = source.source_mentor_id
-           AND teacher.is_af_teacher IS TRUE
+         SELECT CASE WHEN COUNT(DISTINCT teacher.user_id) = 1
+                     THEN MIN(teacher.user_id) END AS user_id
+         FROM teacher
+         JOIN centre_positions seat ON seat.user_id = teacher.user_id
+           AND seat.deleted_at IS NULL AND NOT (seat.role = ANY($5::text[]))
+         JOIN centres centre ON centre.id = seat.centre_id AND centre.is_active IS TRUE
+           AND centre.school_id = roster.school_id AND centre.program_id = $4
+         JOIN user_permission permission ON permission.revoked_at IS NULL
+           AND permission.role = 'teacher'
+           AND (permission.user_id = teacher.user_id OR LOWER(permission.email) = LOWER((
+             SELECT email FROM "user" WHERE id = teacher.user_id
+           )))
+         WHERE LOWER(BTRIM(teacher.teacher_id)) = LOWER(BTRIM(source.source_mentor_id))
+           AND teacher.is_af_teacher IS TRUE AND teacher.exit_date IS NULL
        ) mentor ON TRUE`,
         [
           source.map(({ businessStudentId }) => businessStudentId),
           source.map(({ sourceMentorId }) => sourceMentorId),
           "2026-2027",
           PROGRAM_IDS.COE,
+          [...PM_SEAT_ROLES],
         ]
       ).then((rows): ResolvedHistoricalStudent[] => rows.map((row) => ({
         businessStudentId: row.business_student_id,
@@ -78,13 +82,15 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
       })));
     },
     async existing(studentIds, sourceSystem) {
-      if (!studentIds.length) return new Set<number>();
-      const rows = await query<{ student_id: number | string }>(
-        `SELECT student_id FROM holistic_mentorship_historical_notes
+      if (!studentIds.length) return new Map<number, string>();
+      const rows = await query<{ student_id: number | string; source_fingerprint: string }>(
+        `SELECT student_id, source_fingerprint FROM holistic_mentorship_historical_notes
        WHERE student_id = ANY($1::bigint[]) AND source_system = $2`,
         [studentIds, sourceSystem]
       );
-      return new Set(rows.map(({ student_id }) => Number(student_id)));
+      return new Map(rows.map(({ student_id, source_fingerprint }) =>
+        [Number(student_id), source_fingerprint]
+      ));
     },
     async insert(records) {
       if (!records.length) return;
@@ -106,9 +112,26 @@ async function insertHistoricalRecord(
      VALUES ($1, $2, 'approved_2025_holistic_export', $3, $4, $5, now(), $6::jsonb, now(), now())
      ON CONFLICT (student_id, source_system) DO NOTHING RETURNING id`,
     [record.studentId, record.mentorUserId, record.sourceRecordKey, record.sourceFingerprint,
-      record.actorUserId, JSON.stringify({ source_snapshot: record.sourceSnapshot })]
+      record.actorUserId, JSON.stringify({
+        source_snapshot: record.sourceSnapshot,
+        source_started_at: record.sourceStartedAt,
+        source_ended_at: record.sourceEndedAt,
+        source_timezone: record.sourceTimezone,
+      })]
   );
-  if (!inserted.rows[0]) return;
+  if (!inserted.rows[0]) {
+    const existing = await client.query<{ source_fingerprint: string }>(
+      `SELECT source_fingerprint
+       FROM holistic_mentorship_historical_notes
+       WHERE student_id = $1 AND source_system = 'approved_2025_holistic_export'
+       FOR UPDATE`,
+      [record.studentId]
+    );
+    if (existing.rows[0]?.source_fingerprint !== record.sourceFingerprint) {
+      throw new Error("Historical Note source conflict");
+    }
+    return;
+  }
   for (const question of record.questions) {
     await client.query(
       `INSERT INTO holistic_mentorship_historical_note_answers

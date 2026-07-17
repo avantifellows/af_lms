@@ -11,125 +11,140 @@ const questions = [1, 2, 3, 4].map((position) => ({
   question: `Question ${position}`,
   answer: `Answer ${position}`,
 }));
+const sourceProvenance = {
+  sourceStartedAt: "2025-12-17 10:00:00",
+  sourceEndedAt: "2025-12-17 10:30:00",
+  sourceTimezone: "Asia/Calcutta" as const,
+};
+
+function approvedHistoricalRecords(): HistoricalHolisticNoteSource[] {
+  return [
+    ...Array.from({ length: 39 }, (_, index) => ({
+      ...sourceProvenance,
+      businessStudentId: `eligible-${index}`,
+      sourceRecordKey: `record-${index}`,
+      sourceMentorId: index < 29 ? `mentor-${index}` : null,
+      questions,
+    })),
+    ...Array.from({ length: 3 }, (_, index) => ({
+      ...sourceProvenance,
+      businessStudentId: `empty-${index}`,
+      sourceRecordKey: `empty-record-${index}`,
+      sourceMentorId: `mentor-empty-${index}`,
+      questions: questions.map((question) => ({ ...question, answer: null })),
+    })),
+    ...Array.from({ length: 11 }, (_, index) => ({
+      ...sourceProvenance,
+      businessStudentId: `unmatched-${index}`,
+      sourceRecordKey: `unmatched-record-${index}`,
+      sourceMentorId: null,
+      questions,
+    })),
+  ];
+}
+
+function resolveApprovedRecords(
+  records: HistoricalHolisticNoteSource[],
+  eligible: (index: number) => boolean = () => true
+) {
+  return records.slice(0, 42).map((record, index) => ({
+    businessStudentId: record.businessStudentId,
+    studentId: index + 1,
+    mentorUserId: record.sourceMentorId ? 100 + index : null,
+    eligible: eligible(index),
+  }));
+}
+
+function approvedImportInput(
+  records: HistoricalHolisticNoteSource[],
+  insert: ReturnType<typeof vi.fn>,
+  existing = new Map<number, string>(),
+  actorUserId = 7
+) {
+  return {
+    mode: "apply" as const,
+    actorUserId,
+    sourceSnapshot: "approved-2026-07-14",
+    source: { read: async () => records },
+    db: {
+      resolve: async () => resolveApprovedRecords(records),
+      existing: async () => existing,
+      insert,
+    },
+  };
+}
 
 describe("Historical Holistic Notes import entrypoint", () => {
-  it("does not count empty skipped records as nullable Mentor attributions", async () => {
-    const records: HistoricalHolisticNoteSource[] = [
-      ...Array.from({ length: 32 }, (_, index) => ({
-        businessStudentId: `eligible-${index}`,
-        sourceRecordKey: `record-${index}`,
-        sourceMentorId: `mentor-${index}`,
-        questions,
-      })),
-      ...Array.from({ length: 7 }, (_, index) => ({
-        businessStudentId: `nullable-${index}`,
-        sourceRecordKey: `nullable-record-${index}`,
-        sourceMentorId: null,
-        questions,
-      })),
-      ...Array.from({ length: 3 }, (_, index) => ({
-        businessStudentId: `empty-${index}`,
-        sourceRecordKey: `empty-record-${index}`,
-        sourceMentorId: null,
-        questions: questions.map((question) => ({ ...question, answer: null })),
-      })),
-      ...Array.from({ length: 11 }, (_, index) => ({
-        businessStudentId: `unmatched-${index}`,
-        sourceRecordKey: `unmatched-record-${index}`,
-        sourceMentorId: null,
-        questions,
-      })),
-    ];
+  it("reconciles nullable Mentors across the safe cohort while skipping empty writes", async () => {
+    const records = approvedHistoricalRecords();
     const insert = vi.fn();
     const report = await runHistoricalHolisticNotesImport({
       source: { read: async () => records },
       db: {
-        resolve: async () => records.flatMap((record, index) =>
-          record.businessStudentId.startsWith("unmatched-") ? [] : [{
-            businessStudentId: record.businessStudentId,
-            studentId: index + 1,
-            mentorUserId: record.sourceMentorId ? 100 + index : null,
-            eligible: true,
-          }]
-        ),
-        existing: async () => new Set(),
+        resolve: async () => resolveApprovedRecords(records),
+        existing: async () => new Map(),
         insert,
       },
     });
 
     expect(report).toMatchObject({
-      ok: false,
+      ok: true,
       mode: "dry-run",
       counts: {
         safeCandidates: 42,
         writes: 39,
         emptySkips: 3,
-        nullableMentors: 7,
+        nullableMentors: 10,
         quarantinedUnmatched: 11,
       },
     });
-    expect(report.blockers).toContain("Reconciliation counts differ from the approved 42/39/3/10/11 baseline");
+    expect(report.blockers).toEqual([]);
     expect(insert).not.toHaveBeenCalled();
   });
 
   it("blocks apply when a source record does not contain the original four Question positions", async () => {
-    const records = Array.from({ length: 53 }, (_, index) => ({
-      businessStudentId: `student-${index}`,
-      sourceRecordKey: `record-${index}`,
-      sourceMentorId: index < 32 ? `mentor-${index}` : null,
-      questions: index === 0 ? questions.slice(0, 3) : index < 39 ? questions :
-        questions.map((question) => ({ ...question, answer: null })),
-    }));
+    const records = approvedHistoricalRecords();
+    records[0] = { ...records[0], questions: questions.slice(0, 3) };
     const insert = vi.fn();
-    const report = await runHistoricalHolisticNotesImport({
-      mode: "apply",
-      actorUserId: 7,
-      sourceSnapshot: "approved-2026-07-14",
-      source: { read: async () => records },
-      db: {
-        resolve: async () => records.slice(0, 42).map((record, index) => ({
-          businessStudentId: record.businessStudentId,
-          studentId: index + 1,
-          mentorUserId: index < 32 ? 100 + index : null,
-          eligible: true,
-        })),
-        existing: async () => new Set(),
-        insert,
-      },
-    });
+    const report = await runHistoricalHolisticNotesImport(
+      approvedImportInput(records, insert)
+    );
 
     expect(report.ok).toBe(false);
-    expect(report.blockers).toContain("Source records must contain Question positions 1, 2, 3, and 4 exactly once");
+    expect(report.blockers).toContain(
+      "Source records must contain approved provenance and Question positions 1 through 4"
+    );
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("blocks direct imports with invalid source timestamp provenance", async () => {
+    const records = approvedHistoricalRecords();
+    records[0] = {
+      ...records[0],
+      sourceEndedAt: "2025-12-17 09:59:59",
+    };
+    const insert = vi.fn();
+    const report = await runHistoricalHolisticNotesImport(
+      approvedImportInput(records, insert)
+    );
+
+    expect(report.blockers).toContain(
+      "Source records must contain approved provenance and Question positions 1 through 4"
+    );
     expect(insert).not.toHaveBeenCalled();
   });
 
   it("applies once with provenance metadata and writes nothing on an unchanged rerun", async () => {
-    const records = [
-      ...Array.from({ length: 39 }, (_, index) => ({
-        businessStudentId: `eligible-${index}`, sourceRecordKey: `record-${index}`,
-        sourceMentorId: index < 29 ? `mentor-${index}` : null, questions,
-      })),
-      ...Array.from({ length: 3 }, (_, index) => ({
-        businessStudentId: `empty-${index}`, sourceRecordKey: `empty-record-${index}`,
-        sourceMentorId: `mentor-empty-${index}`,
-        questions: questions.map((question) => ({ ...question, answer: null })),
-      })),
-      ...Array.from({ length: 11 }, (_, index) => ({
-        businessStudentId: `unmatched-${index}`, sourceRecordKey: `unmatched-record-${index}`,
-        sourceMentorId: null, questions,
-      })),
-    ];
-    const imported = new Set<number>();
-    const insert = vi.fn(async (writes: Array<{ studentId: number }>) => {
-      writes.forEach(({ studentId }) => imported.add(studentId));
+    const records = approvedHistoricalRecords();
+    const imported = new Map<number, string>();
+    const insert = vi.fn(async (writes: Array<{ studentId: number; sourceFingerprint: string }>) => {
+      writes.forEach(({ studentId, sourceFingerprint }) =>
+        imported.set(studentId, sourceFingerprint)
+      );
     });
     const db = {
-      resolve: async () => records.slice(0, 42).map((record, index) => ({
-        businessStudentId: record.businessStudentId, studentId: index + 1,
-        mentorUserId: index < 29 || index >= 39 ? 100 + index : null,
-        eligible: true,
-      })),
-      existing: async () => new Set(imported),
+      resolve: async () => resolveApprovedRecords(records),
+      existing: async () => new Map(imported),
       insert,
     };
     const input = {
@@ -149,27 +164,44 @@ describe("Historical Holistic Notes import entrypoint", () => {
   });
 
   it("blocks an exact business Student ID whose current roster is outside launch scope", async () => {
-    const records = Array.from({ length: 53 }, (_, index) => ({
-      businessStudentId: `student-${index}`, sourceRecordKey: `record-${index}`,
-      sourceMentorId: index < 32 ? `mentor-${index}` : null,
-      questions: index < 39 ? questions : index < 42
-        ? questions.map((question) => ({ ...question, answer: null })) : questions,
-    }));
+    const records = approvedHistoricalRecords();
     const report = await runHistoricalHolisticNotesImport({
       mode: "apply", actorUserId: 7, sourceSnapshot: "approved-2026-07-14",
       source: { read: async () => records },
       db: {
-        resolve: async () => records.slice(0, 42).map((record, index) => ({
-          businessStudentId: record.businessStudentId, studentId: index + 1,
-          mentorUserId: index < 32 ? 100 + index : null, eligible: index !== 0,
-        })),
-        existing: async () => new Set(),
+        resolve: async () => resolveApprovedRecords(records, (index) => index !== 0),
+        existing: async () => new Map(),
         insert: vi.fn(),
       },
     });
 
     expect(report.blockers).toContain("1 source Students are outside the approved current roster");
     expect(report.ok).toBe(false);
+  });
+
+  it("blocks apply when an existing Student record has different source content", async () => {
+    const records = approvedHistoricalRecords();
+    const insert = vi.fn();
+    const report = await runHistoricalHolisticNotesImport(
+      approvedImportInput(records, insert, new Map([[1, "different-fingerprint"]]))
+    );
+
+    expect(report.ok).toBe(false);
+    expect(report.blockers).toContain(
+      "1 existing Historical Notes records have different source content"
+    );
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid direct apply metadata before writing", async () => {
+    const records = approvedHistoricalRecords();
+    const insert = vi.fn();
+    const report = await runHistoricalHolisticNotesImport(
+      approvedImportInput(records, insert, new Map(), -1)
+    );
+
+    expect(report.blockers).toContain("Apply requires actor and source-snapshot metadata");
+    expect(insert).not.toHaveBeenCalled();
   });
 });
 

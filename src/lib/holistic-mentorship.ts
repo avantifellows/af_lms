@@ -88,10 +88,16 @@ async function findProgramSchool(
   schoolCode: string
 ): Promise<HolisticMentorshipSchool | null> {
   const rows = await query<HolisticMentorshipSchoolRow>(
-    `SELECT id, code, name, region
+    `SELECT school.id, school.code, school.name, school.region
      FROM school
-     WHERE code = $1
-       AND $2 = ANY(COALESCE(program_ids, '{}'))
+     WHERE school.code = $1
+       AND EXISTS (
+         SELECT 1
+         FROM centres centre
+         WHERE centre.school_id = school.id
+           AND centre.program_id = $2
+           AND centre.is_active IS TRUE
+       )
      LIMIT 1`,
     [schoolCode, PROGRAM_IDS.COE]
   );

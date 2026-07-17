@@ -1,5 +1,6 @@
 import * as dotenv from "dotenv";
 
+import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
 import type {
   HistoricalHolisticNoteSource,
   HolisticOperationMode,
@@ -54,7 +55,12 @@ function isSourceRecord(value: unknown): value is HistoricalHolisticNoteSource {
 function hasSourceIdentity(record: Record<string, unknown>): boolean {
   return isNonEmptyString(record.businessStudentId) &&
     isNonEmptyString(record.sourceRecordKey) &&
-    isNullableString(record.sourceMentorId);
+    isNullableString(record.sourceMentorId) &&
+    hasValidHistoricalSourceProvenance({
+      sourceStartedAt: record.sourceStartedAt,
+      sourceEndedAt: record.sourceEndedAt,
+      sourceTimezone: record.sourceTimezone,
+    });
 }
 
 function hasValidQuestions(value: unknown): boolean {
@@ -64,7 +70,7 @@ function hasValidQuestions(value: unknown): boolean {
 function isSourceQuestion(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return Number.isInteger(value.position) &&
-    typeof value.question === "string" &&
+    isNonEmptyString(value.question) &&
     isNullableString(value.answer);
 }
 
@@ -73,7 +79,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isNullableString(value: unknown): value is string | null {

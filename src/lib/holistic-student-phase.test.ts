@@ -134,6 +134,68 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
+  it("keeps Historical notes as the later-Phase fallback until submitted Notes exist", () => {
+    const input = {
+      targetPhaseId: 26,
+      phases: [
+        { id: 25, number: 5, title: "Grade 12 start" },
+        { id: 26, number: 6, title: "Following up" },
+      ],
+      profile: [{ title: "Strengths", summary: "Patient problem solver" }],
+      historicalAnswers: [
+        { question: "Historical question 1", answer: "Historical answer" },
+        { question: "Historical question 2", answer: null },
+        { question: "Historical question 3", answer: null },
+        { question: "Historical question 4", answer: null },
+      ],
+      launchGrade12: true,
+      entryGradeFirstPhaseId: 25,
+    };
+
+    expect(resolveHolisticStudentContext({ ...input, submittedNotes: [] })).toMatchObject({
+      label: "Historical notes",
+      items: [
+        { label: "Historical question 1", content: "Historical answer" },
+        { label: "Historical question 2", content: "No response recorded" },
+        { label: "Historical question 3", content: "No response recorded" },
+        { label: "Historical question 4", content: "No response recorded" },
+      ],
+    });
+
+    expect(resolveHolisticStudentContext({
+      ...input,
+      submittedNotes: [{
+        phaseId: 25,
+        lastEditedAt: "2026-08-01T00:00:00Z",
+        answers: [{ question: "What helped?", answer: "A weekly plan" }],
+      }],
+    })).toEqual({
+      label: "From Phase 5 - Grade 12 start",
+      items: [{ label: "What helped?", content: "A weekly plan" }],
+      lastUpdatedAt: "2026-08-01T00:00:00Z",
+    });
+  });
+
+  it("uses the Profile at launch Grade 12 entry when Historical answers are empty", () => {
+    expect(resolveHolisticStudentContext({
+      targetPhaseId: 25,
+      phases: [{ id: 25, number: 5, title: "Grade 12 start" }],
+      submittedNotes: [],
+      profile: [{ title: "Strengths", summary: "Patient problem solver" }],
+      historicalAnswers: [
+        { question: "Historical question 1", answer: null },
+        { question: "Historical question 2", answer: "  " },
+        { question: "Historical question 3", answer: null },
+        { question: "Historical question 4", answer: null },
+      ],
+      launchGrade12: true,
+      entryGradeFirstPhaseId: 25,
+    })).toEqual({
+      label: "Student Profile",
+      items: [{ label: "Strengths", content: "Patient problem solver" }],
+    });
+  });
+
   it("uses the Active-configuration Profile only at the entry Grade's first Phase", () => {
     const input = {
       phases: [
@@ -228,6 +290,13 @@ describe("Holistic Student Phase derivation", () => {
       role: "teacher",
       canEdit: true,
     });
+
+    const [mappingSql, mappingParams] = mockQuery.mock.calls[0];
+    expect(String(mappingSql)).toContain("FROM centre_students roster_student");
+    expect(String(mappingSql)).toContain("roster_centre.school_id = mapping.school_id");
+    expect(String(mappingSql)).toContain("current_roster ON mapping.academic_year = $5");
+    expect(String(mappingSql)).not.toContain("batch_enrollment");
+    expect(mappingParams).toEqual([41, 4, 1, "2026-2027", "2026-2027"]);
 
     expect(result).toMatchObject({
       selectedPhase: {
@@ -350,6 +419,10 @@ describe("Holistic Student Phase derivation", () => {
 
     const [mappingSql, mappingParams] = mockQuery.mock.calls[0];
     expect(String(mappingSql)).toContain("($4 <> $5 OR mapping.ended_at IS NULL)");
+    expect(String(mappingSql)).toContain("historical_enrollment.academic_year = mapping.academic_year");
+    expect(String(mappingSql)).toContain("historical_grade ON mapping.academic_year <> $5");
+    expect(String(mappingSql)).not.toContain("historical_enrollment.is_current IS TRUE");
+    expect(String(mappingSql)).not.toContain("JOIN group_user");
     expect(String(mappingSql)).toContain("ORDER BY mapping.started_at DESC, mapping.id DESC");
     expect(mappingParams).toEqual([41, 4, 1, "2025-2026", "2026-2027"]);
     expect(result).toMatchObject({
