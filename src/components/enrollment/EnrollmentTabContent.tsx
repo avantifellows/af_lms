@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Plus, Upload } from "lucide-react";
 import StudentTable, {
@@ -15,6 +15,11 @@ import {
   studentDroppedFromProgram,
   studentHasCurrentProgram,
 } from "@/lib/enrollment-stats";
+import {
+  buildAdmissionSummary,
+  isAdmissionGrade,
+  type ConsentByStudentId,
+} from "@/lib/enrollment-readiness";
 import type { Batch } from "@/components/EditStudentModal";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { Button, Modal } from "@/components/ui";
@@ -36,7 +41,9 @@ interface Props {
   grades: Grade[];
   batches: Batch[];
   nvsStreams: string[];
+  /** School UDISE used by the student write and export routes. */
   schoolUdise: string;
+  /** School code/UDISE used to fetch grade 11/12 consent status. */
   schoolCode: string;
 }
 
@@ -76,6 +83,42 @@ export default function EnrollmentTabContent({
     ? selectedId
     : (programs[0]?.id ?? null);
 
+  // Consent status for the school's grade 11/12 students, keyed by
+  // student_pk_id. Fetched client-side so the (default) enrollment tab isn't
+  // blocked on the per-student document lookups.
+  const [consent, setConsent] = useState<ConsentByStudentId>({});
+  const [consentLoading, setConsentLoading] = useState(true);
+  const [consentError, setConsentError] = useState(false);
+  // Bumped after a save/upload in the roster so the consent map refetches and
+  // the admission summary updates without a full page reload.
+  const [consentReloadKey, setConsentReloadKey] = useState(0);
+
+  // Refetch when the school changes or after an upload. State is only mutated
+  // inside async callbacks (not synchronously in the effect body) to avoid
+  // cascading renders.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/schools/${encodeURIComponent(schoolCode)}/consent-status`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`consent-status ${res.status}`);
+        return res.json();
+      })
+      .then((data: { consent: ConsentByStudentId }) => {
+        if (cancelled) return;
+        setConsent(data.consent ?? {});
+        setConsentError(false);
+      })
+      .catch(() => {
+        if (!cancelled) setConsentError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setConsentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schoolCode, consentReloadKey]);
+
   const filteredActive = useMemo(() => {
     if (selectedProgramId == null) return [];
     return activeStudents.filter((s) =>
@@ -114,22 +157,28 @@ export default function EnrollmentTabContent({
   // Recompute the program pills scoped to the selected grade so every number
   // (total, gender, category) corresponds to the applied program + grade.
   const scopedPrograms = useMemo(() => {
-    const scopedActive =
-      activeStudents.filter((student) =>
+    const scopedActive = activeStudents.filter(
+      (student) =>
         (selectedGrade === "all" || student.grade === Number(selectedGrade)) &&
-        (selectedStream === "all" || student.stream?.toLowerCase() === selectedStream.toLowerCase()),
-      );
+        (selectedStream === "all" ||
+          student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+    );
     return programs.map((p) => buildProgramStats(scopedActive, p.id));
   }, [programs, activeStudents, selectedGrade, selectedStream]);
 
   // Active students of the selected program after the grade filter — drives
   // the "Showing X of Y" hint next to the dropdown.
-  const activeFilteredCount = useMemo(() =>
-    filteredActive.filter((student) =>
-      (selectedGrade === "all" || student.grade === Number(selectedGrade)) &&
-      (selectedStream === "all" || student.stream?.toLowerCase() === selectedStream.toLowerCase()),
-    ).length,
-  [filteredActive, selectedGrade, selectedStream]);
+  const activeFilteredCount = useMemo(
+    () =>
+      filteredActive.filter(
+        (student) =>
+          (selectedGrade === "all" ||
+            student.grade === Number(selectedGrade)) &&
+          (selectedStream === "all" ||
+            student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+      ).length,
+    [filteredActive, selectedGrade, selectedStream],
+  );
 
   const showAddStudent = canAddStudent && selectedProgramId === PROGRAM_IDS.NVS;
 
@@ -144,13 +193,29 @@ export default function EnrollmentTabContent({
     setAddOpen(true);
   };
 
-  const handleStudentCreated = (studentId: string | null, penNumber: string | null) => {
+  const handleStudentCreated = (
+    studentId: string | null,
+    penNumber: string | null,
+  ) => {
     setAddOpen(false);
     setCreatedStudentId(studentId);
     setCreatedPenNumber(penNumber);
     setCreatedOpen(true);
     router.refresh();
   };
+
+  // Admission summary, scoped to the grade filter:
+  //  • "all"  → combined across admission grades (11 & 12)
+  //  • "11"/"12" → just that grade
+  //  • a non-admission grade (9/10) → null (admission tracking doesn't apply)
+  const admissionSummary = useMemo(() => {
+    const gradeNum = selectedGrade === "all" ? null : Number(selectedGrade);
+    if (gradeNum != null && !isAdmissionGrade(gradeNum)) return null;
+    const inScope = filteredActive.filter((s) =>
+      gradeNum == null ? isAdmissionGrade(s.grade) : s.grade === gradeNum,
+    );
+    return buildAdmissionSummary(inScope, consent);
+  }, [filteredActive, consent, selectedGrade]);
 
   return (
     <>
@@ -183,7 +248,7 @@ export default function EnrollmentTabContent({
       </Modal>
       {/* Grade filter — placed above the summary so it's clear the pills react
           to it. */}
-      <div className="max-w-3xl mx-auto mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3 sm:gap-4">
         <label
           htmlFor="gradeFilter"
           className="text-sm font-medium text-gray-700"
@@ -203,7 +268,10 @@ export default function EnrollmentTabContent({
             </option>
           ))}
         </select>
-        <label htmlFor="streamFilter" className="text-sm font-medium text-gray-700">
+        <label
+          htmlFor="streamFilter"
+          className="text-sm font-medium text-gray-700"
+        >
           Filter by Stream:
         </label>
         <select
@@ -214,13 +282,14 @@ export default function EnrollmentTabContent({
         >
           <option value="all">All Streams ({filteredActive.length})</option>
           {streamOptions.map(([stream, count]) => (
-            <option key={stream} value={stream}>{stream} ({count})</option>
+            <option key={stream} value={stream}>
+              {stream} ({count})
+            </option>
           ))}
         </select>
         {(selectedGrade !== "all" || selectedStream !== "all") && (
           <span className="text-sm text-gray-500">
-            Showing {activeFilteredCount} of {filteredActive.length}{" "}
-            students
+            Showing {activeFilteredCount} of {filteredActive.length} students
           </span>
         )}
         {showAddStudent && (
@@ -242,7 +311,8 @@ export default function EnrollmentTabContent({
               onClick={() => {
                 const params = new URLSearchParams();
                 if (selectedGrade !== "all") params.set("grade", selectedGrade);
-                if (selectedStream !== "all") params.set("stream", selectedStream);
+                if (selectedStream !== "all")
+                  params.set("stream", selectedStream);
                 window.location.assign(
                   `/api/school/${encodeURIComponent(schoolUdise)}/students/export${params.size ? `?${params}` : ""}`,
                 );
@@ -268,6 +338,9 @@ export default function EnrollmentTabContent({
             setSelectedGrade("all");
             setSelectedStream("all");
           }}
+          admission={admissionSummary}
+          consentLoading={consentLoading}
+          consentError={consentError}
         />
       )}
 
@@ -289,6 +362,7 @@ export default function EnrollmentTabContent({
         onGradeChange={setSelectedGrade}
         selectedStream={selectedStream}
         hideGradeFilterUI
+        onDataChanged={() => setConsentReloadKey((k) => k + 1)}
       />
 
       <AddStudentModal

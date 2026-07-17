@@ -34,18 +34,22 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+
 - Dual auth (Google OAuth + school passcode) with dev-login personas in non-prod.
 - Student enrollment CRUD (reads direct from Postgres; writes proxied to the DB Service) + school dashboard, search, grade filtering, document uploads (S3).
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
-- PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`.
+- PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; PM completion requires six Action Types, while Admin and Program Admin completion permits zero Actions; Program Admins manage their own in-progress Visits while retaining scoped read access; teacher pickers use the Staff Management Visit Teacher roster.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
-- Deploy via AWS Amplify; ~1341 unit tests (Vitest/RTL) + ~39 E2E (Playwright).
+- Academic Mentorship foundation: `academic_mentorship` feature key, School page current-year Mentorship tab views, guarded `/admin/academic-mentorship` grouped mapping overview with Program filtering, current-year manual add/remove/reassign controls, CSV template/upload import for supported years with prior-year rows stored as historical, selector options API, direct LMS-owned mapping writes, and Staff Management delete/exit safeguards for Academic Mentors with Mapping history.
+- Deploy via AWS Amplify; ~2472 unit tests (Vitest/RTL) + 65 E2E (Playwright).
 
 **Not yet built / in progress:**
+
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
 - Student Addition #197 revision is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; every row not written is counted as to go and included in rejected-row CSV retry, with same-school versus other-school details for existing Students.
 
 **Known issues:**
+
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
 - The `graphify-out/` knowledge graph is not committed (regenerated locally); rebuild with `/graphify --update` after significant changes.
 - Deploy is CI-only via `.github/workflows/deploy-amplify.yml` (main → prod, PRs → shared staging URL). There is no local deploy script.
@@ -54,18 +58,18 @@ Then read this file fully before doing anything else in this session.
 
 Load the relevant file based on the current task. Always load `context/architecture.md` first if not already in context this session.
 
-| Task type | Load |
-|-----------|------|
-| Understanding how the system works | `context/architecture.md` |
-| Working with a specific technology | `context/stack.md` |
-| Writing or reviewing code | `context/conventions.md` |
-| Making a design decision | `context/decisions.md` |
-| Setting up or running the project | `context/setup.md` |
-| Gating a route / access control / 403s | `context/permissions.md` |
-| Reading or writing data (Postgres / DB Service / BigQuery / DynamoDB / S3) | `context/data-access.md` |
-| PM school visits or visit action types | `context/visits.md` |
-| Student addition / bulk upload / lateral entry | `context/student-addition.md` |
-| Any specific task | Check `patterns/INDEX.md` for a matching pattern |
+| Task type                                                                  | Load                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------ |
+| Understanding how the system works                                         | `context/architecture.md`                        |
+| Working with a specific technology                                         | `context/stack.md`                               |
+| Writing or reviewing code                                                  | `context/conventions.md`                         |
+| Making a design decision                                                   | `context/decisions.md`                           |
+| Setting up or running the project                                          | `context/setup.md`                               |
+| Gating a route / access control / 403s                                     | `context/permissions.md`                         |
+| Reading or writing data (Postgres / DB Service / BigQuery / DynamoDB / S3) | `context/data-access.md`                         |
+| PM school visits or visit action types                                     | `context/visits.md`                              |
+| Student addition / bulk upload / lateral entry                             | `context/student-addition.md`                    |
+| Any specific task                                                          | Check `patterns/INDEX.md` for a matching pattern |
 
 ## Behavioural Contract
 

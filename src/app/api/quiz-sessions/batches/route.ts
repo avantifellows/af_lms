@@ -49,9 +49,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ batches: [] });
   }
 
+  // Scope to the PM's authorized programs. (Previously also filtered
+  // batch_id LIKE 'EnableStudents_%', which wrongly hid EMRS/Punjab/Gujarat
+  // batches even when the PM had those programs — program_id is the real scope.)
   const baseFilters = `
     b.program_id = ANY($2::int[])
-    AND b.batch_id LIKE 'EnableStudents_%'
   `;
 
   let batches = await query<BatchRow>(
@@ -72,7 +74,6 @@ export async function GET(request: NextRequest) {
       SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
       FROM batch b
       WHERE b.program_id = ANY($1::int[])
-        AND b.batch_id LIKE 'EnableStudents_%'
       ORDER BY b.name
       `,
       [programIds]

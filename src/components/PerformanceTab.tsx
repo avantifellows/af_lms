@@ -39,6 +39,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   const urlSession = searchParams.get("session");
   const urlStream = searchParams.get("stream") || null;
   const urlSubject = searchParams.get("subject") || null;
+  const urlTestGrade = searchParams.get("testGrade");
   const urlView = (searchParams.get("view") as FullTestView | null) || null;
   const urlCategory = (searchParams.get("category") as TestCategory | null) || null;
 
@@ -59,9 +60,13 @@ export default function PerformanceTab({ schoolUdise }: Props) {
   );
   const [selectedStream, setSelectedStream] = useState<string | null>(urlStream);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(urlSubject);
+  const [selectedTestGrade, setSelectedTestGrade] = useState<number | null>(
+    urlTestGrade ? parseInt(urlTestGrade, 10) : null
+  );
   const [fullTestView, setFullTestView] = useState<FullTestView>(urlView === "cumulative" ? "cumulative" : "per_test");
   const [availableStreams, setAvailableStreams] = useState<string[]>([]);
   const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
+  const [availableTestGrades, setAvailableTestGrades] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Update URL when state changes
@@ -72,6 +77,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
       session?: string | null;
       stream?: string | null;
       subject?: string | null;
+      testGrade?: number | null;
       view?: FullTestView | null;
       category?: TestCategory | null;
     }) => {
@@ -95,6 +101,10 @@ export default function PerformanceTab({ schoolUdise }: Props) {
       if (opts.subject !== undefined) {
         if (opts.subject) params.set("subject", opts.subject);
         else params.delete("subject");
+      }
+      if (opts.testGrade !== undefined) {
+        if (opts.testGrade != null) params.set("testGrade", String(opts.testGrade));
+        else params.delete("testGrade");
       }
       if (opts.view !== undefined) {
         if (opts.view && opts.view !== "per_test") params.set("view", opts.view);
@@ -177,9 +187,10 @@ export default function PerformanceTab({ schoolUdise }: Props) {
 
   // Receive available filter values from BatchOverview as it loads data.
   const handleFilterOptions = useCallback(
-    (opts: { streams: string[]; subjects: string[] }) => {
-      setAvailableStreams(opts.streams);
-      setAvailableSubjects(opts.subjects);
+    (opts: { streams: string[]; subjects: string[]; testGrades: number[] }) => {
+      setAvailableStreams(opts.streams ?? []);
+      setAvailableSubjects(opts.subjects ?? []);
+      setAvailableTestGrades(opts.testGrades ?? []);
     },
     []
   );
@@ -215,8 +226,10 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     setDeepDiveSession(null);
     setSelectedStream(null);
     setSelectedSubject(null);
+    setSelectedTestGrade(null);
+    setAvailableTestGrades([]);
     setGrades(null); // trigger re-fetch
-    updateUrl({ program, grade: null, session: null, stream: null, subject: null });
+    updateUrl({ program, grade: null, session: null, stream: null, subject: null, testGrade: null });
   };
 
   const handleGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -226,7 +239,16 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     setDeepDiveSession(null);
     setSelectedStream(null);
     setSelectedSubject(null);
-    updateUrl({ grade, session: null, stream: null, subject: null });
+    setSelectedTestGrade(null);
+    setAvailableTestGrades([]);
+    updateUrl({ grade, session: null, stream: null, subject: null, testGrade: null });
+  };
+
+  const handleTestGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    const testGrade = val ? parseInt(val, 10) : null;
+    setSelectedTestGrade(testGrade);
+    updateUrl({ testGrade });
   };
 
   const handleTestClick = (sessionId: string, testName: string) => {
@@ -244,7 +266,16 @@ export default function PerformanceTab({ schoolUdise }: Props) {
     // Subject filter is chapter-only; clear when leaving chapter tab
     const subjectReset = cat !== "chapter" && selectedSubject;
     if (subjectReset) setSelectedSubject(null);
-    updateUrl({ category: cat, subject: subjectReset ? null : undefined });
+    // Chapter and full tests can target different grades, so a test-grade
+    // selection from one category may not exist in the other. Clear it on
+    // switch so the view never silently renders empty.
+    const testGradeReset = selectedTestGrade != null;
+    if (testGradeReset) setSelectedTestGrade(null);
+    updateUrl({
+      category: cat,
+      subject: subjectReset ? null : undefined,
+      testGrade: testGradeReset ? null : undefined,
+    });
   };
 
   const handleStreamChange = (stream: string | null) => {
@@ -285,9 +316,9 @@ export default function PerformanceTab({ schoolUdise }: Props) {
         </div>
       )}
 
-      {/* Grade selector */}
+      {/* Grade + Test Grade selectors */}
       {grades.length > 0 && (
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
             Grade
           </label>
@@ -302,6 +333,25 @@ export default function PerformanceTab({ schoolUdise }: Props) {
               </option>
             ))}
           </Select>
+
+          {/* Test Grade filter — the grade the test targets, which can differ
+              from the students' grade (e.g. a grade-12 batch sitting an
+              11th-grade test). Options come from the loaded test set. */}
+          {selectedGrade != null && !deepDiveSession && availableTestGrades.length > 0 && (
+            <>
+              <label className="text-xs font-bold uppercase tracking-wide text-text-muted">
+                Test Grade
+              </label>
+              <Select value={selectedTestGrade ?? ""} onChange={handleTestGradeChange}>
+                <option value="">All test grades</option>
+                {availableTestGrades.map((g) => (
+                  <option key={g} value={g}>
+                    Grade {g}
+                  </option>
+                ))}
+              </Select>
+            </>
+          )}
         </div>
       )}
 
@@ -429,6 +479,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           grade={selectedGrade}
           program={selectedProgram || undefined}
           stream={selectedStream || undefined}
+          testGrade={selectedTestGrade ?? undefined}
         />
       ) : (
         <BatchOverview
@@ -438,6 +489,7 @@ export default function PerformanceTab({ schoolUdise }: Props) {
           program={selectedProgram || undefined}
           stream={selectedStream || undefined}
           subject={selectedSubject || undefined}
+          testGrade={selectedTestGrade ?? undefined}
           onTestClick={handleTestClick}
           onFilterOptions={handleFilterOptions}
         />

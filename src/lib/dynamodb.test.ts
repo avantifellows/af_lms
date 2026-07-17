@@ -411,6 +411,10 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(result!.summary.avg_score).toBe(80);
       expect(result!.summary.min_score).toBe(70);
       expect(result!.summary.max_score).toBe(90);
+      expect(result!.summary.avg_marks).toBe(80);
+      expect(result!.summary.min_marks).toBe(70);
+      expect(result!.summary.max_marks).toBe(90);
+      expect(result!.summary.total_marks).toBe(100);
       expect(result!.summary.avg_accuracy).toBe(70);
       expect(result!.summary.test_name).toBe("Mid-Term Physics");
       expect(result!.summary.start_date).toBe("2026-01-15");
@@ -447,6 +451,44 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
         avg_score: 80,
         avg_accuracy: 75,
       });
+    });
+
+    it("derives per-subject total_questions + attempt_rate from chapters, not subject_performance's test-wide totals (#128 item 4)", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1",
+            user_id: "u1",
+            // subject_performance stamps the WHOLE-TEST totals onto every
+            // subject row (75 questions, 25 skipped) — the bug being fixed.
+            subject_performance: [
+              { subject: "Physics", percentage: 50, accuracy: 60, total_questions: 75, num_skipped: 25 },
+              { subject: "Chemistry", percentage: 40, accuracy: 50, total_questions: 75, num_skipped: 25 },
+            ],
+            // chapter_performance carries the true per-chapter counts.
+            chapter_performance: [
+              { chapter_name: "Kinematics", chapter_id: "c-kin", subject: "Physics", marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 20, num_correct: 15, num_wrong: 0, num_skipped: 5 },
+              { chapter_name: "Optics", chapter_id: "c-opt", subject: "Physics", marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 5, num_correct: 0, num_wrong: 0, num_skipped: 5 },
+              { chapter_name: "Mole Concept", chapter_id: "c-mole", subject: "Chemistry", marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 25, num_correct: 25, num_wrong: 0, num_skipped: 0 },
+            ],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      const phys = result!.subjects.find((s) => s.subject === "Physics")!;
+      const chem = result!.subjects.find((s) => s.subject === "Chemistry")!;
+      // 20 + 5 = 25 per subject, NOT the test-wide 75.
+      expect(phys.total_questions).toBe(25);
+      expect(chem.total_questions).toBe(25);
+      // Physics attempt rate = (25 - 10 skipped) / 25 = 60%, not the
+      // test-wide (75 - 25) / 75 = 66.7% that every subject would have shared.
+      expect(phys.avg_attempt_rate).toBe(60);
+      expect(chem.avg_attempt_rate).toBe(100);
     });
 
     it("groups chapter aggregates by chapter_id and surfaces it on the result", async () => {
@@ -495,6 +537,46 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       });
       // Mean of (4/4=100%) and (0/4=0%) → 50%
       expect(result!.chapters[0].avg_score).toBe(50);
+      // Mean marks (4 and 0) → 2 out of a 4-mark chapter
+      expect(result!.chapters[0].avg_marks).toBe(2);
+      expect(result!.chapters[0].max_marks).toBe(4);
+    });
+
+    it("surfaces the stream-keyed chapter priority on the chapter analysis row (#128 item 2)", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            chapter_performance: [
+              { chapter_name: "Optics", chapter_id: "c-opt", subject: "Physics", marks_scored: 4, max_marks_possible: 4, accuracy: 100, total_questions: 1, priority: "High" },
+              { chapter_name: "Heat", chapter_id: "c-heat", subject: "Physics", marks_scored: 2, max_marks_possible: 4, accuracy: 50, total_questions: 1, priority: "None" },
+            ],
+            subject_performance: [{ subject: "Physics", percentage: 75, accuracy: 75, total_questions: 2, num_skipped: 0 }],
+          }),
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            chapter_performance: [
+              // Same chapters, priority omitted on this doc — the populated
+              // value from the other doc must still win.
+              { chapter_name: "Optics", chapter_id: "c-opt", subject: "Physics", marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 1 },
+              { chapter_name: "Heat", chapter_id: "c-heat", subject: "Physics", marks_scored: 0, max_marks_possible: 4, accuracy: 0, total_questions: 1 },
+            ],
+            subject_performance: [{ subject: "Physics", percentage: 0, accuracy: 0, total_questions: 2, num_skipped: 0 }],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      const optics = result!.chapters.find((c) => c.chapter_id === "c-opt")!;
+      const heat = result!.chapters.find((c) => c.chapter_id === "c-heat")!;
+      expect(optics.priority).toBe("High");
+      // "None" is treated as untagged -> null so the UI renders an em-dash.
+      expect(heat.priority).toBeNull();
     });
 
     it("computes chapter attempt_rate from chapter-level num_skipped (not subject's)", async () => {

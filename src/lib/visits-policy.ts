@@ -234,6 +234,10 @@ export function isScopedVisitsRole(actor: VisitsActor): boolean {
   return actor.role === "admin" || actor.role === "program_admin";
 }
 
+export function requiresVisitActionsForCompletion(actor: VisitsActor): boolean {
+  return actor.role === "program_manager";
+}
+
 export function canAccessVisitSchoolScope(
   actor: VisitsActor,
   schoolCode: string,
@@ -260,7 +264,8 @@ export function canViewVisit(actor: VisitsActor, target: VisitAccessTarget): boo
 
 export function canEditVisit(actor: VisitsActor, target: VisitAccessTarget): boolean {
   if (actor.role === "program_admin") {
-    return false;
+    return hasScopedAccess(actor, target) &&
+      normalizeEmail(target.pmEmail) === normalizeEmail(actor.email);
   }
 
   if (actor.role === "admin") {

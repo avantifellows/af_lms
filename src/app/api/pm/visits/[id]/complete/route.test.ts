@@ -93,7 +93,7 @@ function buildValidClassroomData() {
     CLASSROOM_OBSERVATION_RUBRIC.parameters.map((parameter) => [
       parameter.key,
       { score: parameter.options[0]!.score },
-    ])
+    ]),
   );
 
   return {
@@ -106,9 +106,17 @@ function buildValidClassroomData() {
 }
 
 function completionRequest(accuracy = 10) {
+  return completionRequestWithBody({
+    end_lat: 28.6,
+    end_lng: 77.2,
+    end_accuracy: accuracy,
+  });
+}
+
+function completionRequestWithBody(body: Record<string, unknown>) {
   return new Request("http://localhost/api/pm/visits/10/complete", {
     method: "POST",
-    body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: accuracy }),
+    body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -116,7 +124,31 @@ function completionRequest(accuracy = 10) {
 function setupPmEdit() {
   mockSession.mockResolvedValue(PM_SESSION);
   mockGetPermission.mockResolvedValue(PM_PERM as never);
-  mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+  mockFeatureAccess.mockReturnValue({
+    access: "edit",
+    canView: true,
+    canEdit: true,
+  });
+}
+
+function setupAdminEdit() {
+  mockSession.mockResolvedValue(ADMIN_SESSION);
+  mockGetPermission.mockResolvedValue(ADMIN_PERM as never);
+  mockFeatureAccess.mockReturnValue({
+    access: "edit",
+    canView: true,
+    canEdit: true,
+  });
+}
+
+function setupProgramAdminEdit() {
+  mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
+  mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
+  mockFeatureAccess.mockReturnValue({
+    access: "edit",
+    canView: true,
+    canEdit: true,
+  });
 }
 
 beforeEach(() => {
@@ -144,10 +176,14 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("returns 403 for read-only program admin write attempt", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
 
     const res = await POST(completionRequest() as never, params);
 
@@ -164,7 +200,10 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "Visit not found" });
-    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [
+      string,
+      unknown[],
+    ];
     expect(visitQueryText).toContain("v.deleted_at IS NULL");
     expect(visitParams).toEqual(["10"]);
   });
@@ -180,8 +219,11 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed classroom observation is required to complete visit",
-      details: ["No completed classroom observation action found for this visit"],
+      error:
+        "At least one completed classroom observation is required to complete visit",
+      details: [
+        "No completed classroom observation action found for this visit",
+      ],
     });
   });
 
@@ -206,12 +248,14 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     const json = await res.json();
-    expect(json.error).toBe("At least one completed classroom observation is required to complete visit");
+    expect(json.error).toBe(
+      "At least one completed classroom observation is required to complete visit",
+    );
     expect(json.details).toEqual(
       expect.arrayContaining([
         "Action 201: Missing score for Teacher Grooming",
         "Action 201: Missing score for Gender Sensitivity Parameters",
-      ])
+      ]),
     );
   });
 
@@ -234,35 +278,101 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed classroom observation is required to complete visit",
-      details: ["Action 301: Unsupported classroom observation rubric_version: 99.0"],
+      error:
+        "At least one completed classroom observation is required to complete visit",
+      details: [
+        "Action 301: Unsupported classroom observation rubric_version: 99.0",
+      ],
     });
   });
 
-  it("returns 422 when any action is in progress", async () => {
-    setupPmEdit();
-    mockQuery.mockResolvedValueOnce([VISIT_ROW]).mockResolvedValueOnce([{ has_in_progress_actions: true }]);
+  it.each([
+    { role: "PM", setup: setupPmEdit, visit: VISIT_ROW },
+    {
+      role: "Admin",
+      setup: setupAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" },
+    },
+    {
+      role: "Program Admin",
+      setup: setupProgramAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "PA@AVANTIFELLOWS.ORG" },
+    },
+  ])(
+    "returns 422 when any action is in progress for $role",
+    async ({ setup, visit }) => {
+      setup();
+      mockQuery
+        .mockResolvedValueOnce([visit])
+        .mockResolvedValueOnce([{ has_in_progress_actions: true }]);
 
-    const res = await POST(completionRequest() as never, params);
+      const res = await POST(completionRequest() as never, params);
 
-    expect(res.status).toBe(422);
-    await expect(res.json()).resolves.toEqual({
-      error: "All in-progress action points must be ended before completing visit",
-    });
-  });
+      expect(res.status).toBe(422);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          "All in-progress action points must be ended before completing visit",
+      });
+    },
+  );
 
-  it("returns 422 when GPS accuracy is poor (>500m)", async () => {
-    setupPmEdit();
-    mockQuery.mockResolvedValueOnce([VISIT_ROW]);
+  it.each([
+    { role: "PM", setup: setupPmEdit, visit: VISIT_ROW },
+    {
+      role: "Admin",
+      setup: setupAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" },
+    },
+    {
+      role: "Program Admin",
+      setup: setupProgramAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "pa@avantifellows.org" },
+    },
+  ])(
+    "returns 422 when GPS accuracy is invalid for $role",
+    async ({ setup, visit }) => {
+      setup();
+      mockQuery.mockResolvedValueOnce([visit]);
 
-    const res = await POST(completionRequest(701) as never, params);
+      const res = await POST(completionRequest(701) as never, params);
 
-    expect(res.status).toBe(422);
-    await expect(res.json()).resolves.toEqual({
-      error: "GPS accuracy too low (701m). Move to an open area and try again.",
-    });
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-  });
+      expect(res.status).toBe(422);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          "GPS accuracy too low (701m). Move to an open area and try again.",
+      });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { role: "PM", setup: setupPmEdit, visit: VISIT_ROW },
+    {
+      role: "Admin",
+      setup: setupAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" },
+    },
+    {
+      role: "Program Admin",
+      setup: setupProgramAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "pa@avantifellows.org" },
+    },
+  ])(
+    "returns 422 when end GPS is missing for $role",
+    async ({ setup, visit }) => {
+      setup();
+      mockQuery.mockResolvedValueOnce([visit]);
+
+      const res = await POST(completionRequestWithBody({}) as never, params);
+
+      expect(res.status).toBe(422);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          "end_lat, end_lng, and end_accuracy are required and must be numbers",
+      });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("completes visit, sets completed fields, and does not expose lat/lng", async () => {
     setupPmEdit();
@@ -303,18 +413,28 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(json.visit.end_lng).toBeUndefined();
     expect(json.visit.end_accuracy).toBeUndefined();
 
-    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [string, unknown[]];
+    const [visitQueryText, visitParams] = mockQuery.mock.calls[0] as [
+      string,
+      unknown[],
+    ];
     expect(visitQueryText).toContain("v.deleted_at IS NULL");
     expect(visitParams).toEqual(["10"]);
 
-    const [completionQueryText, completionParams] = mockQuery.mock.calls[8] as [string, unknown[]];
+    const [completionQueryText, completionParams] = mockQuery.mock.calls[8] as [
+      string,
+      unknown[],
+    ];
     expect(completionQueryText).toContain("UPDATE lms_pm_school_visits v");
     expect(completionQueryText).toContain("status = 'completed'");
-    expect(completionQueryText).toContain("completed_at = (NOW() AT TIME ZONE 'UTC')");
+    expect(completionQueryText).toContain(
+      "completed_at = (NOW() AT TIME ZONE 'UTC')",
+    );
     expect(completionQueryText).toContain("end_lat = $2");
     expect(completionQueryText).toContain("end_lng = $3");
     expect(completionQueryText).toContain("end_accuracy = $4");
-    expect(completionQueryText).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
+    expect(completionQueryText).toContain(
+      "updated_at = (NOW() AT TIME ZONE 'UTC')",
+    );
     expect(completionQueryText).toContain("a.status = 'in_progress'");
     expect(completionQueryText).toContain("a.deleted_at IS NULL");
     expect(completionQueryText).toContain("v.status = 'in_progress'");
@@ -322,41 +442,101 @@ describe("POST /api/pm/visits/[id]/complete", () => {
     expect(completionParams).toEqual(["10", 28.6, 77.2, 10]);
   });
 
-  it("is idempotent when visit is already completed and does not attempt update", async () => {
-    setupPmEdit();
-    mockQuery.mockResolvedValueOnce([COMPLETED_VISIT_ROW]);
+  it.each([
+    { role: "PM", setup: setupPmEdit, visit: COMPLETED_VISIT_ROW },
+    {
+      role: "Admin",
+      setup: setupAdminEdit,
+      visit: { ...COMPLETED_VISIT_ROW, pm_email: "other-pm@avantifellows.org" },
+    },
+    {
+      role: "Program Admin",
+      setup: setupProgramAdminEdit,
+      visit: { ...COMPLETED_VISIT_ROW, pm_email: "pa@avantifellows.org" },
+    },
+  ])(
+    "returns stored completion without overwriting GPS or timestamp for $role",
+    async ({ setup, visit }) => {
+      setup();
+      mockQuery.mockResolvedValueOnce([visit]);
 
-    const res = await POST(completionRequest() as never, params);
+      const res = await POST(completionRequest() as never, params);
 
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({
-      visit: {
-        id: 10,
-        status: "completed",
-        completed_at: "2026-02-19T12:00:00.000Z",
-      },
-    });
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-  });
-
-  it("allows admin to complete other PM visit with same validation rules and GPS", async () => {
-    mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockGetPermission.mockResolvedValue(ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
-    mockQuery
-      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" }])
-      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
-      .mockResolvedValueOnce([
-        {
-          id: 202,
-          data: buildValidClassroomData(),
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({
+        visit: {
+          id: 10,
+          status: "completed",
+          completed_at: "2026-02-19T12:00:00.000Z",
         },
+      });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {
+      role: "PM",
+      setup: setupPmEdit,
+      visit: VISIT_ROW,
+      needsRequiredActions: true,
+    },
+    {
+      role: "Admin",
+      setup: setupAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" },
+      needsRequiredActions: false,
+    },
+    {
+      role: "Program Admin",
+      setup: setupProgramAdminEdit,
+      visit: { ...VISIT_ROW, pm_email: "pa@avantifellows.org" },
+      needsRequiredActions: false,
+    },
+  ])(
+    "returns 422 when an Action starts during the completion update for $role",
+    async ({ setup, visit, needsRequiredActions }) => {
+      setup();
+      mockQuery
+        .mockResolvedValueOnce([visit])
+        .mockResolvedValueOnce([{ has_in_progress_actions: false }]);
+      if (needsRequiredActions) {
+        mockQuery
+          .mockResolvedValueOnce([{ id: 201, data: buildValidClassroomData() }])
+          .mockResolvedValueOnce([{ id: 401 }])
+          .mockResolvedValueOnce([{ id: 501 }])
+          .mockResolvedValueOnce([{ id: 601 }])
+          .mockResolvedValueOnce([{ id: 701 }])
+          .mockResolvedValueOnce([{ id: 801 }]);
+      }
+      mockQuery
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([visit])
+        .mockResolvedValueOnce([{ has_in_progress_actions: true }]);
+
+      const res = await POST(completionRequest() as never, params);
+
+      expect(res.status).toBe(422);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          "All in-progress action points must be ended before completing visit",
+      });
+      const updateSql = mockQuery.mock.calls.find(([sql]) =>
+        String(sql).includes("UPDATE lms_pm_school_visits"),
+      )?.[0];
+      expect(updateSql).toContain("NOT EXISTS");
+      expect(updateSql).toContain("a.deleted_at IS NULL");
+      expect(updateSql).toContain("a.status = 'in_progress'");
+    },
+  );
+
+  it("allows admin to complete another PM's visit with zero actions", async () => {
+    setupAdminEdit();
+    mockQuery
+      .mockResolvedValueOnce([
+        { ...VISIT_ROW, pm_email: "other-pm@avantifellows.org" },
       ])
-      .mockResolvedValueOnce([{ id: 402 }]) // completed af_team_interaction
-      .mockResolvedValueOnce([{ id: 502 }]) // completed individual_af_teacher_interaction
-      .mockResolvedValueOnce([{ id: 602 }]) // completed principal_interaction
-      .mockResolvedValueOnce([{ id: 702 }]) // completed group_student_discussion
-      .mockResolvedValueOnce([{ id: 802 }]) // completed individual_student_discussion
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -375,6 +555,46 @@ describe("POST /api/pm/visits/[id]/complete", () => {
         completed_at: "2026-02-19T12:20:00.000Z",
       },
     });
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("allows program admin to complete their own visit with zero actions", async () => {
+    setupProgramAdminEdit();
+    mockQuery
+      .mockResolvedValueOnce([
+        { ...VISIT_ROW, pm_email: "PA@AVANTIFELLOWS.ORG" },
+      ])
+      .mockResolvedValueOnce([{ has_in_progress_actions: false }])
+      .mockResolvedValueOnce([
+        {
+          id: 10,
+          status: "completed",
+          completed_at: "2026-02-19T12:22:00.000Z",
+        },
+      ]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      visit: {
+        id: 10,
+        status: "completed",
+        completed_at: "2026-02-19T12:22:00.000Z",
+      },
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns 403 when program admin completes another user's visit", async () => {
+    setupProgramAdminEdit();
+    mockQuery.mockResolvedValueOnce([VISIT_ROW]);
+
+    const res = await POST(completionRequest() as never, params);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
   it("returns 422 when classroom observation exists but AF team interaction is missing", async () => {
@@ -394,7 +614,8 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed AF Team Interaction is required to complete visit",
+      error:
+        "At least one completed AF Team Interaction is required to complete visit",
       details: ["No completed AF Team Interaction action found for this visit"],
     });
   });
@@ -417,8 +638,11 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed Individual AF Teacher Interaction is required to complete visit",
-      details: ["No completed Individual AF Teacher Interaction action found for this visit"],
+      error:
+        "At least one completed Individual AF Teacher Interaction is required to complete visit",
+      details: [
+        "No completed Individual AF Teacher Interaction action found for this visit",
+      ],
     });
   });
 
@@ -441,7 +665,8 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed Principal Interaction is required to complete visit",
+      error:
+        "At least one completed Principal Interaction is required to complete visit",
       details: ["No completed principal_interaction action found"],
     });
   });
@@ -466,8 +691,11 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed Student Interaction is required to complete visit",
-      details: ["No completed group_student_discussion action found for this visit"],
+      error:
+        "At least one completed Student Interaction is required to complete visit",
+      details: [
+        "No completed group_student_discussion action found for this visit",
+      ],
     });
   });
 
@@ -492,8 +720,11 @@ describe("POST /api/pm/visits/[id]/complete", () => {
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "At least one completed Individual Student Interaction is required to complete visit",
-      details: ["No completed individual_student_discussion action found for this visit"],
+      error:
+        "At least one completed Individual Student Interaction is required to complete visit",
+      details: [
+        "No completed individual_student_discussion action found for this visit",
+      ],
     });
   });
 
@@ -531,7 +762,11 @@ describe("POST /api/pm/visits/[id]/complete", () => {
         completed_at: "2026-02-19T12:25:00.000Z",
       },
     });
-    expect(mockQuery.mock.calls.some(([sql]) => String(sql).includes("school_staff_interaction"))).toBe(false);
+    expect(
+      mockQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("school_staff_interaction"),
+      ),
+    ).toBe(false);
   });
 
   it("completes visit when all required action types have completed actions", async () => {
@@ -585,7 +820,9 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       .mockResolvedValueOnce([{ id: 501 }]) // completed individual_af_teacher_interaction
       .mockResolvedValueOnce([{ id: 601 }]) // completed principal_interaction
       .mockResolvedValueOnce([{ id: 701 }]) // completed group_student_discussion
-      .mockResolvedValueOnce([{ id: 801, data: { entries: [{ invalid: true }] } }]) // status-only check
+      .mockResolvedValueOnce([
+        { id: 801, data: { entries: [{ invalid: true }] } },
+      ]) // status-only check
       .mockResolvedValueOnce([
         {
           id: 10,
@@ -605,8 +842,13 @@ describe("POST /api/pm/visits/[id]/complete", () => {
       },
     });
 
-    const [individualStudentQueryText] = mockQuery.mock.calls[7] as [string, unknown[]];
-    expect(individualStudentQueryText).toContain("action_type = 'individual_student_discussion'");
+    const [individualStudentQueryText] = mockQuery.mock.calls[7] as [
+      string,
+      unknown[],
+    ];
+    expect(individualStudentQueryText).toContain(
+      "action_type = 'individual_student_discussion'",
+    );
     expect(individualStudentQueryText).toContain("status = 'completed'");
     expect(individualStudentQueryText).toContain("SELECT a.id");
     expect(individualStudentQueryText).not.toContain("a.data");

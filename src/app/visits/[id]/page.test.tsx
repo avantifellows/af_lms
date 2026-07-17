@@ -90,7 +90,7 @@ const programAdminPermission = {
   school_codes: null,
   regions: ["North"],
   program_ids: [1],
-  read_only: true,
+  read_only: false,
 };
 
 function setupPmAuth() {
@@ -213,6 +213,9 @@ describe("VisitDetailPage", () => {
 
     expect(screen.getByText("Test School")).toBeInTheDocument();
     expect(screen.getByText("Action Points")).toBeInTheDocument();
+    expect(
+      screen.getByText("Actions are optional for this Visit. End any in-progress Action before completing.")
+    ).toBeInTheDocument();
   });
 
   it("renders action cards and progress", async () => {
@@ -236,6 +239,11 @@ describe("VisitDetailPage", () => {
     expect(screen.getByTestId("delete-visit-button")).toHaveAttribute("data-mode", "detail");
     expect(screen.queryByText("Ended")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "End Visit" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Complete all required Action Types before completing this Visit. School Staff Interaction is optional."
+      )
+    ).toBeInTheDocument();
   });
 
   it("renders empty action state", async () => {
@@ -271,10 +279,29 @@ describe("VisitDetailPage", () => {
     expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
   });
 
-  it("hides delete button for program_admin", async () => {
+  it("shows write controls for a program_admin's own in-progress visit", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "program-admin@avantifellows.org" } });
     mockGetUserPermission.mockResolvedValue(programAdminPermission);
-    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([makeVisit({ pm_email: "PROGRAM-ADMIN@AVANTIFELLOWS.ORG" })])
+      .mockResolvedValueOnce(makeActions());
+
+    const jsx = await VisitDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByTestId("complete-visit-button")).toBeInTheDocument();
+    expect(screen.getByTestId("delete-visit-button")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Action Point" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Actions are optional for this Visit. End any in-progress Action before completing.")
+    ).toBeInTheDocument();
+  });
+
+  it("keeps another user's visit read-only for program_admin", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "program-admin@avantifellows.org" } });
+    mockGetUserPermission.mockResolvedValue(programAdminPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
     mockQuery
       .mockResolvedValueOnce([makeVisit({ pm_email: "other-pm@avantifellows.org" })])
       .mockResolvedValueOnce(makeActions());
@@ -284,6 +311,45 @@ describe("VisitDetailPage", () => {
 
     expect(screen.getByText("This visit is read-only for your role.")).toBeInTheDocument();
     expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
+  });
+
+  it("keeps a program_admin's completed visit read-only", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "program-admin@avantifellows.org" } });
+    mockGetUserPermission.mockResolvedValue(programAdminPermission);
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([
+        makeVisit({
+          pm_email: "program-admin@avantifellows.org",
+          status: "completed",
+          completed_at: "2026-02-10T12:00:00Z",
+        }),
+      ])
+      .mockResolvedValueOnce(makeActions());
+
+    const jsx = await VisitDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("This visit is completed and read-only.")).toBeInTheDocument();
+    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Action Point" })).not.toBeInTheDocument();
+  });
+
+  it("hides write controls for a read-only program_admin's own visit", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "program-admin@avantifellows.org" } });
+    mockGetUserPermission.mockResolvedValue({ ...programAdminPermission, read_only: true });
+    mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
+    mockQuery
+      .mockResolvedValueOnce([makeVisit({ pm_email: "program-admin@avantifellows.org" })])
+      .mockResolvedValueOnce(makeActions());
+
+    const jsx = await VisitDetailPage(pageProps());
+    render(jsx);
+
+    expect(screen.getByText("This visit is read-only for your role.")).toBeInTheDocument();
+    expect(screen.queryByTestId("complete-visit-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("delete-visit-button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Action Point" })).not.toBeInTheDocument();
   });
 
   it("queries visit and actions without selecting visit.data", async () => {

@@ -12,6 +12,7 @@ import {
   seedStudentsForTest,
   seedTestVisit,
   seedVisitAction,
+  seedVisitTeacherTestTeachers,
   type SeededIndividualStudent,
 } from "../helpers/db";
 import { AF_TEAM_INTERACTION_CONFIG } from "../../src/lib/af-team-interaction";
@@ -37,13 +38,11 @@ async function setGoodGps(page: Page) {
 }
 
 function visitLink(page: Page, visitId: number) {
-  return page.locator(`a[href="/visits/${visitId}"]`).filter({ visible: true }).first();
+  return page.locator(`a[href="/visits/${visitId}"]:visible`).first();
 }
 
 function visitTableRow(page: Page, visitId: number) {
-  return page.locator("tr", {
-    has: page.locator(`a[href="/visits/${visitId}"]`),
-  });
+  return page.locator("tr", { has: page.locator(`a[href="/visits/${visitId}"]`) });
 }
 
 async function markVisitCompleted(visitId: number) {
@@ -279,18 +278,10 @@ test.beforeAll(async () => {
   }
 
   // Seed teachers for AF team interaction tests
-  await pool.query(
-    `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
-     VALUES ('e2e-af-teacher-1@test.local', 1, 'teacher', ARRAY[$1::TEXT], 'AF Test Teacher One', false)
-     ON CONFLICT (email) DO UPDATE SET school_codes = ARRAY[$1::TEXT], full_name = 'AF Test Teacher One'`,
-    [schoolCode]
-  );
-  await pool.query(
-    `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
-     VALUES ('e2e-af-teacher-2@test.local', 1, 'teacher', ARRAY[$1::TEXT], 'AF Test Teacher Two', false)
-     ON CONFLICT (email) DO UPDATE SET school_codes = ARRAY[$1::TEXT], full_name = 'AF Test Teacher Two'`,
-    [schoolCode]
-  );
+  await seedVisitTeacherTestTeachers(pool, schoolCode, [
+    { email: "e2e-af-teacher-1@test.local", name: "AF Test Teacher One" },
+    { email: "e2e-af-teacher-2@test.local", name: "AF Test Teacher Two" },
+  ]);
 
   // Seed individual teacher test teachers (3 deterministic teachers)
   seededTeachers = await seedIndividualTeacherTestTeachers(pool, schoolCode);
@@ -406,13 +397,8 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(pmPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
   });
 
-  test("program-admin-does-not-see-delete-button", async ({ programAdminPage }) => {
+  test("program-admin-does-not-see-delete-button-for-another-users-visit", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
-
-    await programAdminPage.goto("/visits");
-    await expect(
-      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
-    ).toBeVisible();
 
     await programAdminPage.goto(`/visits/${visitId}`);
     await expect(
@@ -467,9 +453,10 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     await expect(inProgressCard.getByRole("button", { name: "Delete" })).toBeVisible();
 
     await inProgressCard.getByRole("button", { name: "Delete" }).click();
-    const actionDialog = pmPage.getByRole("dialog", { name: "Delete Action Point" });
-    await expect(actionDialog).toBeVisible();
-    await actionDialog.getByRole("button", { name: "Delete" }).click();
+    await pmPage
+      .getByRole("dialog", { name: "Delete Action Point" })
+      .getByRole("button", { name: "Delete" })
+      .click();
     await expect(pmPage.locator('[data-action-type="af_team_interaction"]')).toHaveCount(0);
   });
 
@@ -586,6 +573,11 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     await setGoodGps(pmPage);
     await pmPage.goto(`/visits/${visitId}`);
+    await expect(
+      pmPage.getByText(
+        "Complete all required Action Types before completing this Visit. School Staff Interaction is optional."
+      )
+    ).toBeVisible();
     await pmPage.getByRole("button", { name: "Complete Visit" }).click();
 
     await expect(
@@ -807,69 +799,24 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     expect(completePayload.error).toContain("GPS accuracy too low");
   });
 
-  test("admin-can-complete-other-pm-visit-with-same-rules", async ({ adminPage }) => {
+  test("admin-can-complete-other-pm-zero-action-visit", async ({ adminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
-    await seedVisitAction(pool, visitId, {
-      actionType: "principal_interaction",
-      status: "completed",
-      data: buildCompletePrincipalInteractionData(),
-    });
 
     await setGoodGps(adminPage);
     await adminPage.goto(`/visits/${visitId}`);
-    await adminPage.getByRole("button", { name: "Complete Visit" }).click();
-
     await expect(
-      adminPage.getByText("At least one completed classroom observation is required to complete visit")
+      adminPage.getByText("Actions are optional for this Visit. End any in-progress Action before completing.")
     ).toBeVisible();
-
-    await seedVisitAction(pool, visitId, {
-      actionType: "classroom_observation",
-      status: "completed",
-      data: buildCompleteClassroomObservationData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "af_team_interaction",
-      status: "completed",
-      data: buildCompleteAFTeamInteractionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "individual_af_teacher_interaction",
-      status: "completed",
-      data: buildCompleteIndividualTeacherInteractionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "group_student_discussion",
-      status: "completed",
-      data: buildCompleteGroupStudentDiscussionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "individual_student_discussion",
-      status: "completed",
-      data: buildCompleteIndividualStudentDiscussionData(),
-    });
-    await seedVisitAction(pool, visitId, {
-      actionType: "school_staff_interaction",
-      status: "completed",
-      data: buildCompleteSchoolStaffInteractionData(),
-    });
-
-    await adminPage.reload();
     await adminPage.getByRole("button", { name: "Complete Visit" }).click();
     await expect(adminPage.getByText("This visit is completed and read-only.")).toBeVisible();
   });
 
-  test("program-admin-read-only", async ({ programAdminPage }) => {
+  test("program-admin-cannot-manage-another-users-visit", async ({ programAdminPage }) => {
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
       actionType: "principal_interaction",
       status: "pending",
     });
-
-    await programAdminPage.goto("/visits");
-    await expect(
-      programAdminPage.getByRole("heading", { name: "School Visit Summary" })
-    ).toBeVisible();
 
     await programAdminPage.goto(`/visits/${visitId}`);
     await expect(
@@ -922,6 +869,165 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       }
     );
     expect(completeResponse.status()).toBe(403);
+  });
+
+  test("program-admin-manages-their-own-in-progress-visit", async ({ programAdminPage }) => {
+    await setGoodGps(programAdminPage);
+    await programAdminPage.goto(`/school/${schoolCode}/visit/new`);
+    const startVisitButton = programAdminPage.getByRole("button", { name: "Start Visit" });
+    await expect(startVisitButton).toBeEnabled();
+    await startVisitButton.click();
+    await expect(programAdminPage).toHaveURL(/\/visits\/\d+$/);
+    const visitId = Number(programAdminPage.url().split("/").pop());
+
+    const owner = await pool.query<{ pm_email: string }>(
+      "SELECT pm_email FROM lms_pm_school_visits WHERE id = $1",
+      [visitId]
+    );
+    expect(owner.rows[0]?.pm_email).toBe("e2e-program-admin@test.local");
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toBeVisible();
+
+    const createActionResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions`,
+      { data: { action_type: "principal_interaction" } }
+    );
+    expect(createActionResponse.status()).toBe(201);
+    const { action } = await createActionResponse.json();
+
+    await programAdminPage.goto(`/visits/${visitId}/actions/${action.id}`);
+    await expect(programAdminPage.getByRole("button", { name: "Save Now" })).toBeVisible();
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(programAdminPage.getByRole("button", { name: "Start", exact: true })).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
+
+    const saveResponse = await programAdminPage.request.patch(
+      `/api/pm/visits/${visitId}/actions/${action.id}`,
+      { data: { data: buildCompletePrincipalInteractionData() } }
+    );
+    expect(saveResponse.status()).toBe(200);
+
+    const startResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${action.id}/start`,
+      { data: { start_lat: 23.0225, start_lng: 72.5714, start_accuracy: 10 } }
+    );
+    expect(startResponse.status()).toBe(200);
+
+    const endResponse = await programAdminPage.request.post(
+      `/api/pm/visits/${visitId}/actions/${action.id}/end`,
+      { data: { end_lat: 23.0225, end_lng: 72.5714, end_accuracy: 10 } }
+    );
+    expect(endResponse.status()).toBe(200);
+
+    const deleteActionResponse = await programAdminPage.request.delete(
+      `/api/pm/visits/${visitId}/actions/${action.id}`
+    );
+    expect(deleteActionResponse.status()).toBe(200);
+
+    const deleteVisitResponse = await programAdminPage.request.delete(
+      `/api/pm/visits/${visitId}`
+    );
+    expect(deleteVisitResponse.status()).toBe(200);
+  });
+
+  test("program-admin-completes-their-own-zero-action-visit", async ({ programAdminPage }) => {
+    const createResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const { id: visitId } = await createResponse.json();
+
+    await setGoodGps(programAdminPage);
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(
+      programAdminPage.getByText(
+        "Actions are optional for this Visit. End any in-progress Action before completing."
+      )
+    ).toBeVisible();
+    await programAdminPage.getByRole("button", { name: "Complete Visit" }).click();
+
+    await expect(programAdminPage.getByText("This visit is completed and read-only.")).toBeVisible();
+  });
+
+  test("program-admin-owned-completed-visit-is-read-only", async ({ programAdminPage }) => {
+    const createResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const { id: visitId } = await createResponse.json();
+    await markVisitCompleted(visitId);
+
+    await programAdminPage.goto(`/visits/${visitId}`);
+    await expect(programAdminPage.getByText("This visit is completed and read-only.")).toBeVisible();
+    await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+    await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
+
+    const deleteResponse = await programAdminPage.request.delete(`/api/pm/visits/${visitId}`);
+    expect(deleteResponse.status()).toBe(409);
+  });
+
+  test("read-only-program-admin-has-no-mutation-access", async ({ programAdminPage }) => {
+    const createResponse = await programAdminPage.request.post("/api/pm/visits", {
+      data: {
+        school_code: schoolCode,
+        start_lat: 23.0225,
+        start_lng: 72.5714,
+        start_accuracy: 10,
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const { id: visitId } = await createResponse.json();
+
+    await pool.query(
+      "UPDATE user_permission SET read_only = true WHERE email = $1",
+      ["e2e-program-admin@test.local"]
+    );
+
+    try {
+      await programAdminPage.goto(`/visits/${visitId}`);
+      await expect(programAdminPage.getByText("This visit is read-only for your role.")).toBeVisible();
+      await expect(programAdminPage.getByRole("button", { name: "Add Action Point" })).toHaveCount(0);
+      await expect(programAdminPage.getByRole("button", { name: "Delete Visit" })).toHaveCount(0);
+
+      await programAdminPage.goto(`/school/${schoolCode}/visit/new`);
+      await expect(programAdminPage.getByRole("button", { name: "Start Visit" })).toHaveCount(0);
+
+      const createVisitResponse = await programAdminPage.request.post("/api/pm/visits", {
+        data: {
+          school_code: schoolCode,
+          start_lat: 23.0225,
+          start_lng: 72.5714,
+          start_accuracy: 10,
+        },
+      });
+      expect(createVisitResponse.status()).toBe(403);
+
+      const createActionResponse = await programAdminPage.request.post(
+        `/api/pm/visits/${visitId}/actions`,
+        { data: { action_type: "principal_interaction" } }
+      );
+      expect(createActionResponse.status()).toBe(403);
+
+      const deleteVisitResponse = await programAdminPage.request.delete(`/api/pm/visits/${visitId}`);
+      expect(deleteVisitResponse.status()).toBe(403);
+    } finally {
+      await pool.query(
+        "UPDATE user_permission SET read_only = false WHERE email = $1",
+        ["e2e-program-admin@test.local"]
+      );
+    }
   });
 
   test("legacy-routes-are-gone", async ({ pmPage }) => {
@@ -1774,7 +1880,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
     }
   });
 
-  test("individual-student-existing-entry-shows-on-open", async ({ pmPage }) => {
+  test("individual-student-canonical-entry-shape-renders-on-open", async ({ pmPage }) => {
     const student = seededStudents.find((s) => s.grade === 11)!;
     const { visitId } = await seedTestVisit(pool, schoolCode);
     const { actionId } = await seedVisitAction(pool, visitId, {
@@ -1782,7 +1888,7 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
       status: "in_progress",
       data: individualStudentEntriesData([
         {
-          id: "existing-grade-11-entry",
+          id: "canonical-entry",
           grade: 11,
           students: [{ id: student.id, name: student.name }],
         },
@@ -1791,9 +1897,22 @@ test.describe("Visits — Phase 6.3 E2E scenarios", () => {
 
     await pmPage.goto(`/visits/${visitId}/actions/${actionId}`);
     await expect(pmPage.getByText(student.name)).toBeVisible();
+
+    await expect
+      .poll(
+        async () => {
+          const row = await getVisitActionData(actionId);
+          return {
+            hasEntries: Array.isArray(row.data.entries),
+            hasLegacyStudents: Array.isArray(row.data.students),
+          };
+        },
+        { timeout: 12_000 }
+      )
+      .toEqual({ hasEntries: true, hasLegacyStudents: false });
   });
 
-  test("individual-student-active-entry-adds-grouped-entry-and-completes", async ({
+  test("individual-student-existing-entry-adds-grouped-entry-and-completes", async ({
     pmPage,
   }) => {
     const grade11 = seededStudents.filter((student) => student.grade === 11);

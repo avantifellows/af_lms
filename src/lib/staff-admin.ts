@@ -149,6 +149,92 @@ export function safeStaffApiError(result: {
   };
 }
 
+interface AcademicMentorshipBlockerTarget {
+  school_code: string | null;
+  academic_year: string;
+}
+
+interface AcademicMentorshipBlockerRow extends AcademicMentorshipBlockerTarget {
+  mentee_count: string | number;
+}
+
+function academicMentorshipManagementLink(
+  row: AcademicMentorshipBlockerTarget | undefined
+): string {
+  if (!row?.school_code || !row.academic_year) {
+    return "/admin/academic-mentorship";
+  }
+  return `/admin/academic-mentorship?school_code=${encodeURIComponent(
+    row.school_code
+  )}&academic_year=${encodeURIComponent(row.academic_year)}`;
+}
+
+function isMissingAcademicMentorshipMappingSchema(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "42P01" || code === "42703";
+}
+
+async function queryAcademicMentorshipBlockers<T>(
+  sql: string,
+  mentorUserId: number
+): Promise<T[]> {
+  try {
+    return await query<T>(sql, [mentorUserId]);
+  } catch (error) {
+    if (isMissingAcademicMentorshipMappingSchema(error)) return [];
+    throw error;
+  }
+}
+
+async function blockIfActiveAcademicMentees(
+  mentorUserId: number
+): Promise<StaffValidationFailure | null> {
+  const rows = await queryAcademicMentorshipBlockers<AcademicMentorshipBlockerRow>(
+    `SELECT s.code AS school_code,
+            m.academic_year,
+            COUNT(*) AS mentee_count
+     FROM academic_mentorship_mentor_mentee_mappings m
+     JOIN school s ON s.id = m.school_id
+     WHERE m.mentor_user_id = $1
+       AND m.ended_at IS NULL
+     GROUP BY s.code, m.academic_year
+     ORDER BY m.academic_year DESC, s.code ASC`,
+    mentorUserId
+  );
+  if (rows.length === 0) return null;
+
+  const count = rows.reduce((total, row) => total + Number(row.mentee_count), 0);
+  return {
+    ok: false,
+    status: 409,
+    code: "active_academic_mentees",
+    error: `This Teacher has ${count} active ${count === 1 ? "Mentee" : "Mentees"}. Remove or reassign them before exiting the Teacher: ${academicMentorshipManagementLink(rows[0])}`,
+  };
+}
+
+export async function blockIfAcademicMentorshipHistory(
+  mentorUserId: number
+): Promise<StaffValidationFailure | null> {
+  const rows = await queryAcademicMentorshipBlockers<AcademicMentorshipBlockerTarget>(
+    `SELECT s.code AS school_code,
+            m.academic_year
+     FROM academic_mentorship_mentor_mentee_mappings m
+     JOIN school s ON s.id = m.school_id
+     WHERE m.mentor_user_id = $1
+     GROUP BY s.code, m.academic_year
+     ORDER BY m.academic_year DESC, s.code ASC`,
+    mentorUserId
+  );
+  if (rows.length === 0) return null;
+
+  return {
+    ok: false,
+    status: 409,
+    code: "academic_mentorship_history",
+    error: `This Teacher has Academic Mentor-Mentee Mapping history. Deleting the Teacher is blocked to preserve audit history: ${academicMentorshipManagementLink(rows[0])}`,
+  };
+}
+
 // --- Roster ---
 
 export type StaffRosterResult =
@@ -540,6 +626,11 @@ export async function updateTeacherRecord(params: {
     }
   }
 
+  if (payload.exit_date && existing[0].user_id !== null) {
+    const blocker = await blockIfActiveAcademicMentees(Number(existing[0].user_id));
+    if (blocker) return blocker;
+  }
+
   const patched = await dbServiceTeacherPatch(params.id, payload);
   if (!patched.ok) return patched;
 
@@ -608,6 +699,43 @@ async function rejectIfRegionLevelUser(
       error:
         "Region-level users can't hold centre seats — their access is scoped by region, not by seat.",
       fields: { user_id: "This user has region-level access" },
+    };
+  }
+  return null;
+}
+
+// Validate a user about to be seated: the user must exist, must not be
+// region-level (see rejectIfRegionLevelUser), and must not already hold this
+// exact centre+role seat. Shared by createPosition (no seat yet) and
+// updatePosition (pass the edited row's id as `excludePositionId` so filling a
+// seat doesn't collide with itself). Returns a failure to surface, or null when
+// the occupant is allowed.
+async function validateSeatOccupant(
+  userId: number,
+  centreId: number,
+  role: SeatRole,
+  excludePositionId?: number
+): Promise<StaffValidationFailure | null> {
+  const users = await query<{ id: number }>(
+    `SELECT id FROM "user" WHERE id = $1`,
+    [userId]
+  );
+  if (users.length === 0) {
+    return { ok: false, status: 404, error: "User not found" };
+  }
+  const regionBlock = await rejectIfRegionLevelUser(userId);
+  if (regionBlock) return regionBlock;
+  const duplicate = await query<{ id: number }>(
+    `SELECT id FROM centre_positions
+     WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL
+       AND ($4::int IS NULL OR id <> $4)`,
+    [centreId, role, userId, excludePositionId ?? null]
+  );
+  if (duplicate.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: "This person already holds this seat",
     };
   }
   return null;
@@ -1263,6 +1391,103 @@ export async function updateStaffMember(params: {
   return { ok: true };
 }
 
+export interface UpdateStaffNameBody {
+  user_id?: unknown;
+  permission_id?: unknown;
+  full_name?: unknown;
+}
+
+// A person's name lives in two places depending on the roster kind: the shared
+// `user` table (teacher/staff rows show first_name + last_name) and
+// `user_permission.full_name` (pending rows, plus what the Users screen and
+// login display). Editing a name here writes BOTH — splitting the full name
+// into first/last for `user` and mirroring the whole string to full_name — so
+// the name stays consistent everywhere instead of drifting between screens.
+export async function updateStaffName(params: {
+  body: UpdateStaffNameBody;
+}): Promise<StaffMutationResult> {
+  const schema = await checkStaffManagementSchema();
+  if (!schema.ok) return schema;
+
+  const fullName =
+    typeof params.body.full_name === "string" ? params.body.full_name.trim() : "";
+  if (!fullName) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Validation failed",
+      fields: { full_name: "Name can't be empty" },
+    };
+  }
+  const tokens = fullName.split(/\s+/).filter(Boolean);
+  const normalized = tokens.join(" ");
+  const firstName = tokens[0] ?? null;
+  const lastName = tokens.length > 1 ? tokens.slice(1).join(" ") : null;
+
+  const userId =
+    params.body.user_id === undefined || params.body.user_id === null
+      ? null
+      : Number(params.body.user_id);
+  if (userId !== null && (!Number.isInteger(userId) || userId <= 0)) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Validation failed",
+      fields: { user_id: "user_id must be a positive integer" },
+    };
+  }
+  const permissionId =
+    params.body.permission_id === undefined || params.body.permission_id === null
+      ? null
+      : Number(params.body.permission_id);
+  if (permissionId !== null && (!Number.isInteger(permissionId) || permissionId <= 0)) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Validation failed",
+      fields: { permission_id: "permission_id must be a positive integer" },
+    };
+  }
+  if (userId === null && permissionId === null) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Provide user_id or permission_id to identify the person",
+    };
+  }
+
+  let touched = 0;
+  await withTransaction(async (client) => {
+    if (userId !== null) {
+      const userUpdate = await client.query(
+        `UPDATE "user" SET first_name = $1, last_name = $2, updated_at = now()
+         WHERE id = $3`,
+        [firstName, lastName, userId]
+      );
+      touched += userUpdate.rowCount ?? 0;
+      const permUpdate = await client.query(
+        `UPDATE user_permission SET full_name = $1, updated_at = now()
+         WHERE user_id = $2 AND revoked_at IS NULL`,
+        [normalized, userId]
+      );
+      touched += permUpdate.rowCount ?? 0;
+    }
+    if (permissionId !== null) {
+      const permUpdate = await client.query(
+        `UPDATE user_permission SET full_name = $1, updated_at = now()
+         WHERE id = $2`,
+        [normalized, permissionId]
+      );
+      touched += permUpdate.rowCount ?? 0;
+    }
+  });
+
+  if (touched === 0) {
+    return { ok: false, status: 404, error: "Person not found" };
+  }
+  return { ok: true };
+}
+
 // --- Centre positions (seats): LMS-direct ---
 
 export interface CreatePositionBody {
@@ -1290,6 +1515,83 @@ async function syncTeacherSubjectFromRole(
     `UPDATE teacher SET subject_id = $1, updated_at = now()
      WHERE user_id = $2 AND is_af_teacher = true`,
     [subjects.rows[0].id, userId]
+  );
+}
+
+// Keep `user_permission.role` — the app-level role that gates the UI (Start
+// Visit button, PM dashboard; see getFeatureAccess) — in sync with the person's
+// centre seats. The seat is the source of truth: holding any PM-tier seat
+// (apm/pm/spm/ph) makes the person a program_manager; with no PM-tier seat left
+// they fall back to teacher. Both directions apply — gaining a PM seat promotes
+// teacher→program_manager, losing the last one demotes program_manager→teacher.
+//
+// Only ever moves WITHIN the {teacher, program_manager} band. A manually
+// elevated program_admin/admin is org-level (not seat-derived) and is left
+// untouched, so this never demotes a real admin who happens to hold a ph seat.
+// Only ever rewrites the live (revoked_at IS NULL) permission row — the same
+// row the gating read uses — so cleaning up an exited person's seats never
+// mutates their revoked row's role. No-ops when the user has no live
+// user_permission row (a seated person who can't yet log in) or when the role
+// already matches. Call after every seat write, once per affected user (both
+// the new and prior occupant on a move).
+async function syncAppRoleFromSeats(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  const pmSeat = await client.query(
+    `SELECT 1 FROM centre_positions
+     WHERE user_id = $1 AND deleted_at IS NULL AND role = ANY($2)
+     LIMIT 1`,
+    [userId, [...PM_SEAT_ROLES]]
+  );
+  const desired = pmSeat.rows.length > 0 ? "program_manager" : "teacher";
+  await client.query(
+    `UPDATE user_permission
+     SET role = $2, updated_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND role IN ('teacher', 'program_manager')
+       AND role <> $2`,
+    [userId, desired]
+  );
+}
+
+// Keep `user_permission.program_ids` in sync with the person's centre seats:
+// each centre belongs to one program, and a seated person's program scope IS the
+// set of programs across their active centres. Recomputed as a full replace on
+// every seat write, so it always equals the union over CURRENT seats — removing
+// one of two Nodal seats keeps Nodal (the other seat still supplies it); a
+// program only drops when its last seat is gone. This is the write-back the
+// resolver (getProgramContextSync) reads live but never persisted, so raw
+// program_ids consumers (quiz-session batches, ownsRecord, the users page) were
+// stale for multi-program PMs.
+//
+// Only touches the live (revoked_at IS NULL) row, and skips admins — level-3
+// admins have full program access regardless, and their program_ids is a manual
+// set we must not shrink to whatever centres they happen to sit at. No-op when
+// the person has no active seat (don't strip a person mid-offboarding to an
+// empty program set) or when the value is already correct.
+async function syncProgramIdsFromSeats(
+  client: PoolClient,
+  userId: number
+): Promise<void> {
+  const rows = await client.query<{ program_id: number }>(
+    `SELECT DISTINCT c.program_id
+     FROM centre_positions cp
+     JOIN centres c ON c.id = cp.centre_id
+     WHERE cp.user_id = $1 AND cp.deleted_at IS NULL AND c.program_id IS NOT NULL`,
+    [userId]
+  );
+  if (rows.rows.length === 0) return;
+  const programIds = rows.rows.map((r) => Number(r.program_id)).sort((a, b) => a - b);
+  await client.query(
+    `UPDATE user_permission
+     SET program_ids = $2, updated_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND role <> 'admin'
+       AND COALESCE(program_ids, '{}') <> $2`,
+    [userId, programIds]
   );
 }
 
@@ -1328,27 +1630,8 @@ export async function createPosition(params: {
   }
 
   if (userId !== null) {
-    const users = await query<{ id: number }>(
-      `SELECT id FROM "user" WHERE id = $1`,
-      [userId]
-    );
-    if (users.length === 0) {
-      return { ok: false, status: 404, error: "User not found" };
-    }
-    const regionBlock = await rejectIfRegionLevelUser(userId);
-    if (regionBlock) return regionBlock;
-    const duplicate = await query<{ id: number }>(
-      `SELECT id FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3 AND deleted_at IS NULL`,
-      [centreId, role, userId]
-    );
-    if (duplicate.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This person already holds this seat",
-      };
-    }
+    const bad = await validateSeatOccupant(userId, centreId, role);
+    if (bad) return bad;
   }
 
   await withTransaction(async (client) => {
@@ -1360,6 +1643,8 @@ export async function createPosition(params: {
     if (userId !== null) {
       await syncTeacherSubjectFromRole(client, userId, role);
       await clearExplicitSchoolScope(client, userId);
+      await syncAppRoleFromSeats(client, userId);
+      await syncProgramIdsFromSeats(client, userId);
     }
   });
 
@@ -1412,28 +1697,13 @@ export async function updatePosition(params: {
         fields: { user_id: "user_id must be a positive integer or null" },
       };
     }
-    const users = await query<{ id: number }>(
-      `SELECT id FROM "user" WHERE id = $1`,
-      [userId]
+    const bad = await validateSeatOccupant(
+      userId,
+      position.centre_id,
+      position.role,
+      params.id
     );
-    if (users.length === 0) {
-      return { ok: false, status: 404, error: "User not found" };
-    }
-    const regionBlock = await rejectIfRegionLevelUser(userId);
-    if (regionBlock) return regionBlock;
-    const duplicate = await query<{ id: number }>(
-      `SELECT id FROM centre_positions
-       WHERE centre_id = $1 AND role = $2 AND user_id = $3
-         AND deleted_at IS NULL AND id <> $4`,
-      [position.centre_id, position.role, userId, params.id]
-    );
-    if (duplicate.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: "This person already holds this seat",
-      };
-    }
+    if (bad) return bad;
   }
 
   // Vacating the seat: refuse if it's the occupant's only seat (would strand
@@ -1454,6 +1724,14 @@ export async function updatePosition(params: {
     );
     if (userId !== null) {
       await clearExplicitSchoolScope(client, userId);
+      await syncAppRoleFromSeats(client, userId);
+      await syncProgramIdsFromSeats(client, userId);
+    }
+    // The prior occupant just lost this seat — re-derive their app role and
+    // program scope too (this may have been their last seat in a program).
+    if (position.user_id !== null && position.user_id !== userId) {
+      await syncAppRoleFromSeats(client, position.user_id);
+      await syncProgramIdsFromSeats(client, position.user_id);
     }
   });
 
@@ -1499,6 +1777,7 @@ export async function setUserRole(params: {
     updatedCount = updated.rows.length;
     if (updatedCount === 0) return;
     await syncTeacherSubjectFromRole(client, userId, role);
+    await syncAppRoleFromSeats(client, userId);
   });
   if (updatedCount === 0) {
     return {
@@ -1537,10 +1816,18 @@ export async function deletePosition(params: {
     return LAST_SEAT_BLOCK;
   }
 
-  await query(
-    `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
-    [params.id]
-  );
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE centre_positions SET deleted_at = now(), updated_at = now() WHERE id = $1`,
+      [params.id]
+    );
+    // The occupant just lost this seat — re-derive their app role and program
+    // scope in case it was their last PM-tier seat / last seat in a program.
+    if (position.user_id !== null) {
+      await syncAppRoleFromSeats(client, position.user_id);
+      await syncProgramIdsFromSeats(client, position.user_id);
+    }
+  });
 
   return { ok: true };
 }

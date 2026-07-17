@@ -13,6 +13,7 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
+vi.mock("@/lib/visit-teachers");
 
 import { getServerSession } from "next-auth";
 
@@ -28,6 +29,7 @@ import { PRINCIPAL_INTERACTION_CONFIG } from "@/lib/principal-interaction";
 import { SCHOOL_STAFF_INTERACTION_CONFIG } from "@/lib/school-staff-interaction";
 import { query } from "@/lib/db";
 import { getFeatureAccess, getUserPermission } from "@/lib/permissions";
+import { getVisitTeachersForSchool } from "@/lib/visit-teachers";
 import {
   NO_SESSION,
   PASSCODE_SESSION,
@@ -40,6 +42,7 @@ const mockSession = vi.mocked(getServerSession);
 const mockGetPermission = vi.mocked(getUserPermission);
 const mockFeatureAccess = vi.mocked(getFeatureAccess);
 const mockQuery = vi.mocked(query);
+const mockGetVisitTeachersForSchool = vi.mocked(getVisitTeachersForSchool);
 
 const params = routeParams({ id: "10", actionId: "101" });
 
@@ -250,10 +253,13 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("keeps action completion validation for a program admin's own visit", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "pa@avantifellows.org" }])
+      .mockResolvedValueOnce([{ ...IN_PROGRESS_ACTION, data: {} }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
       method: "POST",
@@ -262,9 +268,10 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     });
     const res = await POST(req as never, params);
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Invalid principal interaction data",
+    });
   });
 
   it("returns 404 when parent visit does not exist or is soft-deleted", async () => {
@@ -761,6 +768,11 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
   it("returns 422 when not all school teachers are recorded", async () => {
     setupPmEdit();
     const data = buildValidIndividualTeacherData([1]);
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
+      { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+      { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
+      { id: 3, full_name: "", email: "t3@test.com" },
+    ]);
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
       .mockResolvedValueOnce([
@@ -769,11 +781,6 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
           action_type: "individual_af_teacher_interaction",
           data,
         },
-      ])
-      // allTeachersRecordedError query returns 2 teachers but data only has teacher 1
-      .mockResolvedValueOnce([
-        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
-        { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
       ]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
@@ -786,7 +793,42 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.error).toBe("Not all teachers at this school have been recorded");
-    expect(json.details).toEqual(["Missing: Teacher 2"]);
+    expect(json.details).toEqual(["Missing: Teacher 2, t3@test.com"]);
+  });
+
+  it("ignores broad permission-only teachers when the Visit Teacher roster is complete", async () => {
+    setupPmEdit();
+    const data = buildValidIndividualTeacherData([1]);
+    const completedAction = {
+      ...COMPLETED_ACTION,
+      action_type: "individual_af_teacher_interaction",
+      data,
+    };
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
+      { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+    ]);
+    mockQuery
+      .mockResolvedValueOnce([VISIT_ROW])
+      .mockResolvedValueOnce([
+        {
+          ...IN_PROGRESS_ACTION,
+          action_type: "individual_af_teacher_interaction",
+          data,
+        },
+      ])
+      .mockResolvedValueOnce([completedAction]);
+
+    const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
+      method: "POST",
+      body: JSON.stringify({ end_lat: 28.6, end_lng: 77.2, end_accuracy: 10 }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await POST(req as never, params);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.action.status).toBe("completed");
+    expect(mockGetVisitTeachersForSchool).toHaveBeenCalledWith("70705");
   });
 
   it("ends individual teacher interaction with absent/on_leave teachers (no questions needed)", async () => {
@@ -802,6 +844,10 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
       action_type: "individual_af_teacher_interaction",
       data,
     };
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
+      { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+      { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
+    ]);
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
       .mockResolvedValueOnce([
@@ -810,11 +856,6 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
           action_type: "individual_af_teacher_interaction",
           data,
         },
-      ])
-      // allTeachersRecordedError — all teachers accounted for
-      .mockResolvedValueOnce([
-        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
-        { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
       ])
       .mockResolvedValueOnce([completedAction]);
 
@@ -839,6 +880,10 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
       action_type: "individual_af_teacher_interaction",
       data,
     };
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
+      { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+      { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
+    ]);
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
       .mockResolvedValueOnce([
@@ -847,11 +892,6 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
           action_type: "individual_af_teacher_interaction",
           data,
         },
-      ])
-      // allTeachersRecordedError — both teachers in DB match data
-      .mockResolvedValueOnce([
-        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
-        { id: 2, full_name: "Teacher 2", email: "t2@test.com" },
       ])
       .mockResolvedValueOnce([completedAction]);
 
@@ -876,6 +916,9 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
         { id: 1, name: "Teacher 1", attendance: "present" as const, questions: {} },
       ],
     };
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
+      { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
+    ]);
     mockQuery
       .mockResolvedValueOnce([VISIT_ROW])
       .mockResolvedValueOnce([
@@ -884,10 +927,6 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
           action_type: "individual_af_teacher_interaction",
           data: validData,
         },
-      ])
-      // allTeachersRecordedError for pre-update path — passes
-      .mockResolvedValueOnce([
-        { id: 1, full_name: "Teacher 1", email: "t1@test.com" },
       ])
       // UPDATE returns 0 rows (concurrent)
       .mockResolvedValueOnce([])

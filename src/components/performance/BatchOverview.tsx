@@ -19,8 +19,13 @@ interface Props {
   program?: string;
   stream?: string;
   subject?: string;
+  testGrade?: number;
   onTestClick: (sessionId: string, testName: string) => void;
-  onFilterOptions?: (opts: { streams: string[]; subjects: string[] }) => void;
+  onFilterOptions?: (opts: {
+    streams: string[];
+    subjects: string[];
+    testGrades: number[];
+  }) => void;
 }
 
 function TestCard({
@@ -80,6 +85,7 @@ export default function BatchOverview({
   program,
   stream,
   subject,
+  testGrade,
   onTestClick,
   onFilterOptions,
 }: Props) {
@@ -117,16 +123,19 @@ export default function BatchOverview({
   // Compute available subjects from the loaded test set, scoped to the current
   // test category (chapter vs full). Streams come straight from the API.
   const filterOptions = useMemo(() => {
-    if (!data) return { streams: [], subjects: [] };
+    if (!data) return { streams: [], subjects: [], testGrades: [] };
     const subjectSet = new Set<string>();
+    const testGradeSet = new Set<number>();
     for (const t of data.tests) {
       const isChapter = isChapterTest(t.test_format);
       if (testCategory === "chapter" ? !isChapter : isChapter) continue;
       for (const s of t.subjects || []) subjectSet.add(s);
+      if (t.test_grade != null) testGradeSet.add(t.test_grade);
     }
     return {
       streams: data.streams || [],
       subjects: [...subjectSet].sort(),
+      testGrades: [...testGradeSet].sort((a, b) => a - b),
     };
   }, [data, testCategory]);
 
@@ -170,6 +179,7 @@ export default function BatchOverview({
     if (testCategory === "chapter" && subject) {
       if (!(t.subjects || []).includes(subject)) return false;
     }
+    if (testGrade != null && t.test_grade !== testGrade) return false;
     return true;
   });
 
@@ -180,6 +190,7 @@ export default function BatchOverview({
           No {testCategory === "chapter" ? "chapter" : "full"} tests
           {subject ? ` for ${subject}` : ""}
           {stream ? ` for the selected stream` : ""}
+          {testGrade != null ? ` targeting grade ${testGrade}` : ""}
           {" "}available for this grade yet.
         </p>
       </div>

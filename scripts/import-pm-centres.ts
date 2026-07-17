@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-30 (8bc1326). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Import PM-family centre assignments (apm/pm/spm/ph seats) from the ops
  * spreadsheet, plus the people + centre lifecycle they imply. Full replacement
  * of PM-family seats on the in-sheet centres; subject-teacher seats are left

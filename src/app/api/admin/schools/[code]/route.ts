@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { isAdmin, PROGRAM_IDS_ORDERED } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 interface RouteParams {
@@ -33,12 +33,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Validate program_ids are valid (1=CoE, 2=Nodal, 64=NVS)
-    const validProgramIds = [1, 2, 64];
-    const invalidIds = program_ids.filter((id: number) => !validProgramIds.includes(id));
+    // Validate against the known program ids (PROGRAM_IDS in constants) rather
+    // than a frozen list, so newly onboarded programs (Punjab/EMRS/RGNV/…) are
+    // accepted automatically.
+    const invalidIds = program_ids.filter(
+      (id: number) => !PROGRAM_IDS_ORDERED.includes(id)
+    );
     if (invalidIds.length > 0) {
       return NextResponse.json(
-        { error: `Invalid program IDs: ${invalidIds.join(", ")}. Valid IDs are: 1 (CoE), 2 (Nodal), 64 (NVS)` },
+        {
+          error: `Invalid program IDs: ${invalidIds.join(", ")}. Valid IDs are: ${PROGRAM_IDS_ORDERED.join(", ")}`,
+        },
         { status: 400 }
       );
     }

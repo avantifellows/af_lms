@@ -28,3 +28,5 @@ Lookup table for all pattern files in this directory. Check here before starting
 | [add-visit-action-type.md](add-visit-action-type.md) | Adding a new PM visit action type (the ~8-file registry change) |
 | [db-service-write.md](db-service-write.md) | Writing students/batches/quiz-sessions/documents (proxy to the DB Service) |
 | [debug-access-denied.md](debug-access-denied.md) | Diagnosing unexpected 401/403, empty lists, or wrongly-granted access |
+| [debug-curriculum-progress.md](debug-curriculum-progress.md) | Diagnosing teacher LMS curriculum updates not appearing in manager LMS |
+| [debug-e2e-fixtures.md](debug-e2e-fixtures.md) | Diagnosing Playwright failures caused by stale local fixtures or app flow drift |

@@ -11,14 +11,24 @@ export const PROGRAM_IDS = {
   COE: 1,
   NODAL: 2,
   NVS: 64,
-  // Non-JNV centre programs (centre rollout — Punjab CoE meritorious schools + EMRS).
+  // Non-JNV centre programs (centre rollout — Punjab CoE meritorious schools, EMRS, RGNV).
   PUNJAB_COE: 74,
   PUNJAB_NODAL: 94,
   EMRS_COE: 78,
+  UTTARAKHAND_COE: 88, // RGNV (Rajiv Gandhi Navodaya Vidyalaya) schools
 } as const;
 
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
 export const PROGRAM_IDS_ORDERED: number[] = Object.values(PROGRAM_IDS);
+
+// Physical-centre programs — every program EXCEPT NVS. As far as LMS features
+// go (curriculum, quiz sessions, visits, PM dashboard, summary stats) these are
+// all equivalent; NVS is the sole exception (NVS-only users are gated out of
+// those features). Derived from PROGRAM_IDS so a newly onboarded program is
+// included automatically — no separate list to keep in sync.
+export const PHYSICAL_CENTRE_PROGRAM_IDS: number[] = Object.values(
+  PROGRAM_IDS,
+).filter((id) => id !== PROGRAM_IDS.NVS);
 
 // Maps program_ids to the BigQuery `student_program` label.
 // Keep in sync with AddUserModal's PROGRAMS list.
@@ -29,4 +39,7 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.PUNJAB_COE]: "Punjab CoE",
   [PROGRAM_IDS.PUNJAB_NODAL]: "Punjab Nodal",
   [PROGRAM_IDS.EMRS_COE]: "EMRS CoE",
+  [PROGRAM_IDS.UTTARAKHAND_COE]: "Uttarakhand CoE",
 };
+
+export const ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST = ["*"] as const;

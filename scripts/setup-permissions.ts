@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-02-16 (e1ee7ea). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Setup script for user_permission table
  *
  * This script is idempotent - safe to run multiple times.
@@ -20,7 +23,7 @@ const pool = new Pool({
   user: process.env.DATABASE_USER,
   password: process.env.DATABASE_PASSWORD,
   database: process.env.DATABASE_NAME,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
 });
 
 interface SeedUser {

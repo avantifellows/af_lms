@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 
 // ---- mocks (hoisted) ----
 
@@ -13,6 +13,9 @@ const {
   mockNotFound,
   mockProcessStudents,
   mockRouterRefresh,
+  mockGetAcademicMentorshipActorUserId,
+  mockListAcademicMentorshipMappings,
+  mockListAcademicMentorshipTeacherMentees,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -27,6 +30,9 @@ const {
     throw new Error("NOT_FOUND");
   }),
   mockProcessStudents: vi.fn(),
+  mockGetAcademicMentorshipActorUserId: vi.fn(),
+  mockListAcademicMentorshipMappings: vi.fn(),
+  mockListAcademicMentorshipTeacherMentees: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -49,6 +55,12 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
+}));
+vi.mock("@/lib/academic-mentorship", () => ({
+  getAcademicMentorshipActorUserId: mockGetAcademicMentorshipActorUserId,
+  listAcademicMentorshipMappings: mockListAcademicMentorshipMappings,
+  listAcademicMentorshipTeacherMentees:
+    mockListAcademicMentorshipTeacherMentees,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -307,6 +319,18 @@ describe("SchoolPage (server component)", () => {
     mockNotFound.mockImplementation(() => {
       throw new Error("NOT_FOUND");
     });
+    // EnrollmentTabContent fetches grade-11 consent status on mount; stub it so
+    // the post-render state update doesn't trigger act() warnings here.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ consent: {} }),
+      }),
+    );
+    mockListAcademicMentorshipMappings.mockResolvedValue([]);
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
   });
 
   // --- Auth redirects ---
@@ -316,7 +340,7 @@ describe("SchoolPage (server component)", () => {
     mockQuery.mockResolvedValueOnce([makeSchool()]);
 
     await expect(
-      SchoolPage({ params: Promise.resolve({ udise: "24120100101" }) })
+      SchoolPage({ params: Promise.resolve({ udise: "24120100101" }) }),
     ).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
   });
@@ -326,7 +350,7 @@ describe("SchoolPage (server component)", () => {
     mockQuery.mockResolvedValueOnce([]); // no school
 
     await expect(
-      SchoolPage({ params: Promise.resolve({ udise: "99999999999" }) })
+      SchoolPage({ params: Promise.resolve({ udise: "99999999999" }) }),
     ).rejects.toThrow("NOT_FOUND");
     expect(mockNotFound).toHaveBeenCalled();
   });
@@ -345,13 +369,13 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Your passcode only grants access to a different school."
-      )
+        "Your passcode only grants access to a different school.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("Return to login")).toBeInTheDocument();
     expect(screen.getByText("Return to login").closest("a")).toHaveAttribute(
       "href",
-      "/"
+      "/",
     );
   });
 
@@ -374,13 +398,13 @@ describe("SchoolPage (server component)", () => {
       (
         _perm: unknown,
         feature: string,
-        opts?: { isPasscodeUser?: boolean }
+        opts?: { isPasscodeUser?: boolean },
       ) => {
         if (opts?.isPasscodeUser && feature === "students") {
           return featureAccess(true, true);
         }
         return featureAccess(false, false);
-      }
+      },
     );
     mockProcessStudents.mockResolvedValue({ students: [], issues: [] });
 
@@ -398,10 +422,13 @@ describe("SchoolPage (server component)", () => {
     // Only enrollment tab should be visible (passcode user gets none for other features)
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-curriculum")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-mentorship")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Curriculum Summary" })
+      screen.queryByRole("link", { name: "Curriculum Summary" }),
     ).not.toBeInTheDocument();
+    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+    expect(mockListAcademicMentorshipTeacherMentees).not.toHaveBeenCalled();
   });
 
   // --- Google user permission checks ---
@@ -418,13 +445,11 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /You don.t have permission to view this school/
-      )
+      screen.getByText(/You don.t have permission to view this school/),
     ).toBeInTheDocument();
     expect(screen.getByText("Return to dashboard")).toBeInTheDocument();
     expect(
-      screen.getByText("Return to dashboard").closest("a")
+      screen.getByText("Return to dashboard").closest("a"),
     ).toHaveAttribute("href", "/dashboard");
   });
 
@@ -432,7 +457,7 @@ describe("SchoolPage (server component)", () => {
     mockGetServerSession.mockResolvedValue(googleSession());
     mockQuery.mockResolvedValueOnce([makeSchool({ region: "West" })]);
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ level: 2, role: "program_manager", regions: ["East"] })
+      makePermission({ level: 2, role: "program_manager", regions: ["East"] }),
     );
 
     const jsx = await SchoolPage({
@@ -442,7 +467,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
     expect(
-      screen.getByText(/You don.t have permission to view this school/)
+      screen.getByText(/You don.t have permission to view this school/),
     ).toBeInTheDocument();
   });
 
@@ -454,7 +479,7 @@ describe("SchoolPage (server component)", () => {
         level: 1,
         role: "teacher",
         school_codes: ["11111"],
-      })
+      }),
     );
 
     const jsx = await SchoolPage({
@@ -472,7 +497,7 @@ describe("SchoolPage (server component)", () => {
         level: 2,
         role: "program_manager",
         regions: ["West"],
-      })
+      }),
     );
 
     await renderPage();
@@ -488,7 +513,7 @@ describe("SchoolPage (server component)", () => {
         level: 1,
         role: "teacher",
         school_codes: ["70705"],
-      })
+      }),
     );
 
     await renderPage();
@@ -499,7 +524,7 @@ describe("SchoolPage (server component)", () => {
   it("renders page for level 3 user (all schools)", async () => {
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ level: 3, role: "program_admin" })
+      makePermission({ level: 3, role: "program_admin" }),
     );
 
     await renderPage();
@@ -513,7 +538,7 @@ describe("SchoolPage (server component)", () => {
     mockGetServerSession.mockResolvedValue(googleSession());
     mockQuery.mockResolvedValueOnce([makeSchool()]);
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ program_ids: [] })
+      makePermission({ program_ids: [] }),
     );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: false,
@@ -530,11 +555,11 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByText("No Program Access")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "You are not assigned to any programs. Please contact an administrator."
-      )
+        "You are not assigned to any programs. Please contact an administrator.",
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Return to dashboard").closest("a")
+      screen.getByText("Return to dashboard").closest("a"),
     ).toHaveAttribute("href", "/dashboard");
   });
 
@@ -554,7 +579,7 @@ describe("SchoolPage (server component)", () => {
     expect(header).toHaveAttribute("data-title", "JNV Bhavnagar");
     expect(header).toHaveAttribute(
       "data-subtitle",
-      "Bhavnagar, Gujarat | Code: 70705 | UDISE: 24120100101"
+      "Bhavnagar, Gujarat | Code: 70705 | UDISE: 24120100101",
     );
   });
 
@@ -567,7 +592,7 @@ describe("SchoolPage (server component)", () => {
     expect(header.getAttribute("data-subtitle")).not.toContain("UDISE");
     expect(header).toHaveAttribute(
       "data-subtitle",
-      "Bhavnagar, Gujarat | Code: 70705"
+      "Bhavnagar, Gujarat | Code: 70705",
     );
   });
 
@@ -587,7 +612,7 @@ describe("SchoolPage (server component)", () => {
         level: 1,
         role: "teacher",
         school_codes: ["70705"],
-      })
+      }),
     );
 
     await renderPage();
@@ -604,7 +629,7 @@ describe("SchoolPage (server component)", () => {
         role: "program_manager",
         school_codes: ["70705"],
         program_ids: [1],
-      })
+      }),
     );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: true,
@@ -616,10 +641,10 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     expect(
-      screen.queryByRole("link", { name: "Curriculum Summary" })
+      screen.queryByRole("link", { name: "Curriculum Summary" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("page-header")).not.toHaveTextContent(
-      "Curriculum Summary"
+      "Curriculum Summary",
     );
   });
 
@@ -630,7 +655,7 @@ describe("SchoolPage (server component)", () => {
         level: 1,
         role: "teacher",
         school_codes: ["70705", "12345"],
-      })
+      }),
     );
 
     await renderPage();
@@ -645,10 +670,7 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     const header = screen.getByTestId("page-header");
-    expect(header).toHaveAttribute(
-      "data-user-email",
-      "user@avantifellows.org"
-    );
+    expect(header).toHaveAttribute("data-user-email", "user@avantifellows.org");
   });
 
   // --- Tab visibility ---
@@ -672,7 +694,7 @@ describe("SchoolPage (server component)", () => {
       (_perm: unknown, feature: string) => {
         if (feature === "students") return featureAccess(true, true);
         return featureAccess(false, false);
-      }
+      },
     );
 
     await renderPage();
@@ -692,7 +714,7 @@ describe("SchoolPage (server component)", () => {
         program_ids: [64],
         level: 1,
         school_codes: ["70705"],
-      })
+      }),
     );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: true,
@@ -704,12 +726,14 @@ describe("SchoolPage (server component)", () => {
       (_perm: unknown, feature: string) =>
         feature === "students"
           ? featureAccess(true, true)
-          : featureAccess(false, false)
+          : featureAccess(false, false),
     );
 
     await renderPage();
 
-    const props = JSON.parse(screen.getByTestId("student-table").dataset.props || "{}");
+    const props = JSON.parse(
+      screen.getByTestId("student-table").dataset.props || "{}",
+    );
     expect(props.canEdit).toBe(true);
     expect(props.canEditStudent).toBe(false);
   });
@@ -719,8 +743,12 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage();
 
-    expect(screen.getByRole("button", { name: /Add Student/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Bulk Upload/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Add Student/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Bulk Upload/ }),
+    ).toBeInTheDocument();
   });
 
   it("enables only NVS dropout at a Centre-free School for the shared writer gate", async () => {
@@ -762,7 +790,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByTestId("school-tabs")).toHaveAttribute(
       "data-default-tab",
-      "enrollment"
+      "enrollment",
     );
   });
 
@@ -775,7 +803,7 @@ describe("SchoolPage (server component)", () => {
       (_perm: unknown, feature: string) => {
         if (feature === "curriculum") return featureAccess(true, false); // view only
         return featureAccess(true, true);
-      }
+      },
     );
 
     await renderPage();
@@ -795,7 +823,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByTestId("performance-tab")).toHaveAttribute(
       "data-school-udise",
-      "24120100101"
+      "24120100101",
     );
   });
 
@@ -806,7 +834,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByTestId("performance-tab")).toHaveAttribute(
       "data-school-udise",
-      "70705"
+      "70705",
     );
   });
 
@@ -819,11 +847,11 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
       "data-school-id",
-      "school-42"
+      "school-42",
     );
     expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
       "data-can-edit",
-      "true"
+      "true",
     );
   });
 
@@ -833,18 +861,18 @@ describe("SchoolPage (server component)", () => {
       (_perm: unknown, feature: string) => {
         if (feature === "quiz_sessions") return featureAccess(true, false);
         return featureAccess(true, true);
-      }
+      },
     );
 
     await renderPage();
 
     expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
       "data-school-id",
-      "school-42"
+      "school-42",
     );
     expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
       "data-can-edit",
-      "false"
+      "false",
     );
   });
 
@@ -854,7 +882,7 @@ describe("SchoolPage (server component)", () => {
       (_perm: unknown, feature: string) => {
         if (feature === "quiz_sessions") return featureAccess(false, false);
         return featureAccess(true, true);
-      }
+      },
     );
 
     await renderPage();
@@ -872,7 +900,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByTestId("visits-tab")).toHaveAttribute(
       "data-school-code",
-      "70705"
+      "70705",
     );
   });
 
@@ -880,9 +908,27 @@ describe("SchoolPage (server component)", () => {
 
   it("renders selected-program student stats with grade breakdown", async () => {
     const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-3", user_id: "u-3", grade: 12, program_id: 64, status: "active" }),
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: 64,
+        status: "active",
+      }),
+      makeStudent({
+        group_user_id: "gu-2",
+        user_id: "u-2",
+        grade: 11,
+        program_id: 64,
+        status: "active",
+      }),
+      makeStudent({
+        group_user_id: "gu-3",
+        user_id: "u-3",
+        grade: 12,
+        program_id: 64,
+        status: "active",
+      }),
     ];
 
     setupAdminDefaults();
@@ -893,15 +939,29 @@ describe("SchoolPage (server component)", () => {
     // Only NVS has students; its card is selected by default.
     expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("3");
-    // Grade pills
-    expect(screen.getByText("Grade 11")).toBeInTheDocument();
-    expect(screen.getByText("Grade 12")).toBeInTheDocument();
+    // Grade pills (scoped to the stats card — the admission card also lists grades)
+    const statsCard = screen.getByTestId("enrollment-stats-header")
+      .parentElement as HTMLElement;
+    expect(within(statsCard).getByText("Grade 11")).toBeInTheDocument();
+    expect(within(statsCard).getByText("Grade 12")).toBeInTheDocument();
   });
 
   it("excludes dropout students from program counts", async () => {
     const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "dropout" }),
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: 64,
+        status: "active",
+      }),
+      makeStudent({
+        group_user_id: "gu-2",
+        user_id: "u-2",
+        grade: 11,
+        program_id: 64,
+        status: "dropout",
+      }),
     ];
 
     setupAdminDefaults();
@@ -916,8 +976,20 @@ describe("SchoolPage (server component)", () => {
 
   it("renders one program's stats at a time when multiple programs are present", async () => {
     const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: 11, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 1, status: "active" }),
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: 64,
+        status: "active",
+      }),
+      makeStudent({
+        group_user_id: "gu-2",
+        user_id: "u-2",
+        grade: 11,
+        program_id: 1,
+        status: "active",
+      }),
     ];
 
     setupAdminDefaults();
@@ -943,8 +1015,20 @@ describe("SchoolPage (server component)", () => {
 
   it("handles students with null grade in program counts", async () => {
     const students = [
-      makeStudent({ group_user_id: "gu-1", user_id: "u-1", grade: null, program_id: 64, status: "active" }),
-      makeStudent({ group_user_id: "gu-2", user_id: "u-2", grade: 11, program_id: 64, status: "active" }),
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: null,
+        program_id: 64,
+        status: "active",
+      }),
+      makeStudent({
+        group_user_id: "gu-2",
+        user_id: "u-2",
+        grade: 11,
+        program_id: 64,
+        status: "active",
+      }),
     ];
 
     setupAdminDefaults();
@@ -955,8 +1039,10 @@ describe("SchoolPage (server component)", () => {
     // Total counts both NVS students; grade pill only appears for grade 11.
     expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("2");
-    expect(screen.getByText("Grade 11")).toBeInTheDocument();
-    expect(screen.queryByText("Grade null")).not.toBeInTheDocument();
+    const statsCard = screen.getByTestId("enrollment-stats-header")
+      .parentElement as HTMLElement;
+    expect(within(statsCard).getByText("Grade 11")).toBeInTheDocument();
+    expect(within(statsCard).queryByText("Grade null")).not.toBeInTheDocument();
   });
 
   // --- StudentTable props ---
@@ -981,7 +1067,7 @@ describe("SchoolPage (server component)", () => {
       (_perm: unknown, feature: string) => {
         if (feature === "students") return featureAccess(true, true);
         return featureAccess(true, true);
-      }
+      },
     );
 
     await renderPage();
@@ -1000,7 +1086,7 @@ describe("SchoolPage (server component)", () => {
   it("passes effective program-context ids as userProgramIds to StudentTable", async () => {
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ program_ids: [1, 2, 64] })
+      makePermission({ program_ids: [1, 2, 64] }),
     );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: true,
@@ -1022,7 +1108,7 @@ describe("SchoolPage (server component)", () => {
     // must reach StudentTable so the seated user can see/edit those students.
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ role: "teacher", program_ids: [] })
+      makePermission({ role: "teacher", program_ids: [] }),
     );
     mockGetProgramContextSync.mockReturnValue({
       hasAccess: true,
@@ -1204,7 +1290,7 @@ describe("SchoolPage (server component)", () => {
   it("sets hasMultipleSchools=true for level 2 user", async () => {
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ level: 2, role: "program_manager", regions: ["West"] })
+      makePermission({ level: 2, role: "program_manager", regions: ["West"] }),
     );
 
     await renderPage();
@@ -1220,7 +1306,7 @@ describe("SchoolPage (server component)", () => {
     // For level 1, single code: false || (true && false) = false
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ level: 1, role: "teacher", school_codes: ["70705"] })
+      makePermission({ level: 1, role: "teacher", school_codes: ["70705"] }),
     );
 
     await renderPage();
@@ -1241,7 +1327,9 @@ describe("SchoolPage (server component)", () => {
     expect(firstCall[0]).toContain("s.udise_code = $1 OR s.code = $1");
     // Visible schools = JNV OR linked to an active centre (centre rollout).
     expect(firstCall[0]).toContain("af_school_category = 'JNV'");
-    expect(firstCall[0]).toContain("LEFT JOIN centres c ON c.school_id = s.id AND c.is_active = true");
+    expect(firstCall[0]).toContain(
+      "LEFT JOIN centres c ON c.school_id = s.id AND c.is_active = true",
+    );
     expect(firstCall[1]).toEqual(["12345678901"]);
   });
 
@@ -1254,7 +1342,7 @@ describe("SchoolPage (server component)", () => {
     // getStudents query contains school id
     const studentQuery = mockQuery.mock.calls.find(
       (call: string[]) =>
-        typeof call[0] === "string" && call[0].includes("group_user gu")
+        typeof call[0] === "string" && call[0].includes("group_user gu"),
     );
     expect(studentQuery).toBeDefined();
     expect(studentQuery![1]).toEqual(["school-42", "2026-2027"]);
@@ -1267,7 +1355,7 @@ describe("SchoolPage (server component)", () => {
 
     const batchQuery = mockQuery.mock.calls.find(
       (call: unknown[]) =>
-        typeof call[0] === "string" && call[0].includes("FROM batch b")
+        typeof call[0] === "string" && call[0].includes("FROM batch b"),
     );
     expect(batchQuery).toBeDefined();
     expect(batchQuery![1]).toEqual([64]); // PROGRAM_IDS.NVS
@@ -1275,15 +1363,205 @@ describe("SchoolPage (server component)", () => {
 
   // --- Mentorship tab content ---
 
-  it("renders mentorship tab with coming soon message", async () => {
-    setupAdminDefaults();
+  it("renders Teacher current active Academic Mentorship Mentees as a flat list", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } }),
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "teacher", email: "teacher@avantifellows.org" }),
+    );
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([
+      {
+        studentPkId: 201,
+        name: "Anaya Student",
+        studentId: "STU002",
+        grade: 10,
+        assignedDate: "2026-07-02",
+      },
+      {
+        studentPkId: 202,
+        name: "Ravi Student",
+        studentId: "STU001",
+        grade: 11,
+        assignedDate: "2026-07-01",
+      },
+    ]);
 
     await renderPage();
 
     expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
+    expect(screen.getByText("Academic Mentorship")).toBeInTheDocument();
+    expect(screen.getByText("Anaya Student")).toBeInTheDocument();
+    expect(screen.getByText("Ravi Student")).toBeInTheDocument();
+    expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
+    expect(mockListAcademicMentorshipTeacherMentees).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      mentorUserId: 101,
+    });
+    expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+  });
+
+  it("renders Admin read-only Academic Mentorship overview with a prefilled Manage mappings link", async () => {
+    setupAdminDefaults({ id: 20, code: "SCH001" });
+    mockListAcademicMentorshipMappings.mockResolvedValue([
+      {
+        mentor: {
+          userId: 101,
+          name: "Anita Mentor",
+          email: "anita@avantifellows.org",
+        },
+        menteeCount: 1,
+        mappings: [
+          {
+            id: 1,
+            mentee: {
+              studentPkId: 201,
+              name: "Meena Student",
+              studentId: "STU001",
+              grade: 11,
+            },
+            assignedDate: "2026-07-01",
+            endedDate: null,
+            status: "active",
+          },
+        ],
+      },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
+    expect(screen.getByText("Meena Student")).toBeInTheDocument();
     expect(
-      screen.getByText("Mentorship data coming soon.")
+      screen.getByRole("link", { name: "Manage mappings" }),
+    ).toHaveAttribute(
+      "href",
+      "/admin/academic-mentorship?school_code=SCH001&academic_year=2026-2027",
+    );
+    expect(mockListAcademicMentorshipMappings).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      includeHistory: false,
+    });
+  });
+
+  it("renders Teacher empty state when no current active Mentees exist", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } }),
+    );
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "teacher", email: "teacher@avantifellows.org" }),
+    );
+    mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+
+    await renderPage();
+
+    expect(
+      screen.getByText("No mentees assigned for this academic year."),
     ).toBeInTheDocument();
+  });
+
+  it("renders Program Manager read-only overview without a Manage mappings link", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "program_manager" }),
+    );
+    mockListAcademicMentorshipMappings.mockResolvedValue([
+      {
+        mentor: { userId: 101, name: "Anita Mentor", email: null },
+        menteeCount: 1,
+        mappings: [
+          {
+            id: 1,
+            mentee: {
+              studentPkId: 201,
+              name: "Meena Student",
+              studentId: "STU001",
+              grade: 11,
+            },
+            assignedDate: "2026-07-01",
+            endedDate: null,
+            status: "active",
+          },
+        ],
+      },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
+    expect(screen.getByText("Meena Student")).toBeInTheDocument();
+    expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Manage mappings link visible for read-only Program Admins", async () => {
+    setupAdminDefaults({ id: 20, code: "SCH001" });
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({ role: "program_admin", read_only: true }),
+    );
+
+    await renderPage();
+
+    expect(
+      screen.getByText(
+        "No active Academic Mentor-Mentee Mappings for this academic year.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Manage mappings" }),
+    ).toHaveAttribute(
+      "href",
+      "/admin/academic-mentorship?school_code=SCH001&academic_year=2026-2027",
+    );
+  });
+
+  it("does not render mapping history on the School page Mentorship tab", async () => {
+    setupAdminDefaults({ id: 20 });
+    mockListAcademicMentorshipMappings.mockResolvedValue([
+      {
+        mentor: { userId: 101, name: "Anita Mentor", email: null },
+        menteeCount: 2,
+        mappings: [
+          {
+            id: 1,
+            mentee: {
+              studentPkId: 201,
+              name: "Meena Student",
+              studentId: "STU001",
+              grade: 11,
+            },
+            assignedDate: "2026-07-01",
+            endedDate: null,
+            status: "active",
+          },
+          {
+            id: 2,
+            mentee: {
+              studentPkId: 202,
+              name: "Historical Student",
+              studentId: "STU002",
+              grade: 12,
+            },
+            assignedDate: "2026-06-01",
+            endedDate: "2026-07-01",
+            status: "historical",
+          },
+        ],
+      },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByText("Meena Student")).toBeInTheDocument();
+    expect(screen.queryByText("Historical Student")).not.toBeInTheDocument();
+    expect(mockListAcademicMentorshipMappings).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+      includeHistory: false,
+    });
   });
 
   // --- level 2 region check with null school region ---
@@ -1292,7 +1570,7 @@ describe("SchoolPage (server component)", () => {
     mockGetServerSession.mockResolvedValue(googleSession());
     mockQuery.mockResolvedValueOnce([makeSchool({ region: null })]);
     mockGetUserPermission.mockResolvedValue(
-      makePermission({ level: 2, role: "program_manager", regions: ["West"] })
+      makePermission({ level: 2, role: "program_manager", regions: ["West"] }),
     );
 
     const jsx = await SchoolPage({
@@ -1344,7 +1622,9 @@ describe("SchoolPage (server component)", () => {
     expect(screen.queryByText("JNV CoE Students")).not.toBeInTheDocument();
     expect(screen.queryByText("JNV Nodal Students")).not.toBeInTheDocument();
     expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add Student" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add Student" }),
+    ).toBeInTheDocument();
 
     expect(screen.getByTestId("student-table")).toBeInTheDocument();
     const table = screen.getByTestId("student-table");

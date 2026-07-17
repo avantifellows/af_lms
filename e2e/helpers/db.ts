@@ -510,53 +510,158 @@ export function buildCompleteSchoolStaffInteractionData(): Record<string, unknow
   return { questions };
 }
 
+async function ensureTeacherCentre(pool: Pool, schoolCode: string): Promise<number> {
+  const result = await pool.query<{ id: number }>(
+    `WITH school_row AS (
+       SELECT id, name, program_ids FROM school WHERE code = $1 LIMIT 1
+     ),
+     existing AS (
+       SELECT c.id
+       FROM centres c
+       JOIN school_row s ON s.id = c.school_id
+       WHERE c.name = CONCAT(s.name, ' E2E Centre')
+       LIMIT 1
+     ),
+     inserted AS (
+       INSERT INTO centres (
+         name, school_id, type_code, category_code, sub_category_code,
+         stream_codes, program_id, is_physical, is_active, inserted_at, updated_at
+       )
+       SELECT
+         CONCAT(name, ' E2E Centre'),
+         id,
+         'coe',
+         'cat_1_coe',
+         NULL,
+         ARRAY['jee']::TEXT[],
+         COALESCE(program_ids[1], 1),
+         true,
+         true,
+         (NOW() AT TIME ZONE 'UTC'),
+         (NOW() AT TIME ZONE 'UTC')
+       FROM school_row
+       WHERE NOT EXISTS (SELECT 1 FROM existing)
+       RETURNING id
+     )
+     SELECT id FROM inserted
+     UNION ALL
+     SELECT id FROM existing
+     LIMIT 1`,
+    [schoolCode]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error(`School not found for code ${schoolCode}`);
+  }
+
+  return Number(result.rows[0].id);
+}
+
+export async function seedVisitTeacherTestTeachers(
+  pool: Pool,
+  schoolCode: string,
+  teachers: { email: string; name: string }[]
+): Promise<{ id: number; name: string }[]> {
+  const centreId = await ensureTeacherCentre(pool, schoolCode);
+  const results: { id: number; name: string }[] = [];
+
+  for (const [index, t] of teachers.entries()) {
+    const [firstName, ...lastNameParts] = t.name.split(" ");
+    const userRows = await pool.query<{ id: number }>(
+      `WITH existing AS (
+         SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+       ),
+       updated AS (
+         UPDATE "user"
+         SET first_name = $2,
+             last_name = $3,
+             role = 'teacher',
+             updated_at = (NOW() AT TIME ZONE 'UTC')
+         WHERE id IN (SELECT id FROM existing)
+         RETURNING id
+       ),
+       inserted AS (
+         INSERT INTO "user" (email, first_name, last_name, role, inserted_at, updated_at)
+         SELECT $1, $2, $3, 'teacher', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+         WHERE NOT EXISTS (SELECT 1 FROM existing)
+         RETURNING id
+       )
+       SELECT id FROM updated
+       UNION ALL
+       SELECT id FROM inserted
+       LIMIT 1`,
+      [t.email, firstName, lastNameParts.join(" ") || null]
+    );
+    const userId = Number(userRows.rows[0].id);
+
+    const permissionRows = await pool.query<{ id: number }>(
+      `INSERT INTO user_permission (
+         email, level, role, school_codes, full_name, read_only, user_id, revoked_at
+       )
+       VALUES ($1, 1, 'teacher', ARRAY[$2::TEXT], $3, false, $4, NULL)
+       ON CONFLICT (email) DO UPDATE SET
+         school_codes = ARRAY[$2::TEXT],
+         full_name = $3,
+         role = 'teacher',
+         level = 1,
+         read_only = false,
+         user_id = $4,
+         revoked_at = NULL
+       RETURNING id`,
+      [t.email, schoolCode, t.name, userId]
+    );
+
+    await pool.query(
+      `WITH updated AS (
+         UPDATE teacher
+         SET is_af_teacher = true,
+             exit_date = NULL,
+             updated_at = (NOW() AT TIME ZONE 'UTC')
+         WHERE user_id = $1
+         RETURNING id
+       )
+       INSERT INTO teacher (
+         user_id, teacher_id, is_af_teacher, inserted_at, updated_at
+       )
+       SELECT $1, $2, true, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM updated)`,
+      [userId, `E2E-${permissionRows.rows[0].id}`]
+    );
+
+    await pool.query(
+      `INSERT INTO centre_positions (
+         centre_id, role, user_id, inserted_at, updated_at
+       )
+       SELECT $1, $2, $3, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (
+         SELECT 1
+         FROM centre_positions
+         WHERE centre_id = $1
+           AND user_id = $3
+           AND deleted_at IS NULL
+       )`,
+      [centreId, index % 2 === 0 ? "physics" : "maths", userId]
+    );
+
+    results.push({ id: Number(permissionRows.rows[0].id), name: t.name });
+  }
+
+  return results;
+}
+
 /**
- * Seed 3 deterministic teacher user_permission rows for a school.
- * Returns the seeded teacher details for use in test assertions.
+ * Seed 3 deterministic Staff Management teachers for a school.
+ * Returns the Visit Teacher permission IDs for use in test assertions.
  */
 export async function seedIndividualTeacherTestTeachers(
   pool: Pool,
   schoolCode: string
 ): Promise<{ id: number; name: string }[]> {
-  const teachers = [
+  return seedVisitTeacherTestTeachers(pool, schoolCode, [
     { email: "e2e-indiv-teacher-1@test.local", name: "Indiv Teacher One" },
     { email: "e2e-indiv-teacher-2@test.local", name: "Indiv Teacher Two" },
     { email: "e2e-indiv-teacher-3@test.local", name: "Indiv Teacher Three" },
-  ];
-
-  const results: { id: number; name: string }[] = [];
-
-  for (const t of teachers) {
-    const rows = await pool.query<{ id: number }>(
-      `INSERT INTO user_permission (email, level, role, school_codes, full_name, read_only)
-       VALUES ($1, 1, 'teacher', ARRAY[$2::TEXT], $3, false)
-       ON CONFLICT (email) DO UPDATE SET
-         school_codes = ARRAY[$2::TEXT],
-         full_name = $3,
-         role = 'teacher',
-         level = 1
-       RETURNING id`,
-      [t.email, schoolCode, t.name]
-    );
-    results.push({ id: Number(rows.rows[0].id), name: t.name });
-  }
-
-  // Clean up any other teacher rows for this school that aren't our seeded teachers
-  // or the AF team test teachers (to keep those tests working)
-  const keepEmails = [
-    ...teachers.map((t) => t.email),
-    "e2e-af-teacher-1@test.local",
-    "e2e-af-teacher-2@test.local",
-  ];
-  await pool.query(
-    `DELETE FROM user_permission
-     WHERE role = 'teacher'
-       AND school_codes @> ARRAY[$1::TEXT]
-       AND email != ALL($2::TEXT[])`,
-    [schoolCode, keepEmails]
-  );
-
-  return results;
+  ]);
 }
 
 /**

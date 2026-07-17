@@ -7,6 +7,7 @@ import { getTodayIST } from "@/lib/curriculum-date-helpers";
 interface LogSessionModalProps {
   chapters: Chapter[];
   progress: Record<number, ChapterProgress>;
+  scopeLabel?: string;
   onClose: () => void;
   onSave: (payload: {
     date: string;
@@ -44,6 +45,7 @@ function parseDurationInput(value: string): number {
 export default function LogSessionModal({
   chapters,
   progress,
+  scopeLabel,
   onClose,
   onSave,
   isSaving = false,
@@ -174,10 +176,15 @@ export default function LogSessionModal({
       <div className="relative min-h-screen flex items-center justify-center p-4">
         <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col">
           {/* Header */}
-          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Log Teaching Session
-            </h2>
+          <div className="px-4 py-3 border-b border-gray-200 flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {isEditMode ? "Edit class log" : "Log a class"}
+              </h2>
+              {scopeLabel && (
+                <p className="mt-0.5 text-sm text-gray-500">{scopeLabel}</p>
+              )}
+            </div>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600"
@@ -242,9 +249,12 @@ export default function LogSessionModal({
 
             {/* Topic Selection */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Topics Covered
+              <label className="block text-sm font-medium text-gray-700">
+                What did you teach?
               </label>
+              <p className="mb-2 mt-0.5 text-xs text-gray-500">
+                Tick the topics you covered in this class.
+              </p>
 
               <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
                 {chapters.map((chapter) => {
@@ -403,7 +413,7 @@ export default function LogSessionModal({
               }
               className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSaving ? "Saving..." : isEditMode ? "Save Changes" : "Save Log"}
+              {isSaving ? "Saving..." : isEditMode ? "Save changes" : "Save class log"}
             </button>
           </div>
         </div>

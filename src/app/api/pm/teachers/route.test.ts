@@ -6,14 +6,17 @@ import { ADMIN_SESSION, NO_SESSION, PASSCODE_SESSION, PM_SESSION } from "@/app/a
 vi.mock("next-auth");
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/db");
+vi.mock("@/lib/visit-teachers");
 
 import { getServerSession } from "next-auth";
 import { query } from "@/lib/db";
+import { getVisitTeachersForSchool } from "@/lib/visit-teachers";
 
 import { GET } from "./route";
 
 const mockGetServerSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
+const mockGetVisitTeachersForSchool = vi.mocked(getVisitTeachersForSchool);
 
 function teachersRequest(schoolCode?: string): NextRequest {
   const url = schoolCode
@@ -102,54 +105,42 @@ describe("GET /api/pm/teachers", () => {
     stubPermission();
     // 2nd query: school region lookup
     mockQuery.mockResolvedValueOnce([{ region: "Jaipur" }] as never);
-    // 3rd query: teachers
-    mockQuery.mockResolvedValueOnce([
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
       { id: 1, email: "teacher1@school.com", full_name: "Alice Teacher" },
-      { id: 2, email: "teacher2@school.com", full_name: null },
-    ] as never);
+      { id: 2, email: "teacher2@school.com", full_name: "teacher2@school.com" },
+    ]);
 
     const response = await GET(teachersRequest("SCH001"));
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.teachers).toEqual([
       { id: 1, email: "teacher1@school.com", full_name: "Alice Teacher" },
-      { id: 2, email: "teacher2@school.com", full_name: null },
+      { id: 2, email: "teacher2@school.com", full_name: "teacher2@school.com" },
     ]);
-
-    // Verify teachers query includes both school_code and region
-    expect(mockQuery).toHaveBeenLastCalledWith(
-      expect.stringContaining("role = 'teacher'"),
-      ["SCH001", "Jaipur"]
-    );
+    expect(mockGetVisitTeachersForSchool).toHaveBeenCalledWith("SCH001");
   });
 
-  it("passes null region when school not found", async () => {
+  it("looks up visit teachers even when a level-3 user's school has no region row", async () => {
     mockGetServerSession.mockResolvedValueOnce(PM_SESSION);
     stubPermission();
     // school region lookup returns empty
     mockQuery.mockResolvedValueOnce([] as never);
-    // teachers query
-    mockQuery.mockResolvedValueOnce([
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
       { id: 1, email: "t@school.com", full_name: "Only Direct" },
-    ] as never);
+    ]);
 
     const response = await GET(teachersRequest("UNKNOWN"));
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.teachers).toHaveLength(1);
-
-    // Region param is null when school not found
-    expect(mockQuery).toHaveBeenLastCalledWith(
-      expect.stringContaining("role = 'teacher'"),
-      ["UNKNOWN", null]
-    );
+    expect(mockGetVisitTeachersForSchool).toHaveBeenCalledWith("UNKNOWN");
   });
 
   it("returns empty array when no teachers found", async () => {
     mockGetServerSession.mockResolvedValueOnce(ADMIN_SESSION);
     stubPermission({ role: "admin" });
     mockQuery.mockResolvedValueOnce([{ region: "Patna" }] as never);
-    mockQuery.mockResolvedValueOnce([] as never);
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([]);
 
     const response = await GET(teachersRequest("EMPTY_SCHOOL"));
     expect(response.status).toBe(200);
@@ -161,13 +152,14 @@ describe("GET /api/pm/teachers", () => {
     mockGetServerSession.mockResolvedValueOnce(ADMIN_SESSION);
     stubPermission({ role: "admin" });
     mockQuery.mockResolvedValueOnce([{ region: "Lucknow" }] as never);
-    mockQuery.mockResolvedValueOnce([
+    mockGetVisitTeachersForSchool.mockResolvedValueOnce([
       { id: 10, email: "t@school.com", full_name: "Bob" },
-    ] as never);
+    ]);
 
     const response = await GET(teachersRequest("SCH002"));
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.teachers).toHaveLength(1);
+    expect(mockGetVisitTeachersForSchool).toHaveBeenCalledWith("SCH002");
   });
 });

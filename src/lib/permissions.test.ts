@@ -95,6 +95,27 @@ describe("getProgramContextSync", () => {
     expect(ctx.isNVSOnly).toBe(false);
   });
 
+  it("treats a Punjab CoE teacher as having CoE/Nodal (not NVS-only)", () => {
+    const ctx = getProgramContextSync(
+      makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_COE] })
+    );
+    expect(ctx.hasCoEOrNodal).toBe(true);
+    expect(ctx.isNVSOnly).toBe(false);
+  });
+
+  it("treats Punjab Nodal and EMRS CoE as CoE/Nodal too", () => {
+    expect(
+      getProgramContextSync(
+        makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_NODAL] })
+      ).hasCoEOrNodal
+    ).toBe(true);
+    expect(
+      getProgramContextSync(
+        makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.EMRS_COE] })
+      ).hasCoEOrNodal
+    ).toBe(true);
+  });
+
   it("returns no access for non-admin with empty program_ids", () => {
     const ctx = getProgramContextSync(
       makePermission({ role: "teacher", program_ids: [] })
@@ -220,12 +241,12 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(false);
     });
 
-    it("gives program_admin view on visits", () => {
+    it("gives program_admin edit on visits", () => {
       const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "visits");
-      expect(result.access).toBe("view");
+      expect(result.access).toBe("edit");
       expect(result.canView).toBe(true);
-      expect(result.canEdit).toBe(false);
+      expect(result.canEdit).toBe(true);
     });
 
     it("gives program_admin view on quiz sessions", () => {
@@ -234,6 +255,14 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("view");
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
+    });
+
+    it("gives NVS-only program_admin edit on academic mentorship", () => {
+      const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.NVS] });
+      const result = getFeatureAccess(perm, "academic_mentorship");
+      expect(result.access).toBe("edit");
+      expect(result.canView).toBe(true);
+      expect(result.canEdit).toBe(true);
     });
 
     it("gives admin edit on visits", () => {
@@ -279,6 +308,15 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("none");
     });
 
+    it("does NOT gate a Punjab CoE teacher out of curriculum or quiz sessions", () => {
+      const perm = makePermission({
+        role: "teacher",
+        program_ids: [PROGRAM_IDS.PUNJAB_COE],
+      });
+      expect(getFeatureAccess(perm, "curriculum").canView).toBe(true);
+      expect(getFeatureAccess(perm, "quiz_sessions").canView).toBe(true);
+    });
+
     it("allows CoE PM to access visits", () => {
       const perm = makePermission({
         role: "program_manager",
@@ -313,6 +351,19 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("view");
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
+    });
+
+    it("downgrades program_admin visit access to view", () => {
+      const perm = makePermission({
+        role: "program_admin",
+        read_only: true,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(perm, "visits")).toEqual({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
     });
 
     it("does not affect view-only features", () => {
