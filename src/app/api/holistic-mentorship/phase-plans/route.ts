@@ -82,7 +82,7 @@ async function actorUserId(email: string): Promise<number | null> {
   return rows[0] ? Number(rows[0].id) : null;
 }
 
-async function createOrAddPhase(value: Record<string, unknown>) {
+async function createOrAddPhase(value: Record<string, unknown>, actorUserId: number) {
   if (value.action === "create") {
     const academicYear = value.academic_year;
     const copyFrom = value.copy_from_academic_year;
@@ -92,6 +92,7 @@ async function createOrAddPhase(value: Record<string, unknown>) {
     return response(await createHolisticPhasePlan({
       academicYear,
       copyFromAcademicYear: copyFrom as string | undefined,
+      actorUserId,
     }));
   }
   if (value.action === "add") {
@@ -99,12 +100,16 @@ async function createOrAddPhase(value: Record<string, unknown>) {
     if (!parsed || typeof value.academic_year !== "string") {
       return holisticApiError("Invalid Phase definition");
     }
-    return response(await addHolisticPhase({ academicYear: value.academic_year, ...parsed }));
+    return response(await addHolisticPhase({
+      academicYear: value.academic_year,
+      actorUserId,
+      ...parsed,
+    }));
   }
   return holisticApiError("Unknown action");
 }
 
-async function updatePhase(value: Record<string, unknown>) {
+async function updatePhase(value: Record<string, unknown>, actorUserId: number) {
   const parsed = definition(value);
   const phaseId = positiveInteger(value.phase_id);
   const expectedRevision = positiveInteger(value.expected_revision);
@@ -114,25 +119,24 @@ async function updatePhase(value: Record<string, unknown>) {
   return response(await updateHolisticPhase({
     phaseId,
     expectedRevision,
+    actorUserId,
     confirmed: value.confirmed,
     ...parsed,
   }));
 }
 
-async function changePhaseState(value: Record<string, unknown>, email: string) {
+async function changePhaseState(value: Record<string, unknown>, actorUserId: number) {
   const phaseId = positiveInteger(value.phase_id);
   const expectedRevision = positiveInteger(value.expected_revision);
   const state = value.state === "open" || value.state === "locked" ? value.state : null;
   if (!phaseId || !expectedRevision || !state || value.confirmed !== true) {
     return holisticApiError("Invalid state change");
   }
-  const actor = await actorUserId(email);
-  if (!actor) return holisticApiError("Actor not found", 422);
   return response(await setHolisticPhaseState({
     phaseId,
     expectedRevision,
     state,
-    actorUserId: actor,
+    actorUserId,
     confirmed: true,
   }));
 }
@@ -151,7 +155,7 @@ function parsePhaseOrder(value: unknown): { id: number; expectedRevision: number
     : phases as { id: number; expectedRevision: number }[];
 }
 
-async function reorderPhases(value: Record<string, unknown>) {
+async function reorderPhases(value: Record<string, unknown>, actorUserId: number) {
   const phases = parsePhaseOrder(value.phases);
   if (typeof value.academic_year !== "string" || !phases) {
     return holisticApiError("Invalid Phase order");
@@ -159,6 +163,7 @@ async function reorderPhases(value: Record<string, unknown>) {
   return response(await reorderHolisticPhases({
     academicYear: value.academic_year,
     phases,
+    actorUserId,
   }));
 }
 
@@ -172,16 +177,22 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const parsed = await configurationAction(request);
-  return parsed.ok ? createOrAddPhase(parsed.value) : parsed.response;
+  if (!parsed.ok) return parsed.response;
+  const actor = await actorUserId(parsed.access.email);
+  return actor
+    ? createOrAddPhase(parsed.value, actor)
+    : holisticApiError("Actor not found", 422);
 }
 
 export async function PATCH(request: NextRequest) {
   const parsed = await configurationAction(request);
   if (!parsed.ok) return parsed.response;
   const { access, value } = parsed;
-  if (value.action === "update") return updatePhase(value);
-  if (value.action === "state") return changePhaseState(value, access.email);
-  if (value.action === "reorder") return reorderPhases(value);
+  const actor = await actorUserId(access.email);
+  if (!actor) return holisticApiError("Actor not found", 422);
+  if (value.action === "update") return updatePhase(value, actor);
+  if (value.action === "state") return changePhaseState(value, actor);
+  if (value.action === "reorder") return reorderPhases(value, actor);
   return holisticApiError("Unknown action");
 }
 
@@ -192,5 +203,7 @@ export async function DELETE(request: NextRequest) {
   const phaseId = value && positiveInteger(value.phase_id);
   const expectedRevision = value && positiveInteger(value.expected_revision);
   if (!phaseId || !expectedRevision) return holisticApiError("Invalid Phase");
-  return response(await deleteHolisticPhase({ phaseId, expectedRevision }));
+  const actor = await actorUserId(access.email);
+  if (!actor) return holisticApiError("Actor not found", 422);
+  return response(await deleteHolisticPhase({ phaseId, expectedRevision, actorUserId: actor }));
 }

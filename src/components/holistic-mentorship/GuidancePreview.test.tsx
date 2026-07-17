@@ -4,12 +4,43 @@ import { describe, expect, it } from "vitest";
 import GuidancePreview from "./GuidancePreview";
 
 describe("GuidancePreview", () => {
-  it("renders safe Markdown links without rendering raw HTML or unsafe links", () => {
-    render(<GuidancePreview markdown={"## Prepare\n[Guide](https://example.org)\n<script>alert(1)</script>\n[Bad](javascript:alert(1))"} />);
+  it("renders the supported Markdown structure", () => {
+    render(<GuidancePreview markdown={`# Prepare
+
+Start with **trust** and *listen* carefully.
+
+- Ask about home
+- Ask about school
+
+1. Listen
+2. Plan
+
+> Let the student lead.
+
+---
+
+[Open guide](https://example.org/guide)`} />);
 
     expect(screen.getByRole("heading", { name: "Prepare" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Guide" })).toHaveAttribute("href", "https://example.org");
-    expect(screen.queryByRole("link", { name: "Bad" })).not.toBeInTheDocument();
+    expect(screen.getByText("trust").tagName).toBe("STRONG");
+    expect(screen.getByText("listen", { exact: true }).tagName).toBe("EM");
+    expect(screen.getAllByRole("list")).toHaveLength(2);
+    expect(document.querySelector("blockquote")).toHaveTextContent("Let the student lead.");
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open guide" })).toHaveAttribute("href", "https://example.org/guide");
+  });
+
+  it("never renders raw HTML, images, or unsafe links", () => {
+    render(<GuidancePreview markdown={`<script>alert(1)</script>
+
+![Profile](https://example.org/profile.png)
+
+[Bad](javascript:alert(1)) [Email](mailto:test@example.org) [Relative](/private)`} />);
+
     expect(document.querySelector("script")).toBeNull();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Bad" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Email" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Relative" })).not.toBeInTheDocument();
   });
 });

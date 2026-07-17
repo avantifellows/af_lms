@@ -57,6 +57,7 @@ export type PhasePlanResult =
 type PhaseDefinition = {
   phaseId: number;
   expectedRevision: number;
+  actorUserId: number;
   grade: 11 | 12;
   title: string;
   guidanceMarkdown: string;
@@ -66,6 +67,8 @@ type PhaseDefinition = {
 
 type MutablePhaseRow = {
   id: number | string;
+  phase_plan_id: number | string;
+  position: number;
   revision: number;
   state: "locked" | "open";
   guidance_markdown: string;
@@ -78,7 +81,24 @@ type MutablePhaseRow = {
 type ReorderPhaseRow = Pick<
   PhaseRow,
   "id" | "position" | "revision" | "state" | "frozen_at" | "ever_opened" | "used"
->;
+> & { phase_plan_id: number | string };
+
+type PhaseMutationAction = "created" | "definition_updated" | "reordered" | "deleted";
+
+async function recordPhaseMutation(
+  client: PoolClient,
+  phasePlanId: number,
+  phaseId: number,
+  action: PhaseMutationAction,
+  actorUserId: number
+) {
+  await client.query(
+    `INSERT INTO holistic_mentorship_phase_mutation_audits
+       (phase_plan_id, phase_id, action, actor_user_id, occurred_at, inserted_at, updated_at)
+     VALUES ($1, $2, $3, $4, NOW(), NOW(), NOW())`,
+    [phasePlanId, phaseId, action, actorUserId]
+  );
+}
 
 export function validateAcademicYear(value: string): boolean {
   const match = /^(\d{4})-(\d{4})$/.exec(value);
@@ -103,7 +123,9 @@ function validateHolisticGuidance(markdown: string): string | null {
   return null;
 }
 
-function validateDefinition(input: Omit<PhaseDefinition, "phaseId" | "expectedRevision" | "confirmed">) {
+function validateDefinition(
+  input: Omit<PhaseDefinition, "phaseId" | "expectedRevision" | "actorUserId" | "confirmed">
+) {
   if (![11, 12].includes(input.grade)) return "Grade must be 11 or 12";
   if (!input.title.trim()) return "Title is required";
   if (input.title.trim().length > 120) return "Title must be 120 characters or fewer";
@@ -115,7 +137,8 @@ function validateDefinition(input: Omit<PhaseDefinition, "phaseId" | "expectedRe
 
 async function getMutablePhase(client: PoolClient, phaseId: number): Promise<MutablePhaseRow | null> {
   const result = await client.query<MutablePhaseRow>(
-    `SELECT p.id, p.revision, p.state, p.guidance_markdown, plan.academic_year, p.frozen_at,
+    `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.guidance_markdown,
+            plan.academic_year, p.frozen_at,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -211,22 +234,26 @@ async function updatePhaseTransaction(
   const phase = checked.phase;
   const invalidChange = validateDefinitionChange(phase, input);
   if (invalidChange) return invalidChange;
-  if (!phase.ever_opened) {
-    const ownershipError = await validateQuestionOwnership(client, input.phaseId, input.questions);
-    if (ownershipError) return ownershipError;
-  }
+  const ownershipError = await validateQuestionOwnership(client, input.phaseId, input.questions);
+  if (ownershipError) return ownershipError;
   const updated = await client.query<{ revision: number }>(
     `UPDATE holistic_mentorship_phases
-     SET grade_id = CASE WHEN $6 THEN grade_id ELSE (SELECT id FROM grade WHERE number = $2) END,
-         title = CASE WHEN $6 THEN title ELSE $3 END,
+     SET grade_id = (SELECT id FROM grade WHERE number = $2),
+         title = $3,
          guidance_markdown = $4, revision = revision + 1, updated_at = NOW()
      WHERE id = $1 AND revision = $5
      RETURNING revision`,
-    [input.phaseId, input.grade, input.title.trim(), input.guidanceMarkdown,
-      input.expectedRevision, phase.ever_opened]
+    [input.phaseId, input.grade, input.title.trim(), input.guidanceMarkdown, input.expectedRevision]
   );
   if (!updated.rows[0]) return { ok: false, status: 409, error: "Phase changed" };
-  if (!phase.ever_opened) await replaceQuestions(client, input);
+  await replaceQuestions(client, input);
+  await recordPhaseMutation(
+    client,
+    Number(phase.phase_plan_id),
+    input.phaseId,
+    "definition_updated",
+    input.actorUserId
+  );
   return { ok: true, id: input.phaseId, revision: updated.rows[0].revision };
 }
 
@@ -297,6 +324,7 @@ export async function getHolisticPhasePlan(
 export async function createHolisticPhasePlan(params: {
   academicYear: string;
   copyFromAcademicYear?: string;
+  actorUserId: number;
 }): Promise<PhasePlanResult> {
   if (params.academicYear !== CURRENT_ACADEMIC_YEAR || !validateAcademicYear(params.academicYear)) {
     return { ok: false, status: 422, error: "Only the current Academic Year can be configured" };
@@ -351,6 +379,13 @@ export async function createHolisticPhasePlan(params: {
            WHERE phase_id = $2 ORDER BY position`,
           [Number(phase.new_id), Number(phase.old_id)]
         );
+        await recordPhaseMutation(
+          client,
+          planId,
+          Number(phase.new_id),
+          "created",
+          params.actorUserId
+        );
       }
     }
     return { ok: true, id: planId };
@@ -359,6 +394,7 @@ export async function createHolisticPhasePlan(params: {
 
 export async function addHolisticPhase(params: {
   academicYear: string;
+  actorUserId: number;
   grade: 11 | 12;
   title: string;
   guidanceMarkdown: string;
@@ -370,7 +406,7 @@ export async function addHolisticPhase(params: {
     return { ok: false, status: 422, error: "Prior-year Plans are read-only" };
   }
   return withTransaction(async (client) => {
-    const inserted = await client.query<{ id: number | string }>(
+    const inserted = await client.query<{ id: number | string; phase_plan_id: number | string }>(
       `INSERT INTO holistic_mentorship_phases
          (phase_plan_id, grade_id, title, position, state, guidance_markdown, revision, inserted_at, updated_at)
        SELECT plan.id, grade.id, $3,
@@ -379,7 +415,7 @@ export async function addHolisticPhase(params: {
        FROM holistic_mentorship_phase_plans plan
        JOIN grade ON grade.number = $5
        WHERE plan.program_id = $1 AND plan.academic_year = $2
-       RETURNING id`,
+       RETURNING id, phase_plan_id`,
       [PROGRAM_IDS.COE, params.academicYear, params.title.trim(), params.guidanceMarkdown, params.grade]
     );
     if (!inserted.rows[0]) return { ok: false, status: 404, error: "Plan not found" };
@@ -392,6 +428,13 @@ export async function addHolisticPhase(params: {
         [phaseId, question.text.trim(), index + 1]
       );
     }
+    await recordPhaseMutation(
+      client,
+      Number(inserted.rows[0].phase_plan_id),
+      phaseId,
+      "created",
+      params.actorUserId
+    );
     return { ok: true, id: phaseId, revision: 1 };
   });
 }
@@ -496,6 +539,7 @@ export async function setHolisticPhaseState(input: {
 export async function deleteHolisticPhase(input: {
   phaseId: number;
   expectedRevision: number;
+  actorUserId: number;
 }): Promise<PhasePlanResult> {
   return withTransaction(async (client) => {
     const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
@@ -504,8 +548,52 @@ export async function deleteHolisticPhase(input: {
     if (phase.state !== "locked" || phase.ever_opened || phase.used || phase.frozen_at) {
       return { ok: false, status: 422, error: "Only never-opened, unused Locked Phases can be deleted" };
     }
+    const later = await client.query<ReorderPhaseRow>(
+      `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
+              EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
+                      WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
+              EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
+                      WHERE n.phase_id = p.id) AS used
+       FROM holistic_mentorship_phases p
+       WHERE p.phase_plan_id = $1 AND p.position > $2
+       ORDER BY p.position FOR UPDATE`,
+      [Number(phase.phase_plan_id), phase.position]
+    );
+    if (later.rows.some(immutablePhase)) {
+      return { ok: false, status: 422, error: "Deleting this Phase would move an opened or used Phase" };
+    }
     await client.query(`DELETE FROM holistic_mentorship_phase_questions WHERE phase_id = $1`, [input.phaseId]);
+    await recordPhaseMutation(
+      client,
+      Number(phase.phase_plan_id),
+      input.phaseId,
+      "deleted",
+      input.actorUserId
+    );
     await client.query(`DELETE FROM holistic_mentorship_phases WHERE id = $1 AND revision = $2`, [input.phaseId, input.expectedRevision]);
+    if (later.rows.length) {
+      const laterIds = later.rows.map((row) => Number(row.id));
+      await client.query(
+        `UPDATE holistic_mentorship_phases SET position = position + 10000
+         WHERE id = ANY($1::bigint[])`,
+        [laterIds]
+      );
+      await client.query(
+        `UPDATE holistic_mentorship_phases
+         SET position = position - 10001, revision = revision + 1, updated_at = NOW()
+         WHERE id = ANY($1::bigint[])`,
+        [laterIds]
+      );
+      for (const phaseRow of later.rows) {
+        await recordPhaseMutation(
+          client,
+          Number(phaseRow.phase_plan_id),
+          Number(phaseRow.id),
+          "reordered",
+          input.actorUserId
+        );
+      }
+    }
     return { ok: true, id: input.phaseId };
   });
 }
@@ -515,7 +603,7 @@ async function loadReorderPhases(
   academicYear: string
 ): Promise<ReorderPhaseRow[]> {
   const result = await client.query<ReorderPhaseRow>(
-    `SELECT p.id, p.position, p.revision, p.state, p.frozen_at,
+    `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
             EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions t
                     WHERE t.phase_id = p.id AND t.to_state = 'open') AS ever_opened,
             EXISTS (SELECT 1 FROM holistic_mentorship_post_session_notes n
@@ -587,8 +675,10 @@ async function persistReorder(
   client: PoolClient,
   rows: ReorderPhaseRow[],
   requestedPhases: { id: number; expectedRevision: number }[],
-  changedIds: number[]
+  changedIds: number[],
+  actorUserId: number
 ) {
+  const byId = new Map(rows.map((row) => [Number(row.id), row]));
   await client.query(
     `UPDATE holistic_mentorship_phases SET position = position + 10000 WHERE id = ANY($1::bigint[])`,
     [changedIds]
@@ -602,25 +692,37 @@ async function persistReorder(
        WHERE id = $1 AND revision = $3`,
       [phase.id, rows[index].position, phase.expectedRevision]
     );
+    await recordPhaseMutation(
+      client,
+      Number(byId.get(phase.id)!.phase_plan_id),
+      phase.id,
+      "reordered",
+      actorUserId
+    );
   }
 }
 
 async function reorderPhaseTransaction(
   client: PoolClient,
-  input: { academicYear: string; phases: { id: number; expectedRevision: number }[] }
+  input: {
+    academicYear: string;
+    phases: { id: number; expectedRevision: number }[];
+    actorUserId: number;
+  }
 ): Promise<PhasePlanResult> {
   const rows = await loadReorderPhases(client, input.academicYear);
   const validationError = validateReorder(rows, input.phases);
   if (validationError) return validationError;
   const changedIds = reorderedPhaseIds(rows, input.phases);
   if (!changedIds.length) return { ok: true };
-  await persistReorder(client, rows, input.phases, changedIds);
+  await persistReorder(client, rows, input.phases, changedIds, input.actorUserId);
   return { ok: true };
 }
 
 export async function reorderHolisticPhases(input: {
   academicYear: string;
   phases: { id: number; expectedRevision: number }[];
+  actorUserId: number;
 }): Promise<PhasePlanResult> {
   if (input.academicYear !== CURRENT_ACADEMIC_YEAR || input.phases.length < 2) {
     return { ok: false, status: 422, error: "Invalid Phase order" };

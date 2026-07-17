@@ -62,7 +62,7 @@ async function persistDraft(
 
 function confirmPreviouslyOpenedPhase(phase: Phase | null | undefined) {
   if (!phase?.everOpened) return true;
-  return window.confirm("Save confirmed Guidance changes to this previously opened Phase?");
+  return window.confirm("Save changes to this previously opened Phase?");
 }
 
 function selectedDraftPhase(plan: Plan | null | undefined, draft: Draft | null) {
@@ -200,13 +200,21 @@ function PlanToolbar({ academicYear, editable, busy, onAcademicYearChange, onAdd
   onAdd: () => void;
 }) {
   return <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
-    <label className="w-48 text-sm font-medium text-text-primary">
-      Academic Year
-      <Select value={academicYear} onChange={(event) => onAcademicYearChange(event.target.value)} className="mt-1">
-        <option value={CURRENT_ACADEMIC_YEAR}>{CURRENT_ACADEMIC_YEAR}</option>
-        <option value={PRIOR_ACADEMIC_YEAR}>{PRIOR_ACADEMIC_YEAR}</option>
-      </Select>
-    </label>
+    <div className="flex flex-wrap gap-3">
+      <label className="w-48 text-sm font-medium text-text-primary">
+        Program
+        <Select value="1" disabled className="mt-1">
+          <option value="1">Program 1</option>
+        </Select>
+      </label>
+      <label className="w-48 text-sm font-medium text-text-primary">
+        Academic Year
+        <Select value={academicYear} onChange={(event) => onAcademicYearChange(event.target.value)} className="mt-1">
+          <option value={CURRENT_ACADEMIC_YEAR}>{CURRENT_ACADEMIC_YEAR}</option>
+          <option value={PRIOR_ACADEMIC_YEAR}>{PRIOR_ACADEMIC_YEAR}</option>
+        </Select>
+      </label>
+    </div>
     {editable && <Button type="button" onClick={onAdd} disabled={busy}>
       <Plus className="h-4 w-4" aria-hidden="true" /> Add Phase
     </Button>}
@@ -345,6 +353,12 @@ function removeQuestion(draft: Draft, index: number): Draft {
   return { ...draft, questions: draft.questions.filter((_, questionIndex) => questionIndex !== index) };
 }
 
+function moveQuestion(draft: Draft, index: number, offset: -1 | 1): Draft {
+  const questions = [...draft.questions];
+  [questions[index], questions[index + offset]] = [questions[index + offset], questions[index]];
+  return { ...draft, questions };
+}
+
 function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onChange, onChangeState, onSave }: {
   draft: Draft;
   plan: Plan;
@@ -355,7 +369,7 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
   onChangeState: (phase: Phase) => Promise<void>;
   onSave: () => Promise<void>;
 }) {
-  const identityReadOnly = !plan.editable || !!draft.everOpened;
+  const identityReadOnly = definitionReadOnly;
   return <div className="space-y-4">
     <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
       <label className="text-sm font-medium text-text-primary">Grade
@@ -376,6 +390,14 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
       {draft.questions.map((question, index) => <div key={question.id ?? index} className="flex gap-2">
         <Input aria-label={`Question ${index + 1}`} value={question.text}
           onChange={(event) => onChange(updateQuestion(draft, index, event.target.value))} />
+        <Button type="button" variant="icon" title="Move Question up" aria-label={`Move Question ${index + 1} up`}
+          disabled={index === 0} onClick={() => onChange(moveQuestion(draft, index, -1))}>
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="icon" title="Move Question down" aria-label={`Move Question ${index + 1} down`}
+          disabled={index === draft.questions.length - 1} onClick={() => onChange(moveQuestion(draft, index, 1))}>
+          <ArrowDown className="h-4 w-4" />
+        </Button>
         <Button type="button" variant="icon" title="Remove Question" aria-label={`Remove Question ${index + 1}`}
           disabled={draft.questions.length === 1} onClick={() => onChange(removeQuestion(draft, index))}>
           <Trash2 className="h-4 w-4" />

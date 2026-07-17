@@ -13,7 +13,47 @@ describe("PhasePlanSetup", () => {
     render(<PhasePlanSetup />);
 
     expect(await screen.findByRole("button", { name: "Create blank Plan" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Program")).toHaveValue("1");
+    expect(screen.getByLabelText("Program")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Copy 2025-2026 Plan" })).toBeInTheDocument();
+  });
+
+  it("edits and reorders questions on an opened unused Phase after confirmation", async () => {
+    const user = userEvent.setup();
+    const phase = {
+      id: 21, number: 1, grade: 11, title: "Opened title", state: "open",
+      guidanceMarkdown: "Opened Guidance", revision: 2, frozen: false,
+      everOpened: true, used: false, active: true,
+      questions: [{ id: 41, text: "First Question" }, { id: 42, text: "Second Question" }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: {
+        id: 7, academicYear: "2026-2027", editable: true, phases: [phase],
+      } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: {
+        id: 7, academicYear: "2026-2027", editable: true, phases: [phase],
+      } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<PhasePlanSetup />);
+
+    await user.click(await screen.findByRole("button", { name: /Opened title/ }));
+    expect(screen.getByLabelText("Grade")).toBeEnabled();
+    expect(screen.getByLabelText("Title")).toBeEnabled();
+    expect(screen.getByLabelText("Question 1")).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Move Question 2 up" }));
+    expect(screen.getByLabelText("Question 1")).toHaveValue("Second Question");
+    expect(screen.getByRole("button", { name: "Move Question 1 up" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Save Phase" }));
+    expect(confirm).toHaveBeenCalledWith("Save changes to this previously opened Phase?");
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({
+      action: "update",
+      confirmed: true,
+      questions: [{ id: 42, text: "Second Question" }, { id: 41, text: "First Question" }],
+    });
   });
 
   it("preserves unsaved text when an optimistic save conflicts", async () => {
