@@ -40,6 +40,15 @@ pr_count=$(jq 'length' <<<"$prs")
 
 if [ "$pr_count" -gt 0 ]; then
   echo "Found $pr_count merged PRs since $SINCE_DATE" >&2
+
+  # Deterministic changelog appended verbatim after the LLM's narrative notes.
+  {
+    echo "## 📋 Changelog"
+    echo
+    jq -r 'sort_by(.mergedAt) | reverse | .[] |
+      "- [#\(.number)](\(.url)) \(.title) — @\(.author.login)"' <<<"$prs"
+  } > "$OUT_DIR/changelog.md"
+
   {
     echo "# Work merged into $REPO ($DEFAULT_BRANCH) since $SINCE_DATE"
     echo
@@ -103,6 +112,11 @@ if [ "$commit_count" -eq 0 ]; then
 fi
 
 echo "Found $commit_count commits since $SINCE_DATE" >&2
+{
+  echo "## 📋 Changelog"
+  echo
+  jq -r '.[] | "- [`\(.sha[0:7])`](\(.html_url)) \(.commit.message | split("\n")[0]) — @\(.author.login // .commit.author.name)"' <<<"$commits"
+} > "$OUT_DIR/changelog.md"
 {
   echo "# Work committed to $REPO ($DEFAULT_BRANCH) since $SINCE_DATE"
   echo

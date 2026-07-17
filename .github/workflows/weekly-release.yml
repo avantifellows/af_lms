@@ -82,6 +82,8 @@ jobs:
              --system-prompt "$(cat release-notes/system-prompt.md)" \
              "$(cat out/context.md)" > out/notes.md
           test -s out/notes.md
+          printf '\n' >> out/notes.md
+          cat out/changelog.md >> out/notes.md
           echo "--- Generated notes ---"
           cat out/notes.md
 
