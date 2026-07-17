@@ -13,6 +13,7 @@ export const HOLISTIC_FIXTURE_MANIFEST = {
     "admin",
     "program_manager",
     "program_admin",
+    "read_only",
     "passcode",
   ],
   states: ["locked", "open", "active", "skipped", "pending", "completed"],
@@ -156,7 +157,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
     );
   }
 
-  const actor = async (email: string, role: string, level: number) => {
+  const actor = async (email: string, role: string, level: number, readOnly = false) => {
     const result = await client.query<{ id: number | string }>(
       `/* fixture_actor */
        WITH existing AS (
@@ -170,26 +171,31 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
        ), permission AS (
          INSERT INTO user_permission
            (email, level, role, program_ids, school_codes, full_name, read_only, user_id, revoked_at)
-         SELECT $1, $4, $3, ARRAY[$5::int], ARRAY[$6::text], CONCAT('Synthetic ', $2), false, actor.id, NULL
+         SELECT $1, $4, $3, ARRAY[$5::int], ARRAY[$6::text], CONCAT('Synthetic ', $2), $7, actor.id, NULL
          FROM actor
          ON CONFLICT (email) DO UPDATE SET level = EXCLUDED.level, role = EXCLUDED.role,
            program_ids = EXCLUDED.program_ids, school_codes = EXCLUDED.school_codes,
-           read_only = false, user_id = EXCLUDED.user_id, revoked_at = NULL
+           read_only = EXCLUDED.read_only, user_id = EXCLUDED.user_id, revoked_at = NULL
        )
        SELECT id FROM actor`,
-      [email, role.replaceAll("_", " "), role, level, PROGRAM_IDS.COE, scope.school_code]
+      [email, role.replaceAll("_", " "), role, level, PROGRAM_IDS.COE, scope.school_code, readOnly]
     );
     return Number(result.rows[0].id);
   };
 
   const mentorUserId = await actor("e2e-holistic-teacher@test.local", "teacher", 1);
   const formerMentorUserId = await actor("e2e-former-holistic-mentor@test.local", "teacher", 1);
+  const readOnlyMentorUserId = await actor("e2e-holistic-read-only@test.local", "teacher", 1, true);
   const holisticAdminUserId = await actor("e2e-holistic-admin@test.local", "holistic_mentorship_admin", 3);
   await actor("e2e-holistic-global-admin@test.local", "admin", 3);
   await actor("e2e-holistic-pm@test.local", "program_manager", 2);
   await actor("e2e-holistic-program-admin@test.local", "program_admin", 2);
 
-  for (const [userId, suffix] of [[mentorUserId, "ACTIVE"], [formerMentorUserId, "FORMER"]] as const) {
+  for (const [userId, suffix] of [
+    [mentorUserId, "ACTIVE"],
+    [formerMentorUserId, "FORMER"],
+    [readOnlyMentorUserId, "READ-ONLY"],
+  ] as const) {
     await client.query(
       `WITH updated_teacher AS (
          UPDATE teacher SET is_af_teacher = true, exit_date = NULL, updated_at = now()
@@ -200,10 +206,14 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
          RETURNING user_id
        ), teacher_row AS (
          SELECT user_id FROM updated_teacher UNION ALL SELECT user_id FROM inserted_teacher LIMIT 1
+       ), updated_seat AS (
+         UPDATE centre_positions SET role = 'subject_tbd', updated_at = now()
+         WHERE centre_id = $3 AND user_id = $1 AND deleted_at IS NULL
+         RETURNING id
        )
        INSERT INTO centre_positions (centre_id, role, user_id, inserted_at, updated_at)
-       SELECT $3, 'mentorship', user_id, now(), now() FROM teacher_row
-       WHERE NOT EXISTS (SELECT 1 FROM centre_positions WHERE centre_id = $3 AND user_id = $1 AND deleted_at IS NULL)`,
+       SELECT $3, 'subject_tbd', user_id, now(), now() FROM teacher_row
+       WHERE NOT EXISTS (SELECT 1 FROM updated_seat)`,
       [userId, `E2E-HM-${suffix}`, scope.centre_id]
     );
   }
@@ -241,10 +251,15 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
   const phaseByPosition = new Map(phaseResult.rows.map(({ id, position }) => [Number(position), Number(id)]));
   await client.query(
     `INSERT INTO holistic_mentorship_phase_questions (phase_id, text, position, inserted_at, updated_at)
-     SELECT phase.id, 'What support will help next?', 1, now(), now()
+     SELECT phase.id, 'Synthetic: What support will help next?', 1, now(), now()
      FROM holistic_mentorship_phases phase
      WHERE phase.phase_plan_id = $1 AND phase.position BETWEEN 1 AND 6
-     ON CONFLICT (phase_id, position) DO NOTHING`,
+     ON CONFLICT (phase_id, position) DO UPDATE SET text = EXCLUDED.text, updated_at = now()
+     WHERE EXISTS (
+       SELECT 1 FROM holistic_mentorship_phases fixture_phase
+       WHERE fixture_phase.id = holistic_mentorship_phase_questions.phase_id
+         AND fixture_phase.title LIKE 'Synthetic %'
+     )`,
     [planId]
   );
   const questionResult = await client.query<{ id: number | string; phase_id: number | string }>(

@@ -4,14 +4,16 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getSchoolByPasscode } from "./permissions";
 
-// Dev login personas — each maps to a real email in user_permission.
+// Dev login personas — each maps to a local fixture email in user_permission.
 // Only used when NODE_ENV !== "production".
 export const DEV_LOGIN_PERSONAS = {
-  admin: { email: "pritam@avantifellows.org", name: "Dev Admin" },
-  program_manager: { email: "deepansh.mathur96@gmail.com", name: "Dev PM" },
-  teacher: { email: "sanghamitrapatil06@gmail.com", name: "Dev Teacher" },
-  holistic_admin: { email: "poojita@avantifellows.org", name: "Dev Holistic Admin" },
-  read_only: { email: "lokesh@avantifellows.org", name: "Dev Read-Only" },
+  admin: { email: "e2e-holistic-global-admin@test.local", name: "Dev Admin" },
+  program_manager: { email: "e2e-holistic-pm@test.local", name: "Dev PM" },
+  program_admin: { email: "e2e-holistic-program-admin@test.local", name: "Dev Program Admin" },
+  teacher: { email: "e2e-holistic-teacher@test.local", name: "Dev Teacher" },
+  former_mentor: { email: "e2e-former-holistic-mentor@test.local", name: "Dev Former Mentor" },
+  holistic_admin: { email: "e2e-holistic-admin@test.local", name: "Dev Holistic Admin" },
+  read_only: { email: "e2e-holistic-read-only@test.local", name: "Dev Read-Only" },
 } as const;
 
 export type DevPersonaKey = keyof typeof DEV_LOGIN_PERSONAS;
