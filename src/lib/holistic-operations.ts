@@ -212,6 +212,9 @@ export async function runHolisticMappingRollover(params: {
   if (fromStart === null || toStart !== fromStart + 1) {
     throw new Error("Rollover target must be the next Academic Year");
   }
+  if (!Number.isSafeInteger(params.actorUserId) || params.actorUserId < 1) {
+    throw new Error("Rollover requires a valid actor User ID");
+  }
   const mode = params.mode ?? "dry-run";
   if (mode === "apply") {
     return {

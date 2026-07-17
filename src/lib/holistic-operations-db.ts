@@ -151,27 +151,48 @@ function createHolisticRolloverDb(database: Database): HolisticRolloverDb {
       );
     },
     async apply(fromAcademicYear, toAcademicYear, actorUserId) {
-      return withTransaction(async (client) => {
-        await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-        const candidates = await loadRolloverCandidates(
-          async (sql, params) => (await client.query<RolloverRow>(sql, params)).rows,
-          fromAcademicYear,
-          toAcademicYear
-        );
-        const counts = rolloverCounts(candidates);
-        for (const candidate of candidates.filter(({ eligible, alreadyMapped }) => eligible && !alreadyMapped)) {
-          await client.query(
-            `INSERT INTO holistic_mentorship_mentor_mentee_mappings
-             (student_id, mentor_user_id, school_id, program_id, academic_year, started_at,
-              assigned_by_user_id, assignment_source, inserted_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, now(), $6, 'academic_year_rollover', now(), now())
-           ON CONFLICT (student_id, academic_year) WHERE ended_at IS NULL DO NOTHING`,
-            [candidate.studentId, candidate.mentorUserId, candidate.schoolId, PROGRAM_IDS.COE,
-              toAcademicYear, actorUserId]
-          );
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await withTransaction(async (client) => {
+            await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+            await client.query(
+              "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+              [`holistic_mentorship_rollover:${fromAcademicYear}:${toAcademicYear}`]
+            );
+            const actor = await client.query(
+              `SELECT id FROM "user" WHERE id = $1 FOR SHARE`,
+              [actorUserId]
+            );
+            if (!actor.rows[0]) throw new Error("Rollover actor does not exist");
+            const candidates = await loadRolloverCandidates(
+              async (sql, params) => (await client.query<RolloverRow>(sql, params)).rows,
+              fromAcademicYear,
+              toAcademicYear
+            );
+            const counts = rolloverCounts(candidates);
+            for (const candidate of candidates.filter(({ eligible, alreadyMapped }) =>
+              eligible && !alreadyMapped)) {
+              const inserted = await client.query<{ id: number | string }>(
+                `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+                 (student_id, mentor_user_id, school_id, program_id, academic_year, started_at,
+                  assigned_by_user_id, assignment_source, inserted_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, now(), $6, 'academic_year_rollover', now(), now())
+               ON CONFLICT (student_id, academic_year) WHERE ended_at IS NULL DO NOTHING
+               RETURNING id`,
+                [candidate.studentId, candidate.mentorUserId, candidate.schoolId, PROGRAM_IDS.COE,
+                  toAcademicYear, actorUserId]
+              );
+              if (!inserted.rows[0]) {
+                counts.carried -= 1;
+                counts.skipped += 1;
+              }
+            }
+            return counts;
+          });
+        } catch (error) {
+          if ((error as { code?: unknown } | null)?.code !== "40001" || attempt === 2) throw error;
         }
-        return counts;
-      });
+      }
     },
   };
 }
@@ -195,17 +216,14 @@ async function loadRolloverCandidates(
                 SELECT 1
                 FROM student
                 JOIN "user" student_user ON student_user.id = student.user_id
-                JOIN group_user school_membership ON school_membership.user_id = student_user.id
-                JOIN "group" school_group ON school_group.id = school_membership.group_id
-                  AND school_group.type = 'school' AND school_group.child_id = mapping.school_id
-                JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
-                  AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = $2
-                  AND grade_enrollment.is_current IS TRUE
-                JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
-                JOIN enrollment_record batch_enrollment ON batch_enrollment.user_id = student_user.id
-                  AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
-                JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
-                JOIN batch ON batch.id = batch_group.child_id AND batch.program_id = $3
+                JOIN centre_students roster_student ON roster_student.user_id = student_user.id
+                  AND roster_student.academic_year = $2
+                  AND roster_student.program_id = $3
+                  AND roster_student.grade IN (11, 12)
+                JOIN centres roster_centre ON roster_centre.id = roster_student.centre_id
+                  AND roster_centre.is_active IS TRUE
+                  AND roster_centre.school_id = mapping.school_id
+                  AND roster_centre.program_id = $3
                 JOIN teacher mentor_teacher ON mentor_teacher.user_id = mapping.mentor_user_id
                   AND mentor_teacher.is_af_teacher IS TRUE AND mentor_teacher.exit_date IS NULL
                 JOIN centre_positions seat ON seat.user_id = mapping.mentor_user_id
@@ -218,9 +236,10 @@ async function loadRolloverCandidates(
               ) AS eligible,
               EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings next_mapping
                       WHERE next_mapping.student_id = mapping.student_id
-                        AND next_mapping.academic_year = $2 AND next_mapping.ended_at IS NULL) AS already_mapped
+                        AND next_mapping.academic_year = $2) AS already_mapped
        FROM holistic_mentorship_mentor_mentee_mappings mapping
-       WHERE mapping.academic_year = $1 AND mapping.ended_at IS NULL
+       WHERE mapping.academic_year = $1 AND mapping.program_id = $3
+         AND mapping.ended_at IS NULL
        ORDER BY mapping.student_id`,
     [fromAcademicYear, toAcademicYear, PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
   );

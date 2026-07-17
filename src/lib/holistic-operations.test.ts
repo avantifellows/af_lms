@@ -217,6 +217,18 @@ describe("Holistic Mapping rollover entrypoint", () => {
     expect(db.candidates).not.toHaveBeenCalled();
   });
 
+  it("rejects an invalid actor before data access", async () => {
+    const db = { candidates: vi.fn(), apply: vi.fn() };
+    await expect(runHolisticMappingRollover({
+      fromAcademicYear: "2026-2027",
+      toAcademicYear: "2027-2028",
+      actorUserId: 0,
+      db,
+    })).rejects.toThrow("Rollover requires a valid actor User ID");
+    expect(db.candidates).not.toHaveBeenCalled();
+    expect(db.apply).not.toHaveBeenCalled();
+  });
+
   it("defaults to dry-run and reports carried, skipped, and ineligible aggregates without writes", async () => {
     const apply = vi.fn();
     const report = await runHolisticMappingRollover({

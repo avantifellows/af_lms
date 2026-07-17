@@ -89,6 +89,25 @@ For Profiles, compare eligible Student IDs, exact BigQuery identities, approved
 Form structure, successful active-configuration Profiles, and failed/skipped
 generation counts. Investigate every difference; do not fill gaps manually.
 
+The first Mapping rollover apply happens only at the next Academic Year. Run the
+aggregate-only dry-run first, review its carried/skipped/ineligible counts, then
+apply with a canonical operator User ID and verify an immediate no-op rerun:
+
+```bash
+npm run holistic:rollover -- \
+  --from=2026-2027 --to=2027-2028 \
+  --actor-user-id=<operator-user-id> --env-file=.env.production
+
+npm run holistic:rollover -- \
+  --from=2026-2027 --to=2027-2028 --apply \
+  --actor-user-id=<operator-user-id> --env-file=.env.production
+```
+
+The script carries only still-eligible same-School Program 1 pairs. Any Mapping
+history already present in the target year is skipped, including a carried
+Mapping that a Teacher later removed, so a rerun cannot undo Teacher action.
+Keep the prior-year rows unchanged and do not commit Student-level output.
+
 ## Staging Sign-Off
 
 Keep the shared-preview deployment paused while Engineering and Product run and
