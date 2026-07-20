@@ -10,7 +10,10 @@ import {
   getCentreOptionSets,
   getCentreSearchSuggestions,
   isActiveCentreOptionCode,
+  linkBatchToCentre,
+  listCentreBatches,
   resetCentreSchemaCheckForTests,
+  unlinkBatchFromCentre,
   updateCentre,
   updateCentreOption,
 } from "./centres";
@@ -772,5 +775,119 @@ describe("Centre grid contracts", () => {
       },
     });
     expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("centre ↔ batch links", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetCentreSchemaCheckForTests();
+  });
+
+  const centreRow = {
+    id: "7",
+    name: "JNV Vaishali CoE",
+    school_id: "44",
+    type_code: "coe",
+    type_label: "CoE",
+    type_is_active: true,
+    category_code: null,
+    category_label: null,
+    category_is_active: null,
+    sub_category_code: null,
+    sub_category_label: null,
+    sub_category_is_active: null,
+    stream_codes: [],
+    stream_options: [],
+    is_physical: false,
+    is_active: true,
+    inserted_at: "2026-01-07T00:00:00.000Z",
+    updated_at: "2026-01-07T00:00:00.000Z",
+    school_name: "JNV Vaishali",
+    school_code: "VS01",
+    school_udise_code: "10101",
+    school_region: "East",
+    school_state: "Bihar",
+    school_district: "Vaishali",
+    total_count: "1",
+  };
+
+  it("lists actively-linked batches for a centre", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { id: 1, batch_pk: 11, batch_id: "B_11", name: "Class 11" },
+    ]);
+
+    const rows = await listCentreBatches(7);
+
+    expect(rows).toEqual([{ id: 1, batch_pk: 11, batch_id: "B_11", name: "Class 11" }]);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("FROM centre_batch cb");
+    expect(sql).toContain("cb.deleted_at IS NULL");
+    expect(params).toEqual([7]);
+  });
+
+  it("links a batch by reviving a soft-deleted row when present", async () => {
+    mockQuery
+      .mockResolvedValueOnce([]) // schema check → ready
+      .mockResolvedValueOnce([centreRow]) // getCentreById
+      .mockResolvedValueOnce([{ id: 11 }]) // batch lookup
+      .mockResolvedValueOnce([{ id: 99 }]); // revive UPDATE ... RETURNING id
+
+    const result = await linkBatchToCentre({ centreId: 7, batchId: "B_11" });
+
+    expect(result).toEqual({ ok: true });
+    // revive matched → no INSERT issued (4 calls total, not 5)
+    expect(mockQuery).toHaveBeenCalledTimes(4);
+    expect(mockQuery.mock.calls[3][0]).toContain("SET deleted_at = NULL");
+  });
+
+  it("inserts a new link when no soft-deleted row exists", async () => {
+    mockQuery
+      .mockResolvedValueOnce([]) // schema check
+      .mockResolvedValueOnce([centreRow]) // getCentreById
+      .mockResolvedValueOnce([{ id: 11 }]) // batch lookup
+      .mockResolvedValueOnce([]) // revive → nothing revived
+      .mockResolvedValueOnce([]); // INSERT ... ON CONFLICT DO NOTHING
+
+    const result = await linkBatchToCentre({ centreId: 7, batchId: "B_11" });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockQuery).toHaveBeenCalledTimes(5);
+    expect(mockQuery.mock.calls[4][0]).toContain("INSERT INTO centre_batch");
+    expect(mockQuery.mock.calls[4][0]).toContain("ON CONFLICT");
+  });
+
+  it("404s when the centre does not exist", async () => {
+    mockQuery
+      .mockResolvedValueOnce([]) // schema check
+      .mockResolvedValueOnce([]); // getCentreById → none
+
+    const result = await linkBatchToCentre({ centreId: 999, batchId: "B_11" });
+
+    expect(result).toEqual({ ok: false, status: 404, error: "Centre not found" });
+  });
+
+  it("422s when the batch id is unknown", async () => {
+    mockQuery
+      .mockResolvedValueOnce([]) // schema check
+      .mockResolvedValueOnce([centreRow]) // getCentreById
+      .mockResolvedValueOnce([]); // batch lookup → none
+
+    const result = await linkBatchToCentre({ centreId: 7, batchId: "nope" });
+
+    expect(result).toEqual({ ok: false, status: 422, error: "Batch not found" });
+  });
+
+  it("unlinks by soft-deleting the active row", async () => {
+    mockQuery
+      .mockResolvedValueOnce([]) // schema check
+      .mockResolvedValueOnce([{ id: 11 }]) // batch lookup
+      .mockResolvedValueOnce([]); // UPDATE ... SET deleted_at = now()
+
+    const result = await unlinkBatchFromCentre({ centreId: 7, batchId: "B_11" });
+
+    expect(result).toEqual({ ok: true });
+    expect(mockQuery.mock.calls[2][0]).toContain("SET deleted_at = now()");
+    expect(mockQuery.mock.calls[2][1]).toEqual([7, 11]);
   });
 });

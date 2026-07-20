@@ -3,10 +3,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   canAccessQuizSessionBatches,
-  canAccessQuizSessionSchool,
   requireQuizSessionAccess,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
+import { batchesForCentre, userCanAccessCentre } from "@/lib/centre-batch";
 import { query } from "@/lib/db";
 import {
   dbIstTimestampToUtcIso,
@@ -32,14 +32,6 @@ interface SessionRow {
   platform: string | null;
 }
 
-interface BatchRow {
-  id: number;
-  name: string;
-  batch_id: string;
-  parent_id: number | null;
-  program_id: number | null;
-}
-
 interface CreateQuizSessionBody {
   name?: string;
   resourceId?: number;
@@ -59,38 +51,6 @@ function getDefaultSessionName(baseName: string): string {
   return baseName.trim();
 }
 
-async function getBatchesForSchool(
-  schoolId: number,
-  programIds: number[]
-): Promise<BatchRow[]> {
-  if (programIds.length === 0) return [];
-
-  let batches = await query<BatchRow>(
-    `
-    SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
-    FROM school_batch sb
-    JOIN batch b ON b.id = sb.batch_id
-    WHERE sb.school_id = $1
-      AND b.program_id = ANY($2::int[])
-    ORDER BY b.name
-    `,
-    [schoolId, programIds]
-  );
-
-  if (batches.length === 0) {
-    batches = await query<BatchRow>(
-      `
-      SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
-      FROM batch b
-      WHERE b.program_id = ANY($1::int[])
-      ORDER BY b.name
-      `,
-      [programIds]
-    );
-  }
-
-  return batches;
-}
 
 async function fetchQuizTemplateResource(
   resourceId: number
@@ -130,18 +90,18 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const schoolIdParam = searchParams.get("schoolId");
+  const centreIdParam = searchParams.get("centreId");
   const classBatchId = searchParams.get("classBatchId");
   const page = Number(searchParams.get("page") || "0");
   const perPage = Number(searchParams.get("per_page") || "50");
 
-  if (!schoolIdParam) {
-    return NextResponse.json({ error: "schoolId is required" }, { status: 400 });
+  if (!centreIdParam) {
+    return NextResponse.json({ error: "centreId is required" }, { status: 400 });
   }
 
-  const schoolId = Number(schoolIdParam);
-  if (Number.isNaN(schoolId)) {
-    return NextResponse.json({ error: "Invalid schoolId" }, { status: 400 });
+  const centreId = Number(centreIdParam);
+  if (!Number.isInteger(centreId) || centreId <= 0) {
+    return NextResponse.json({ error: "Invalid centreId" }, { status: 400 });
   }
 
   const access = await requireQuizSessionAccess(session.user.email, "view");
@@ -149,13 +109,12 @@ export async function GET(request: NextRequest) {
     return access.response;
   }
 
-  const permission = access.permission;
-  if (!(await canAccessQuizSessionSchool(permission, schoolId))) {
+  // Pure teacher→centre access; school permission is not consulted.
+  if (!userCanAccessCentre(access.permission, centreId)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const programIds = permission?.program_ids ?? [];
-  const batches = await getBatchesForSchool(schoolId, programIds);
+  const batches = await batchesForCentre(centreId);
   const classBatchIds = batches
     .filter((b) => b.parent_id !== null)
     .map((b) => b.batch_id);

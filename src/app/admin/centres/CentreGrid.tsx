@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import StatCard from "@/components/StatCard";
+import ManageBatchesModal from "./ManageBatchesModal";
 import { Badge, Button, Card, Input, Select } from "@/components/ui";
 import { DetailField } from "@/components/ui/DetailField";
 import { DetailGroup } from "@/components/ui/DetailGroup";
@@ -102,6 +103,7 @@ export default function CentreGrid({
   const [loading, setLoading] = useState(false);
   const [tableError, setTableError] = useState("");
   const [modal, setModal] = useState<{ mode: EditMode; form: CentreFormState } | null>(null);
+  const [batchModal, setBatchModal] = useState<{ id: number; name: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -606,6 +608,7 @@ export default function CentreGrid({
                 expanded={expandedIds.has(row.id)}
                 onToggle={() => toggleExpanded(row.id)}
                 onEdit={() => openEdit(row)}
+                onManageBatches={() => setBatchModal({ id: row.id, name: row.name })}
               />
             ))}
           </ul>
@@ -952,6 +955,14 @@ export default function CentreGrid({
           </div>
         </div>
       )}
+
+      {batchModal && (
+        <ManageBatchesModal
+          centreId={batchModal.id}
+          centreName={batchModal.name}
+          onClose={() => setBatchModal(null)}
+        />
+      )}
     </section>
   );
 }
@@ -1141,11 +1152,13 @@ function CentreCard({
   expanded,
   onToggle,
   onEdit,
+  onManageBatches,
 }: {
   row: CentreListRow;
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
+  onManageBatches: () => void;
 }) {
   return (
     <li>
@@ -1221,6 +1234,10 @@ function CentreCard({
             <Button variant="ghost" size="sm" onClick={onEdit}>
               <Edit2 className="h-4 w-4" aria-hidden="true" />
               Edit
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onManageBatches}>
+              <Link2 className="h-4 w-4" aria-hidden="true" />
+              Manage Batches
             </Button>
           </div>
         </div>

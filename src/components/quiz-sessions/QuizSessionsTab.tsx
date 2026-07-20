@@ -312,10 +312,10 @@ function areSessionsEqual(previous: QuizSession[], next: QuizSession[]): boolean
 }
 
 export default function QuizSessionsTab({
-  schoolId,
+  centreId,
   canEdit = false,
 }: {
-  schoolId: string;
+  centreId: string;
   canEdit?: boolean;
 }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
@@ -368,7 +368,7 @@ export default function QuizSessionsTab({
     setLoadingBatches(true);
     setLoadError(null);
     try {
-      const response = await fetch(`/api/quiz-sessions/batches?schoolId=${schoolId}`);
+      const response = await fetch(`/api/quiz-sessions/batches?centreId=${centreId}`);
       if (!response.ok) {
         throw new Error("Failed to fetch batches");
       }
@@ -380,7 +380,7 @@ export default function QuizSessionsTab({
     } finally {
       setLoadingBatches(false);
     }
-  }, [schoolId]);
+  }, [centreId]);
 
   const fetchSessions = useCallback(
     async (
@@ -395,7 +395,7 @@ export default function QuizSessionsTab({
       }
       try {
         const params = new URLSearchParams({
-          schoolId,
+          centreId,
           page: String(pageIndex),
           per_page: String(PER_PAGE),
         });
@@ -430,7 +430,7 @@ export default function QuizSessionsTab({
         }
       }
     },
-    [schoolId]
+    [centreId]
   );
 
   useEffect(() => {

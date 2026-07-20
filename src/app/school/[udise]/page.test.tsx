@@ -173,18 +173,6 @@ vi.mock("@/components/PerformanceTab", () => ({
   ),
 }));
 
-vi.mock("@/components/quiz-sessions/QuizSessionsTab", () => ({
-  __esModule: true,
-  default: ({ schoolId, canEdit }: { schoolId: string; canEdit?: boolean }) => (
-    <div
-      data-testid="quiz-sessions-tab"
-      data-school-id={schoolId}
-      data-can-edit={String(canEdit)}
-    >
-      QuizSessionsTab
-    </div>
-  ),
-}));
 
 vi.mock("@/components/VisitsTab", () => ({
   __esModule: true,
@@ -682,7 +670,6 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-enrollment")).toBeInTheDocument();
     expect(screen.getByTestId("tab-curriculum")).toBeInTheDocument();
     expect(screen.getByTestId("tab-performance")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-quiz_sessions")).toBeInTheDocument();
     expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
     expect(screen.getByTestId("tab-visits")).toBeInTheDocument();
   });
@@ -758,59 +745,6 @@ describe("SchoolPage (server component)", () => {
       "data-school-udise",
       "70705"
     );
-  });
-
-  // --- QuizSessionsTab props ---
-
-  it("passes school id to QuizSessionsTab", async () => {
-    setupAdminDefaults({ id: "school-42" });
-
-    await renderPage();
-
-    expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
-      "data-school-id",
-      "school-42"
-    );
-    expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
-      "data-can-edit",
-      "true"
-    );
-  });
-
-  it("passes view-only access to QuizSessionsTab", async () => {
-    setupAdminDefaults({ id: "school-42" });
-    mockGetFeatureAccess.mockImplementation(
-      (_perm: unknown, feature: string) => {
-        if (feature === "quiz_sessions") return featureAccess(true, false);
-        return featureAccess(true, true);
-      }
-    );
-
-    await renderPage();
-
-    expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
-      "data-school-id",
-      "school-42"
-    );
-    expect(screen.getByTestId("quiz-sessions-tab")).toHaveAttribute(
-      "data-can-edit",
-      "false"
-    );
-  });
-
-  it("hides QuizSessionsTab when quiz session access is none", async () => {
-    setupAdminDefaults();
-    mockGetFeatureAccess.mockImplementation(
-      (_perm: unknown, feature: string) => {
-        if (feature === "quiz_sessions") return featureAccess(false, false);
-        return featureAccess(true, true);
-      }
-    );
-
-    await renderPage();
-
-    expect(screen.queryByTestId("tab-quiz_sessions")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("quiz-sessions-tab")).not.toBeInTheDocument();
   });
 
   // --- VisitsTab props ---

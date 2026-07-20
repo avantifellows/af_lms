@@ -1,19 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import {
-  canAccessQuizSessionSchool,
-  requireQuizSessionAccess,
-} from "@/lib/quiz-session-access";
+import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
+import { batchesForCentre, userCanAccessCentre, type CentreBatchRow } from "@/lib/centre-batch";
 import { query } from "@/lib/db";
-
-interface BatchRow {
-  id: number;
-  name: string;
-  batch_id: string;
-  parent_id: number | null;
-  program_id: number | null;
-}
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -23,15 +13,15 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const schoolIdParam = searchParams.get("schoolId");
+  const centreIdParam = searchParams.get("centreId");
 
-  if (!schoolIdParam) {
-    return NextResponse.json({ error: "schoolId is required" }, { status: 400 });
+  if (!centreIdParam) {
+    return NextResponse.json({ error: "centreId is required" }, { status: 400 });
   }
 
-  const schoolId = Number(schoolIdParam);
-  if (Number.isNaN(schoolId)) {
-    return NextResponse.json({ error: "Invalid schoolId" }, { status: 400 });
+  const centreId = Number(centreIdParam);
+  if (!Number.isInteger(centreId) || centreId <= 0) {
+    return NextResponse.json({ error: "Invalid centreId" }, { status: 400 });
   }
 
   const access = await requireQuizSessionAccess(session.user.email, "view");
@@ -39,47 +29,18 @@ export async function GET(request: NextRequest) {
     return access.response;
   }
 
-  if (!(await canAccessQuizSessionSchool(access.permission, schoolId))) {
+  // Pure teacher→centre access: the user must hold a seat at this centre
+  // (or be an admin). School permission is not consulted.
+  if (!userCanAccessCentre(access.permission, centreId)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const programIds = access.permission.program_ids ?? [];
+  // Batches linked to the centre via centre_batch. The link IS the scope, so
+  // there is no program-id filter here — a centre belongs to one program and
+  // its linked batches are already the right set.
+  let batches: CentreBatchRow[] = await batchesForCentre(centreId);
 
-  if (programIds.length === 0) {
-    return NextResponse.json({ batches: [] });
-  }
-
-  // Scope to the PM's authorized programs. (Previously also filtered
-  // batch_id LIKE 'EnableStudents_%', which wrongly hid EMRS/Punjab/Gujarat
-  // batches even when the PM had those programs — program_id is the real scope.)
-  const baseFilters = `
-    b.program_id = ANY($2::int[])
-  `;
-
-  let batches = await query<BatchRow>(
-    `
-    SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
-    FROM school_batch sb
-    JOIN batch b ON b.id = sb.batch_id
-    WHERE sb.school_id = $1
-      AND ${baseFilters}
-    ORDER BY b.name
-    `,
-    [schoolId, programIds]
-  );
-
-  if (batches.length === 0) {
-    batches = await query<BatchRow>(
-      `
-      SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
-      FROM batch b
-      WHERE b.program_id = ANY($1::int[])
-      ORDER BY b.name
-      `,
-      [programIds]
-    );
-  }
-
+  // Pull in any parent batches not already present so hierarchies render whole.
   const parentIds = Array.from(
     new Set(batches.map((b) => b.parent_id).filter((id): id is number => id !== null))
   );
@@ -87,7 +48,7 @@ export async function GET(request: NextRequest) {
   const missingParentIds = parentIds.filter((id) => !knownIds.has(id));
 
   if (missingParentIds.length > 0) {
-    const parentRows = await query<BatchRow>(
+    const parentRows = await query<CentreBatchRow>(
       `
       SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
       FROM batch b
