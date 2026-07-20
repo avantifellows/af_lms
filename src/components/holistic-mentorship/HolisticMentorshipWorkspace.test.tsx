@@ -99,6 +99,8 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
-    expect(await screen.findByRole("button", { name: "Create blank Plan" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Start blank" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Program")).toBeDisabled();
+    expect(screen.getByLabelText("Academic Year")).toHaveValue("2026-2027");
   });
 });

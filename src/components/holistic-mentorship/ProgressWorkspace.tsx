@@ -1,11 +1,11 @@
 "use client";
 
-import { Download, ExternalLink, RefreshCw, Search, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Clock, Download, History, RefreshCw, SearchX, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import type { HolisticProgressRow } from "@/types/holistic-progress";
 
 type Row = HolisticProgressRow;
@@ -30,7 +30,6 @@ type ProfilePayload = {
 };
 
 type ProgressFilters = {
-  academicYear: string;
   school: string;
   grade: string;
   mentor: string;
@@ -40,7 +39,7 @@ type ProgressFilters = {
   sort: string;
   direction: string;
 };
-type ProgressFilterName = Exclude<keyof ProgressFilters, "academicYear" | "direction">;
+type ProgressFilterName = Exclude<keyof ProgressFilters, "direction">;
 type FilterChangeHandler = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
 
 const EMPTY: Payload = {
@@ -49,7 +48,6 @@ const EMPTY: Payload = {
   refreshedAt: "", pageSize: 50,
 };
 const INITIAL_FILTERS: ProgressFilters = {
-  academicYear: CURRENT_ACADEMIC_YEAR,
   school: "",
   grade: "",
   mentor: "",
@@ -185,17 +183,29 @@ function useProgressExport(params: URLSearchParams, academicYear: string) {
   return { exporting, exportError, exportProgress };
 }
 
-export default function ProgressWorkspace() {
+export default function ProgressWorkspace({
+  academicYear = CURRENT_ACADEMIC_YEAR,
+  onAcademicYears,
+}: {
+  academicYear?: string;
+  onAcademicYears?: (years: string[]) => void;
+}) {
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [page, setPage] = useState(1);
   const [ready, setReady] = useState(false);
   const [profileStudent, setProfileStudent] = useState<Row | null>(null);
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
+  const [seenAcademicYear, setSeenAcademicYear] = useState(academicYear);
+  if (seenAcademicYear !== academicYear) {
+    setSeenAcademicYear(academicYear);
+    setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
+    setPage(1);
+  }
 
   const params = useMemo(() => {
     const value = new URLSearchParams({
-      academic_year: filters.academicYear,
+      academic_year: academicYear,
       page: String(page),
       sort: filters.sort,
       direction: filters.direction,
@@ -207,10 +217,15 @@ export default function ProgressWorkspace() {
     if (filters.progress) value.set("progress", filters.progress);
     if (filters.search.trim()) value.set("search", filters.search.trim());
     return value;
-  }, [filters, page]);
+  }, [academicYear, filters, page]);
 
   const { data, loading, error, reload } = useProgressData(params, ready);
-  const { exporting, exportError, exportProgress } = useProgressExport(params, filters.academicYear);
+  const { exporting, exportError, exportProgress } = useProgressExport(params, academicYear);
+
+  useEffect(() => {
+    if (data.academicYears.length > 0) onAcademicYears?.(data.academicYears);
+  }, [data.academicYears, onAcademicYears]);
+
 
   useEffect(() => {
     const stored = storedView();
@@ -240,202 +255,231 @@ export default function ProgressWorkspace() {
     setFilters((current) => ({ ...current, [name]: event.target.value }));
     setPage(1);
   };
-  const updateAcademicYear = (event: React.ChangeEvent<HTMLSelectElement>) => {
+  const clearFilters = () => {
+    setFilters((current) => ({ ...INITIAL_FILTERS, sort: current.sort, direction: current.direction }));
+    setPage(1);
+  };
+  const changeSort = (key: string) => {
     setFilters((current) => ({
       ...current,
-      academicYear: event.target.value,
-      school: "",
-      mentor: "",
-      phase: "",
+      sort: key,
+      direction: current.sort === key && current.direction === "asc" ? "desc" : "asc",
     }));
     setPage(1);
   };
+  const filtered = Boolean(filters.school || filters.grade || filters.mentor || filters.phase
+    || filters.progress || filters.search.trim());
   const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
   return (
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">Students &amp; Progress</h2>
+          <p className="text-sm text-text-muted">Mapped Mentees only. Mapping and Notes are read-only for Admins.</p>
+        </div>
+        <Button type="button" onClick={() => void exportProgress()} disabled={exporting}>
+          <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
+        </Button>
+      </div>
+      {academicYear !== CURRENT_ACADEMIC_YEAR && (
+        <div className="flex items-start gap-3 rounded-md bg-info-bg p-3 text-sm text-text-secondary">
+          <History aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+          <p><strong className="text-text-primary">Viewing {academicYear}.</strong> This view shows Students
+            who had a Mapping during that Academic Year. Earlier academic years are read-only.</p>
+        </div>
+      )}
+      {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
+      <ProgressFilterPanel filters={filters} options={data.options} onChange={update} />
       <ProgressCounts counts={data.counts} />
-      <ProgressFilterPanel
-        filters={filters}
-        options={data.options}
-        academicYears={data.academicYears}
-        refreshedAt={data.refreshedAt}
-        loading={loading}
-        exporting={exporting}
-        exportError={exportError}
-        onChange={update}
-        onAcademicYearChange={updateAcademicYear}
-        onRefresh={reload}
-        onExport={() => void exportProgress()}
-        onDirectionChange={() => setFilters((current) => ({
-          ...current,
-          direction: current.direction === "asc" ? "desc" : "asc",
-        }))}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
+          <Clock aria-hidden="true" className="h-4 w-4" />
+          <span aria-live="polite" className="min-w-0 break-words">
+            {refreshedLabel(data.refreshedAt)}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="secondary" className="text-xs" onClick={clearFilters}>Clear filters</Button>
+          <Button type="button" variant="secondary" className="text-xs" onClick={reload} disabled={loading}>
+            <RefreshCw aria-hidden="true" className={`h-4 w-4 motion-reduce:animate-none ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+      </div>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <ProgressResults
         rows={data.rows}
         loading={loading}
-        academicYear={filters.academicYear}
+        academicYear={academicYear}
         hasMappings={data.options.schools.length > 0}
+        filtered={filtered}
+        sort={filters.sort}
+        direction={filters.direction}
+        onSort={changeSort}
+        onClearFilters={clearFilters}
         onOpenProfile={setProfileStudent}
       />
-      <ProgressPagination page={page} totalPages={totalPages} onPageChange={setPage} />
-      {profileStudent && <ProfilePanel student={profileStudent} academicYear={filters.academicYear} onClose={() => setProfileStudent(null)} />}
+      <ProgressPagination page={page} totalPages={totalPages} rowCount={data.rows.length}
+        totalMapped={data.counts.totalMapped} onPageChange={setPage} />
+      {profileStudent && <ProfilePanel student={profileStudent} academicYear={academicYear} onClose={() => setProfileStudent(null)} />}
     </div>
   );
 }
 
+function refreshedLabel(refreshedAt: string) {
+  if (!refreshedAt) return "Not refreshed";
+  return <>Last refreshed <span className="font-mono">{new Date(refreshedAt).toLocaleString()}</span></>;
+}
+
 function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
-  const items: Array<[string, number]> = [
-    ["Mapped", counts.totalMapped],
-    ["Pending", counts.pending],
-    ["Completed", counts.completed],
-    ["Skipped", counts.skipped],
-    ["No active phase", counts.noActivePhase],
+  const items: Array<[string, number, string]> = [
+    ["Total mapped Mentees", counts.totalMapped, ""],
+    ["Pending", counts.pending, "border-t-[3px] border-t-warning-border"],
+    ["Completed", counts.completed, "border-t-[3px] border-t-success"],
+    ["Skipped", counts.skipped, "border-t-[3px] border-t-info"],
   ];
-  return <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-5">
-    {items.map(([label, value]) => <div key={label} className="bg-bg-card px-4 py-3 last:col-span-2 sm:last:col-span-1">
-      <p className="text-xs font-medium text-text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-text-primary">{value}</p>
+  if (counts.noActivePhase > 0) items.push(["No active phase", counts.noActivePhase, ""]);
+  return <div className={`grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border ${items.length === 5 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
+    {items.map(([label, value, accent]) => <div key={label} className={`bg-bg-card px-4 py-3 last:col-span-2 sm:last:col-span-1 ${accent}`}>
+      <p className="text-[10px] font-extrabold uppercase tracking-wide text-text-muted">{label}</p>
+      <p className="mt-1 font-mono text-2xl font-extrabold text-text-primary">{value}</p>
     </div>)}
   </div>;
 }
 
-function ProgressFilterPanel({
-  filters,
-  options,
-  academicYears,
-  refreshedAt,
-  loading,
-  exporting,
-  exportError,
-  onChange,
-  onAcademicYearChange,
-  onRefresh,
-  onExport,
-  onDirectionChange,
-}: {
+const FILTER_LABEL = "block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
+const FILTER_CONTROL = "mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm font-normal normal-case tracking-normal text-text-primary";
+
+function ProgressFilterPanel({ filters, options, onChange }: {
   filters: ProgressFilters;
   options: Options;
-  academicYears: string[];
-  refreshedAt: string;
-  loading: boolean;
-  exporting: boolean;
-  exportError: string;
   onChange: (name: ProgressFilterName) => FilterChangeHandler;
-  onAcademicYearChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  onRefresh: () => void;
-  onExport: () => void;
-  onDirectionChange: () => void;
 }) {
-  return <div className="space-y-3 border-y border-border py-4">
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <label className="relative min-w-0 sm:col-span-2">
-        <span className="sr-only">Search Students</span>
-        <Search aria-hidden="true" className="absolute left-3 top-3 h-5 w-5 text-text-muted" />
-        <input className="min-h-11 w-full rounded-md border border-border bg-bg pl-10 pr-3 text-sm" value={filters.search}
-          onChange={onChange("search")} placeholder="Student name or external ID" />
-      </label>
-      <label className="min-w-0 text-xs font-medium text-text-muted">
-        Program
-        <select aria-label="Program" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm text-text-primary" value={PROGRAM_IDS.COE} disabled>
-          <option value={PROGRAM_IDS.COE}>{PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE]} (Program {PROGRAM_IDS.COE})</option>
-        </select>
-      </label>
-      <label className="min-w-0 text-xs font-medium text-text-muted">
-        Academic Year
-        <select aria-label="Academic Year" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm text-text-primary" value={filters.academicYear} onChange={onAcademicYearChange}>
-          {academicYears.map((year) => <option key={year}>{year}</option>)}
-        </select>
-      </label>
-      <select aria-label="Phase lens" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.phase} onChange={onChange("phase")}>
-        <option value="">Active Phase for each Grade</option>
-        {options.phases.map((item) => <option key={item.id} value={item.id}>Phase {item.number}: {item.title} (Grade {item.grade})</option>)}
-      </select>
-      <select aria-label="Filter by School" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.school} onChange={onChange("school")}>
+  return <div className="grid grid-cols-[minmax(0,1fr)] gap-3 border-y border-border py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <label className={FILTER_LABEL}>
+      School
+      <select aria-label="Filter by School" className={FILTER_CONTROL} value={filters.school} onChange={onChange("school")}>
         <option value="">All Schools</option>
         {options.schools.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
       </select>
-      <select aria-label="Filter by Grade" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.grade} onChange={onChange("grade")}>
+    </label>
+    <label className={FILTER_LABEL}>
+      Grade
+      <select aria-label="Filter by Grade" className={FILTER_CONTROL} value={filters.grade} onChange={onChange("grade")}>
         <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
       </select>
-      <select aria-label="Filter by Mentor" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.mentor} onChange={onChange("mentor")}>
+    </label>
+    <label className={FILTER_LABEL}>
+      Phase
+      <select aria-label="Phase lens" className={FILTER_CONTROL} value={filters.phase} onChange={onChange("phase")}>
+        <option value="">Active Phase for each Grade</option>
+        {options.phases.map((item) => <option key={item.id} value={item.id}>Phase {item.number}: {item.title} (Grade {item.grade})</option>)}
+      </select>
+    </label>
+    <label className={FILTER_LABEL}>
+      Mentor
+      <select aria-label="Filter by Mentor" className={FILTER_CONTROL} value={filters.mentor} onChange={onChange("mentor")}>
         <option value="">All Mentors</option>
         {options.mentors.map((item) => <option key={item.userId} value={item.userId}>{item.name}</option>)}
       </select>
-      <select aria-label="Filter by Progress" className="min-h-11 min-w-0 w-full rounded-md border border-border bg-bg px-3 text-sm" value={filters.progress} onChange={onChange("progress")}>
+    </label>
+    <label className={FILTER_LABEL}>
+      Progress
+      <select aria-label="Filter by Progress" className={FILTER_CONTROL} value={filters.progress} onChange={onChange("progress")}>
         <option value="">All Progress</option><option value="pending">Pending</option><option value="completed">Completed</option>
         <option value="skipped">Skipped</option><option value="no_active_phase">No active phase</option>
       </select>
-    </div>
-    {filters.academicYear !== CURRENT_ACADEMIC_YEAR &&
-      <p className="text-sm font-medium text-text-muted">Earlier academic years are read-only.</p>}
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-muted">
-        <span aria-live="polite" className="min-w-0 break-words">{refreshedAt ? `Last refreshed ${new Date(refreshedAt).toLocaleString()}` : "Not refreshed"}</span>
-        <Button className="min-w-11" variant="icon" aria-label="Refresh" onClick={onRefresh} disabled={loading}>
-          <RefreshCw aria-hidden="true" className={`h-4 w-4 motion-reduce:animate-none ${loading ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
-      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-        <select aria-label="Sort results" className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-bg px-2 text-xs sm:flex-none" value={filters.sort} onChange={onChange("sort")}>
-          <option value="student_name">Student</option><option value="school">School</option><option value="grade">Grade</option>
-          <option value="mentor">Mentor</option><option value="phase">Phase</option><option value="progress">Progress</option>
-        </select>
-        <button type="button" className="min-h-11 rounded-md border border-border px-3 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={onDirectionChange}>
-          {filters.direction === "asc" ? "Ascending" : "Descending"}
-        </button>
-        <Button type="button" variant="secondary" onClick={onExport} disabled={exporting}>
-          <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
-        </Button>
-      </div>
-    </div>
-    {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
+    </label>
+    <label className={FILTER_LABEL}>
+      Student
+      <input aria-label="Search Students" className={FILTER_CONTROL} value={filters.search}
+        onChange={onChange("search")} placeholder="Name or Student ID" />
+    </label>
   </div>;
 }
+
+const SORTABLE_COLUMNS: Array<[string, string]> = [["student_name", "Student"], ["school", "School"], ["grade", "Grade"]];
 
 function ProgressResults({
   rows,
   loading,
   academicYear,
   hasMappings,
+  filtered,
+  sort,
+  direction,
+  onSort,
+  onClearFilters,
   onOpenProfile,
 }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
   hasMappings: boolean;
+  filtered: boolean;
+  sort: string;
+  direction: string;
+  onSort: (key: string) => void;
+  onClearFilters: () => void;
   onOpenProfile: (row: Row) => void;
 }) {
+  if (!loading && rows.length === 0) {
+    return <ProgressEmptyState hasMappings={hasMappings} filtered={filtered} onClearFilters={onClearFilters} />;
+  }
   return <div role="region" aria-label="Student progress table" tabIndex={0}
     className="w-full min-w-0 max-w-full overflow-x-auto border-y border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
-    <table aria-busy={loading} aria-label="Student progress results" className="w-full min-w-[1200px] text-left text-sm">
+    <table aria-busy={loading} aria-label="Student progress results" className="w-full min-w-[1100px] text-left text-sm">
       <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
-        <th className="px-3 py-3">Student</th><th className="px-3 py-3">School</th><th className="px-3 py-3">Grade</th>
-        <th className="px-3 py-3">Mentor</th><th className="px-3 py-3">Phase</th><th className="px-3 py-3">Availability</th>
-        <th className="px-3 py-3">Progress</th><th className="px-3 py-3">Completed on</th><th className="px-3 py-3">Actions</th>
+        {SORTABLE_COLUMNS.map(([key, label]) => <th key={key} className="px-3 py-3"
+          aria-sort={sort === key ? (direction === "desc" ? "descending" : "ascending") : undefined}>
+          <button type="button" className="inline-flex min-h-9 items-center gap-1 uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            onClick={() => onSort(key)}>
+            {label}
+            {sort === key && direction === "desc"
+              ? <ArrowDown aria-hidden="true" className="h-3.5 w-3.5" />
+              : <ArrowUp aria-hidden="true" className={`h-3.5 w-3.5 ${sort === key ? "" : "opacity-30"}`} />}
+          </button>
+        </th>)}
+        <th className="px-3 py-3">Mentor</th><th className="px-3 py-3">Phase</th>
+        <th className="px-3 py-3">Progress</th><th className="px-3 py-3">Completed on</th>
+        <th className="relative px-3 py-3"><span className="sr-only">Actions</span></th>
       </tr></thead>
       <tbody className="divide-y divide-border">
-        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} hasMappings={hasMappings} onOpenProfile={onOpenProfile} />
+        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} onOpenProfile={onOpenProfile} />
       </tbody>
     </table>
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear, hasMappings, onOpenProfile }: {
+function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
+  hasMappings: boolean;
+  filtered: boolean;
+  onClearFilters: () => void;
+}) {
+  const noMappings = !hasMappings && !filtered;
+  const Icon = noMappings ? Users : SearchX;
+  return <div className="flex min-h-64 flex-col items-center justify-center gap-3 border-y border-border p-8 text-center">
+    <Icon aria-hidden="true" className="h-8 w-8 text-text-muted" />
+    <p className="text-base font-semibold text-text-primary">
+      {noMappings ? "No mapped Students exist for this Academic Year." : "No mapped Students match these filters."}
+    </p>
+    <p className="text-sm text-text-muted">
+      {noMappings
+        ? "Students appear here after Teachers assign them from their School workspace."
+        : "Change or clear a filter to see more mapped Mentees."}
+    </p>
+    {!noMappings && <Button type="button" variant="secondary" onClick={onClearFilters}>Clear filters</Button>}
+  </div>;
+}
+
+function ProgressRows({ rows, loading, academicYear, onOpenProfile }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
-  hasMappings: boolean;
   onOpenProfile: (row: Row) => void;
 }) {
   if (loading && rows.length === 0) {
-    return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
-  }
-  if (rows.length === 0) {
-    return <tr><td colSpan={9} className="px-3 py-12 text-center text-text-muted">
-      {hasMappings ? "No mapped Students match these filters." : "No mapped Students exist for this Academic Year."}
-    </td></tr>;
+    return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
   }
   return rows.map((row) => <ProgressRow key={row.studentId} row={row} academicYear={academicYear} onOpenProfile={onOpenProfile} />);
 }
@@ -446,36 +490,41 @@ function ProgressRow({ row, academicYear, onOpenProfile }: {
   onOpenProfile: (row: Row) => void;
 }) {
   return <tr className="hover:bg-hover-bg/50">
-    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
-    <td className="px-3 py-3"><p>{row.schoolName}</p><p className="text-xs text-text-muted">{row.schoolCode}</p></td>
-    <td className="px-3 py-3">{row.grade}</td><td className="px-3 py-3"><p>{row.mentorName}</p><p className="text-xs text-text-muted">{row.mentorEmail || "No email"}</p></td>
-    <td className="px-3 py-3"><PhaseName row={row} /></td>
-    <td className="px-3 py-3"><PhaseAvailability state={row.phaseState} /></td>
+    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
+    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.schoolName}</p><p className="font-mono text-xs text-text-muted">{row.schoolCode}</p></td>
+    <td className="px-3 py-3 font-mono">{row.grade}</td>
+    <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.mentorName}</p><p className="text-xs text-text-muted">{row.mentorEmail || "No email"}</p></td>
+    <td className="px-3 py-3"><PhaseCell row={row} /></td>
     <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
-    <td className="px-3 py-3"><CompletionTime value={row.completedAt} /></td>
+    <td className="px-3 py-3 font-mono"><CompletionTime value={row.completedAt} /></td>
     <td className="px-3 py-3"><ProgressActions row={row} academicYear={academicYear} onOpenProfile={onOpenProfile} /></td>
   </tr>;
 }
 
-function PhaseName({ row }: { row: Row }) {
-  if (row.phaseNumber === null) return <>No active phase</>;
-  return <>Phase {row.phaseNumber}: {row.phaseTitle}</>;
+function PhaseCell({ row }: { row: Row }) {
+  if (row.phaseNumber === null) return <p className="font-semibold text-text-primary">No active phase</p>;
+  return <>
+    <p className="font-semibold text-text-primary">Phase {row.phaseNumber}: {row.phaseTitle}</p>
+    <p className={`text-[11px] font-bold ${row.phaseState === "active" ? "text-accent" : "text-text-muted"}`}>
+      {row.phaseState ? `${row.phaseState[0].toUpperCase()}${row.phaseState.slice(1)}` : ""}
+    </p>
+  </>;
 }
 
-function PhaseAvailability({ state }: { state: Row["phaseState"] }) {
-  if (!state) return <span className="text-text-muted">-</span>;
-  const variant = state === "active" ? "success" : state === "open" ? "info" : "default";
-  return <Badge variant={variant}>{state[0].toUpperCase()}{state.slice(1)}</Badge>;
-}
+const PROGRESS_LABELS: Record<string, string> = {
+  completed: "Completed", pending: "Pending", skipped: "Skipped", no_active_phase: "No active phase",
+};
 
 function ProgressBadge({ progress }: { progress: Row["progress"] }) {
-  const variant = progress === "completed" ? "success" : progress === "skipped" ? "warning" : "default";
-  return <Badge variant={variant}>{progress.replaceAll("_", " ")}</Badge>;
+  const variant = progress === "completed" ? "success"
+    : progress === "pending" ? "warning"
+    : progress === "skipped" ? "info" : "default";
+  return <Badge variant={variant}>{PROGRESS_LABELS[progress] ?? progress.replaceAll("_", " ")}</Badge>;
 }
 
 function CompletionTime({ value }: { value: string | null }) {
   if (!value) return <span className="text-text-muted">-</span>;
-  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(value));
 }
 
 function ProgressActions({ row, academicYear, onOpenProfile }: {
@@ -483,27 +532,38 @@ function ProgressActions({ row, academicYear, onOpenProfile }: {
   academicYear: string;
   onOpenProfile: (row: Row) => void;
 }) {
-  return <div className="flex justify-end gap-1">
+  const openable = row.phaseId && row.phaseState !== "locked";
+  return <div className="flex items-center justify-end gap-1">
     <Button className="min-w-11" variant="icon" aria-label={`Profile for ${row.studentName}`} onClick={() => onOpenProfile(row)}>
       <Sparkles aria-hidden="true" className="h-4 w-4" />
     </Button>
-    {row.phaseId && <Link aria-label={`Open ${row.studentName}`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md p-2 text-accent hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+    {openable ? <Link aria-label={`Open ${row.studentName}`}
+      className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({ school_code: row.schoolCode, academic_year: academicYear })}`}>
-      <ExternalLink aria-hidden="true" className="h-4 w-4" />
-    </Link>}
+      Open Student
+    </Link> : <Button type="button" variant="secondary" className="text-xs" disabled title="Phase is locked">Open Student</Button>}
   </div>;
 }
 
-function ProgressPagination({ page, totalPages, onPageChange }: {
+function ProgressPagination({ page, totalPages, rowCount, totalMapped, onPageChange }: {
   page: number;
   totalPages: number;
+  rowCount: number;
+  totalMapped: number;
   onPageChange: React.Dispatch<React.SetStateAction<number>>;
 }) {
+  const start = rowCount > 0 ? (page - 1) * 50 + 1 : 0;
+  const end = rowCount > 0 ? start + rowCount - 1 : 0;
   return <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-    <span className="text-text-muted">Page {page} of {totalPages}</span>
-    <div className="flex gap-2">
-      <Button variant="secondary" disabled={page <= 1} onClick={() => onPageChange((value) => value - 1)}>Previous</Button>
-      <Button variant="secondary" disabled={page >= totalPages} onClick={() => onPageChange((value) => value + 1)}>Next</Button>
+    <span className="text-text-muted">
+      Showing <span className="font-mono">{start}-{end}</span> of <span className="font-mono">{totalMapped}</span> mapped Mentees
+    </span>
+    <div className="flex items-center gap-2">
+      <Button className="min-w-11" variant="icon" aria-label="Previous page" disabled={page <= 1}
+        onClick={() => onPageChange((value) => value - 1)}><ChevronLeft aria-hidden="true" className="h-4 w-4" /></Button>
+      <span aria-label={`Page ${page} of ${totalPages}`} className="font-mono text-xs text-text-secondary">{page} / {totalPages}</span>
+      <Button className="min-w-11" variant="icon" aria-label="Next page" disabled={page >= totalPages}
+        onClick={() => onPageChange((value) => value + 1)}><ChevronRight aria-hidden="true" className="h-4 w-4" /></Button>
     </div>
   </div>;
 }

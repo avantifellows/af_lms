@@ -386,7 +386,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     const program = holisticAdminPage.getByLabel("Program");
     await expect(program).toBeDisabled();
     await expect(program).toHaveValue("1");
-    await expect(holisticAdminPage.getByRole("columnheader", { name: "Availability" })).toBeVisible();
+    await expect(holisticAdminPage.getByRole("columnheader", { name: "Phase" })).toBeVisible();
     await expect(holisticAdminPage.getByRole("columnheader", { name: "Completed on" })).toBeVisible();
 
     const progress = await holisticAdminPage.request.get(
@@ -425,11 +425,11 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(csvBody).not.toMatch(/Student Profile|Student Context|profile_journey_id|mapping_id/i);
 
     await holisticAdminPage.getByRole("link", { name: /^Open / }).first().click();
-    await expect(holisticAdminPage.getByText("Read-only", { exact: true })).toBeVisible();
+    await expect(holisticAdminPage.getByText("Admin read-only view", { exact: true })).toBeVisible();
     await holisticAdminPage.goto("/admin/holistic-mentorship");
     await holisticAdminPage.getByRole("tab", { name: "Phase Setup" }).click();
     await expect(holisticAdminPage.getByText("Synthetic Grade 11 Active")).toBeVisible();
-    await expect(holisticAdminPage.getByText("Open · Active", { exact: true }).first()).toBeVisible();
+    await expect(holisticAdminPage.getByText("Active", { exact: true }).first()).toBeVisible();
     await holisticAdminPage.getByText("Synthetic Grade 11 Locked", { exact: true }).click();
     holisticAdminPage.once("dialog", (dialog) => dialog.accept());
     const phaseOpen = holisticAdminPage.waitForResponse((response) =>
@@ -439,7 +439,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticAdminPage.getByRole("button", { name: "Open Phase" }).click();
     await expect((await phaseOpen).status()).toBe(200);
     const openedPhase = holisticAdminPage.getByText("Synthetic Grade 11 Locked", { exact: true }).locator("..").locator("..");
-    await expect(openedPhase.getByText("Open · Active", { exact: true })).toBeVisible();
+    await expect(openedPhase.getByText("Active", { exact: true })).toBeVisible();
 
     await holisticAdminPage.getByRole("tab", { name: "Students & Progress" }).click();
     await holisticAdminPage.route("**/api/holistic-mentorship/profiles/*", async (route) => {

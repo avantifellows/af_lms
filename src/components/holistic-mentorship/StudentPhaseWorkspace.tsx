@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Lock } from "lucide-react";
+import { ArrowLeft, EyeOff, Lock, RefreshCw, type LucideIcon } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
+import { Card } from "@/components/ui/Card";
 import GuidancePreview from "./GuidancePreview";
 
 type NotesEditorProps = {
@@ -151,6 +152,10 @@ function selectedOpenPhase(detail: HolisticStudentPhaseDetail): OpenSelectedPhas
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 class NotesRequestError extends Error {
@@ -781,12 +786,18 @@ export default function StudentPhaseWorkspace({
   detail,
   schoolCode,
   academicYear,
+  backHref,
 }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
+  backHref?: string;
 }) {
   const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<number>>(() => new Set());
+  if (detail.readOnly) {
+    return <AdminReadOnlyWorkspace detail={detail} schoolCode={schoolCode}
+      academicYear={academicYear} backHref={backHref} />;
+  }
   const phases = detail.phases.map((phase) =>
     phase.phaseId !== null && "locked" in phase && !phase.locked && completedPhaseIds.has(phase.phaseId)
       ? { ...phase, progress: "completed" as const, draftSaved: false }
@@ -798,7 +809,7 @@ export default function StudentPhaseWorkspace({
     : selected;
   return (
     <div className="space-y-6">
-      <StudentIdentity student={detail.student} readOnly={detail.readOnly} />
+      <StudentIdentity student={detail.student} />
       <PhaseNavigation studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
       <InactivePhasePanels studentId={detail.student.id} phases={phases}
@@ -811,15 +822,50 @@ export default function StudentPhaseWorkspace({
   );
 }
 
-function StudentIdentity({ student, readOnly }: {
+function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, backHref }: {
+  detail: HolisticStudentPhaseDetail;
+  schoolCode: string;
+  academicYear: string;
+  backHref?: string;
+}) {
+  return (
+    <div className="space-y-6">
+      <AdminStudentHeader student={detail.student} backHref={backHref} />
+      <InactivePhasePanels studentId={detail.student.id} phases={detail.phases}
+        selectedPhaseId={detail.selectedPhase.phaseId} />
+      <Card elevation="sm" className="overflow-hidden">
+        <PhaseNavigation readOnly studentId={detail.student.id} phases={detail.phases}
+          selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
+        <AdminSelectedPhase phase={selectedOpenPhase(detail)} selectedPhase={detail.selectedPhase}
+          studentId={detail.student.id} academicYear={academicYear} />
+      </Card>
+    </div>
+  );
+}
+
+function StudentIdentity({ student }: {
   student: HolisticStudentPhaseDetail["student"];
-  readOnly: boolean;
 }) {
   return <header className="flex flex-col gap-1 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
     <div>
       <h1 className="text-2xl font-bold text-text-primary">{student.name}</h1>
     </div>
-    {readOnly && <span className="text-sm font-medium text-text-muted">Read-only</span>}
+  </header>;
+}
+
+function AdminStudentHeader({ student, backHref }: {
+  student: HolisticStudentPhaseDetail["student"];
+  backHref?: string;
+}) {
+  return <header className="flex items-center gap-4">
+    {backHref && <Link href={backHref} aria-label="Back to Students and Progress"
+      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-card text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
+      <ArrowLeft aria-hidden="true" className="h-5 w-5" />
+    </Link>}
+    <div>
+      <h1 className="text-2xl font-bold text-text-primary">{student.name}</h1>
+      <p className="text-sm text-text-muted">Admin read-only view</p>
+    </div>
   </header>;
 }
 
@@ -847,12 +893,13 @@ function InactivePhasePanels({ studentId, phases, selectedPhaseId }: {
     aria-labelledby={phaseTabId(studentId, phase)} hidden />)}</>;
 }
 
-function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear }: {
+function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, readOnly = false }: {
   studentId: number;
   phases: HolisticStudentPhaseDetail["phases"];
   selectedPhaseId: number | null;
   schoolCode: string;
   academicYear: string;
+  readOnly?: boolean;
 }) {
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (!new Set(["ArrowLeft", "ArrowRight", "Home", "End"]).has(event.key)) return;
@@ -871,10 +918,51 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
     tabs[next].click();
   };
   return <nav role="tablist" aria-label="Holistic Phases" onKeyDown={onKeyDown}
-    className="flex gap-2 overflow-x-auto pb-2">
-    {phases.map((phase) => <PhaseNavigationLink key={`${phase.number}-${phase.title}`} phase={phase}
-      current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />)}
+    className={readOnly ? "flex overflow-x-auto border-b border-border" : "flex gap-2 overflow-x-auto pb-2"}>
+    {phases.map((phase) => readOnly
+      ? <AdminPhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
+        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />
+      : <PhaseNavigationLink key={`${phase.number}-${phase.title}`} phase={phase}
+        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />)}
   </nav>;
+}
+
+const ADMIN_PHASE_STAGE_TEXT: Record<PhaseStage, string> = {
+  Completed: "text-success",
+  Open: "text-info",
+  Skipped: "text-warning-text",
+  Locked: "text-text-muted",
+};
+
+function AdminPhaseTab({ phase, current, studentId, schoolCode, academicYear }: {
+  phase: PhaseNavigationItem;
+  current: boolean;
+  studentId: number;
+  schoolCode: string;
+  academicYear: string;
+}) {
+  if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
+    return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
+      aria-disabled="true" aria-selected="false" tabIndex={-1} disabled
+      className="min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-2 border-transparent px-3 py-2 text-left opacity-60">
+      <span className="block text-sm font-semibold text-text-muted">Phase {phase.number}</span>
+      <span className="mt-1 flex items-center gap-1 text-xs font-medium text-text-muted">
+        <Lock aria-hidden="true" className="h-3 w-3" />
+        Locked
+      </span>
+    </button>;
+  }
+  const stage = phaseStage(phase);
+  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear)}
+    id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
+    aria-controls={phasePanelId(studentId, phase)}
+    aria-label={`Phase ${phase.number} - ${phase.title} - ${stage}`}
+    className={`min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-2 px-3 py-2 text-left ${current ? "border-accent" : "border-transparent hover:bg-hover-bg"}`}>
+    <span className={`block text-sm font-semibold ${current ? "text-text-primary" : "text-text-muted"}`}>
+      Phase {phase.number}
+    </span>
+    <span className={`mt-1 block text-xs font-medium ${ADMIN_PHASE_STAGE_TEXT[stage]}`}>{stage}</span>
+  </Link>;
 }
 
 function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYear }: {
@@ -928,14 +1016,7 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
     className="space-y-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <PhaseHeading phase={phase} />
-    <div role="group" aria-label="Preparation panel" className="grid grid-cols-2 rounded-md border border-border lg:hidden">
-      <button type="button" aria-pressed={mobilePanel === "context"}
-        className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "context" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
-        onClick={() => setMobilePanel("context")}>Student Context</button>
-      <button type="button" aria-pressed={mobilePanel === "guidance"}
-        className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "guidance" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
-        onClick={() => setMobilePanel("guidance")}>Phase Guidance</button>
-    </div>
+    <PreparationSwitch mobilePanel={mobilePanel} onSelect={setMobilePanel} />
     <div className="grid gap-6 lg:grid-cols-2">
       <div className={`${mobilePanel === "context" ? "block" : "hidden"} lg:block lg:h-[32rem] lg:overflow-y-auto lg:pr-3`}>
         <StudentContext context={phase.context} />
@@ -951,6 +1032,234 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
       phase={phase} studentId={studentId} readOnly={readOnly}
       schoolCode={schoolCode} academicYear={academicYear} onSubmitted={() => onSubmitted(phase.phaseId)} />
   </section>;
+}
+
+function PreparationSwitch({ mobilePanel, onSelect }: {
+  mobilePanel: "context" | "guidance";
+  onSelect: (panel: "context" | "guidance") => void;
+}) {
+  return <div role="group" aria-label="Preparation panel" className="grid grid-cols-2 rounded-md border border-border lg:hidden">
+    <button type="button" aria-pressed={mobilePanel === "context"}
+      className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "context" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
+      onClick={() => onSelect("context")}>Student Context</button>
+    <button type="button" aria-pressed={mobilePanel === "guidance"}
+      className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "guidance" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
+      onClick={() => onSelect("guidance")}>Phase Guidance</button>
+  </div>;
+}
+
+function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear }: {
+  phase: OpenSelectedPhase | null;
+  selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
+  studentId: number;
+  academicYear: string;
+}) {
+  const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
+  const tabId = phaseTabId(studentId, selectedPhase);
+  const panelId = phasePanelId(studentId, selectedPhase);
+  if (!phase) {
+    return <p id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
+      className="py-10 text-center text-sm text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      This Phase is locked.
+    </p>;
+  }
+  return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
+    className="space-y-5 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-5">
+    <AdminPhaseContextHead phase={phase} studentId={studentId} academicYear={academicYear} />
+    <PreparationSwitch mobilePanel={mobilePanel} onSelect={setMobilePanel} />
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card elevation="sm"
+        className={`${mobilePanel === "context" ? "block" : "hidden"} p-4 lg:block lg:max-h-[30rem] lg:overflow-y-auto`}>
+        <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
+          <h3 className="text-base font-semibold text-text-primary">Student Context</h3>
+          <AdminContextSourceBadge context={phase.context} />
+        </div>
+        <AdminContextBlocks context={phase.context} />
+      </Card>
+      <Card elevation="sm"
+        className={`${mobilePanel === "guidance" ? "block" : "hidden"} p-4 lg:block lg:max-h-[30rem] lg:overflow-y-auto`}>
+        <div className="border-b border-border pb-3">
+          <h3 className="text-base font-semibold text-text-primary">Phase Guidance</h3>
+        </div>
+        <div className="pt-4">
+          <GuidancePreview markdown={phase.guidanceMarkdown} />
+        </div>
+      </Card>
+    </div>
+    <AdminNotesPanel phase={phase} />
+  </section>;
+}
+
+function contextSourceIsProfile(context: OpenSelectedPhase["context"]) {
+  if ("missing" in context) return context.missing === "Profile unavailable";
+  return context.label === "Student Profile";
+}
+
+function AdminPhaseContextHead({ phase, studentId, academicYear }: {
+  phase: OpenSelectedPhase;
+  studentId: number;
+  academicYear: string;
+}) {
+  const profileSource = contextSourceIsProfile(phase.context);
+  const progressLabel = phase.progress === "completed" ? "Completed"
+    : phase.progress === "skipped" ? "Skipped" : "Pending";
+  return <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h2 id="phase-heading" className="text-xl font-semibold text-text-primary">
+        Phase {phase.number} - {phase.title}
+      </h2>
+      <p className="mt-0.5 text-sm text-text-muted">
+        {profileSource ? "Student Profile context" : `Open Phase - ${progressLabel}`}
+      </p>
+    </div>
+    {profileSource && <AdminProfileRegeneration studentId={studentId} academicYear={academicYear} />}
+  </div>;
+}
+
+type AdminRegenerationState = "unknown" | "none" | "queued" | "running" | "completed" | "failed";
+
+function AdminProfileRegeneration({ studentId, academicYear }: {
+  studentId: number;
+  academicYear: string;
+}) {
+  const [state, setState] = useState<AdminRegenerationState>("unknown");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  const apiUrl = `/api/holistic-mentorship/profiles/${studentId}?${new URLSearchParams({
+    academic_year: academicYear,
+  })}`;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(apiUrl, { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body: { regeneration?: { state: AdminRegenerationState } | null } | null) => {
+        if (!body || controller.signal.aborted) return;
+        setState(body.regeneration?.state ?? "none");
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [apiUrl]);
+
+  const requestRegeneration = async () => {
+    if (!window.confirm("Request Profile regeneration?")) return;
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_key: crypto.randomUUID(), force: true }),
+      });
+      if (response.ok) {
+        setState("queued");
+        setMessage({ error: false, text: "Regeneration queued." });
+      } else {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        setMessage({ error: true, text: body.error || `Unable to queue regeneration (${response.status})` });
+      }
+    } catch {
+      setMessage({ error: true, text: "Could not confirm regeneration. Refresh before retrying." });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (state === "unknown") return null;
+  return <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+    {["queued", "running"].includes(state)
+      ? <Badge variant="info" className="gap-1">
+          <RefreshCw aria-hidden="true" className="h-3 w-3" />
+          Regeneration {state}
+        </Badge>
+      : <Button type="button" variant="secondary" disabled={submitting} aria-busy={submitting}
+          onClick={() => void requestRegeneration()}>
+          <RefreshCw aria-hidden="true" className="h-4 w-4" />
+          Request Profile regeneration
+        </Button>}
+    {message && <p role="status" className={`text-sm ${message.error ? "text-danger" : "text-success"}`}>
+      {message.text}
+    </p>}
+  </div>;
+}
+
+function AdminContextSourceBadge({ context }: { context: OpenSelectedPhase["context"] }) {
+  const label = "missing" in context
+    ? (context.missing === "Profile unavailable" ? "Student Profile" : null)
+    : context.label.startsWith("From Phase") ? context.label.split(" - ")[0] : context.label;
+  return label ? <Badge variant="info" className="shrink-0">{label}</Badge> : null;
+}
+
+function AdminContextBlocks({ context }: { context: OpenSelectedPhase["context"] }) {
+  if ("missing" in context) return <p className="pt-4 text-sm text-text-muted">{context.missing}</p>;
+  return <div className="space-y-4 pt-4">
+    {context.label && <div>
+      <h4 className="text-sm font-semibold text-success">{context.label}</h4>
+      {context.lastUpdatedAt && <p className="mt-1 text-sm text-text-primary">
+        Last updated <span className="font-mono">{formatDate(context.lastUpdatedAt)}</span>
+      </p>}
+    </div>}
+    {context.items.map((item, index) => <div key={`${item.label}-${index}`}>
+      <h4 className="text-sm font-semibold text-success">{item.label}</h4>
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</p>
+    </div>)}
+  </div>;
+}
+
+function AdminNotesPanel({ phase }: { phase: OpenSelectedPhase }) {
+  const submitted = phase.notes?.state === "submitted" ? phase.notes : null;
+  return <Card elevation="sm" className="p-4 sm:p-5">
+    <h3 className="text-base font-semibold text-text-primary">Post-Session Notes</h3>
+    <p className="mt-1 text-sm text-text-muted">
+      Submitted Notes are visible here. Draft answers are never shown to Admins.
+    </p>
+    {submitted
+      ? <AdminSubmittedNotes notes={submitted} questions={phase.questions} />
+      : <AdminInfoAlert icon={EyeOff} title="Mentor draft is not visible">
+          This Phase is Pending. Admins can read Notes only after the Mentor submits them.
+        </AdminInfoAlert>}
+  </Card>;
+}
+
+function AdminSubmittedNotes({ notes, questions }: {
+  notes: NonNullable<OpenSelectedPhase["notes"]>;
+  questions: OpenSelectedPhase["questions"];
+}) {
+  const questionText = new Map(questions.map((question) => [question.questionId, question.text]));
+  const submittedAt = notes.firstSubmittedAt ?? notes.lastEditedAt;
+  return <>
+    <p className="mt-4 text-sm text-text-muted">
+      {notes.authorName ? `Submitted by ${notes.authorName} on ` : "Submitted on "}
+      <span className="font-mono">{formatDateTime(submittedAt)}</span>
+    </p>
+    <div className="mt-4 space-y-4">
+      {(notes.answers ?? []).map((answer) => <div key={answer.questionId}>
+        <h4 className="text-sm font-semibold text-success">
+          {questionText.get(answer.questionId) ?? answer.question}
+        </h4>
+        <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-info bg-bg-card-alt p-3 text-sm text-text-primary">
+          {answer.answer}
+        </blockquote>
+      </div>)}
+    </div>
+    <AdminInfoAlert icon={Lock} title="Read-only for Admins">
+      Only the author while currently assigned can edit submitted Notes.
+    </AdminInfoAlert>
+  </>;
+}
+
+function AdminInfoAlert({ icon: Icon, title, children }: {
+  icon: LucideIcon;
+  title: string;
+  children: ReactNode;
+}) {
+  return <div className="mt-4 flex items-start gap-3 rounded-md bg-info-bg p-3 text-sm text-text-secondary">
+    <Icon aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+    <div>
+      <p className="font-semibold text-text-primary">{title}</p>
+      <p>{children}</p>
+    </div>
+  </div>;
 }
 
 function PhaseHeading({ phase }: { phase: OpenSelectedPhase }) {

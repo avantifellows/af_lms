@@ -36,14 +36,13 @@ describe("ProgressWorkspace", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows fixed Program, dynamic years, required row details, counts, and drill-down", async () => {
-    render(<ProgressWorkspace />);
+  it("reports dynamic years and shows required row details, counts, and drill-down", async () => {
+    const onAcademicYears = vi.fn();
+    render(<ProgressWorkspace onAcademicYears={onAcademicYears} />);
 
     expect(await screen.findByText("Student One")).toBeInTheDocument();
-    expect(screen.getByLabelText("Program")).toHaveValue("1");
-    expect(screen.getByLabelText("Program")).toBeDisabled();
-    expect(screen.getByRole("option", { name: "2023-2024" })).toBeInTheDocument();
-    expect(screen.getByText("73")).toBeInTheDocument();
+    expect(onAcademicYears).toHaveBeenCalledWith(["2026-2027", "2025-2026", "2023-2024"]);
+    expect(screen.getAllByText("73").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("mentor@example.com")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Completed on" })).toBeInTheDocument();
@@ -69,18 +68,18 @@ describe("ProgressWorkspace", () => {
   });
 
   it("clears year-specific selectors when the Academic Year changes", async () => {
-    render(<ProgressWorkspace />);
+    const view = render(<ProgressWorkspace academicYear="2026-2027" />);
     await screen.findByText("Student One");
     fireEvent.change(screen.getByLabelText("Phase lens"), { target: { value: "70" } });
     fireEvent.change(screen.getByLabelText("Filter by School"), { target: { value: "SCH001" } });
     fireEvent.change(screen.getByLabelText("Filter by Mentor"), { target: { value: "9" } });
-    fireEvent.change(screen.getByLabelText("Academic Year"), { target: { value: "2025-2026" } });
+    view.rerender(<ProgressWorkspace academicYear="2025-2026" />);
 
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
       "/api/holistic-mentorship/progress?academic_year=2025-2026&page=1&sort=school&direction=asc",
       expect.anything()
     ));
-    expect(screen.getByText("Earlier academic years are read-only.")).toBeInTheDocument();
+    expect(screen.getByText(/Earlier academic years are read-only/)).toBeInTheDocument();
   });
 
   it("distinguishes an Academic Year with no Mappings from filters with no matches", async () => {
@@ -125,8 +124,7 @@ describe("ProgressWorkspace", () => {
       expect.anything(),
     ]]);
     expect(screen.getByLabelText("Filter by School")).toHaveValue("SCH001");
-    expect(screen.getByLabelText("Sort results")).toHaveValue("progress");
-    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("Page 2 of 2")).toBeInTheDocument();
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 420 }));
   });
 
@@ -146,8 +144,7 @@ describe("ProgressWorkspace", () => {
     await screen.findByText("Student One");
 
     fireEvent.change(screen.getByLabelText("Filter by School"), { target: { value: "SCH001" } });
-    fireEvent.change(screen.getByLabelText("Sort results"), { target: { value: "phase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ascending" }));
+    fireEvent.click(screen.getByRole("button", { name: "School" }));
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
 
     await waitFor(() => expect(click).toHaveBeenCalled());
@@ -155,7 +152,7 @@ describe("ProgressWorkspace", () => {
     expect(exportCall).toBeDefined();
     const query = new URL(String(exportCall![0]), "http://localhost").searchParams;
     expect(Object.fromEntries(query)).toMatchObject({
-      academic_year: "2026-2027", school_code: "SCH001", sort: "phase", direction: "desc", format: "csv",
+      academic_year: "2026-2027", school_code: "SCH001", sort: "school", direction: "desc", format: "csv",
     });
     expect(query.has("page")).toBe(false);
     expect(createObjectURL).toHaveBeenCalled();

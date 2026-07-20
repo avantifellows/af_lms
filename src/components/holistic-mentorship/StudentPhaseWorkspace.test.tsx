@@ -35,6 +35,29 @@ function dispatchTraverse(navigation: EventTarget, destinationKey: string) {
   return event;
 }
 
+const adminDetail = (overrides: Partial<OpenPhase> = {}): HolisticStudentPhaseDetail => ({
+  student: { id: 41, name: "Meera Singh", externalStudentId: "S41", grade: 12 as const },
+  phases: [
+    { phaseId: 70, number: 5, title: "Reconnecting", locked: false as const, active: false, progress: "completed" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027" },
+    { phaseId: 73, number: 6, title: "Decision Making", locked: false as const, active: true, progress: "pending" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027" },
+  ],
+  selectedPhase: {
+    phaseId: 73, number: 6, title: "Decision Making", locked: false as const, active: true,
+    progress: "pending" as const, draftSaved: false, grade: 12 as const, academicYear: "2026-2027",
+    revision: 5, mappingId: 300, notesRevision: 0, canEditNotes: false,
+    guidanceMarkdown: "## Prepare\nListen first.",
+    context: {
+      label: "From Phase 5 - Reconnecting",
+      items: [{ label: "What changed?", content: "More settled" }],
+      lastUpdatedAt: "2026-07-13T00:00:00Z",
+    },
+    questions: [{ questionId: 91, text: "Which decision is the student working through?", position: 1 }],
+    notes: null,
+    ...overrides,
+  },
+  readOnly: true,
+});
+
 const teacherDetail = (notes: OpenPhase["notes"] = null): HolisticStudentPhaseDetail => ({
   student: { id: 41, name: "Asha Rao", externalStudentId: "S41", grade: 11 as const },
   phases: [{ phaseId: 73, number: 1, title: "Belonging", locked: false as const, active: true, progress: "pending" as const, draftSaved: false, grade: 11 as const, academicYear: "2026-2027" }],
@@ -93,6 +116,88 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.getByText("From Phase 4 - Building confidence")).toBeInTheDocument();
     expect(screen.getByText("A weekly plan")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("shows the Admin read-only header with back navigation and underline Phase tabs", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+      backHref="/admin/holistic-mentorship" detail={adminDetail()} />);
+
+    const back = screen.getByRole("link", { name: "Back to Students and Progress" });
+    expect(back).toHaveAttribute("href", "/admin/holistic-mentorship");
+    expect(screen.getByRole("heading", { name: "Meera Singh" })).toBeInTheDocument();
+    expect(screen.getByText("Admin read-only view")).toBeInTheDocument();
+    expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Phase 6 - Decision Making" })).toBeInTheDocument();
+    expect(screen.getByText("Open Phase - Pending")).toBeInTheDocument();
+    const selectedTab = screen.getByRole("tab", { name: /Phase 6/ });
+    expect(selectedTab).toHaveAttribute("aria-selected", "true");
+    expect(selectedTab.className).toContain("border-accent");
+    expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("shows submitted Notes with answers and an Admin read-only notice", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+      notes: {
+        state: "submitted",
+        revision: 3,
+        authorName: "Divya Menon",
+        firstSubmittedAt: "2026-07-14T09:48:00Z",
+        lastEditedAt: "2026-07-14T09:48:00Z",
+        answers: [{
+          questionId: 91,
+          question: "Which decision is the student working through?",
+          answer: "Comparing engineering pathways",
+        }],
+      },
+    })} />);
+
+    expect(screen.getByText(/Submitted by Divya Menon on/)).toBeInTheDocument();
+    expect(screen.getByText("Comparing engineering pathways")).toBeInTheDocument();
+    expect(screen.getByText("Read-only for Admins")).toBeInTheDocument();
+    expect(screen.getByText("Only the author while currently assigned can edit submitted Notes."))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Notes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("hides Mentor draft answers from Admins while the Phase is Pending", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+      notes: {
+        state: "draft",
+        revision: 2,
+        authorName: "Divya Menon",
+        firstSubmittedAt: null,
+        lastEditedAt: "2026-07-14T09:48:00Z",
+      },
+    })} />);
+
+    expect(screen.getByText("Mentor draft is not visible")).toBeInTheDocument();
+    expect(screen.getByText("This Phase is Pending. Admins can read Notes only after the Mentor submits them."))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/Draft saved/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("offers Profile regeneration when the Context source is the Student Profile", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ summaries: [], regeneration: null }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+      context: { label: "Student Profile", items: [{ label: "Journey", content: "Summary" }] },
+    })} />);
+
+    expect(screen.getByText("Student Profile context")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Request Profile regeneration" }));
+    await screen.findByText("Regeneration queued.");
+    expect(window.confirm).toHaveBeenCalledWith("Request Profile regeneration?");
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
+    expect(post[0]).toBe("/api/holistic-mentorship/profiles/41");
+    expect(JSON.parse(String(post[1].body))).toMatchObject({ force: true });
   });
 
   it("autosaves a partial answer only after a short pause", async () => {

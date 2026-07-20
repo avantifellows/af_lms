@@ -111,17 +111,18 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
   if (!detail) notFound();
   redirectFromLockedPhase(detail, request, access.permission.role);
 
+  const backHref = studentPhaseBackHref(access.permission.role, request.schoolCode);
   return (
     <div className="min-h-screen bg-bg">
       <PageHeader
         title="Holistic Mentorship"
-        subtitle={access.school?.name}
-        backHref={studentPhaseBackHref(access.permission.role, request.schoolCode)}
+        subtitle={detail.readOnly ? undefined : access.school?.name}
+        backHref={detail.readOnly ? undefined : backHref}
         userEmail={session?.user?.email ?? undefined}
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <StudentPhaseWorkspace key={detail.student.id} detail={detail}
-          schoolCode={request.schoolCode} academicYear={request.academicYear} />
+          schoolCode={request.schoolCode} academicYear={request.academicYear} backHref={backHref} />
       </main>
     </div>
   );

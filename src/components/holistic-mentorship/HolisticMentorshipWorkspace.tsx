@@ -1,14 +1,18 @@
 "use client";
 
 import { ClipboardList, Users } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 
-import { Card } from "@/components/ui";
+import { Card, Select } from "@/components/ui";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 import PhasePlanSetup from "./PhasePlanSetup";
 import ProgressWorkspace from "./ProgressWorkspace";
 import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
 
 type WorkspaceMode = "teacher" | "admin";
+
+const [currentStartYear] = CURRENT_ACADEMIC_YEAR.split("-").map(Number);
+const PRIOR_ACADEMIC_YEAR = `${currentStartYear - 1}-${currentStartYear}`;
 
 const WORKSPACES = {
   teacher: [
@@ -44,6 +48,17 @@ export default function HolisticMentorshipWorkspace({
   const Icon = active.icon;
   const tabSetId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [academicYear, setAcademicYear] = useState(CURRENT_ACADEMIC_YEAR);
+  const [academicYears, setAcademicYears] = useState<string[]>([CURRENT_ACADEMIC_YEAR, PRIOR_ACADEMIC_YEAR]);
+  const mergeAcademicYears = useCallback((years: string[]) => {
+    if (years.length === 0) return;
+    setAcademicYears((current) => {
+      const merged = Array.from(new Set([...years, PRIOR_ACADEMIC_YEAR]));
+      return merged.length === current.length && merged.every((year, index) => year === current[index])
+        ? current
+        : merged;
+    });
+  }, []);
 
   const activateWorkspace = (workspaceId: string) => {
     setActiveId(workspaceId);
@@ -67,9 +82,26 @@ export default function HolisticMentorshipWorkspace({
 
   return (
     <section className="min-w-0 max-w-full space-y-4">
+      {mode === "admin" && (
+        <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
+          <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+            Program
+            <Select aria-label="Program" className="mt-1 w-full font-normal normal-case tracking-normal" value={PROGRAM_IDS.COE} disabled>
+              <option value={PROGRAM_IDS.COE}>{PROGRAM_IDS.COE} - {PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE]}</option>
+            </Select>
+          </label>
+          <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+            Academic Year
+            <Select aria-label="Academic Year" className="mt-1 w-full font-mono font-normal normal-case tracking-normal"
+              value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}>
+              {academicYears.map((year) => <option key={year}>{year}</option>)}
+            </Select>
+          </label>
+        </div>
+      )}
       <div
         aria-label="Holistic Mentorship sections"
-        className="flex gap-2 overflow-x-auto border-b border-border pb-3"
+        className="flex gap-1 overflow-x-auto border-b border-border"
         role="tablist"
       >
         {workspaces.map((workspace, index) => (
@@ -84,10 +116,10 @@ export default function HolisticMentorshipWorkspace({
             tabIndex={workspace.id === active.id ? 0 : -1}
             onClick={() => activateWorkspace(workspace.id)}
             onKeyDown={(event) => handleTabKeyDown(event, index)}
-            className={`min-h-11 shrink-0 rounded-md px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-1 ${
+            className={`-mb-px min-h-12 shrink-0 border-b-2 px-4 text-xs font-extrabold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-1 ${
               workspace.id === active.id
-                ? "bg-accent text-text-on-accent"
-                : "bg-bg-card-alt text-text-secondary hover:bg-hover-bg hover:text-text-primary"
+                ? "border-accent text-accent"
+                : "border-transparent text-text-secondary hover:bg-accent/5 hover:text-text-primary"
             }`}
           >
             {workspace.label}
@@ -109,9 +141,9 @@ export default function HolisticMentorshipWorkspace({
             canEdit={canEdit}
           />
         ) : mode === "admin" && active.id === "phases" ? (
-          <PhasePlanSetup />
+          <PhasePlanSetup academicYear={academicYear} />
         ) : mode === "admin" && active.id === "progress" ? (
-          <ProgressWorkspace />
+          <ProgressWorkspace academicYear={academicYear} onAcademicYears={mergeAcademicYears} />
         ) : (
           <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">
             <Icon aria-hidden="true" className="h-7 w-7 text-text-muted" />

@@ -15,7 +15,12 @@ vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: mockRedire
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: mockAccess }));
 vi.mock("@/lib/holistic-student-phase", () => ({ getHolisticStudentPhase: mockDetail }));
 vi.mock("@/components/holistic-mentorship/StudentPhaseWorkspace", () => ({
-  default: ({ detail }: { detail: { student: { name: string } } }) => <h1>{detail.student.name}</h1>,
+  default: ({ detail, backHref }: { detail: { student: { name: string } }; backHref?: string }) => (
+    <div>
+      {backHref && <a href={backHref}>Back to Students and Progress</a>}
+      <h1>{detail.student.name}</h1>
+    </div>
+  ),
 }));
 
 import StudentPhasePage from "./page";

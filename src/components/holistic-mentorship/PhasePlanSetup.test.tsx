@@ -12,10 +12,9 @@ describe("PhasePlanSetup", () => {
   it("offers blank and prior-year copy paths when the current Plan does not exist", async () => {
     render(<PhasePlanSetup />);
 
-    expect(await screen.findByRole("button", { name: "Create blank Plan" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Program")).toHaveValue("1");
-    expect(screen.getByLabelText("Program")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Copy 2025-2026 Plan" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Start blank" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy previous year" })).toBeInTheDocument();
+    expect(screen.getByText(`Create the 2026-2027 Phase Plan`)).toBeInTheDocument();
   });
 
   it("edits and reorders questions on an opened unused Phase after confirmation", async () => {
@@ -39,7 +38,7 @@ describe("PhasePlanSetup", () => {
     render(<PhasePlanSetup />);
 
     await user.click(await screen.findByRole("button", { name: /Opened title/ }));
-    expect(screen.getByLabelText("Grade")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Grade 11" })).toBeEnabled();
     expect(screen.getByLabelText("Title")).toBeEnabled();
     expect(screen.getByLabelText("Question 1")).toBeEnabled();
 
