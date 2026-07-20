@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { getDbServiceConfig } from "@/lib/db-service-config";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   parseStudentAdditionUpload,
@@ -185,18 +186,14 @@ async function proxyRowsToDbService({
   upload: { id: string; filename: string };
   period: ReturnType<typeof deriveLmsEnrollmentPeriod>;
 }) {
-  const dbServiceUrl = process.env.DB_SERVICE_URL?.replace(/\/+$/, "");
-  const dbServiceToken = process.env.DB_SERVICE_TOKEN;
-  if (!dbServiceUrl || !dbServiceToken) {
+  const dbService = getDbServiceConfig();
+  if (!dbService) {
     return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
   }
 
-  const response = await fetch(`${dbServiceUrl}/lms/students/bulk-create-with-enrollments`, {
+  const response = await fetch(`${dbService.baseUrl}/lms/students/bulk-create-with-enrollments`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${dbServiceToken}`,
-    },
+    headers: dbService.headers,
     body: JSON.stringify({
       actor: access.actor,
       school: { code: school.code, udise_code: school.udise_code },

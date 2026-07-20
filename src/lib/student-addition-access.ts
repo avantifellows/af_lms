@@ -101,6 +101,20 @@ function studentAdditionActor(permission: UserPermission, email: string) {
   };
 }
 
+function allowNvsStudentAccess(
+  permission: UserPermission,
+  email: string,
+  scope: StudentWriteScopeRow,
+): Extract<StudentAdditionStudentAccessResult, { ok: true }> {
+  return {
+    ok: true,
+    permission,
+    programId: PROGRAM_IDS.NVS,
+    school: { code: scope.code, udise_code: scope.udise_code },
+    actor: studentAdditionActor(permission, email),
+  };
+}
+
 function actorHasProgramAccess(permission: UserPermission, programId: number) {
   return getProgramContextSync(permission).programIds.includes(programId);
 }
@@ -316,13 +330,7 @@ export async function requireStudentAdditionStudentAccess(
   if (!scope.has_program_enrollment) return deny(403);
   if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
 
-  return {
-    ok: true,
-    permission,
-    programId: PROGRAM_IDS.NVS,
-    school: { code: scope.code, udise_code: scope.udise_code },
-    actor: studentAdditionActor(permission, email),
-  };
+  return allowNvsStudentAccess(permission, email, scope);
 }
 
 export async function requireStudentDropoutUndoAccess(
@@ -338,11 +346,5 @@ export async function requireStudentDropoutUndoAccess(
   if (!(await hasSchoolAccess(permission, email, scope))) return deny(403);
   if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
 
-  return {
-    ok: true,
-    permission,
-    programId: PROGRAM_IDS.NVS,
-    school: { code: scope.code, udise_code: scope.udise_code },
-    actor: studentAdditionActor(permission, email),
-  };
+  return allowNvsStudentAccess(permission, email, scope);
 }

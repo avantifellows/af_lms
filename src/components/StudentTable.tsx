@@ -102,6 +102,21 @@ interface StudentTableProps {
   onDataChanged?: () => void;
 }
 
+function studentBelongsToProgram(student: Student, programId: number) {
+  if (Array.isArray(student.student_program_ids)) {
+    return student.student_program_ids.map(Number).includes(programId);
+  }
+  return Number(student.program_id) === programId;
+}
+
+function userCanManageProgram(
+  isAdmin: boolean,
+  userProgramIds: number[] | null,
+  programId: number,
+) {
+  return isAdmin || Boolean(userProgramIds?.includes(programId));
+}
+
 function formatDate(dateString: string | null): string {
   if (!dateString) return "—";
   const d = new Date(dateString);
@@ -578,11 +593,8 @@ export default function StudentTable({
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
-    const belongsToProgram = Array.isArray(student.student_program_ids)
-      ? student.student_program_ids.map(Number).includes(effectiveProgramId)
-      : Number(student.program_id) === effectiveProgramId;
-    if (!belongsToProgram) return false;
-    return isAdmin || Boolean(userProgramIds?.includes(effectiveProgramId));
+    if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
+    return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
 
   const canUndoNvsDropout = (student: Student): boolean =>

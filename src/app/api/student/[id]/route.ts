@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getDbServiceConfig } from "@/lib/db-service-config";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
 import { canonicalizeStudentEditPayload } from "@/lib/student-addition-fields";
@@ -62,9 +63,8 @@ export async function PATCH(
       return NextResponse.json({ error: access.error }, { status: access.status });
     }
 
-    const dbServiceUrl = process.env.DB_SERVICE_URL?.replace(/\/+$/, "");
-    const dbServiceToken = process.env.DB_SERVICE_TOKEN;
-    if (!dbServiceUrl || !dbServiceToken) {
+    const dbService = getDbServiceConfig();
+    if (!dbService) {
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
     }
 
@@ -82,13 +82,10 @@ export async function PATCH(
     }
 
     const response = await fetch(
-      `${dbServiceUrl}/lms/students/${id}/update-with-enrollments`,
+      `${dbService.baseUrl}/lms/students/${id}/update-with-enrollments`,
       {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${dbServiceToken}`,
-        },
+        headers: dbService.headers,
         body: JSON.stringify({
           actor: access.actor,
           school: access.school,

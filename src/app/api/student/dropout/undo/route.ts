@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { query } from "@/lib/db";
+import { getDbServiceConfig } from "@/lib/db-service-config";
 import { requireStudentDropoutUndoAccess } from "@/lib/student-addition-access";
 
 interface StudentRow {
@@ -43,18 +44,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Student has no identifier" }, { status: 400 });
     }
 
-    const dbServiceUrl = process.env.DB_SERVICE_URL?.replace(/\/+$/, "");
-    const dbServiceToken = process.env.DB_SERVICE_TOKEN;
-    if (!dbServiceUrl || !dbServiceToken) {
+    const dbService = getDbServiceConfig();
+    if (!dbService) {
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
     }
 
-    const response = await fetch(`${dbServiceUrl}/lms/students/undo-program-dropout`, {
+    const response = await fetch(`${dbService.baseUrl}/lms/students/undo-program-dropout`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${dbServiceToken}`,
-      },
+      headers: dbService.headers,
       body: JSON.stringify({
         ...(student.student_id
           ? { student_id: student.student_id }

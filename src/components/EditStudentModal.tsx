@@ -78,21 +78,29 @@ function fullName(student: Student) {
   return [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
 }
 
+function textValue(value: string | null | undefined) {
+  return value || "";
+}
+
+function editGender(gender: string | null) {
+  return gender === "Others" ? "Other" : textValue(gender);
+}
+
 function initialFormData(student: Student) {
   const legacyCategory = legacyPwdCategory(student.category);
   return {
     first_name: fullName(student),
-    phone: student.phone || "",
-    gender: student.gender === "Others" ? "Other" : student.gender || "",
+    phone: textValue(student.phone),
+    gender: editGender(student.gender),
     date_of_birth: formatDateForInput(student.date_of_birth),
     category: legacyCategory.category,
     physically_handicapped: Boolean(student.physically_handicapped ?? legacyCategory.pwd),
-    stream: student.stream || "",
-    board_stream: student.board_stream || "",
-    father_name: student.father_name || "",
-    annual_family_income: student.annual_family_income || "",
+    stream: textValue(student.stream),
+    board_stream: textValue(student.board_stream),
+    father_name: textValue(student.father_name),
+    annual_family_income: textValue(student.annual_family_income),
     g10_board: student.g10_board === CBSE_BOARD ? CBSE_BOARD : "Others",
-    grade: student.grade ? String(student.grade) : "",
+    grade: textValue(student.grade?.toString()),
   };
 }
 
