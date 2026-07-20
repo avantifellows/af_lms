@@ -2,6 +2,8 @@
 
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   SearchX,
   UserMinus,
   UserRound,
@@ -33,6 +35,7 @@ interface SavedFilters {
   search: string;
   grade: "" | "11" | "12";
   assignment: "" | "unassigned" | "other";
+  page: number;
   menteeSearch: string;
   menteeGrade: "" | "11" | "12";
   menteeStatus: "" | "draft" | "pending" | "completed" | "none";
@@ -42,10 +45,13 @@ const EMPTY_FILTERS: SavedFilters = {
   search: "",
   grade: "",
   assignment: "",
+  page: 1,
   menteeSearch: "",
   menteeGrade: "",
   menteeStatus: "",
 };
+
+const ROSTER_PAGE_SIZE = 10;
 
 const FIELD_LABEL_CLASSES =
   "block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
@@ -77,6 +83,7 @@ function savedFilters(schoolCode: string): SavedFilters {
       search: typeof parsed.search === "string" ? parsed.search : "",
       grade: savedGrade(parsed.grade),
       assignment: savedAssignment(parsed.assignment),
+      page: Number.isInteger(parsed.page) && (parsed.page as number) >= 1 ? (parsed.page as number) : 1,
       menteeSearch: typeof parsed.menteeSearch === "string" ? parsed.menteeSearch : "",
       menteeGrade: savedGrade(parsed.menteeGrade),
       menteeStatus: savedMenteeStatus(parsed.menteeStatus),
@@ -264,6 +271,12 @@ export default function TeacherMappingWorkspace({
 
   const roster = rosterStudents(students, actorUserId);
   const visibleRoster = visibleRosterStudents(roster, filters);
+  const rosterPageCount = Math.max(1, Math.ceil(visibleRoster.length / ROSTER_PAGE_SIZE));
+  const rosterPage = Math.min(Math.max(1, filters.page), rosterPageCount);
+  const pagedRoster = visibleRoster.slice(
+    (rosterPage - 1) * ROSTER_PAGE_SIZE,
+    rosterPage * ROSTER_PAGE_SIZE
+  );
   const mentees = students.filter((student) => student.ownership?.mentorUserId === actorUserId);
   const shownMentees = visibleMentees(mentees, filters);
 
@@ -276,8 +289,12 @@ export default function TeacherMappingWorkspace({
   };
 
   const changeFilter = (updates: Partial<SavedFilters>) => {
-    if ("search" in updates || "grade" in updates || "assignment" in updates) setSelected([]);
-    setFilters((current) => ({ ...current, ...updates }));
+    const next = { ...updates };
+    if ("search" in updates || "grade" in updates || "assignment" in updates) {
+      setSelected([]);
+      next.page = 1;
+    }
+    setFilters((current) => ({ ...current, ...next }));
   };
 
   const assign = async () => {
@@ -351,7 +368,10 @@ export default function TeacherMappingWorkspace({
       ) : (
         <>
           <AssignmentRoster
-            students={visibleRoster}
+            students={pagedRoster}
+            visibleCount={visibleRoster.length}
+            page={rosterPage}
+            pageCount={rosterPageCount}
             allCount={roster.length}
             filters={filters}
             canEdit={canEdit}
@@ -361,7 +381,7 @@ export default function TeacherMappingWorkspace({
             onOpenChange={setAssignOpen}
             onFilterChange={changeFilter}
             onToggle={toggle}
-            onSelectShown={() => setSelected(visibleRoster.map((student) => student.studentId))}
+            onSelectShown={() => setSelected(pagedRoster.map((student) => student.studentId))}
             onAssign={assign}
           />
           <MenteesSection
@@ -381,8 +401,11 @@ export default function TeacherMappingWorkspace({
   );
 }
 
-function AssignmentRoster({ students, allCount, filters, canEdit, selected, busy, open, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign }: {
+function AssignmentRoster({ students, visibleCount, page, pageCount, allCount, filters, canEdit, selected, busy, open, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign }: {
   students: Student[];
+  visibleCount: number;
+  page: number;
+  pageCount: number;
   allCount: number;
   filters: SavedFilters;
   canEdit: boolean;
@@ -412,7 +435,10 @@ function AssignmentRoster({ students, allCount, filters, canEdit, selected, busy
       <RosterToolbar filters={filters} allCount={allCount} canEdit={canEdit}
         selectedCount={selected.length} busy={busy} onFilterChange={onFilterChange} onAssign={onAssign} />
       <RosterTable students={students} allCount={allCount} canEdit={canEdit} selected={selected}
+        page={page} visibleCount={visibleCount}
         onToggle={onToggle} onClearFilters={() => onFilterChange({ search: "", grade: "", assignment: "" })} />
+      {visibleCount > 0 && <RosterPagination page={page} pageCount={pageCount} total={visibleCount}
+        onPageChange={(nextPage) => onFilterChange({ page: nextPage })} />}
       <div className="flex min-h-16 flex-col justify-between gap-2 border-t border-border px-4 py-2 sm:flex-row sm:items-center">
         <span className="text-xs text-text-muted">
           You can view full mentorship data only after a Student is assigned to you.
@@ -425,6 +451,36 @@ function AssignmentRoster({ students, allCount, filters, canEdit, selected, busy
       </div>
     </div>
   </details>;
+}
+
+function RosterPagination({ page, pageCount, total, onPageChange }: {
+  page: number;
+  pageCount: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  const start = (page - 1) * ROSTER_PAGE_SIZE + 1;
+  const end = Math.min(page * ROSTER_PAGE_SIZE, total);
+  return <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2">
+    <span className="text-xs text-text-muted">
+      Showing <span className="font-mono font-semibold text-text-secondary">{start}-{end}</span> of{" "}
+      <span className="font-mono font-semibold text-text-secondary">{total}</span> Students
+    </span>
+    <div className="flex items-center gap-1">
+      <Button type="button" variant="icon" title="Previous page" aria-label="Previous page"
+        disabled={page === 1} onClick={() => onPageChange(page - 1)}>
+        <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+      </Button>
+      <span aria-label={`Page ${page} of ${pageCount}`}
+        className="px-1 font-mono text-xs font-bold text-text-secondary">
+        {page} / {pageCount}
+      </span>
+      <Button type="button" variant="icon" title="Next page" aria-label="Next page"
+        disabled={page === pageCount} onClick={() => onPageChange(page + 1)}>
+        <ChevronRight aria-hidden="true" className="h-4 w-4" />
+      </Button>
+    </div>
+  </div>;
 }
 
 function RosterToolbar({ filters, allCount, canEdit, selectedCount, busy, onFilterChange, onAssign }: {
@@ -470,11 +526,13 @@ function RosterToolbar({ filters, allCount, canEdit, selectedCount, busy, onFilt
   </div>;
 }
 
-function RosterTable({ students, allCount, canEdit, selected, onToggle, onClearFilters }: {
+function RosterTable({ students, allCount, canEdit, selected, page, visibleCount, onToggle, onClearFilters }: {
   students: Student[];
   allCount: number;
   canEdit: boolean;
   selected: number[];
+  page: number;
+  visibleCount: number;
   onToggle: (studentId: number) => void;
   onClearFilters: () => void;
 }) {
@@ -492,7 +550,8 @@ function RosterTable({ students, allCount, canEdit, selected, onToggle, onClearF
   }
   return <>
     <p role="status" aria-live="polite" className="sr-only">
-      Showing {studentCount(students.length)}.
+      Showing Students {(page - 1) * ROSTER_PAGE_SIZE + 1} to{" "}
+      {(page - 1) * ROSTER_PAGE_SIZE + students.length} of {visibleCount}.
     </p>
     <div role="region" aria-label="Student assignment results" tabIndex={0}
       className="overflow-x-auto border-t border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">

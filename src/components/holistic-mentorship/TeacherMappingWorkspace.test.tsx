@@ -80,7 +80,7 @@ describe("TeacherMappingWorkspace", () => {
     expect(within(table).queryByText("My Mentee")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Student assignment results" }))
       .toHaveAttribute("tabindex", "0");
-    expect(screen.getByText("Showing 2 Students.")).toHaveAttribute("role", "status");
+    expect(screen.getByText("Showing Students 1 to 2 of 2.")).toHaveAttribute("role", "status");
 
     const menteeCard = screen.getByRole("article");
     expect(within(menteeCard).getByRole("link", { name: "Open My Mentee" })).toBeInTheDocument();
@@ -97,6 +97,49 @@ describe("TeacherMappingWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("Filter by Assignment"), "other");
     expect(await within(table).findByText("Another Mentee")).toBeInTheDocument();
     expect(within(table).queryByText("Available Student")).not.toBeInTheDocument();
+  });
+
+  it("paginates the roster to 10 Students per page", async () => {
+    const students = Array.from({ length: 23 }, (_, index) => ({
+      studentId: 100 + index,
+      name: `Student ${String(index + 1).padStart(2, "0")}`,
+      externalStudentId: `ST-${100 + index}`,
+      grade: 11,
+      activePhaseId: null,
+      activeNotesState: null,
+      ownership: null,
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ actorUserId: 9, students }),
+    }));
+    const user = userEvent.setup();
+
+    render(<TeacherMappingWorkspace schoolCode="SCH001" />);
+
+    const table = await screen.findByRole("table", { name: "Student assignment results" });
+    expect(within(table).getAllByRole("row")).toHaveLength(11);
+    expect(within(table).getByText("Student 01")).toBeInTheDocument();
+    expect(within(table).queryByText("Student 11")).not.toBeInTheDocument();
+    expect(screen.getByText("1 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(within(table).getByText("Student 11")).toBeInTheDocument();
+    expect(within(table).queryByText("Student 01")).not.toBeInTheDocument();
+    expect(screen.getByText("2 / 3")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Select all shown" }));
+    expect(screen.getByRole("button", { name: "Assign to me (3)" })).toBeEnabled();
+
+    await user.type(screen.getByLabelText("Search Students"), "Student 0");
+    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Assign to me" })).toBeDisabled();
+    expect(within(table).getByText("Student 09")).toBeInTheDocument();
   });
 
   it("filters My Mentees by Active-Phase status", async () => {
