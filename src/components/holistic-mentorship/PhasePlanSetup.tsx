@@ -46,7 +46,7 @@ async function persistDraft(
   draft: Draft,
   academicYear: string,
   confirmed: boolean,
-  request: (method: string, payload: Record<string, unknown>, reload?: boolean) => Promise<boolean>
+  request: (method: string, payload: Record<string, unknown>, reload?: boolean) => Promise<Record<string, unknown> | false>
 ) {
   if (draft.id) {
     return request("PATCH", {
@@ -95,7 +95,7 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
   const selectedPhase = selectedDraftPhase(plan, draft);
   const definitionReadOnly = isDefinitionReadOnly(plan, selectedPhase);
 
-  const load = useCallback(async (year = academicYear) => {
+  const load = useCallback(async (year = academicYear, selectPhaseId?: number) => {
     setPlan(undefined);
     setDraft(null);
     setMessage("");
@@ -103,7 +103,10 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
       const result = await fetch(`/api/holistic-mentorship/phase-plans?academic_year=${year}`);
       const data = await result.json();
       if (!result.ok) setMessage(data.error ?? "Could not load the Plan");
-      setPlan(data.plan ?? null);
+      const nextPlan: Plan | null = data.plan ?? null;
+      setPlan(nextPlan);
+      const keep = selectPhaseId ? nextPlan?.phases.find((phase) => phase.id === selectPhaseId) : undefined;
+      if (keep) setDraft(draftFromPhase(keep));
     } catch {
       setMessage("Could not load the Plan");
       setPlan(null);
@@ -134,7 +137,7 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
         return false;
       }
       if (reload) await load();
-      return true;
+      return (data ?? {}) as Record<string, unknown>;
     } catch {
       setMessage("Could not save the Plan");
       return false;
@@ -161,7 +164,9 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
     const phase = draft.id ? plan?.phases.find((item) => item.id === draft.id) : null;
     if (!confirmPreviouslyOpenedPhase(phase)) return;
     const saved = await persistDraft(draft, academicYear, !!phase?.everOpened, request);
-    if (saved) await load();
+    if (!saved) return;
+    const savedId = draft.id ?? (typeof saved.id === "number" ? saved.id : undefined);
+    await load(academicYear, savedId);
   }
 
   function discard() {
@@ -174,7 +179,9 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
   async function changeState(phase: Phase) {
     const next = phase.state === "locked" ? "open" : "locked";
     if (!window.confirm(`${next === "open" ? "Open" : "Return to Locked"} Phase ${phase.number}?`)) return;
-    await request("PATCH", { action: "state", phase_id: phase.id, expected_revision: phase.revision, state: next, confirmed: true });
+    const changed = await request("PATCH",
+      { action: "state", phase_id: phase.id, expected_revision: phase.revision, state: next, confirmed: true }, false);
+    if (changed) await load(academicYear, phase.id);
   }
 
   async function remove(phase: Phase) {
@@ -184,13 +191,15 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
 
   async function move(index: number, offset: -1 | 1) {
     if (!plan) return;
+    const moved = plan.phases[index];
     const reordered = [...plan.phases];
     [reordered[index], reordered[index + offset]] = [reordered[index + offset], reordered[index]];
-    await request("PATCH", {
+    const saved = await request("PATCH", {
       action: "reorder",
       academic_year: academicYear,
       phases: reordered.map((phase) => ({ id: phase.id, expected_revision: phase.revision })),
-    });
+    }, false);
+    if (saved) await load(academicYear, moved.id);
   }
 
   if (plan === undefined) return <p role="status" className="py-12 text-center text-sm text-text-muted">Loading Phase Plan...</p>;

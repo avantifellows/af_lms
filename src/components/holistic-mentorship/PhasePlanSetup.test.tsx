@@ -55,6 +55,39 @@ describe("PhasePlanSetup", () => {
     });
   });
 
+  it("keeps the moved Phase selected after a reorder", async () => {
+    const user = userEvent.setup();
+    const lockedPhase = (id: number, number: number, title: string) => ({
+      id, number, grade: 11, title, state: "locked",
+      guidanceMarkdown: "Guidance", revision: 1, frozen: false,
+      everOpened: false, used: false, active: false,
+      questions: [{ id: id * 10, text: "Question" }],
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: {
+        id: 7, academicYear: "2026-2027", editable: true,
+        phases: [lockedPhase(21, 1, "First title"), lockedPhase(22, 2, "Second title")],
+      } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: {
+        id: 7, academicYear: "2026-2027", editable: true,
+        phases: [lockedPhase(22, 1, "Second title"), lockedPhase(21, 2, "First title")],
+      } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PhasePlanSetup />);
+
+    await user.click(await screen.findByRole("button", { name: /Second title/ }));
+    await user.click(screen.getByRole("button", { name: "Move Phase 2 up" }));
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({
+      action: "reorder",
+      phases: [{ id: 22, expected_revision: 1 }, { id: 21, expected_revision: 1 }],
+    });
+    expect(await screen.findByRole("heading", { name: "Phase 1 - Second title" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Second title/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /First title/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("preserves unsaved text when an optimistic save conflicts", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn()
