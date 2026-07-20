@@ -18,9 +18,11 @@ edges:
     condition: when reading or writing data and unsure which backend to use
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
+  - target: context/student-addition.md
+    condition: when working on self-service student addition, bulk upload, lateral entry, or school-facing edit/delete rollout
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-07-15
+last_updated: 2026-07-17
 ---
 
 # Session Bootstrap
@@ -32,6 +34,7 @@ Then read this file fully before doing anything else in this session.
 ## Current Project State
 
 **Working:**
+
 - Dual auth (Google OAuth + school passcode) with dev-login personas in non-prod.
 - Student enrollment CRUD (reads direct from Postgres; writes proxied to the DB Service) + school dashboard, search, grade filtering, document uploads (S3).
 - Permission system: feature×role matrix, 3-level school scope, program/NVS gating, `read_only` downgrade, additive centre-seat scope.
@@ -41,9 +44,12 @@ Then read this file fully before doing anything else in this session.
 - Deploy via AWS Amplify; ~2472 unit tests (Vitest/RTL) + 65 E2E (Playwright).
 
 **Not yet built / in progress:**
+
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
+- Student Addition #197 revision is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; every row not written is counted as to go and included in rejected-row CSV retry, with same-school versus other-school details for existing Students.
 
 **Known issues:**
+
 - Two write paths exist — sending a student/batch/quiz-session write to Postgres instead of the DB Service is a real bug (see `context/data-access.md`).
 - The `graphify-out/` knowledge graph is not committed (regenerated locally); rebuild with `/graphify --update` after significant changes.
 - Deploy is CI-only via `.github/workflows/deploy-amplify.yml` (main → prod, PRs → shared staging URL). There is no local deploy script.
@@ -52,17 +58,18 @@ Then read this file fully before doing anything else in this session.
 
 Load the relevant file based on the current task. Always load `context/architecture.md` first if not already in context this session.
 
-| Task type | Load |
-|-----------|------|
-| Understanding how the system works | `context/architecture.md` |
-| Working with a specific technology | `context/stack.md` |
-| Writing or reviewing code | `context/conventions.md` |
-| Making a design decision | `context/decisions.md` |
-| Setting up or running the project | `context/setup.md` |
-| Gating a route / access control / 403s | `context/permissions.md` |
-| Reading or writing data (Postgres / DB Service / BigQuery / DynamoDB / S3) | `context/data-access.md` |
-| PM school visits or visit action types | `context/visits.md` |
-| Any specific task | Check `patterns/INDEX.md` for a matching pattern |
+| Task type                                                                  | Load                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------ |
+| Understanding how the system works                                         | `context/architecture.md`                        |
+| Working with a specific technology                                         | `context/stack.md`                               |
+| Writing or reviewing code                                                  | `context/conventions.md`                         |
+| Making a design decision                                                   | `context/decisions.md`                           |
+| Setting up or running the project                                          | `context/setup.md`                               |
+| Gating a route / access control / 403s                                     | `context/permissions.md`                         |
+| Reading or writing data (Postgres / DB Service / BigQuery / DynamoDB / S3) | `context/data-access.md`                         |
+| PM school visits or visit action types                                     | `context/visits.md`                              |
+| Student addition / bulk upload / lateral entry                             | `context/student-addition.md`                    |
+| Any specific task                                                          | Check `patterns/INDEX.md` for a matching pattern |
 
 ## Behavioural Contract
 
