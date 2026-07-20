@@ -31,6 +31,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         external_student_id: "ST-41",
         grade: "11",
         active_phase_id: "73",
+        active_notes_state: "draft",
         mapping_id: "73",
         mentor_user_id: "9",
         mentor_name: "Nila Sen",
@@ -51,6 +52,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         externalStudentId: "ST-41",
         grade: 11,
         activePhaseId: 73,
+        activeNotesState: "draft",
         ownership: { mappingId: 73, mentorUserId: 9, mentorName: "Nila Sen" },
       },
     ]);

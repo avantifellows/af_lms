@@ -15,10 +15,6 @@ const [currentStartYear] = CURRENT_ACADEMIC_YEAR.split("-").map(Number);
 const PRIOR_ACADEMIC_YEAR = `${currentStartYear - 1}-${currentStartYear}`;
 
 const WORKSPACES = {
-  teacher: [
-    { id: "assign", label: "Assign Students", empty: "No eligible Students to show yet.", icon: Users },
-    { id: "mentees", label: "My Mentees", empty: "No Mentees assigned yet.", icon: ClipboardList },
-  ],
   admin: [
     { id: "progress", label: "Students & Progress", empty: "No mapped Students to show yet.", icon: Users },
     { id: "phases", label: "Phase Setup", empty: "No Holistic Phases configured yet.", icon: ClipboardList },
@@ -34,16 +30,8 @@ export default function HolisticMentorshipWorkspace({
   schoolCode?: string;
   canEdit?: boolean;
 }) {
-  const workspaces = WORKSPACES[mode];
-  const [activeId, setActiveId] = useState<string>(() => {
-    if (mode !== "teacher" || !schoolCode || typeof window === "undefined") {
-      return workspaces[0].id;
-    }
-    const saved = sessionStorage.getItem(`holistic-mappings-view:${schoolCode}`);
-    return workspaces.some((workspace) => workspace.id === saved)
-      ? saved!
-      : workspaces[0].id;
-  });
+  const workspaces = WORKSPACES.admin;
+  const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   const Icon = active.icon;
   const tabSetId = useId();
@@ -62,9 +50,6 @@ export default function HolisticMentorshipWorkspace({
 
   const activateWorkspace = (workspaceId: string) => {
     setActiveId(workspaceId);
-    if (mode === "teacher" && schoolCode) {
-      sessionStorage.setItem(`holistic-mappings-view:${schoolCode}`, workspaceId);
-    }
   };
 
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -79,6 +64,12 @@ export default function HolisticMentorshipWorkspace({
     activateWorkspace(workspaces[nextIndex].id);
     tabRefs.current[nextIndex]?.focus();
   };
+
+  if (mode === "teacher") {
+    return schoolCode
+      ? <TeacherMappingWorkspace schoolCode={schoolCode} canEdit={canEdit} />
+      : null;
+  }
 
   return (
     <section className="min-w-0 max-w-full space-y-4">
@@ -134,13 +125,7 @@ export default function HolisticMentorshipWorkspace({
         tabIndex={0}
         className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
-        {mode === "teacher" && schoolCode ? (
-          <TeacherMappingWorkspace
-            schoolCode={schoolCode}
-            view={active.id as "assign" | "mentees"}
-            canEdit={canEdit}
-          />
-        ) : mode === "admin" && active.id === "phases" ? (
+        {mode === "admin" && active.id === "phases" ? (
           <PhasePlanSetup academicYear={academicYear} />
         ) : mode === "admin" && active.id === "progress" ? (
           <ProgressWorkspace academicYear={academicYear} onAcademicYears={mergeAcademicYears} />

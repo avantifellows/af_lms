@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, EyeOff, Lock, RefreshCw, type LucideIcon } from "lucide-react";
+import {
+  Archive, ArrowLeft, BookOpen, CloudCheck, CloudOff, EyeOff, History, Lock, Pencil,
+  RefreshCw, Save, Send, Sparkles, type LucideIcon,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
@@ -27,6 +30,7 @@ type NotesEditorProps = {
     authorName?: string | null;
     answers?: Array<{ questionId: number; answer: string }>;
   };
+  timestampNotes: OpenSelectedPhase["notes"];
   onNotesSaved: (submitted: boolean) => void;
 };
 type NotesEditorStatus = "idle" | "saving" | "saved" | "failed";
@@ -653,18 +657,61 @@ function PostSessionNotesEditor(props: NotesEditorProps) {
     setSuccess("");
   };
 
-  return <NotesEditorContent
-    showInputs={shouldShowNotesInputs(canAutosave, editingSubmitted)}
-    editable={<EditableNotesForm questions={props.questions} answers={answers} status={status} error={error}
-      validationError={validationError} validationErrorId={validationErrorId}
-      canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)} editingSubmitted={editingSubmitted}
-      disabled={finalWriting} onAnswerChange={updateAnswer}
-      onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
-      onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />}
-    submitted={<><SubmittedNotesView questions={props.questions} answers={answers}
+  const showInputs = shouldShowNotesInputs(canAutosave, editingSubmitted);
+  return <>
+    <NotesHead showInputs={showInputs} completed={notesState === "submitted" && !editingSubmitted}
+      draftMode={canAutosave} status={status} error={error} timestampNotes={props.timestampNotes}
       canEdit={canEditSubmittedNotes(props.editable, notesState)} onEdit={beginCorrection} />
-      {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>}
-  />;
+    <NotesEditorContent
+      showInputs={showInputs}
+      editable={<EditableNotesForm questions={props.questions} answers={answers} status={status} error={error}
+        validationError={validationError} validationErrorId={validationErrorId}
+        canRetry={enabledUnlessDisabled(autosaveEnabled, conflict)} editingSubmitted={editingSubmitted}
+        disabled={finalWriting} onAnswerChange={updateAnswer}
+        onTextarea={(questionId, element) => { textareasRef.current[questionId] = element; }}
+        onRetry={retry} onSaveCorrection={saveCorrection} onCancelCorrection={cancelCorrection} onSubmit={submit} />}
+      submitted={<><SubmittedNotesView questions={props.questions} answers={answers} />
+        {success && <p role="status" className="text-sm font-medium text-success">{success}</p>}</>}
+    />
+  </>;
+}
+
+function NotesHead({ showInputs, completed, draftMode, status, error, timestampNotes, canEdit, onEdit }: {
+  showInputs: boolean;
+  completed: boolean;
+  draftMode: boolean;
+  status: NotesEditorStatus;
+  error: string;
+  timestampNotes: OpenSelectedPhase["notes"];
+  canEdit: boolean;
+  onEdit: () => void;
+}) {
+  return <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="notes-heading" className="text-base font-bold uppercase text-text-primary">Post-Session Notes</h2>
+        {completed && <Badge variant="success">Completed</Badge>}
+      </div>
+      {showInputs
+        ? <p className="mt-1 text-sm text-text-muted">All answers are required before submission.</p>
+        : timestampNotes && <NotesTimestamp notes={timestampNotes} />}
+    </div>
+    {draftMode && <NotesSaveState status={status} error={error} />}
+    {completed && canEdit && <Button type="button" variant="secondary" className="shrink-0" onClick={onEdit}>
+      <Pencil aria-hidden="true" className="h-4 w-4" />
+      Edit Notes
+    </Button>}
+  </div>;
+}
+
+function NotesSaveState({ status, error }: { status: NotesEditorStatus; error: string }) {
+  if (status === "idle") return null;
+  return <span role="status" className={`inline-flex shrink-0 items-center gap-1.5 text-xs ${
+    status === "failed" ? "text-danger" : "text-text-muted"}`}>
+    {status === "saved" && <CloudCheck aria-hidden="true" className="h-4 w-4" />}
+    {status === "failed" && <CloudOff aria-hidden="true" className="h-4 w-4" />}
+    {status === "saving" ? "Saving" : status === "saved" ? "Saved" : error}
+  </span>;
 }
 
 function NotesEditorContent({ showInputs, editable, submitted }: {
@@ -675,18 +722,17 @@ function NotesEditorContent({ showInputs, editable, submitted }: {
   return showInputs ? editable : submitted;
 }
 
-function SubmittedNotesView({ questions, answers, canEdit, onEdit }: {
+function SubmittedNotesView({ questions, answers }: {
   questions: NotesEditorProps["questions"];
   answers: Record<number, string>;
-  canEdit: boolean;
-  onEdit: () => void;
 }) {
   return <>
     {questions.map((question) => <div key={question.questionId}>
-      <h3 className="text-sm font-semibold text-text-secondary">{question.text}</h3>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-text-primary">{answers[question.questionId] || "Not submitted"}</p>
+      <h3 className="text-sm font-semibold text-text-primary">{question.text}</h3>
+      <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-info bg-bg-card-alt p-3 text-sm text-text-primary">
+        {answers[question.questionId] || "Not submitted"}
+      </blockquote>
     </div>)}
-    {canEdit && <Button type="button" variant="secondary" onClick={onEdit}>Edit Notes</Button>}
   </>;
 }
 
@@ -713,7 +759,8 @@ function EditableNotesForm({ questions, answers, status, error, validationError,
     {questions.map((question) => {
       const invalid = Boolean(validationError && !answers[question.questionId]?.trim());
       return <label key={question.questionId} className="block space-y-1 text-sm font-semibold text-text-secondary">
-        {question.text}
+        {question.text} <span aria-hidden="true" className="text-accent">*</span>
+        <span className="sr-only">required</span>
         <textarea ref={(element) => onTextarea(question.questionId, element)} aria-label={question.text}
         aria-invalid={invalid} aria-describedby={invalid ? validationErrorId : undefined} rows={4}
         disabled={disabled}
@@ -744,20 +791,24 @@ function NotesEditorActions({ status, error, validationError, validationErrorId,
   onCancelCorrection: () => void;
   onSubmit: () => Promise<void>;
 }) {
-  return <div className="flex min-h-11 flex-wrap items-center gap-3" aria-live="polite">
+  return <div className="flex min-h-11 flex-wrap items-center justify-end gap-3" aria-live="polite">
     {validationError && <span id={validationErrorId} role="alert" className="text-sm text-danger">
       {validationError}
     </span>}
-    {status === "saving" && <span className="text-sm text-text-muted">Saving</span>}
-    {status === "saved" && <span className="text-sm font-medium text-success">Saved</span>}
     {status === "failed" && <>
-      <span className="text-sm text-danger">{error}</span>
-      {canRetry && <Button type="button" variant="secondary" size="sm" disabled={disabled} onClick={onRetry}>Retry</Button>}
+      {editingSubmitted && <span className="text-sm text-danger">{error}</span>}
+      {canRetry && <Button type="button" variant="secondary" className="text-xs" disabled={disabled} onClick={onRetry}>Retry</Button>}
     </>}
     {editingSubmitted
-      ? <><Button type="button" onClick={() => void onSaveCorrection()} disabled={disabled || status === "saving"}>Save Changes</Button>
-          <Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button></>
-      : <Button type="button" onClick={() => void onSubmit()} disabled={disabled || status === "saving"}>Submit Notes</Button>}
+      ? <><Button type="button" variant="ghost" disabled={disabled} onClick={onCancelCorrection}>Cancel</Button>
+          <Button type="button" onClick={() => void onSaveCorrection()} disabled={disabled || status === "saving"}>
+            <Save aria-hidden="true" className="h-4 w-4" />
+            Save Changes
+          </Button></>
+      : <Button type="button" onClick={() => void onSubmit()} disabled={disabled || status === "saving"}>
+          <Send aria-hidden="true" className="h-4 w-4" />
+          Submit Notes
+        </Button>}
   </div>;
 }
 
@@ -809,7 +860,7 @@ export default function StudentPhaseWorkspace({
     : selected;
   return (
     <div className="space-y-6">
-      <StudentIdentity student={detail.student} />
+      <StudentIdentity student={detail.student} backHref={backHref} />
       <PhaseNavigation studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
       <InactivePhasePanels studentId={detail.student.id} phases={phases}
@@ -843,13 +894,24 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, backHref }: 
   );
 }
 
-function StudentIdentity({ student }: {
+function studentInitials(name: string) {
+  return name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
+function StudentIdentity({ student, backHref }: {
   student: HolisticStudentPhaseDetail["student"];
+  backHref?: string;
 }) {
-  return <header className="flex flex-col gap-1 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
-    <div>
-      <h1 className="text-2xl font-bold text-text-primary">{student.name}</h1>
-    </div>
+  return <header className="flex items-center gap-4">
+    {backHref && <Link href={backHref} aria-label="Back to Holistic Mentorship"
+      className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-border bg-bg-card text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
+      <ArrowLeft aria-hidden="true" className="h-5 w-5" />
+    </Link>}
+    <span aria-hidden="true"
+      className="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-full bg-info-bg font-extrabold text-info">
+      {studentInitials(student.name)}
+    </span>
+    <h1 className="text-2xl font-bold uppercase text-text-primary">{student.name}</h1>
   </header>;
 }
 
@@ -918,7 +980,7 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
     tabs[next].click();
   };
   return <nav role="tablist" aria-label="Holistic Phases" onKeyDown={onKeyDown}
-    className={readOnly ? "flex overflow-x-auto border-b border-border" : "flex gap-2 overflow-x-auto pb-2"}>
+    className="flex overflow-x-auto border-b border-border">
     {phases.map((phase) => readOnly
       ? <AdminPhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
         current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />
@@ -975,22 +1037,20 @@ function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYe
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
     return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
       aria-disabled="true" aria-selected="false" tabIndex={-1} disabled
-      className="min-h-11 shrink-0 rounded-md border border-border bg-bg-card-alt px-3 text-left text-sm text-text-muted opacity-60">
-      <span className="block font-semibold">Phase {phase.number}</span>
-      <span className="block max-w-40 truncate text-xs">{phase.title}</span>
+      className="min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-[3px] border-transparent bg-bg-card-alt px-3 py-2 text-left opacity-60">
+      <span className="block text-sm font-bold text-text-muted">Phase {phase.number}</span>
       <PhaseStatusBadge stage="Locked" />
     </button>;
   }
   const className = current
-    ? "border-accent bg-accent text-text-on-accent"
-    : "border-border bg-bg-card text-text-secondary hover:bg-hover-bg";
+    ? "border-accent bg-bg-card text-text-primary"
+    : "border-transparent text-text-muted hover:bg-accent/5";
   return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear)}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${phaseStage(phase)}`}
-    className={`min-h-11 shrink-0 rounded-md border px-3 py-2 text-sm ${className}`}>
-    <span className="block font-semibold">Phase {phase.number}</span>
-    <span className="block max-w-40 truncate text-xs">{phase.title}</span>
+    className={`min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-[3px] px-3 py-2 text-left ${className}`}>
+    <span className="block text-sm font-bold">Phase {phase.number}</span>
     <PhaseStatusBadge stage={phaseStage(phase)} />
   </Link>;
 }
@@ -1017,16 +1077,31 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
     className="space-y-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <PhaseHeading phase={phase} />
     <PreparationSwitch mobilePanel={mobilePanel} onSelect={setMobilePanel} />
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className={`${mobilePanel === "context" ? "block" : "hidden"} lg:block lg:h-[32rem] lg:overflow-y-auto lg:pr-3`}>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card elevation="sm"
+        className={`${mobilePanel === "context" ? "block" : "hidden"} p-4 lg:block lg:max-h-[32rem] lg:overflow-y-auto`}>
         <StudentContext context={phase.context} />
-      </div>
-      <div className={`${mobilePanel === "guidance" ? "block" : "hidden"} lg:block lg:h-[32rem] lg:overflow-y-auto lg:pr-3`}>
-        <section aria-labelledby="guidance-heading" className="space-y-4 border-t border-border pt-4">
-          <h2 id="guidance-heading" className="text-lg font-semibold text-text-primary">Phase Guidance</h2>
-          <GuidancePreview markdown={phase.guidanceMarkdown} />
+      </Card>
+      <Card elevation="sm"
+        className={`${mobilePanel === "guidance" ? "block" : "hidden"} p-4 lg:block lg:max-h-[32rem] lg:overflow-y-auto`}>
+        <section aria-labelledby="guidance-heading">
+          <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
+            <h2 id="guidance-heading" className="text-sm font-bold uppercase text-text-primary">Phase Guidance</h2>
+            <Badge variant="danger" className="shrink-0 gap-1">
+              <BookOpen aria-hidden="true" className="h-3 w-3" />
+              Mentor guide
+            </Badge>
+          </div>
+          <div className="pt-4">
+            <GuidancePreview markdown={phase.guidanceMarkdown} />
+          </div>
         </section>
-      </div>
+      </Card>
+    </div>
+    <div className="flex items-center gap-3 text-xs font-extrabold uppercase text-text-muted">
+      <span aria-hidden="true" className="flex-1 border-t border-dashed border-border" />
+      After the conversation
+      <span aria-hidden="true" className="flex-1 border-t border-dashed border-border" />
     </div>
     <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
       phase={phase} studentId={studentId} readOnly={readOnly}
@@ -1038,12 +1113,13 @@ function PreparationSwitch({ mobilePanel, onSelect }: {
   mobilePanel: "context" | "guidance";
   onSelect: (panel: "context" | "guidance") => void;
 }) {
-  return <div role="group" aria-label="Preparation panel" className="grid grid-cols-2 rounded-md border border-border lg:hidden">
+  return <div role="group" aria-label="Preparation panel"
+    className="grid grid-cols-2 rounded-md border border-border bg-bg-card-alt p-1 lg:hidden">
     <button type="button" aria-pressed={mobilePanel === "context"}
-      className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "context" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
+      className={`min-h-11 rounded px-3 text-sm font-bold ${mobilePanel === "context" ? "bg-bg-card text-accent shadow-sm" : "text-text-muted"}`}
       onClick={() => onSelect("context")}>Student Context</button>
     <button type="button" aria-pressed={mobilePanel === "guidance"}
-      className={`min-h-11 px-3 text-sm font-semibold ${mobilePanel === "guidance" ? "bg-accent text-text-on-accent" : "bg-bg-card text-text-secondary"}`}
+      className={`min-h-11 rounded px-3 text-sm font-bold ${mobilePanel === "guidance" ? "bg-bg-card text-accent shadow-sm" : "text-text-muted"}`}
       onClick={() => onSelect("guidance")}>Phase Guidance</button>
   </div>;
 }
@@ -1263,35 +1339,51 @@ function AdminInfoAlert({ icon: Icon, title, children }: {
 }
 
 function PhaseHeading({ phase }: { phase: OpenSelectedPhase }) {
-  return <section aria-labelledby="phase-heading" className="space-y-2">
-    <div className="flex flex-wrap items-center gap-2">
-      <h2 id="phase-heading" className="text-xl font-semibold text-text-primary">Phase {phase.number}: {phase.title}</h2>
-      <PhaseStatusBadge stage={phase.progress === "completed" ? "Completed" : phase.progress === "skipped" ? "Skipped" : "Open"} />
-      {phase.draftSaved && <span className="text-xs font-medium text-text-muted">Draft saved</span>}
-    </div>
+  return <section aria-labelledby="phase-heading">
+    <h2 id="phase-heading" className="text-xl font-semibold text-text-primary">Phase {phase.number} - {phase.title}</h2>
+    <p className="mt-1 text-sm text-text-muted">
+      Prep material stays read-only. Complete Notes after the offline conversation.
+    </p>
   </section>;
 }
 
+function ContextSourceBadge({ context }: { context: OpenSelectedPhase["context"] }) {
+  if ("missing" in context) {
+    return context.missing === "Profile unavailable"
+      ? <Badge variant="warning" className="shrink-0">Student Profile unavailable</Badge>
+      : <Badge variant="default" className="shrink-0">No source available</Badge>;
+  }
+  const icons = { "Student Profile": Sparkles, "Historical notes": Archive } as const;
+  const Icon = context.label in icons ? icons[context.label as keyof typeof icons] : History;
+  return <Badge variant="info" className="shrink-0 gap-1">
+    <Icon aria-hidden="true" className="h-3 w-3" />
+    {context.label}
+  </Badge>;
+}
+
 function StudentContext({ context }: { context: OpenSelectedPhase["context"] }) {
-  return <section aria-labelledby="context-heading" className="space-y-4 border-t border-border pt-4">
-    <div>
-      <h2 id="context-heading" className="text-lg font-semibold text-text-primary">Student Context</h2>
-      {context.label && <p className="text-sm font-medium text-accent">{context.label}</p>}
-      {"lastUpdatedAt" in context && context.lastUpdatedAt &&
-        <p className="text-xs text-text-muted">Last updated {formatDate(context.lastUpdatedAt)}</p>}
+  return <section aria-labelledby="context-heading">
+    <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
+      <h2 id="context-heading" className="text-sm font-bold uppercase text-text-primary">Student Context</h2>
+      <ContextSourceBadge context={context} />
     </div>
     <StudentContextBody context={context} />
   </section>;
 }
 
 function StudentContextBody({ context }: { context: OpenSelectedPhase["context"] }) {
-  if ("missing" in context) return <p className="text-sm text-text-muted">{context.missing}</p>;
-  return <dl className="space-y-4">
-    {context.items.map((item, index) => <div key={`${item.label}-${index}`}>
-      <dt className="text-sm font-semibold text-text-secondary">{item.label}</dt>
-      <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</dd>
-    </div>)}
-  </dl>;
+  if ("missing" in context) return <p className="pt-4 text-sm text-text-muted">{context.missing}</p>;
+  return <div className="space-y-4 pt-4">
+    <dl className="space-y-4">
+      {context.items.map((item, index) => <div key={`${item.label}-${index}`}>
+        <dt className="text-sm font-semibold text-success">{item.label}</dt>
+        <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-text-primary">{item.content}</dd>
+      </div>)}
+    </dl>
+    {context.lastUpdatedAt && <p className="font-mono text-xs text-text-muted">
+      Last updated {formatDate(context.lastUpdatedAt)}
+    </p>}
+  </div>;
 }
 
 function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
@@ -1321,14 +1413,15 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
       .catch(() => undefined);
   }, [apiUrl, onSubmitted, phase.phaseId]);
 
-  return <section aria-labelledby="notes-heading" className="space-y-4 border-t border-border pt-4">
-    <h2 id="notes-heading" className="text-lg font-semibold text-text-primary">Post-Session Notes</h2>
-    {visibleNotes && <NotesTimestamp notes={visibleNotes} />}
-    <PostSessionNotesEditor key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
-      studentId={studentId} phaseId={phase.phaseId} phaseRevision={phase.revision}
-      mappingId={phase.mappingId} notesRevision={phase.notesRevision} schoolCode={schoolCode}
-      academicYear={academicYear} editable={!readOnly && phase.canEditNotes}
-      questions={phase.questions} notes={phase.notes} onNotesSaved={refreshNotesMetadata} />
+  return <section aria-labelledby="notes-heading">
+    <Card elevation="sm" className="space-y-4 p-4 sm:p-5">
+      <PostSessionNotesEditor key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
+        studentId={studentId} phaseId={phase.phaseId} phaseRevision={phase.revision}
+        mappingId={phase.mappingId} notesRevision={phase.notesRevision} schoolCode={schoolCode}
+        academicYear={academicYear} editable={!readOnly && phase.canEditNotes}
+        questions={phase.questions} notes={phase.notes} timestampNotes={visibleNotes}
+        onNotesSaved={refreshNotesMetadata} />
+    </Card>
   </section>;
 }
 
@@ -1336,5 +1429,5 @@ function NotesTimestamp({ notes }: { notes: NonNullable<OpenSelectedPhase["notes
   const submitted = notes.firstSubmittedAt
     ? `${notes.authorName ? `Submitted by ${notes.authorName} on ` : "Submitted "}${formatDate(notes.firstSubmittedAt)}`
     : "Draft saved";
-  return <p className="text-xs text-text-muted">{submitted}{` · Last edited ${formatDate(notes.lastEditedAt)}`}</p>;
+  return <p className="mt-1 font-mono text-xs text-text-muted">{submitted}{` | Last edited ${formatDate(notes.lastEditedAt)}`}</p>;
 }

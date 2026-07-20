@@ -233,7 +233,11 @@ describe("StudentPhaseWorkspace", () => {
     })} />);
 
     expect(screen.getByRole("textbox", { name: "What helped?" })).toHaveValue("Saved draft answer");
-    expect(screen.getByText(/Draft saved · Last edited/)).toBeInTheDocument();
+    expect(screen.getByText("Prep material stays read-only. Complete Notes after the offline conversation."))
+      .toBeInTheDocument();
+    expect(screen.getByText("All answers are required before submission.")).toBeInTheDocument();
+    expect(screen.getAllByText("*")).toHaveLength(1);
+    expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
   it("rehydrates a saved draft when refreshed server props advance", async () => {
@@ -510,10 +514,11 @@ describe("StudentPhaseWorkspace", () => {
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(8);
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Phase 1Phase 1Locked", "Phase 2Phase 2Locked", "Phase 3Phase 3Locked", "Phase 4Phase 4Locked",
-      "Phase 5Start Grade 12Completed", "Phase 6Study choicesOpen", "Phase 7Staying on trackSkipped",
-      "Phase 8Next stepsLocked",
+      "Phase 1Locked", "Phase 2Locked", "Phase 3Locked", "Phase 4Locked",
+      "Phase 5Completed", "Phase 6Open", "Phase 7Skipped", "Phase 8Locked",
     ]);
+    expect(screen.getByRole("tab", { name: "Phase 5 - Start Grade 12 - Completed" }))
+      .toHaveAttribute("aria-selected", "true");
     expect(tabs[0]).toBeDisabled();
     expect(tabs[7]).toBeDisabled();
     expect(screen.getByRole("banner")).toHaveTextContent("Asha Rao");

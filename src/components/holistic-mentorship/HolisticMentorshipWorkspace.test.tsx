@@ -11,75 +11,65 @@ describe("HolisticMentorshipWorkspace", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the Teacher assignment and Mentee empty workspaces", async () => {
+  it("shows the single-page Teacher workspace with assignment and Mentee sections", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ students: [], actorUserId: 9 }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup();
     render(<HolisticMentorshipWorkspace mode="teacher" schoolCode="SCH001" />);
 
-    expect(screen.getByRole("tab", { name: "Assign Students" })).toBeInTheDocument();
-    expect(await screen.findByText("No eligible Students to show yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Holistic Mentorship" })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(await screen.findByText("No eligible Students at this School")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&search=",
       { signal: expect.any(AbortSignal) }
     );
 
-    await user.click(screen.getByRole("tab", { name: "My Mentees" }));
-    expect(screen.getByText("No Mentees assigned yet.")).toBeInTheDocument();
+    expect(screen.getByText("Assign Students")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "My Mentees" })).toBeInTheDocument();
+    expect(screen.getByText("No Mentees assigned")).toBeInTheDocument();
+    expect(screen.getByText("2026-2027")).toBeInTheDocument();
   });
 
-  it("restores the Teacher's last Mapping subview", async () => {
-    sessionStorage.setItem("holistic-mappings-view:SCH001", "mentees");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+  it("links the Admin workspace tabs to their panel and supports the full keyboard pattern", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
       ok: true,
-      json: async () => ({ students: [], actorUserId: 9 }),
-    }));
-
-    render(<HolisticMentorshipWorkspace mode="teacher" schoolCode="SCH001" />);
-
-    expect(screen.getByRole("tab", { name: "My Mentees" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    );
-    expect(await screen.findByText("No Mentees assigned yet.")).toBeInTheDocument();
-  });
-
-  it("links the workspace tabs to their panel and supports the full keyboard pattern", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ students: [], actorUserId: 9 }),
-    }));
+      json: async () => url.includes("/progress?") ? {
+        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      } : { plan: null },
+    })));
     const user = userEvent.setup();
-    render(<HolisticMentorshipWorkspace mode="teacher" schoolCode="SCH001" />);
+    render(<HolisticMentorshipWorkspace mode="admin" />);
 
     const tablist = screen.getByRole("tablist", { name: "Holistic Mentorship sections" });
-    const assign = screen.getByRole("tab", { name: "Assign Students" });
-    const mentees = screen.getByRole("tab", { name: "My Mentees" });
-    const panel = screen.getByRole("tabpanel", { name: "Assign Students" });
-    expect(tablist).toContainElement(assign);
-    expect(assign).toHaveAttribute("aria-controls", panel.id);
-    expect(panel).toHaveAttribute("aria-labelledby", assign.id);
-    expect(assign).toHaveAttribute("tabindex", "0");
-    expect(mentees).toHaveAttribute("tabindex", "-1");
+    const progress = screen.getByRole("tab", { name: "Students & Progress" });
+    const phases = screen.getByRole("tab", { name: "Phase Setup" });
+    const panel = screen.getByRole("tabpanel", { name: "Students & Progress" });
+    expect(tablist).toContainElement(progress);
+    expect(progress).toHaveAttribute("aria-controls", panel.id);
+    expect(panel).toHaveAttribute("aria-labelledby", progress.id);
+    expect(progress).toHaveAttribute("tabindex", "0");
+    expect(phases).toHaveAttribute("tabindex", "-1");
 
-    assign.focus();
+    progress.focus();
     await user.keyboard("{ArrowRight}");
-    expect(mentees).toHaveFocus();
-    expect(mentees).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: "My Mentees" })).toBe(panel);
+    expect(phases).toHaveFocus();
+    expect(phases).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Phase Setup" })).toBe(panel);
 
     await user.keyboard("{ArrowRight}");
-    expect(assign).toHaveFocus();
+    expect(progress).toHaveFocus();
     await user.keyboard("{End}");
-    expect(mentees).toHaveFocus();
+    expect(phases).toHaveFocus();
     await user.keyboard("{Home}");
-    expect(assign).toHaveFocus();
+    expect(progress).toHaveFocus();
     await user.keyboard("{ArrowLeft}");
-    expect(mentees).toHaveFocus();
-    expect(sessionStorage.getItem("holistic-mappings-view:SCH001")).toBe("mentees");
+    expect(phases).toHaveFocus();
   });
 
   it("shows the Program-wide Admin progress and setup workspaces", async () => {

@@ -1,9 +1,18 @@
 "use client";
 
-import { ArrowRight, Search, UserMinus, UserPlus } from "lucide-react";
+import {
+  ChevronDown,
+  SearchX,
+  UserMinus,
+  UserRound,
+  UserRoundCheck,
+  UserRoundPlus,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 
 interface Student {
@@ -12,6 +21,7 @@ interface Student {
   externalStudentId: string | null;
   grade: number;
   activePhaseId: number | null;
+  activeNotesState: "draft" | "submitted" | null;
   ownership: {
     mappingId: number;
     mentorUserId: number;
@@ -23,9 +33,24 @@ interface SavedFilters {
   search: string;
   grade: "" | "11" | "12";
   assignment: "" | "unassigned" | "other";
+  menteeSearch: string;
+  menteeGrade: "" | "11" | "12";
+  menteeStatus: "" | "draft" | "pending" | "completed" | "none";
 }
 
-const EMPTY_FILTERS: SavedFilters = { search: "", grade: "", assignment: "" };
+const EMPTY_FILTERS: SavedFilters = {
+  search: "",
+  grade: "",
+  assignment: "",
+  menteeSearch: "",
+  menteeGrade: "",
+  menteeStatus: "",
+};
+
+const FIELD_LABEL_CLASSES =
+  "block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted";
+const FIELD_INPUT_CLASSES =
+  "mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3 text-sm font-normal normal-case tracking-normal";
 
 function savedGrade(value: unknown): SavedFilters["grade"] {
   return value === "11" || value === "12" ? value : "";
@@ -33,6 +58,12 @@ function savedGrade(value: unknown): SavedFilters["grade"] {
 
 function savedAssignment(value: unknown): SavedFilters["assignment"] {
   return value === "unassigned" || value === "other" ? value : "";
+}
+
+function savedMenteeStatus(value: unknown): SavedFilters["menteeStatus"] {
+  return value === "draft" || value === "pending" || value === "completed" || value === "none"
+    ? value
+    : "";
 }
 
 function savedFilters(schoolCode: string): SavedFilters {
@@ -46,27 +77,89 @@ function savedFilters(schoolCode: string): SavedFilters {
       search: typeof parsed.search === "string" ? parsed.search : "",
       grade: savedGrade(parsed.grade),
       assignment: savedAssignment(parsed.assignment),
+      menteeSearch: typeof parsed.menteeSearch === "string" ? parsed.menteeSearch : "",
+      menteeGrade: savedGrade(parsed.menteeGrade),
+      menteeStatus: savedMenteeStatus(parsed.menteeStatus),
     };
   } catch {
     return EMPTY_FILTERS;
   }
 }
 
-function studentsForView(
-  students: Student[],
-  view: "assign" | "mentees",
-  actorUserId: number | null,
-  assignment: SavedFilters["assignment"]
-) {
-  if (view === "mentees") {
-    return students.filter((student) => student.ownership?.mentorUserId === actorUserId);
-  }
-  return students.filter((student) => {
-    if (student.ownership?.mentorUserId === actorUserId) return false;
-    if (assignment === "unassigned") return student.ownership === null;
-    if (assignment === "other") return student.ownership !== null;
-    return true;
+function matchesQuery(student: Student, queryText: string) {
+  const query = queryText.trim().toLowerCase();
+  if (!query) return true;
+  return (
+    student.name.toLowerCase().includes(query) ||
+    (student.externalStudentId ?? "").toLowerCase().includes(query)
+  );
+}
+
+function rosterStudents(students: Student[], actorUserId: number | null) {
+  return students.filter(
+    (student) => student.ownership === null || student.ownership.mentorUserId !== actorUserId
+  );
+}
+
+function visibleRosterStudents(roster: Student[], filters: SavedFilters) {
+  return roster.filter((student) => {
+    if (filters.grade && String(student.grade) !== filters.grade) return false;
+    if (filters.assignment === "unassigned" && student.ownership !== null) return false;
+    if (filters.assignment === "other" && student.ownership === null) return false;
+    return matchesQuery(student, filters.search);
   });
+}
+
+type MenteeStatus = "draft" | "pending" | "completed" | "none";
+
+function menteeStatus(student: Student): MenteeStatus {
+  if (student.activePhaseId === null) return "none";
+  if (student.activeNotesState === "submitted") return "completed";
+  if (student.activeNotesState === "draft") return "draft";
+  return "pending";
+}
+
+const MENTEE_STATUS_RANK: Record<MenteeStatus, number> = {
+  draft: 0,
+  pending: 1,
+  completed: 2,
+  none: 3,
+};
+
+const MENTEE_STATUS_LABEL: Record<MenteeStatus, string> = {
+  draft: "Draft saved",
+  pending: "Pending",
+  completed: "Completed",
+  none: "No active phase",
+};
+
+const MENTEE_STATUS_CLASSES: Record<MenteeStatus, string> = {
+  draft: "bg-accent/10 text-accent",
+  pending: "border border-border bg-bg-card-alt text-text-muted",
+  completed: "bg-success/10 text-success",
+  none: "border border-border bg-bg-card-alt text-text-muted",
+};
+
+function visibleMentees(mentees: Student[], filters: SavedFilters) {
+  return mentees
+    .filter((student) => {
+      if (filters.menteeGrade && String(student.grade) !== filters.menteeGrade) return false;
+      if (filters.menteeStatus && menteeStatus(student) !== filters.menteeStatus) return false;
+      return matchesQuery(student, filters.menteeSearch);
+    })
+    .sort((a, b) =>
+      MENTEE_STATUS_RANK[menteeStatus(a)] - MENTEE_STATUS_RANK[menteeStatus(b)] ||
+      a.name.localeCompare(b.name)
+    );
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join("");
 }
 
 function studentCount(count: number): string {
@@ -105,15 +198,12 @@ async function mappingChangeError(
 
 export default function TeacherMappingWorkspace({
   schoolCode,
-  view,
   canEdit = true,
 }: {
   schoolCode: string;
-  view: "assign" | "mentees";
   canEdit?: boolean;
 }) {
   const [filters, setFilters] = useState(() => savedFilters(schoolCode));
-  const { search, grade, assignment } = filters;
   const [students, setStudents] = useState<Student[]>([]);
   const [actorUserId, setActorUserId] = useState<number | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
@@ -121,6 +211,7 @@ export default function TeacherMappingWorkspace({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState("");
+  const [assignOpen, setAssignOpen] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -129,9 +220,8 @@ export default function TeacherMappingWorkspace({
     const params = new URLSearchParams({
       school_code: schoolCode,
       academic_year: CURRENT_ACADEMIC_YEAR,
-      search,
+      search: "",
     });
-    if (grade) params.set("grade", grade);
     try {
       const response = await fetch(`/api/holistic-mentorship/mappings?${params}`, { signal });
       const data = await response.json();
@@ -140,6 +230,10 @@ export default function TeacherMappingWorkspace({
       setActorUserId(data.actorUserId);
       setSelected([]);
       setMessage("");
+      const hasMentees = (data.students as Student[]).some(
+        (student) => student.ownership?.mentorUserId === data.actorUserId
+      );
+      if (!hasMentees) setAssignOpen(true);
       loaded = true;
     } catch (error) {
       if ((error as Error).name !== "AbortError") setMessage((error as Error).message);
@@ -147,19 +241,17 @@ export default function TeacherMappingWorkspace({
       if (!signal?.aborted) setLoading(false);
     }
     return loaded;
-  }, [grade, schoolCode, search]);
+  }, [schoolCode]);
 
   useEffect(() => {
-    sessionStorage.setItem(
-      `holistic-mappings:${schoolCode}`,
-      JSON.stringify({ search, grade, assignment })
-    );
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [assignment, grade, load, schoolCode, search]);
+  }, [load]);
 
-  useEffect(() => setSelected([]), [view]);
+  useEffect(() => {
+    sessionStorage.setItem(`holistic-mappings:${schoolCode}`, JSON.stringify(filters));
+  }, [filters, schoolCode]);
 
   useEffect(() => {
     const key = `holistic-mappings-scroll:${schoolCode}`;
@@ -170,7 +262,10 @@ export default function TeacherMappingWorkspace({
     return () => window.removeEventListener("scroll", remember);
   }, [schoolCode]);
 
-  const visible = studentsForView(students, view, actorUserId, assignment);
+  const roster = rosterStudents(students, actorUserId);
+  const visibleRoster = visibleRosterStudents(roster, filters);
+  const mentees = students.filter((student) => student.ownership?.mentorUserId === actorUserId);
+  const shownMentees = visibleMentees(mentees, filters);
 
   const toggle = (studentId: number) => {
     setSelected((current) =>
@@ -181,15 +276,16 @@ export default function TeacherMappingWorkspace({
   };
 
   const changeFilter = (updates: Partial<SavedFilters>) => {
-    setSelected([]);
+    if ("search" in updates || "grade" in updates || "assignment" in updates) setSelected([]);
     setFilters((current) => ({ ...current, ...updates }));
   };
 
   const assign = async () => {
-    const choices = visible.filter((student) => selected.includes(student.studentId));
+    const choices = visibleRoster.filter((student) => selected.includes(student.studentId));
     const reassigned = choices.filter(
       (student) => student.ownership && student.ownership.mentorUserId !== actorUserId
     );
+    if (choices.length === 0) return;
     const takeover = reassigned.length > 0;
     if (!window.confirm(assignmentConfirmation(choices, reassigned))) return;
     setBusy(true);
@@ -234,210 +330,386 @@ export default function TeacherMappingWorkspace({
   };
 
   return (
-    <div className="space-y-4">
-      <MappingFilters
-        search={search}
-        grade={grade}
-        assignment={assignment}
-        view={view}
-        onSearchChange={(search) => changeFilter({ search })}
-        onGradeChange={(grade) => changeFilter({ grade })}
-        onAssignmentChange={(assignment) => changeFilter({ assignment })}
-      />
+    <section className="min-w-0 max-w-full space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
+            Holistic Mentorship
+          </h2>
+          <p className="text-sm text-text-muted">Assign Students to yourself to start mentorship</p>
+        </div>
+        <span className="self-start rounded-full bg-info-bg px-3 py-1.5 font-mono text-xs font-bold text-info sm:self-auto">
+          {CURRENT_ACADEMIC_YEAR}
+        </span>
+      </div>
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
       {success && <p role="status" className="text-sm text-success">{success}</p>}
-      <MappingResults
-        loading={loading}
-        students={visible}
-        view={view}
-        canEdit={canEdit}
-        actorUserId={actorUserId}
-        selected={selected}
-        busy={busy}
-        schoolCode={schoolCode}
-        onToggle={toggle}
-        onRemove={remove}
-      />
-      <AssignSelectedButton
-        view={view}
-        canEdit={canEdit}
-        selectedCount={selected.length}
-        busy={busy}
-        onAssign={assign}
-      />
-    </div>
+      {loading ? (
+        <p role="status" aria-live="polite" className="py-12 text-center text-sm text-text-muted">
+          Loading Students...
+        </p>
+      ) : (
+        <>
+          <AssignmentRoster
+            students={visibleRoster}
+            allCount={roster.length}
+            filters={filters}
+            canEdit={canEdit}
+            selected={selected}
+            busy={busy}
+            open={assignOpen}
+            onOpenChange={setAssignOpen}
+            onFilterChange={changeFilter}
+            onToggle={toggle}
+            onSelectShown={() => setSelected(visibleRoster.map((student) => student.studentId))}
+            onAssign={assign}
+          />
+          <MenteesSection
+            mentees={mentees}
+            shown={shownMentees}
+            filters={filters}
+            canEdit={canEdit}
+            busy={busy}
+            schoolCode={schoolCode}
+            onFilterChange={changeFilter}
+            onRemove={remove}
+            onOpenRoster={() => setAssignOpen(true)}
+          />
+        </>
+      )}
+    </section>
   );
 }
 
-function MappingFilters({ search, grade, assignment, view, onSearchChange, onGradeChange, onAssignmentChange }: {
-  search: string;
-  grade: SavedFilters["grade"];
-  assignment: SavedFilters["assignment"];
-  view: "assign" | "mentees";
-  onSearchChange: (value: string) => void;
-  onGradeChange: (value: SavedFilters["grade"]) => void;
-  onAssignmentChange: (value: SavedFilters["assignment"]) => void;
+function AssignmentRoster({ students, allCount, filters, canEdit, selected, busy, open, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign }: {
+  students: Student[];
+  allCount: number;
+  filters: SavedFilters;
+  canEdit: boolean;
+  selected: number[];
+  busy: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onFilterChange: (updates: Partial<SavedFilters>) => void;
+  onToggle: (studentId: number) => void;
+  onSelectShown: () => void;
+  onAssign: () => Promise<void>;
 }) {
-  return <div className="flex flex-col gap-3 sm:flex-row">
-    <label className="relative min-w-0 flex-1">
-      <span className="sr-only">Search Students</span>
-      <Search aria-hidden="true" className="absolute left-3 top-3 h-5 w-5 text-text-muted" />
-      <input className="min-h-11 w-full rounded-md border border-border bg-bg pl-10 pr-3 text-sm"
-        value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search by Student name or ID" />
+  return <details open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}
+    className="group overflow-hidden rounded-md border border-border bg-bg-card shadow-sm">
+    <summary className="flex min-h-[58px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-extrabold uppercase tracking-wide text-text-primary [&::-webkit-details-marker]:hidden">
+      <span className="flex flex-wrap items-center gap-2">
+        <UserRoundPlus aria-hidden="true" className="h-[18px] w-[18px]" />
+        Assign Students
+        <span className="text-xs font-medium normal-case tracking-normal text-text-muted">
+          School roster only
+        </span>
+      </span>
+      <ChevronDown aria-hidden="true"
+        className="h-[18px] w-[18px] shrink-0 transition-transform group-open:rotate-180" />
+    </summary>
+    <div className="border-t border-border">
+      <RosterToolbar filters={filters} allCount={allCount} canEdit={canEdit}
+        selectedCount={selected.length} busy={busy} onFilterChange={onFilterChange} onAssign={onAssign} />
+      <RosterTable students={students} allCount={allCount} canEdit={canEdit} selected={selected}
+        onToggle={onToggle} onClearFilters={() => onFilterChange({ search: "", grade: "", assignment: "" })} />
+      <div className="flex min-h-16 flex-col justify-between gap-2 border-t border-border px-4 py-2 sm:flex-row sm:items-center">
+        <span className="text-xs text-text-muted">
+          You can view full mentorship data only after a Student is assigned to you.
+        </span>
+        {canEdit && students.length > 0 && (
+          <Button type="button" variant="ghost" className="text-xs" onClick={onSelectShown}>
+            Select all shown
+          </Button>
+        )}
+      </div>
+    </div>
+  </details>;
+}
+
+function RosterToolbar({ filters, allCount, canEdit, selectedCount, busy, onFilterChange, onAssign }: {
+  filters: SavedFilters;
+  allCount: number;
+  canEdit: boolean;
+  selectedCount: number;
+  busy: boolean;
+  onFilterChange: (updates: Partial<SavedFilters>) => void;
+  onAssign: () => Promise<void>;
+}) {
+  return <div className="grid items-end gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_9rem_13rem_auto]">
+    <label className={FIELD_LABEL_CLASSES}>
+      Search Student
+      <input aria-label="Search Students" className={FIELD_INPUT_CLASSES}
+        value={filters.search} placeholder="Name or Student ID"
+        onChange={(event) => onFilterChange({ search: event.target.value })} />
     </label>
-    <select aria-label="Filter by Grade" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm"
-      value={grade} onChange={(event) => onGradeChange(event.target.value as SavedFilters["grade"])}>
-      <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
-    </select>
-    {view === "assign" && <select aria-label="Filter by Assignment" className="min-h-11 rounded-md border border-border bg-bg px-3 text-sm"
-      value={assignment} onChange={(event) => onAssignmentChange(event.target.value as SavedFilters["assignment"])}>
-      <option value="">All available</option><option value="unassigned">Unassigned</option>
-      <option value="other">Assigned to another Mentor</option>
-    </select>}
+    <label className={FIELD_LABEL_CLASSES}>
+      Grade
+      <select aria-label="Filter by Grade" className={FIELD_INPUT_CLASSES}
+        value={filters.grade}
+        onChange={(event) => onFilterChange({ grade: event.target.value as SavedFilters["grade"] })}>
+        <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
+      </select>
+    </label>
+    <label className={FIELD_LABEL_CLASSES}>
+      Show
+      <select aria-label="Filter by Assignment" className={FIELD_INPUT_CLASSES}
+        value={filters.assignment}
+        onChange={(event) => onFilterChange({ assignment: event.target.value as SavedFilters["assignment"] })}>
+        <option value="">All available ({allCount})</option>
+        <option value="unassigned">Unassigned</option>
+        <option value="other">Assigned to others</option>
+      </select>
+    </label>
+    {canEdit && (
+      <Button type="button" disabled={busy || selectedCount === 0} onClick={() => void onAssign()}>
+        <UserRoundCheck aria-hidden="true" className="h-4 w-4" />
+        Assign to me{selectedCount > 0 ? ` (${selectedCount})` : ""}
+      </Button>
+    )}
   </div>;
 }
 
-function MappingResults({ loading, students, view, canEdit, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
-  loading: boolean;
+function RosterTable({ students, allCount, canEdit, selected, onToggle, onClearFilters }: {
   students: Student[];
-  view: "assign" | "mentees";
+  allCount: number;
   canEdit: boolean;
-  actorUserId: number | null;
   selected: number[];
-  busy: boolean;
-  schoolCode: string;
   onToggle: (studentId: number) => void;
-  onRemove: (student: Student) => Promise<void>;
+  onClearFilters: () => void;
 }) {
-  if (loading) {
-    return <p role="status" aria-live="polite" className="py-12 text-center text-sm text-text-muted">
-      Loading Students...
-    </p>;
+  if (allCount === 0) {
+    return <RosterEmptyState icon={Users}
+      title="No eligible Students at this School"
+      body="No current Grade 11 or 12 Program 1 Students are available for Holistic Mentor assignment." />;
   }
   if (students.length === 0) {
-    return <p role="status" aria-live="polite" className="py-12 text-center text-sm font-medium text-text-muted">
-      {view === "assign" ? "No eligible Students to show yet." : "No Mentees assigned yet."}
-    </p>;
+    return <RosterEmptyState title="No Students match" body="Change the filter or search text.">
+      <Button type="button" variant="secondary" onClick={onClearFilters}>
+        Clear search and filters
+      </Button>
+    </RosterEmptyState>;
   }
   return <>
     <p role="status" aria-live="polite" className="sr-only">
       Showing {studentCount(students.length)}.
     </p>
-    <MappingTable students={students} view={view} canEdit={canEdit} actorUserId={actorUserId} selected={selected}
-      busy={busy} schoolCode={schoolCode} onToggle={onToggle} onRemove={onRemove} />
+    <div role="region" aria-label="Student assignment results" tabIndex={0}
+      className="overflow-x-auto border-t border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
+      <table aria-label="Student assignment results" className="w-full min-w-[640px] text-left text-sm">
+        <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
+          {canEdit && <th className="w-12 px-3 py-3"><span className="sr-only">Select</span></th>}
+          <th className="px-3 py-3">Student</th><th className="px-3 py-3">Grade</th>
+          <th className="px-3 py-3">Current assignment</th>
+        </tr></thead>
+        <tbody className="divide-y divide-border">
+          {students.map((student) => <tr key={student.studentId} className="hover:bg-accent/5">
+            {canEdit && <td className="px-3 py-2">
+              <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2">
+                <input type="checkbox" aria-label={`Select ${student.name}`}
+                  checked={selected.includes(student.studentId)}
+                  className="h-5 w-5 accent-accent" onChange={() => onToggle(student.studentId)} />
+              </label>
+            </td>}
+            <td className="px-3 py-2">
+              <StudentCell student={student} />
+            </td>
+            <td className="px-3 py-2 text-text-muted">Grade {student.grade}</td>
+            <td className="px-3 py-2"><AssignmentBadge student={student} /></td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
   </>;
 }
 
-function MappingTable({ students, view, canEdit, actorUserId, selected, busy, schoolCode, onToggle, onRemove }: {
-  students: Student[];
-  view: "assign" | "mentees";
-  canEdit: boolean;
-  actorUserId: number | null;
-  selected: number[];
-  busy: boolean;
-  schoolCode: string;
-  onToggle: (studentId: number) => void;
-  onRemove: (student: Student) => Promise<void>;
+function StudentCell({ student }: { student: Student }) {
+  return <span className="flex min-w-0 items-center gap-2.5">
+    <span aria-hidden="true"
+      className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-info-bg text-xs font-extrabold text-info">
+      {initials(student.name)}
+    </span>
+    <span className="min-w-0">
+      <span className="block font-semibold text-text-primary">{student.name}</span>
+      {student.externalStudentId && (
+        <span className="block font-mono text-xs text-text-muted">{student.externalStudentId}</span>
+      )}
+    </span>
+  </span>;
+}
+
+function AssignmentBadge({ student }: { student: Student }) {
+  if (!student.ownership) {
+    return <span className="inline-flex items-center rounded-full border border-border bg-bg-card-alt px-2.5 py-1 text-xs font-bold text-text-muted">
+      Unassigned
+    </span>;
+  }
+  return <span className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-2.5 py-1 text-xs font-bold text-warning-text">
+    <UserRound aria-hidden="true" className="h-3.5 w-3.5" />
+    {student.ownership.mentorName}
+  </span>;
+}
+
+function RosterEmptyState({ icon: Icon = SearchX, title, body, children }: {
+  icon?: typeof SearchX;
+  title: string;
+  body: string;
+  children?: React.ReactNode;
 }) {
-  const label = view === "assign" ? "Student assignment results" : "My Mentees results";
-  return <div role="region" aria-label={label} tabIndex={0}
-    className="overflow-x-auto border-y border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
-    <table aria-label={label} className="w-full min-w-[640px] text-left text-sm">
-      <thead className="bg-bg-card-alt text-xs uppercase text-text-muted"><tr>
-        {view === "assign" && canEdit && <th className="w-12 px-3 py-3"><span className="sr-only">Select</span></th>}
-        <th className="px-3 py-3">Student</th><th className="px-3 py-3">Grade</th><th className="px-3 py-3">Current Mentor</th>
-        {view === "mentees" && <th className="w-56 px-3 py-3"><span className="sr-only">Actions</span></th>}
-      </tr></thead>
-      <tbody className="divide-y divide-border">
-        {students.map((student) => <MappingRow key={student.studentId} student={student} view={view}
-          canEdit={canEdit} mine={student.ownership?.mentorUserId === actorUserId} selected={selected.includes(student.studentId)}
-          busy={busy} schoolCode={schoolCode} onToggle={onToggle} onRemove={onRemove} />)}
-      </tbody>
-    </table>
+  return <div className="grid min-h-44 place-items-center border-t border-border px-5 py-8 text-center">
+    <div className="max-w-md space-y-2">
+      <Icon aria-hidden="true" className="mx-auto h-10 w-10 text-text-muted" />
+      <h3 className="text-sm font-bold text-text-primary">{title}</h3>
+      <p className="text-sm text-text-muted">{body}</p>
+      {children}
+    </div>
   </div>;
 }
 
-function MappingRow({ student, view, canEdit, mine, selected, busy, schoolCode, onToggle, onRemove }: {
-  student: Student;
-  view: "assign" | "mentees";
-  canEdit: boolean;
-  mine: boolean;
-  selected: boolean;
-  busy: boolean;
-  schoolCode: string;
-  onToggle: (studentId: number) => void;
-  onRemove: (student: Student) => Promise<void>;
-}) {
-  return <tr>
-    <MappingSelectCell view={view} canEdit={canEdit} student={student} selected={selected}
-      mine={mine} onToggle={onToggle} />
-    <td className="px-3 py-3 font-medium text-text-primary">
-      {student.name}
-      {student.externalStudentId && <span className="block text-xs font-normal text-text-muted">{student.externalStudentId}</span>}
-    </td>
-    <td className="px-3 py-3">{student.grade}</td>
-    <td className="px-3 py-3">{mine ? "You" : student.ownership?.mentorName ?? "Unassigned"}</td>
-    <MappingActionsCell view={view} student={student} canEdit={canEdit} busy={busy}
-      schoolCode={schoolCode} onRemove={onRemove} />
-  </tr>;
-}
-
-function MappingSelectCell({ view, canEdit, student, selected, mine, onToggle }: {
-  view: "assign" | "mentees";
-  canEdit: boolean;
-  student: Student;
-  selected: boolean;
-  mine: boolean;
-  onToggle: (studentId: number) => void;
-}) {
-  if (view !== "assign" || !canEdit) return null;
-  return <td className="px-3 py-3">
-    <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 has-[:disabled]:cursor-not-allowed">
-      <input type="checkbox" aria-label={`Select ${student.name}`} checked={selected} disabled={mine}
-        className="h-5 w-5 accent-accent" onChange={() => onToggle(student.studentId)} />
-    </label>
-  </td>;
-}
-
-function MappingActionsCell({ view, student, canEdit, busy, schoolCode, onRemove }: {
-  view: "assign" | "mentees";
-  student: Student;
+function MenteesSection({ mentees, shown, filters, canEdit, busy, schoolCode, onFilterChange, onRemove, onOpenRoster }: {
+  mentees: Student[];
+  shown: Student[];
+  filters: SavedFilters;
   canEdit: boolean;
   busy: boolean;
   schoolCode: string;
+  onFilterChange: (updates: Partial<SavedFilters>) => void;
   onRemove: (student: Student) => Promise<void>;
+  onOpenRoster: () => void;
 }) {
-  if (view !== "mentees") return null;
-  return <td className="px-3 py-3 text-right">
-      <div className="flex justify-end gap-2">
-        {student.activePhaseId && <Link
-          href={`/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${new URLSearchParams({ school_code: schoolCode, academic_year: CURRENT_ACADEMIC_YEAR })}`}
-          aria-label={`Open ${student.name}`}
-          className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-3 font-medium text-text-on-accent hover:bg-accent-hover">
-          Open <ArrowRight aria-hidden="true" className="h-4 w-4" />
-        </Link>}
-        {canEdit && (
-          <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border px-3 font-medium hover:bg-hover-bg disabled:opacity-50"
-            aria-label={`Remove ${student.name}`} disabled={busy} onClick={() => void onRemove(student)}>
-            <UserMinus aria-hidden="true" className="h-4 w-4" /> Remove
-          </button>
-        )}
+  const countLabel = shown.length === mentees.length
+    ? `${mentees.length} current ${mentees.length === 1 ? "Mentee" : "Mentees"}`
+    : `${shown.length} of ${mentees.length} Mentees shown`;
+  return <div className="space-y-4 pt-2">
+    <div>
+      <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">My Mentees</h2>
+      <p className="text-sm text-text-muted">{countLabel}</p>
+    </div>
+    {mentees.length > 0 && (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_13rem]">
+        <label className={FIELD_LABEL_CLASSES}>
+          Search Mentees
+          <input aria-label="Search Mentees" className={FIELD_INPUT_CLASSES}
+            value={filters.menteeSearch} placeholder="Name or Student ID"
+            onChange={(event) => onFilterChange({ menteeSearch: event.target.value })} />
+        </label>
+        <label className={FIELD_LABEL_CLASSES}>
+          Grade
+          <select aria-label="Filter Mentees by Grade" className={FIELD_INPUT_CLASSES}
+            value={filters.menteeGrade}
+            onChange={(event) => onFilterChange({ menteeGrade: event.target.value as SavedFilters["menteeGrade"] })}>
+            <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
+          </select>
+        </label>
+        <label className={FIELD_LABEL_CLASSES}>
+          Active-Phase status
+          <select aria-label="Active-Phase status" className={FIELD_INPUT_CLASSES}
+            value={filters.menteeStatus}
+            onChange={(event) => onFilterChange({ menteeStatus: event.target.value as SavedFilters["menteeStatus"] })}>
+            <option value="">All statuses</option>
+            <option value="draft">Draft saved</option>
+            <option value="pending">Pending</option>
+            <option value="completed">Completed</option>
+            <option value="none">No active phase</option>
+          </select>
+        </label>
       </div>
-    </td>;
+    )}
+    <MenteeCards mentees={mentees} shown={shown} canEdit={canEdit} busy={busy} schoolCode={schoolCode}
+      onRemove={onRemove} onOpenRoster={onOpenRoster}
+      onClearFilters={() => onFilterChange({ menteeSearch: "", menteeGrade: "", menteeStatus: "" })} />
+  </div>;
 }
 
-function AssignSelectedButton({ view, canEdit, selectedCount, busy, onAssign }: {
-  view: "assign" | "mentees";
+function MenteeCards({ mentees, shown, canEdit, busy, schoolCode, onRemove, onOpenRoster, onClearFilters }: {
+  mentees: Student[];
+  shown: Student[];
   canEdit: boolean;
-  selectedCount: number;
   busy: boolean;
-  onAssign: () => Promise<void>;
+  schoolCode: string;
+  onRemove: (student: Student) => Promise<void>;
+  onOpenRoster: () => void;
+  onClearFilters: () => void;
 }) {
-  if (!canEdit || view !== "assign" || selectedCount === 0) return null;
-  return <div className="flex justify-end">
-    <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-4 font-semibold text-text-on-accent hover:bg-accent-hover disabled:opacity-50"
-      disabled={busy} onClick={() => void onAssign()}>
-      <UserPlus aria-hidden="true" className="h-4 w-4" /> Assign {selectedCount} selected
-    </button>
+  if (mentees.length === 0) {
+    return <div className="grid min-h-52 place-items-center rounded-md border border-border bg-bg-card px-5 py-10 text-center shadow-sm">
+      <div className="max-w-md space-y-2">
+        <Users aria-hidden="true" className="mx-auto h-10 w-10 text-text-muted" />
+        <h3 className="text-sm font-bold text-text-primary">No Mentees assigned</h3>
+        <p className="text-sm text-text-muted">
+          Select Students from the assignment roster and choose Assign to me.
+        </p>
+        <Button type="button" variant="secondary" onClick={onOpenRoster}>
+          View assignment roster
+        </Button>
+      </div>
+    </div>;
+  }
+  if (shown.length === 0) {
+    return <div className="grid min-h-44 place-items-center rounded-md border border-border bg-bg-card px-5 py-8 text-center shadow-sm">
+      <div className="max-w-md space-y-2">
+        <SearchX aria-hidden="true" className="mx-auto h-10 w-10 text-text-muted" />
+        <h3 className="text-sm font-bold text-text-primary">No Mentees match</h3>
+        <p className="text-sm text-text-muted">Change the search or filters.</p>
+        <Button type="button" variant="secondary" onClick={onClearFilters}>
+          Clear search and filters
+        </Button>
+      </div>
+    </div>;
+  }
+  return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    {shown.map((student) => <MenteeCard key={student.studentId} student={student} canEdit={canEdit}
+      busy={busy} schoolCode={schoolCode} onRemove={onRemove} />)}
   </div>;
+}
+
+function MenteeCard({ student, canEdit, busy, schoolCode, onRemove }: {
+  student: Student;
+  canEdit: boolean;
+  busy: boolean;
+  schoolCode: string;
+  onRemove: (student: Student) => Promise<void>;
+}) {
+  const status = menteeStatus(student);
+  const body = (
+    <div className="flex items-start justify-between gap-2">
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span aria-hidden="true"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-info-bg text-xs font-extrabold text-info">
+          {initials(student.name)}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-base font-bold text-text-primary">{student.name}</span>
+          <span className="block font-mono text-xs text-text-muted">
+            Grade {student.grade}{student.externalStudentId ? ` | ${student.externalStudentId}` : ""}
+          </span>
+        </span>
+      </span>
+      <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-bold ${MENTEE_STATUS_CLASSES[status]}`}>
+        {MENTEE_STATUS_LABEL[status]}
+      </span>
+    </div>
+  );
+  return <article className="overflow-hidden rounded-md border border-border bg-bg-card shadow-sm transition-shadow hover:shadow-md">
+    {student.activePhaseId ? (
+      <Link
+        href={`/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${new URLSearchParams({ school_code: schoolCode, academic_year: CURRENT_ACADEMIC_YEAR })}`}
+        aria-label={`Open ${student.name}`}
+        className="block min-h-[74px] p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset">
+        {body}
+      </Link>
+    ) : (
+      <div className="min-h-[74px] p-4">{body}</div>
+    )}
+    <div className="flex min-h-11 items-center justify-between gap-2 border-t border-border py-1 pl-4 pr-1.5">
+      <span className="text-xs text-text-muted">Current-year Mentee</span>
+      {canEdit && (
+        <button type="button" aria-label={`Remove ${student.name}`} title="Remove assignment"
+          disabled={busy} onClick={() => void onRemove(student)}
+          className="grid h-11 w-11 place-items-center rounded-md text-text-muted hover:bg-accent/10 hover:text-accent disabled:opacity-50">
+          <UserMinus aria-hidden="true" className="h-[18px] w-[18px]" />
+        </button>
+      )}
+    </div>
+  </article>;
 }

@@ -9,6 +9,7 @@ interface RosterRow {
   external_student_id: string | null;
   grade: number | string;
   active_phase_id: number | string | null;
+  active_notes_state: "draft" | "submitted" | null;
   mapping_id: number | string | null;
   mentor_user_id: number | string | null;
   mentor_name: string | null;
@@ -20,6 +21,7 @@ export interface HolisticAssignmentRosterStudent {
   externalStudentId: string | null;
   grade: number;
   activePhaseId: number | null;
+  activeNotesState: "draft" | "submitted" | null;
   ownership: {
     mappingId: number;
     mentorUserId: number;
@@ -426,6 +428,7 @@ export async function listHolisticAssignmentRoster(params: {
             st.student_id AS external_student_id,
             roster_student.grade,
             active_phase.id AS active_phase_id,
+            active_notes.state AS active_notes_state,
             mapping.id AS mapping_id,
             mapping.mentor_user_id,
             NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name
@@ -447,6 +450,9 @@ export async function listHolisticAssignmentRoster(params: {
        ORDER BY phase.position DESC
        LIMIT 1
      ) active_phase ON true
+     LEFT JOIN holistic_mentorship_post_session_notes active_notes
+       ON active_notes.student_id = st.id
+      AND active_notes.phase_id = active_phase.id
      LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping
        ON mapping.student_id = st.id
       AND mapping.academic_year = $2
@@ -477,6 +483,7 @@ export async function listHolisticAssignmentRoster(params: {
     externalStudentId: row.external_student_id,
     grade: Number(row.grade),
     activePhaseId: row.active_phase_id === null ? null : Number(row.active_phase_id),
+    activeNotesState: row.active_notes_state ?? null,
     ownership:
       row.mapping_id === null || row.mentor_user_id === null
         ? null

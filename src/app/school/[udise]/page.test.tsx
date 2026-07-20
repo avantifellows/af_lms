@@ -1302,8 +1302,10 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByTestId("tab-holistic_mentorship")).toHaveTextContent(
       "Holistic Mentorship"
     );
-    expect(screen.getByRole("tab", { name: "Assign Students" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "My Mentees" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Holistic Mentorship" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Assign Students to yourself to start mentorship")
+    ).toBeInTheDocument();
     expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
       expect.objectContaining({ user: { email: "teacher@avantifellows.org" } }),
       "roster_view",

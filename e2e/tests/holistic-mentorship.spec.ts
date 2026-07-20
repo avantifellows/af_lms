@@ -139,14 +139,12 @@ test.describe("Holistic Mentorship release workflows", () => {
       await holisticTeacherPage.setViewportSize(viewport);
       await openTeacherWorkspace(holisticTeacherPage);
 
-      const teacherSections = holisticTeacherPage.getByRole("tablist", {
-        name: "Holistic Mentorship sections",
-      });
-      await expect(teacherSections).toBeVisible();
-      await expect(teacherSections.getByRole("tab", { name: "Assign Students" })).toHaveAttribute(
-        "aria-selected",
-        "true"
-      );
+      await expect(
+        holisticTeacherPage.getByRole("heading", { name: "Holistic Mentorship" })
+      ).toBeVisible();
+      await expect(
+        holisticTeacherPage.getByRole("heading", { name: "My Mentees" })
+      ).toBeVisible();
       await expect(holisticTeacherPage.getByRole("textbox", { name: "Search Students" })).toBeVisible();
       await expect(holisticTeacherPage.getByRole("combobox", { name: "Filter by Grade" })).toBeVisible();
       await expect(holisticTeacherPage.getByRole("combobox", { name: "Filter by Assignment" })).toBeVisible();
@@ -155,25 +153,20 @@ test.describe("Holistic Mentorship release workflows", () => {
         holisticTeacherPage.getByRole("table", { name: "Student assignment results" })
       );
       await expectNoPageOverflow(holisticTeacherPage);
-      await expectMinimumTapTarget(teacherSections.getByRole("tab", { name: "Assign Students" }));
+      await expectMinimumTapTarget(assignmentSummary(holisticTeacherPage));
       await captureResponsiveScreenshot(holisticTeacherPage, testInfo, `mentor-assignment-${viewport.name}`);
     }
 
     await holisticTeacherPage.setViewportSize(RESPONSIVE_VIEWPORTS[0]);
     await openTeacherWorkspace(holisticTeacherPage);
-    const teacherSections = holisticTeacherPage.getByRole("tablist", {
-      name: "Holistic Mentorship sections",
-    });
-    const assignTab = teacherSections.getByRole("tab", { name: "Assign Students" });
-    const menteesTab = teacherSections.getByRole("tab", { name: "My Mentees" });
-    await assignTab.focus();
-    await assignTab.press("ArrowRight");
-    await expect(menteesTab).toBeFocused();
-    await expect(menteesTab).toHaveAttribute("aria-selected", "true");
     await expect(holisticTeacherPage.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
-    await menteesTab.press("Home");
-    await expect(assignTab).toBeFocused();
-    await expect(assignTab).toHaveAttribute("aria-selected", "true");
+    const summary = assignmentSummary(holisticTeacherPage);
+    const searchStudents = holisticTeacherPage.getByRole("textbox", { name: "Search Students" });
+    await summary.focus();
+    await summary.press("Enter");
+    await expect(searchStudents).toBeHidden();
+    await summary.press("Enter");
+    await expect(searchStudents).toBeVisible();
 
     for (const viewport of RESPONSIVE_VIEWPORTS) {
       await holisticTeacherPage.setViewportSize(viewport);
@@ -332,7 +325,7 @@ test.describe("Holistic Mentorship release workflows", () => {
       response.url().endsWith("/api/holistic-mentorship/mappings") && response.request().method() === "POST"
     );
     holisticTeacherPage.once("dialog", (dialog) => dialog.accept());
-    await holisticTeacherPage.getByRole("button", { name: "Assign 1 selected" }).click();
+    await holisticTeacherPage.getByRole("button", { name: "Assign to me (1)" }).click();
     await expect((await assignment).status()).toBe(200);
 
     await holisticTeacherPage.goto(studentPhaseUrl(fixture.draftStudentId, fixture.activeGrade11PhaseId));
@@ -502,15 +495,20 @@ test.describe("Holistic Mentorship release workflows", () => {
   });
 });
 
+function assignmentSummary(page: Page) {
+  return page.locator("summary").filter({ hasText: "Assign Students" });
+}
+
 async function openTeacherWorkspace(page: Page) {
   await page.goto(`/school/${fixture.schoolCode}`);
   const tab = page.getByRole("tab", { name: "Holistic Mentorship", exact: true });
   await expect(tab).toBeVisible();
   await tab.click();
-  const assignTab = page.getByRole("tab", { name: "Assign Students" });
-  await expect(assignTab).toBeVisible();
-  if (await assignTab.getAttribute("aria-selected") !== "true") await assignTab.click();
-  await expect(assignTab).toHaveAttribute("aria-selected", "true");
+  const summary = assignmentSummary(page);
+  await expect(summary).toBeVisible();
+  const searchStudents = page.getByRole("textbox", { name: "Search Students" });
+  if (!(await searchStudents.isVisible())) await summary.click();
+  await expect(searchStudents).toBeVisible();
 }
 
 async function openAdminProgress(page: Page) {
