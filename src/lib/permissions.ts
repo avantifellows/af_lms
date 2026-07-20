@@ -28,7 +28,8 @@ export type Feature =
   | "performance"
   | "summary_stats"
   | "pm_dashboard"
-  | "quiz_sessions";
+  | "quiz_sessions"
+  | "teacher_feedback";
 
 // Feature access levels
 export type FeatureAccess = "none" | "view" | "edit";
@@ -43,11 +44,15 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
   quiz_sessions: { teacher: "edit",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  // PM-driven: a PM/admin sets up student feedback ABOUT teachers, so teachers
+  // must not have edit (or view) here — mirrors the visits access shape.
+  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "view", admin: "edit" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
 const NVS_GATED_FEATURES: Set<Feature> = new Set([
   "visits", "curriculum", "pm_dashboard", "summary_stats", "quiz_sessions",
+  "teacher_feedback",
 ]);
 
 export interface FeatureAccessResult {
