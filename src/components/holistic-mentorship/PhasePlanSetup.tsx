@@ -75,6 +75,18 @@ function isDefinitionReadOnly(plan: Plan | null | undefined, selectedPhase: Phas
   return !!selectedPhase && (selectedPhase.frozen || selectedPhase.used);
 }
 
+function normalizedQuestions(questions: Question[]) {
+  return questions.map((question) => ({ id: question.id ?? null, text: question.text }));
+}
+
+function draftIsDirty(draft: Draft, phase: Phase | undefined) {
+  if (!phase) return true;
+  return draft.grade !== phase.grade ||
+    draft.title !== phase.title ||
+    draft.guidanceMarkdown !== phase.guidanceMarkdown ||
+    JSON.stringify(normalizedQuestions(draft.questions)) !== JSON.stringify(normalizedQuestions(phase.questions));
+}
+
 function draftFromPhase(phase: Phase): Draft {
   return {
     id: phase.id,
@@ -349,6 +361,7 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
 }) {
   const identityReadOnly = definitionReadOnly;
   const phase = selectedPhase;
+  const dirty = draftIsDirty(draft, phase);
   return <article className="min-w-0 rounded-md border border-border bg-bg-card">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
       <div>
@@ -433,8 +446,9 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
       </section>
     </div>
     {plan.editable && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-4">
-      <Button type="button" variant="secondary" onClick={onDiscard} disabled={busy || definitionReadOnly}>Discard</Button>
-      <Button type="button" onClick={() => void onSave()} disabled={busy || definitionReadOnly}>
+      {dirty && !definitionReadOnly && <p role="status" className="mr-auto text-xs font-semibold text-warning-text">Unsaved changes</p>}
+      <Button type="button" variant="secondary" onClick={onDiscard} disabled={busy || definitionReadOnly || !dirty}>Discard</Button>
+      <Button type="button" onClick={() => void onSave()} disabled={busy || definitionReadOnly || !dirty}>
         <Save aria-hidden="true" className="h-4 w-4" /> Save Phase
       </Button>
     </footer>}

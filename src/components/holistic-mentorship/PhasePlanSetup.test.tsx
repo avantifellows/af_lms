@@ -55,6 +55,33 @@ describe("PhasePlanSetup", () => {
     });
   });
 
+  it("disables Save and Discard until the draft has unsaved changes", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Saved title", state: "locked",
+        guidanceMarkdown: "Saved Guidance", revision: 2, frozen: false,
+        everOpened: false, used: false, active: false,
+        questions: [{ id: 41, text: "Saved Question" }],
+      }],
+    } }) }));
+    render(<PhasePlanSetup />);
+
+    await user.click(await screen.findByRole("button", { name: /Saved title/ }));
+    expect(screen.getByRole("button", { name: "Save Phase" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Title"), "!");
+    expect(screen.getByRole("button", { name: "Save Phase" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeEnabled();
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Saved title");
+    expect(screen.getByRole("button", { name: "Save Phase" })).toBeDisabled();
+  });
+
   it("keeps the moved Phase selected after a reorder", async () => {
     const user = userEvent.setup();
     const lockedPhase = (id: number, number: number, title: string) => ({
