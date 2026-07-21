@@ -74,6 +74,36 @@ describe("StudentPhasePage", () => {
     }));
   });
 
+  it("returns a global Admin opened from School coverage to that School tab", async () => {
+    mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "admin" },
+      school: { id: 4, name: "School One" },
+      canEdit: false,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [],
+      selectedPhase: { phaseId: 73, locked: false },
+      readOnly: true,
+    });
+    const schoolProps = {
+      ...props,
+      searchParams: Promise.resolve({
+        school_code: "SCH001",
+        academic_year: "2026-2027",
+        source: "school",
+      }),
+    };
+
+    const { container } = render(await StudentPhasePage(schoolProps));
+
+    expect(container.querySelector(
+      'a[href="/school/SCH001?tab=holistic_mentorship"]'
+    )).toBeInTheDocument();
+  });
+
   it("opens a prior-year Admin drill-down from Progress without requiring a current Mapping", async () => {
     mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
     mockAccess.mockResolvedValue({

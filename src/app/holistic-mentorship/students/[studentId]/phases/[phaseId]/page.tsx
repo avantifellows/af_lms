@@ -16,7 +16,7 @@ import {
 
 type StudentPhasePageProps = {
   params: Promise<{ studentId: string; phaseId: string }>;
-  searchParams: Promise<{ school_code?: string; academic_year?: string }>;
+  searchParams: Promise<{ school_code?: string; academic_year?: string; source?: string }>;
 };
 
 function positiveInteger(value: string) {
@@ -33,8 +33,9 @@ async function studentPhaseRequest({ params, searchParams }: StudentPhasePagePro
   const phaseId = positiveInteger(rawPhaseId);
   const schoolCode = queryParams.school_code ?? "";
   const academicYear = queryParams.academic_year ?? "";
+  const source = queryParams.source === "school" ? "school" as const : undefined;
   if (studentId === null || phaseId === null || !schoolCode || !validateAcademicYear(academicYear)) notFound();
-  return { studentId, phaseId, schoolCode, academicYear };
+  return { studentId, phaseId, schoolCode, academicYear, source };
 }
 
 async function studentPhaseAccess(
@@ -51,13 +52,17 @@ async function studentPhaseAccess(
   redirect(access.status === 401 ? "/" : "/dashboard");
 }
 
-function studentPhaseBackHref(role: string, schoolCode: string) {
+function studentPhaseBackHref(role: string, schoolCode: string, source?: "school") {
+  if (role === "admin" && source === "school") {
+    return `/school/${schoolCode}?tab=holistic_mentorship`;
+  }
   const admin = role === "admin" || role === "holistic_mentorship_admin";
   return admin ? "/admin/holistic-mentorship" : `/school/${schoolCode}?tab=holistic_mentorship`;
 }
 
-function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string) {
+function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string, source?: "school") {
   const query = new URLSearchParams({ school_code: schoolCode, academic_year: academicYear });
+  if (source) query.set("source", source);
   return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
 }
 
@@ -85,11 +90,13 @@ function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
   studentId: number;
   schoolCode: string;
   academicYear: string;
+  source?: "school";
 }, role: string) {
   if (!("locked" in detail.selectedPhase) || !detail.selectedPhase.locked) return;
+  const source = role === "admin" ? request.source : undefined;
   const phaseId = fallbackPhaseId(detail, request.academicYear);
-  if (phaseId) redirect(studentPhaseHref(request.studentId, phaseId, request.schoolCode, request.academicYear));
-  redirect(studentPhaseBackHref(role, request.schoolCode));
+  if (phaseId) redirect(studentPhaseHref(request.studentId, phaseId, request.schoolCode, request.academicYear, source));
+  redirect(studentPhaseBackHref(role, request.schoolCode, source));
 }
 
 export default async function StudentPhasePage(props: StudentPhasePageProps) {
@@ -111,7 +118,8 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
   if (!detail) notFound();
   redirectFromLockedPhase(detail, request, access.permission.role);
 
-  const backHref = studentPhaseBackHref(access.permission.role, request.schoolCode);
+  const source = access.permission.role === "admin" ? request.source : undefined;
+  const backHref = studentPhaseBackHref(access.permission.role, request.schoolCode, source);
   return (
     <div className="min-h-screen bg-bg">
       <PageHeader
@@ -122,7 +130,8 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <StudentPhaseWorkspace key={detail.student.id} detail={detail}
-          schoolCode={request.schoolCode} academicYear={request.academicYear} backHref={backHref} />
+          schoolCode={request.schoolCode} academicYear={request.academicYear}
+          source={source} backHref={backHref} />
       </main>
     </div>
   );

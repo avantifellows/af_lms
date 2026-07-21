@@ -838,17 +838,19 @@ export default function StudentPhaseWorkspace({
   detail,
   schoolCode,
   academicYear,
+  source,
   backHref,
 }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
+  source?: "school";
   backHref?: string;
 }) {
   const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<number>>(() => new Set());
   if (detail.readOnly) {
     return <AdminReadOnlyWorkspace detail={detail} schoolCode={schoolCode}
-      academicYear={academicYear} backHref={backHref} />;
+      academicYear={academicYear} source={source} backHref={backHref} />;
   }
   const phases = detail.phases.map((phase) =>
     phase.phaseId !== null && "locked" in phase && !phase.locked && completedPhaseIds.has(phase.phaseId)
@@ -863,7 +865,8 @@ export default function StudentPhaseWorkspace({
     <div className="space-y-6">
       <StudentIdentity student={detail.student} backHref={backHref} />
       <PhaseNavigation studentId={detail.student.id} phases={phases}
-        selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
+        selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
+        academicYear={academicYear} source={source} />
       <InactivePhasePanels studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} />
       <SelectedPhaseContent phase={visibleSelected} studentId={detail.student.id}
@@ -874,10 +877,11 @@ export default function StudentPhaseWorkspace({
   );
 }
 
-function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, backHref }: {
+function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, source, backHref }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
+  source?: "school";
   backHref?: string;
 }) {
   return (
@@ -887,7 +891,8 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, backHref }: 
         selectedPhaseId={detail.selectedPhase.phaseId} />
       <Card elevation="sm" className="overflow-hidden">
         <PhaseNavigation readOnly studentId={detail.student.id} phases={detail.phases}
-          selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode} academicYear={academicYear} />
+          selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
+          academicYear={academicYear} source={source} />
         <AdminSelectedPhase phase={selectedOpenPhase(detail)} selectedPhase={detail.selectedPhase}
           studentId={detail.student.id} academicYear={academicYear} />
       </Card>
@@ -932,8 +937,9 @@ function AdminStudentHeader({ student, backHref }: {
   </header>;
 }
 
-function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string) {
+function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string, source?: "school") {
   const query = new URLSearchParams({ school_code: schoolCode, academic_year: academicYear });
+  if (source) query.set("source", source);
   return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
 }
 
@@ -956,12 +962,13 @@ function InactivePhasePanels({ studentId, phases, selectedPhaseId }: {
     aria-labelledby={phaseTabId(studentId, phase)} hidden />)}</>;
 }
 
-function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, readOnly = false }: {
+function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, source, readOnly = false }: {
   studentId: number;
   phases: HolisticStudentPhaseDetail["phases"];
   selectedPhaseId: number | null;
   schoolCode: string;
   academicYear: string;
+  source?: "school";
   readOnly?: boolean;
 }) {
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -984,9 +991,11 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
     className="flex overflow-x-auto border-b border-border">
     {phases.map((phase) => readOnly
       ? <AdminPhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
-        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />
+        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
+        academicYear={academicYear} source={source} />
       : <PhaseNavigationLink key={`${phase.number}-${phase.title}`} phase={phase}
-        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} />)}
+        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
+        academicYear={academicYear} source={source} />)}
   </nav>;
 }
 
@@ -997,12 +1006,13 @@ const ADMIN_PHASE_STAGE_TEXT: Record<PhaseStage, string> = {
   Locked: "text-text-muted",
 };
 
-function AdminPhaseTab({ phase, current, studentId, schoolCode, academicYear }: {
+function AdminPhaseTab({ phase, current, studentId, schoolCode, academicYear, source }: {
   phase: PhaseNavigationItem;
   current: boolean;
   studentId: number;
   schoolCode: string;
   academicYear: string;
+  source?: "school";
 }) {
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
     return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
@@ -1016,7 +1026,7 @@ function AdminPhaseTab({ phase, current, studentId, schoolCode, academicYear }: 
     </button>;
   }
   const stage = phaseStage(phase);
-  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear)}
+  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear, source)}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${stage}`}
@@ -1028,12 +1038,13 @@ function AdminPhaseTab({ phase, current, studentId, schoolCode, academicYear }: 
   </Link>;
 }
 
-function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYear }: {
+function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYear, source }: {
   phase: PhaseNavigationItem;
   current: boolean;
   studentId: number;
   schoolCode: string;
   academicYear: string;
+  source?: "school";
 }) {
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
     return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
@@ -1046,7 +1057,7 @@ function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYe
   const className = current
     ? "border-accent bg-bg-card text-text-primary"
     : "border-transparent text-text-muted hover:bg-accent/5";
-  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear)}
+  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear, source)}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${phaseStage(phase)}`}

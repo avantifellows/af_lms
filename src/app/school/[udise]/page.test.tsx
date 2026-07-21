@@ -15,6 +15,7 @@ const {
   mockGetAcademicMentorshipActorUserId,
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
+  mockListHolisticAssignmentRoster,
   mockRequireHolisticMentorshipAccess,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockGetAcademicMentorshipActorUserId: vi.fn(),
   mockListAcademicMentorshipMappings: vi.fn(),
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
+  mockListHolisticAssignmentRoster: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
 }));
 
@@ -62,6 +64,9 @@ vi.mock("@/lib/academic-mentorship", () => ({
 }));
 vi.mock("@/lib/holistic-mentorship", () => ({
   requireHolisticMentorshipAccess: mockRequireHolisticMentorshipAccess,
+}));
+vi.mock("@/lib/holistic-mappings", () => ({
+  listHolisticAssignmentRoster: mockListHolisticAssignmentRoster,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -329,6 +334,7 @@ describe("SchoolPage (server component)", () => {
     );
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
     mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockListHolisticAssignmentRoster.mockResolvedValue([]);
     mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: false,
@@ -1327,6 +1333,36 @@ describe("SchoolPage (server component)", () => {
       "program_read",
       { schoolCode: "70705" }
     );
+  });
+
+  it("shows Admin read-only Holistic assignment coverage for the current School", async () => {
+    const { permission } = setupAdminDefaults({ id: "20", code: "SCH001" });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001" },
+      actorUserId: 101,
+      canEdit: false,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 41,
+      name: "Asha Rao",
+      externalStudentId: "S41",
+      grade: 11,
+      activePhaseId: 73,
+      activeNotesState: "draft",
+      ownership: { mappingId: 8, mentorUserId: 9, mentorName: "Anita Mentor" },
+    }]);
+
+    await renderPage();
+
+    expect(screen.getByText("School assignment coverage for 2026-2027")).toBeInTheDocument();
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+    });
   });
 
   it("keeps the dedicated Admin out of non-Holistic School data", async () => {

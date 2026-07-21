@@ -37,10 +37,12 @@ import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
 import { buildProgramStats } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
+import AdminSchoolRoster from "@/components/holistic-mentorship/AdminSchoolRoster";
 import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipSession,
 } from "@/lib/holistic-mentorship";
+import { listHolisticAssignmentRoster } from "@/lib/holistic-mappings";
 import { type ReactNode } from "react";
 
 interface School {
@@ -533,19 +535,13 @@ async function buildHolisticMentorshipContent({
       />
     );
   }
-  return (
-    <section className="space-y-4">
-      <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">
-        Holistic Mentorship
-      </h2>
-      <Link
-        href="/admin/holistic-mentorship"
-        className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-4 py-2 text-sm font-semibold text-text-on-accent hover:bg-accent-hover"
-      >
-        Open Program workspace
-      </Link>
-    </section>
-  );
+  return <AdminSchoolRoster
+    schoolCode={schoolCode}
+    students={await listHolisticAssignmentRoster({
+      schoolId: holisticAccess.school!.id,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    })}
+  />;
 }
 
 async function buildSchoolTabs({
