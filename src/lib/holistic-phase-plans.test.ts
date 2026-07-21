@@ -10,9 +10,10 @@ import { addHolisticPhase, createHolisticPhasePlan, deleteHolisticPhase, getHoli
 
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
+const actor = { actorEmail: "hm-admin@example.com", actorUserId: 9 };
 const newPhase = {
   academicYear: "2026-2027",
-  actorUserId: 9,
+  ...actor,
   grade: 11 as const,
   title: "Belonging",
   guidanceMarkdown: "Discuss goals",
@@ -35,7 +36,7 @@ function deletePhaseClient(laterPhase: Record<string, unknown>) {
 async function deletePhaseWithLater(laterPhase: Record<string, unknown>) {
   const client = deletePhaseClient(laterPhase);
   mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
-  const result = await deleteHolisticPhase({ phaseId: 21, expectedRevision: 1, actorUserId: 9 });
+  const result = await deleteHolisticPhase({ phaseId: 21, expectedRevision: 1, ...actor });
   return { client, result };
 }
 
@@ -73,7 +74,7 @@ describe("Holistic Phase Plans", () => {
       updateHolisticPhase({
         phaseId: 21,
         expectedRevision: 3,
-        actorUserId: 9,
+        ...actor,
         title: "My unsaved title",
         grade: 11,
         guidanceMarkdown: "My unsaved guidance",
@@ -100,7 +101,7 @@ describe("Holistic Phase Plans", () => {
     await expect(updateHolisticPhase({
       phaseId: 21,
       expectedRevision: 2,
-      actorUserId: 9,
+      ...actor,
       title: "New title",
       grade: 12,
       guidanceMarkdown: "New Guidance",
@@ -110,7 +111,7 @@ describe("Holistic Phase Plans", () => {
 
     expect(String(client.query.mock.calls[2][0])).not.toContain("CASE WHEN");
     expect(client.query.mock.calls[2][1]).toEqual([21, 12, "New title", "New Guidance", 2]);
-    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "definition_updated", 9]);
+    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "definition_updated", 9, actor.actorEmail]);
   });
 
   it("opens a complete Phase out of sequence and records the confirmed actor transition", async () => {
@@ -123,9 +124,9 @@ describe("Holistic Phase Plans", () => {
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", actorUserId: 9, confirmed: true }))
+    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true }))
       .resolves.toEqual({ ok: true, id: 21, revision: 3 });
-    expect(client.query.mock.calls[3][1]).toEqual([21, "locked", "open", 9]);
+    expect(client.query.mock.calls[3][1]).toEqual([21, "locked", "open", 9, actor.actorEmail]);
   });
 
   it("does not open a Phase whose stored Question is blank", async () => {
@@ -136,7 +137,7 @@ describe("Holistic Phase Plans", () => {
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", actorUserId: 9, confirmed: true }))
+    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true }))
       .resolves.toEqual({ ok: false, status: 422, error: "Complete Grade, title, Guidance, and Questions before opening" });
     expect(client.query).toHaveBeenCalledTimes(2);
   });
@@ -152,7 +153,7 @@ describe("Holistic Phase Plans", () => {
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", actorUserId: 9, confirmed: true }))
+    await expect(setHolisticPhaseState({ phaseId: 21, expectedRevision: 2, state: "open", ...actor, confirmed: true }))
       .resolves.toEqual({ ok: false, status: 422, error: "Complete Grade, title, Guidance, and Questions before opening" });
   });
 
@@ -162,7 +163,7 @@ describe("Holistic Phase Plans", () => {
       .mockResolvedValueOnce({ rows: [{ id: "21", revision: 3, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: true, used: false }] }) };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(deleteHolisticPhase({ phaseId: 21, expectedRevision: 3, actorUserId: 9 }))
+    await expect(deleteHolisticPhase({ phaseId: 21, expectedRevision: 3, ...actor }))
       .resolves.toEqual({ ok: false, status: 422, error: "Only never-opened, unused Locked Phases can be deleted" });
   });
 
@@ -178,7 +179,7 @@ describe("Holistic Phase Plans", () => {
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
-    await expect(reorderHolisticPhases({ academicYear: "2026-2027", actorUserId: 9, phases: [
+    await expect(reorderHolisticPhases({ academicYear: "2026-2027", ...actor, phases: [
       { id: 22, expectedRevision: 2 }, { id: 21, expectedRevision: 1 },
     ] })).resolves.toEqual({ ok: true });
     expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
@@ -201,12 +202,12 @@ describe("Holistic Phase Plans", () => {
     await expect(createHolisticPhasePlan({
       academicYear: "2026-2027",
       copyFromAcademicYear: "2025-2026",
-      actorUserId: 9,
+      ...actor,
     }))
       .resolves.toEqual({ ok: true, id: 7 });
     expect(String(client.query.mock.calls[2][0])).toContain("'locked'");
     expect(client.query.mock.calls[3][1]).toEqual([31, 21]);
-    expect(client.query.mock.calls[4][1]).toEqual([7, 31, "created", 9]);
+    expect(client.query.mock.calls[4][1]).toEqual([7, 31, "created", 9, actor.actorEmail]);
   });
 
   it("audits a newly added Phase", async () => {
@@ -224,7 +225,7 @@ describe("Holistic Phase Plans", () => {
     expect(String(client.query.mock.calls[0][0])).toContain("FOR UPDATE");
     expect(client.query.mock.calls[0][1]).toEqual([1, "2026-2027"]);
     expect(String(client.query.mock.calls[1][0])).toContain("MAX(position) + 1");
-    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "created", 9]);
+    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "created", 9, actor.actorEmail]);
   });
 
   it("returns before calculating a Phase position when the locked Plan is missing", async () => {
@@ -251,8 +252,8 @@ describe("Holistic Phase Plans", () => {
       .filter(([sql]) => String(sql).includes("phase_mutation_audits"))
       .map(([, params]) => params);
     expect(auditArgs).toEqual([
-      [7, 21, "deleted", 9],
-      [7, 22, "reordered", 9],
+      [7, 21, "deleted", 9, actor.actorEmail],
+      [7, 22, "reordered", 9, actor.actorEmail],
     ]);
     expect(client.query.mock.calls.some(([sql]) => String(sql).includes("position = position - 10001")))
       .toBe(true);
@@ -274,7 +275,7 @@ describe("Holistic Phase Plans", () => {
   it("rejects raw HTML, embedded images, and unsafe Guidance links", async () => {
     for (const guidanceMarkdown of ["<iframe src='x'>", "![image](https://x)", "[bad](javascript:alert(1))"]) {
       const result = await addHolisticPhase({
-        academicYear: "2026-2027", actorUserId: 9, grade: 11, title: "Safety", guidanceMarkdown,
+        academicYear: "2026-2027", ...actor, grade: 11, title: "Safety", guidanceMarkdown,
         questions: [{ text: "What matters?" }],
       });
       expect(result).toMatchObject({ ok: false, status: 422 });

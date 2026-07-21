@@ -187,7 +187,8 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
   const mentorUserId = await actor("e2e-holistic-teacher@test.local", "teacher", 1);
   const formerMentorUserId = await actor("e2e-former-holistic-mentor@test.local", "teacher", 1);
   const readOnlyMentorUserId = await actor("e2e-holistic-read-only@test.local", "teacher", 1, true);
-  const holisticAdminUserId = await actor("e2e-holistic-admin@test.local", "holistic_mentorship_admin", 3);
+  const holisticAdminEmail = "e2e-holistic-admin@test.local";
+  const holisticAdminUserId = await actor(holisticAdminEmail, "holistic_mentorship_admin", 3);
   await actor("e2e-holistic-global-admin@test.local", "admin", 3);
   await actor("e2e-holistic-pm@test.local", "program_manager", 2);
   await actor("e2e-holistic-program-admin@test.local", "program_admin", 2);
@@ -273,8 +274,8 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
   const questionByPhase = new Map(questionResult.rows.map(({ id, phase_id }) => [Number(phase_id), Number(id)]));
   await client.query(
     `INSERT INTO holistic_mentorship_phase_state_transitions
-       (phase_id, from_state, to_state, actor_user_id, occurred_at, inserted_at, updated_at)
-     SELECT phase.id, 'locked', 'open', $2,
+       (phase_id, from_state, to_state, actor_user_id, actor_email, occurred_at, inserted_at, updated_at)
+     SELECT phase.id, 'locked', 'open', $2, $3,
             CASE phase.position WHEN 1 THEN '2026-05-01T00:00:00Z'::timestamptz
               WHEN 2 THEN '2026-06-01T00:00:00Z'::timestamptz
               WHEN 4 THEN '2026-05-01T00:00:00Z'::timestamptz
@@ -284,7 +285,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
      WHERE phase.phase_plan_id = $1 AND phase.state = 'open'
        AND NOT EXISTS (SELECT 1 FROM holistic_mentorship_phase_state_transitions existing
                        WHERE existing.phase_id = phase.id AND existing.to_state = 'open')`,
-    [planId, holisticAdminUserId]
+    [planId, holisticAdminUserId, holisticAdminEmail]
   );
 
   const syntheticPrompt = "Synthetic prompt only.";

@@ -42,12 +42,10 @@ describe("/api/holistic-mentorship/phase-plans", () => {
 
   it("lets a Holistic Mentorship Admin create the blank current-year Plan", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "hm-admin@example.com" } });
-    mockQuery
-      .mockResolvedValueOnce([{
-        email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
-        school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
-      }])
-      .mockResolvedValueOnce([{ id: "9" }]);
+    mockQuery.mockResolvedValueOnce([{
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
+    }]);
     const client = { query: vi.fn().mockResolvedValueOnce({ rows: [{ id: "7" }] }) };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
@@ -61,14 +59,12 @@ describe("/api/holistic-mentorship/phase-plans", () => {
     expect(client.query.mock.calls[0][1]).toEqual([1, "2026-2027"]);
   });
 
-  it("attributes an opened Phase definition update to the authenticated actor", async () => {
+  it("attributes a Phase update by email when the actor has no User row", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "hm-admin@example.com" } });
-    mockQuery
-      .mockResolvedValueOnce([{
-        email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
-        school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
-      }])
-      .mockResolvedValueOnce([{ id: "9" }]);
+    mockQuery.mockResolvedValueOnce([{
+      email: "hm-admin@example.com", level: 3, role: "holistic_mentorship_admin",
+      school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: null,
+    }]);
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{
@@ -97,6 +93,8 @@ describe("/api/holistic-mentorship/phase-plans", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "definition_updated", 9]);
+    expect(client.query.mock.calls.at(-1)?.[1]).toEqual([
+      7, 21, "definition_updated", null, "hm-admin@example.com",
+    ]);
   });
 });
