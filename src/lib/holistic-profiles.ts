@@ -77,8 +77,7 @@ export async function requestHolisticProfileRegeneration(params: {
        JOIN "user" student_user ON student_user.id = student.user_id
        JOIN enrollment_record batch_enrollment ON batch_enrollment.user_id = student_user.id
          AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
-       JOIN "group" batch_group ON batch_group.id = batch_enrollment.group_id AND batch_group.type = 'batch'
-       JOIN batch ON batch.id = batch_group.child_id AND batch.program_id = $3
+       JOIN batch ON batch.id = batch_enrollment.group_id AND batch.program_id = $3
        JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
          AND grade_enrollment.group_type = 'grade' AND grade_enrollment.is_current IS TRUE
        JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
