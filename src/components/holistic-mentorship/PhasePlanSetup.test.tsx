@@ -9,12 +9,29 @@ describe("PhasePlanSetup", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: null }) }));
   });
 
-  it("offers blank and prior-year copy paths when the current Plan does not exist", async () => {
+  it("only offers a blank Plan when no prior-year Plan exists", async () => {
     render(<PhasePlanSetup />);
 
     expect(await screen.findByRole("button", { name: "Start blank" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy previous year" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy previous year" })).not.toBeInTheDocument();
+    expect(screen.getByText("Start with no Phases and add them from this workspace.")).toBeInTheDocument();
     expect(screen.getByText(`Create the 2026-2027 Phase Plan`)).toBeInTheDocument();
+  });
+
+  it("offers to copy when a prior-year Plan exists", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ plan: { id: 6 } }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PhasePlanSetup />);
+
+    expect(await screen.findByRole("button", { name: "Copy previous year" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/holistic-mentorship/phase-plans?academic_year=2025-2026"
+    );
+    expect(screen.getByText(/copy last year's definitions/)).toBeInTheDocument();
   });
 
   it("edits and reorders questions on an opened unused Phase after confirmation", async () => {

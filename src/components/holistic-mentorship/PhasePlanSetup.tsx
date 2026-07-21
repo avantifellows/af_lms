@@ -101,6 +101,7 @@ function draftFromPhase(phase: Phase): Draft {
 
 export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }: { academicYear?: string }) {
   const [plan, setPlan] = useState<Plan | null | undefined>();
+  const [canCopyPriorPlan, setCanCopyPriorPlan] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -109,6 +110,7 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
 
   const load = useCallback(async (year = academicYear, selectPhaseId?: number) => {
     setPlan(undefined);
+    setCanCopyPriorPlan(false);
     setDraft(null);
     setMessage("");
     try {
@@ -116,11 +118,17 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
       const data = await result.json();
       if (!result.ok) setMessage(data.error ?? "Could not load the Plan");
       const nextPlan: Plan | null = data.plan ?? null;
+      if (!nextPlan && year === CURRENT_ACADEMIC_YEAR) {
+        const priorResult = await fetch(`/api/holistic-mentorship/phase-plans?academic_year=${PRIOR_ACADEMIC_YEAR}`);
+        const priorData = await priorResult.json();
+        setCanCopyPriorPlan(priorResult.ok && !!priorData.plan);
+      }
       setPlan(nextPlan);
       const keep = selectPhaseId ? nextPlan?.phases.find((phase) => phase.id === selectPhaseId) : undefined;
       if (keep) setDraft(draftFromPhase(keep));
     } catch {
       setMessage("Could not load the Plan");
+      setCanCopyPriorPlan(false);
       setPlan(null);
     }
   }, [academicYear]);
@@ -226,7 +234,8 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
       </div>
       {message && <p role="alert" className="rounded-md bg-danger-bg p-3 text-sm text-danger">{message}</p>}
       <PlanContent plan={plan ?? null} academicYear={academicYear} draft={draft} selectedPhase={selectedPhase}
-        definitionReadOnly={definitionReadOnly} busy={busy} onCreate={create} onEdit={edit} onMove={move}
+        definitionReadOnly={definitionReadOnly} busy={busy} canCopyPriorPlan={canCopyPriorPlan}
+        onCreate={create} onEdit={edit} onMove={move}
         onRemove={remove} onDraftChange={setDraft} onChangeState={changeState} onSave={save} onDiscard={discard} />
     </section>
   );
@@ -239,6 +248,7 @@ type PlanContentProps = {
   selectedPhase: Phase | undefined;
   definitionReadOnly: boolean;
   busy: boolean;
+  canCopyPriorPlan: boolean;
   onCreate: (copy: boolean) => Promise<void>;
   onEdit: (phase: Phase) => void;
   onMove: (index: number, offset: -1 | 1) => Promise<void>;
@@ -251,14 +261,16 @@ type PlanContentProps = {
 
 function PlanContent(props: PlanContentProps) {
   if (!props.plan) {
-    return <MissingPlan academicYear={props.academicYear} busy={props.busy} onCreate={props.onCreate} />;
+    return <MissingPlan academicYear={props.academicYear} busy={props.busy}
+      canCopyPriorPlan={props.canCopyPriorPlan} onCreate={props.onCreate} />;
   }
   return <ConfiguredPlan {...props} plan={props.plan} />;
 }
 
-function MissingPlan({ academicYear, busy, onCreate }: {
+function MissingPlan({ academicYear, busy, canCopyPriorPlan, onCreate }: {
   academicYear: string;
   busy: boolean;
+  canCopyPriorPlan: boolean;
   onCreate: (copy: boolean) => Promise<void>;
 }) {
   if (academicYear !== CURRENT_ACADEMIC_YEAR) {
@@ -267,12 +279,14 @@ function MissingPlan({ academicYear, busy, onCreate }: {
   return <div className="flex min-h-72 flex-col items-center justify-center gap-3 border border-dashed border-border p-6 text-center">
     <Milestone aria-hidden="true" className="h-8 w-8 text-text-muted" />
     <p className="text-base font-semibold text-text-primary">Create the {CURRENT_ACADEMIC_YEAR} Phase Plan</p>
-    <p className="text-sm text-text-muted">Start with no Phases, or copy last year&apos;s definitions into new Locked Phases.</p>
+    <p className="text-sm text-text-muted">{canCopyPriorPlan
+      ? "Start with no Phases, or copy last year's definitions into new Locked Phases."
+      : "Start with no Phases and add them from this workspace."}</p>
     <div className="flex flex-wrap justify-center gap-2">
       <Button type="button" variant="secondary" onClick={() => void onCreate(false)} disabled={busy}>Start blank</Button>
-      <Button type="button" onClick={() => void onCreate(true)} disabled={busy}>
+      {canCopyPriorPlan && <Button type="button" onClick={() => void onCreate(true)} disabled={busy}>
         <Copy aria-hidden="true" className="h-4 w-4" /> Copy previous year
-      </Button>
+      </Button>}
     </div>
   </div>;
 }
