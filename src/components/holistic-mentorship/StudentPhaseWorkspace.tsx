@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
-import type { HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
+import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -49,6 +49,7 @@ type BeforeNotesNavigation = () => boolean | Promise<boolean>;
 const NOTES_REFRESH_URLS = "holistic-notes-refresh-urls";
 const SUBMIT_BLANK_ANSWER_ERROR = "Answer every Question before submitting";
 const SAVE_BLANK_ANSWER_ERROR = "Answer every Question before saving";
+const PROFILE_STATUS_POLL_MS = 2_000;
 
 function browserNavigation() {
   return (window as typeof window & { navigation?: BrowserNavigation }).navigation ?? null;
@@ -1141,7 +1142,7 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear }: {
   }
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
     className="space-y-5 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-5">
-    <AdminPhaseContextHead phase={phase} studentId={studentId} academicYear={academicYear} />
+    <AdminPhaseContextHead phase={phase} />
     <PreparationSwitch mobilePanel={mobilePanel} onSelect={setMobilePanel} />
     <div className="grid gap-4 lg:grid-cols-2">
       <Card elevation="sm"
@@ -1150,6 +1151,9 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear }: {
           <h3 className="text-base font-semibold text-text-primary">Student Context</h3>
           <AdminContextSourceBadge context={phase.context} />
         </div>
+        {contextSourceIsProfile(phase.context) && <AdminProfileRegeneration
+          studentId={studentId} academicYear={academicYear} initial={phase.context.regeneration ?? null}
+        />}
         <AdminContextBlocks context={phase.context} />
       </Card>
       <Card elevation="sm"
@@ -1171,10 +1175,8 @@ function contextSourceIsProfile(context: OpenSelectedPhase["context"]) {
   return context.label === "Student Profile";
 }
 
-function AdminPhaseContextHead({ phase, studentId, academicYear }: {
+function AdminPhaseContextHead({ phase }: {
   phase: OpenSelectedPhase;
-  studentId: number;
-  academicYear: string;
 }) {
   const profileSource = contextSourceIsProfile(phase.context);
   const progressLabel = phase.progress === "completed" ? "Completed"
@@ -1188,72 +1190,155 @@ function AdminPhaseContextHead({ phase, studentId, academicYear }: {
         {profileSource ? "Student Profile context" : `Open Phase - ${progressLabel}`}
       </p>
     </div>
-    {profileSource && <AdminProfileRegeneration studentId={studentId} academicYear={academicYear} />}
   </div>;
 }
 
-type AdminRegenerationState = "unknown" | "none" | "queued" | "running" | "completed" | "failed";
+function regenerationVariant(state: HolisticProfileRegeneration["state"]) {
+  if (state === "completed") return "success" as const;
+  if (state === "failed") return "danger" as const;
+  return "info" as const;
+}
 
-function AdminProfileRegeneration({ studentId, academicYear }: {
+function profileFailureMessage(errorCode: string | null) {
+  const messages: Record<string, string> = {
+    no_questionnaire_submission: "This Student has not submitted the profile questionnaire.",
+    malformed_source_id: "The questionnaire response could not be matched to this Student.",
+    user_not_found: "The questionnaire response could not be matched to this Student.",
+    student_not_found: "The questionnaire response could not be matched to this Student.",
+    ambiguous_student: "The questionnaire response matches more than one Student.",
+    test_record: "The available questionnaire response is marked as a test response.",
+    form_not_approved: "The submitted questionnaire is not an approved Profile questionnaire.",
+    form_grade_mismatch: "The submitted questionnaire does not match the Student's entry Grade.",
+    journey_source_conflict: "The questionnaire does not match the Student's existing Profile journey.",
+    program_ineligible: "This Student is not eligible for the Holistic Mentorship Program.",
+    school_missing_or_ambiguous: "The Student's School details must be corrected before a Profile can be generated.",
+    grade_ineligible: "This Student's Grade is not eligible for a Profile.",
+    dropout: "This Student is marked as a dropout and is not eligible for a Profile.",
+    eligibility_inconsistent: "The Student's eligibility details must be corrected before a Profile can be generated.",
+    prompt_configuration_not_found: "The active Profile configuration is unavailable.",
+    privacy_erased: "A Profile cannot be generated because this Student's Holistic Mentorship data was deleted.",
+    enqueue_rejected: "Profile regeneration could not be started. Please try again.",
+  };
+  return errorCode && messages[errorCode]
+    ? messages[errorCode]
+    : "Profile regeneration failed. Please try again.";
+}
+
+function ProfileRegenerationStatus({ regeneration }: {
+  regeneration: HolisticProfileRegeneration | null;
+}) {
+  if (!regeneration) return null;
+  return <div className="mt-3 space-y-2">
+    <p className="text-sm text-text-secondary">
+      Regeneration status:{" "}
+      <Badge variant={regenerationVariant(regeneration.state)}>
+        {regeneration.state}
+      </Badge>
+    </p>
+    {regeneration.state === "failed" && <p role="alert" className="text-sm text-danger">
+      {profileFailureMessage(regeneration.errorCode)}
+    </p>}
+  </div>;
+}
+
+type ProfileStatusPayload = { regeneration?: HolisticProfileRegeneration | null };
+
+function AdminProfileRegeneration({ studentId, academicYear, initial }: {
   studentId: number;
   academicYear: string;
+  initial: HolisticProfileRegeneration | null;
 }) {
-  const [state, setState] = useState<AdminRegenerationState>("unknown");
+  const router = useRouter();
+  const [regeneration, setRegeneration] = useState(initial);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  const [pollRetry, setPollRetry] = useState(0);
   const apiUrl = `/api/holistic-mentorship/profiles/${studentId}?${new URLSearchParams({
     academic_year: academicYear,
   })}`;
 
+  const loadStatus = useCallback(async () => {
+    const response = await fetch(apiUrl, { cache: "no-store" });
+    const body = await response.json().catch(() => null) as ProfileStatusPayload | null;
+    if (!response.ok || !body) throw new Error(`Unable to refresh Profile status (${response.status})`);
+    const next = body.regeneration ?? null;
+    setRegeneration(next);
+    if (next?.state === "completed") router.refresh();
+    return next;
+  }, [apiUrl, router]);
+
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch(apiUrl, { cache: "no-store", signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
-      .then((body: { regeneration?: { state: AdminRegenerationState } | null } | null) => {
-        if (!body || controller.signal.aborted) return;
-        setState(body.regeneration?.state ?? "none");
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [apiUrl]);
+    setRegeneration(initial);
+  }, [initial]);
+
+  useEffect(() => {
+    if (!regeneration || !["queued", "running"].includes(regeneration.state)) return;
+    const timer = window.setTimeout(() => {
+      void loadStatus().catch(() => {
+        setMessage({
+          error: true,
+          text: "Could not refresh Profile status. Retrying automatically.",
+        });
+        setPollRetry((value) => value + 1);
+      });
+    }, PROFILE_STATUS_POLL_MS);
+    return () => window.clearTimeout(timer);
+  }, [loadStatus, pollRetry, regeneration]);
 
   const requestRegeneration = async () => {
     if (!window.confirm("Request Profile regeneration?")) return;
     setSubmitting(true);
     setMessage(null);
+    const requestKey = regeneration?.state === "queued"
+      ? regeneration.requestKey
+      : crypto.randomUUID();
     try {
       const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request_key: crypto.randomUUID(), force: true }),
+        body: JSON.stringify({ request_key: requestKey, force: true }),
       });
+      const body = await response.json().catch(() => null) as {
+        error?: string;
+        requestKey?: string;
+        state?: HolisticProfileRegeneration["state"];
+        delivery?: "ambiguous";
+      } | null;
       if (response.ok) {
-        setState("queued");
-        setMessage({ error: false, text: "Regeneration queued." });
+        setRegeneration({
+          requestKey: body?.requestKey ?? requestKey,
+          state: body?.state ?? "queued",
+          errorCode: null,
+        });
+        setMessage({
+          error: false,
+          text: body?.delivery === "ambiguous"
+            ? "Regeneration queued. Delivery is not yet confirmed."
+            : "Regeneration queued.",
+        });
       } else {
-        const body = await response.json().catch(() => ({})) as { error?: string };
-        setMessage({ error: true, text: body.error || `Unable to queue regeneration (${response.status})` });
+        setMessage({ error: true, text: body?.error || `Unable to queue regeneration (${response.status})` });
+        await loadStatus().catch(() => undefined);
       }
     } catch {
-      setMessage({ error: true, text: "Could not confirm regeneration. Refresh before retrying." });
+      setMessage({ error: true, text: "Could not confirm regeneration. Status will refresh automatically." });
+      setRegeneration({ requestKey, state: "queued", errorCode: null });
+      await loadStatus().catch(() => undefined);
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (state === "unknown") return null;
-  return <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-    {["queued", "running"].includes(state)
-      ? <Badge variant="info" className="gap-1">
-          <RefreshCw aria-hidden="true" className="h-3 w-3" />
-          Regeneration {state}
-        </Badge>
-      : <Button type="button" variant="secondary" disabled={submitting} aria-busy={submitting}
-          onClick={() => void requestRegeneration()}>
-          <RefreshCw aria-hidden="true" className="h-4 w-4" />
-          Request Profile regeneration
-        </Button>}
-    {message && <p role="status" className={`text-sm ${message.error ? "text-danger" : "text-success"}`}>
+  const pending = regeneration && ["queued", "running"].includes(regeneration.state);
+  return <div className="border-b border-border py-3">
+    <ProfileRegenerationStatus regeneration={regeneration} />
+    {!pending && <Button type="button" variant="secondary" className="mt-3"
+      disabled={submitting} aria-busy={submitting} onClick={() => void requestRegeneration()}>
+      <RefreshCw aria-hidden="true" className="h-4 w-4" />
+      Request Profile regeneration
+    </Button>}
+    {message && <p role={message.error ? "alert" : "status"}
+      className={`text-sm ${message.error ? "text-danger" : "text-success"}`}>
       {message.text}
     </p>}
   </div>;
@@ -1367,6 +1452,9 @@ function StudentContext({ context }: { context: OpenSelectedPhase["context"] }) 
       <h2 id="context-heading" className="text-sm font-bold uppercase text-text-primary">Student Context</h2>
       <ContextSourceBadge context={context} />
     </div>
+    {contextSourceIsProfile(context) && <ProfileRegenerationStatus
+      regeneration={context.regeneration ?? null}
+    />}
     <StudentContextBody context={context} />
   </section>;
 }

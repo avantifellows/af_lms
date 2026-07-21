@@ -56,10 +56,18 @@ export type HolisticStudentContext = {
   label: "Student Profile" | "Historical notes" | `From Phase ${number} - ${string}`;
   items: Array<{ label: string; content: string }>;
   lastUpdatedAt?: string;
+  regeneration?: HolisticProfileRegeneration | null;
 } | {
   label: null;
   items: [];
   missing: "Profile unavailable" | "No previous session notes available";
+  regeneration?: HolisticProfileRegeneration | null;
+};
+
+export type HolisticProfileRegeneration = {
+  requestKey: string;
+  state: "queued" | "running" | "completed" | "failed";
+  errorCode: string | null;
 };
 
 export type HolisticPhaseSummary =
@@ -112,6 +120,7 @@ export function resolveHolisticStudentContext(input: {
   historicalAnswers: Array<{ question: string; answer: string | null }> | null;
   launchGrade12: boolean;
   entryGradeFirstPhaseId: number | null;
+  profileRegeneration?: HolisticProfileRegeneration | null;
 }): HolisticStudentContext {
   const targetIndex = input.phases.findIndex(({ id }) => id === input.targetPhaseId);
   const submittedByPhase = new Map(input.submittedNotes.map((notes) => [notes.phaseId, notes]));
@@ -137,12 +146,16 @@ export function resolveHolisticStudentContext(input: {
     };
   }
   if (input.targetPhaseId === input.entryGradeFirstPhaseId) {
+    const regeneration = input.profileRegeneration === undefined
+      ? {}
+      : { regeneration: input.profileRegeneration };
     return input.profile
       ? {
           label: "Student Profile",
           items: input.profile.map(({ title, summary }) => ({ label: title, content: summary })),
+          ...regeneration,
         }
-      : { label: null, items: [], missing: "Profile unavailable" };
+      : { label: null, items: [], missing: "Profile unavailable", ...regeneration };
   }
   return {
     label: null,
@@ -228,7 +241,14 @@ type NotesRow = {
   answer: string | null;
 };
 
-type ProfileRow = { title: string; summary: string; position: number };
+type ProfileRow = {
+  title: string | null;
+  summary: string | null;
+  position: number | null;
+  regeneration_request_key: string | null;
+  regeneration_state: HolisticProfileRegeneration["state"] | null;
+  regeneration_error_code: string | null;
+};
 type HistoricalRow = { question: string; answer: string | null; position: number };
 
 type StudentPhaseParams = {
@@ -392,13 +412,27 @@ async function loadPhaseRelations(
       [params.studentId, phaseIds]
     ),
     query<ProfileRow>(
-      `SELECT summary.question_set_title AS title, summary.summary, summary.position
-       FROM holistic_mentorship_profile_journeys journey
-       JOIN holistic_mentorship_student_profiles profile ON profile.profile_journey_id = journey.id
-       JOIN holistic_mentorship_prompt_configurations configuration
-         ON configuration.id = profile.prompt_configuration_id AND configuration.state = 'active'
-       JOIN holistic_mentorship_student_profile_summaries summary ON summary.student_profile_id = profile.id
-       WHERE journey.student_id = $1 ORDER BY summary.position`,
+      `SELECT summary.question_set_title AS title, summary.summary, summary.position,
+              request.request_key AS regeneration_request_key,
+              request.state AS regeneration_state,
+              request.error_code AS regeneration_error_code
+       FROM holistic_mentorship_prompt_configurations configuration
+       LEFT JOIN holistic_mentorship_profile_journeys journey ON journey.student_id = $1
+       LEFT JOIN holistic_mentorship_student_profiles profile
+         ON profile.profile_journey_id = journey.id
+        AND profile.prompt_configuration_id = configuration.id
+       LEFT JOIN holistic_mentorship_student_profile_summaries summary
+         ON summary.student_profile_id = profile.id
+       LEFT JOIN LATERAL (
+         SELECT regeneration.request_key, regeneration.state, regeneration.error_code
+         FROM holistic_mentorship_regeneration_requests regeneration
+         WHERE regeneration.student_id = $1
+           AND regeneration.prompt_configuration_id = configuration.id
+         ORDER BY regeneration.inserted_at DESC, regeneration.id DESC
+         LIMIT 1
+       ) request ON TRUE
+       WHERE configuration.state = 'active'
+       ORDER BY summary.position`,
       [params.studentId]
     ),
     query<HistoricalRow>(
@@ -562,12 +596,21 @@ function submittedPhaseNotes(
 }
 
 function selectedPhaseContext(params: OpenSelectedPhaseParams) {
+  const profile = params.profileRows.flatMap(({ title, summary }) =>
+    title !== null && summary !== null ? [{ title, summary }] : []
+  );
+  const request = params.profileRows[0];
   return resolveHolisticStudentContext({
     targetPhaseId: params.selected.id,
     phases: params.applicable.map(({ id, number, title }) => ({ id, number, title })),
     submittedNotes: submittedPhaseNotes(params.applicable, params.notesByPhase),
-    profile: params.profileRows.length
-      ? params.profileRows.map(({ title, summary }) => ({ title, summary }))
+    profile: profile.length ? profile : null,
+    profileRegeneration: request?.regeneration_request_key && request.regeneration_state
+      ? {
+          requestKey: request.regeneration_request_key,
+          state: request.regeneration_state,
+          errorCode: request.regeneration_error_code,
+        }
       : null,
     historicalAnswers: params.historicalRows.length
       ? params.historicalRows.map(({ question, answer }) => ({ question, answer }))

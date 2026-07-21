@@ -179,12 +179,10 @@ describe("StudentPhaseWorkspace", () => {
   });
 
   it("offers Profile regeneration when the Context source is the Student Profile", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ summaries: [], regeneration: null }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      ))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(
+      JSON.stringify({ requestKey: "request-1", state: "queued" }),
+      { status: 202, headers: { "Content-Type": "application/json" } }
+    ));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
@@ -198,6 +196,62 @@ describe("StudentPhaseWorkspace", () => {
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(post[0]).toBe("/api/holistic-mentorship/profiles/41");
     expect(JSON.parse(String(post[1].body))).toMatchObject({ force: true });
+  });
+
+  it("polls a queued Profile request and explains a missing questionnaire", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      regeneration: {
+        requestKey: "request-1",
+        state: "failed",
+        errorCode: "no_questionnaire_submission",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+      context: {
+        label: "Student Profile",
+        items: [{ label: "Journey", content: "Existing summary" }],
+        regeneration: { requestKey: "request-1", state: "queued", errorCode: null },
+      },
+    })} />);
+
+    expect(screen.getByText("Existing summary")).toBeInTheDocument();
+    expect(screen.getByText("queued")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request Profile regeneration" })).not.toBeInTheDocument();
+
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027",
+      { cache: "no-store" }
+    );
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This Student has not submitted the profile questionnaire."
+    );
+    expect(screen.getByRole("button", { name: "Request Profile regeneration" })).toBeEnabled();
+  });
+
+  it("shows the same Profile failure reason to Mentors without an Admin action", () => {
+    const detail = teacherDetail();
+    (detail.selectedPhase as OpenPhase).context = {
+      label: null,
+      items: [],
+      missing: "Profile unavailable",
+      regeneration: {
+        requestKey: "request-1",
+        state: "failed",
+        errorCode: "no_questionnaire_submission",
+      },
+    };
+
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This Student has not submitted the profile questionnaire."
+    );
+    expect(screen.queryByRole("button", { name: "Request Profile regeneration" })).not.toBeInTheDocument();
   });
 
   it("autosaves a partial answer only after a short pause", async () => {

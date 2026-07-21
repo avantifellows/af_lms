@@ -348,7 +348,11 @@ describe("Holistic Student Phase derivation", () => {
         first_submitted_at: null, last_edited_at: "2026-07-02T00:00:00Z",
         question_id: 91, question: "What helped?", question_position: 1, answer: "private draft",
       }])
-      .mockResolvedValueOnce([{ title: "Strengths", summary: "Patient problem solver", position: 1 }])
+      .mockResolvedValueOnce([{
+        title: "Strengths", summary: "Patient problem solver", position: 1,
+        regeneration_request_key: "request-1", regeneration_state: "failed",
+        regeneration_error_code: "no_questionnaire_submission",
+      }])
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
@@ -368,6 +372,11 @@ describe("Holistic Student Phase derivation", () => {
         context: {
           label: "Student Profile",
           items: [{ label: "Strengths", content: "Patient problem solver" }],
+          regeneration: {
+            requestKey: "request-1",
+            state: "failed",
+            errorCode: "no_questionnaire_submission",
+          },
         },
         notes: {
           state: "draft",

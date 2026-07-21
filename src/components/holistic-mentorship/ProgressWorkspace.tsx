@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Clock, Download, History, RefreshCw, SearchX, Sparkles, Users } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Clock, Download, History, RefreshCw, SearchX, Users } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
@@ -19,16 +19,6 @@ type Payload = {
   counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
   options: Options; academicYears: string[]; refreshedAt: string; pageSize: 50;
 };
-type RegenerationState = "queued" | "running" | "completed" | "failed";
-type ProfilePayload = {
-  summaries: Array<{ position: number; title: string; summary: string }>;
-  regeneration: null | {
-    requestKey: string;
-    state: RegenerationState;
-    requestedAt: string;
-  };
-};
-
 type ProgressFilters = {
   school: string;
   grade: string;
@@ -59,52 +49,6 @@ const INITIAL_FILTERS: ProgressFilters = {
 };
 const VIEW_STATE_KEY = "holistic-progress-view";
 const SCROLL_KEY = "holistic-progress-scroll";
-
-async function jsonObject(response: Response): Promise<Record<string, unknown> | null> {
-  return response.json().catch(() => null) as Promise<Record<string, unknown> | null>;
-}
-
-function responseError(body: Record<string, unknown> | null, fallback: string) {
-  return typeof body?.error === "string" ? body.error : fallback;
-}
-
-function regenerationVariant(state: RegenerationState) {
-  if (state === "completed") return "success" as const;
-  if (state === "failed") return "danger" as const;
-  return "info" as const;
-}
-
-async function fetchProfile(studentId: number, academicYear: string): Promise<ProfilePayload> {
-  const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}?academic_year=${academicYear}`);
-  const body = await jsonObject(response);
-  if (!response.ok) throw new Error(responseError(body, `Unable to load Profile (${response.status})`));
-  if (!body || !Array.isArray(body.summaries)) throw new Error("Unable to load Profile");
-  return body as ProfilePayload;
-}
-
-function regenerationSuccessMessage(body: Record<string, unknown> | null) {
-  if (body?.delivery === "ambiguous") return "Regeneration queued. Delivery is not yet confirmed.";
-  const state = typeof body?.state === "string" ? body.state : "queued";
-  return state === "queued" ? "Regeneration queued." : `Regeneration is ${state}.`;
-}
-
-async function queueProfileRegeneration(studentId: number, requestKey: string) {
-  try {
-    const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request_key: requestKey, force: true }),
-    });
-    const body = await jsonObject(response);
-    return response.ok
-      ? { message: { error: false, text: regenerationSuccessMessage(body) }, refresh: true }
-      : { message: { error: true, text: responseError(body, `Unable to queue regeneration (${response.status})`) }, refresh: true };
-  } catch {
-    return {
-      message: { error: true, text: "Could not confirm regeneration. Refresh status before retrying." },
-      refresh: false,
-    };
-  }
-}
 
 function storedView() {
   try {
@@ -193,7 +137,6 @@ export default function ProgressWorkspace({
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [page, setPage] = useState(1);
   const [ready, setReady] = useState(false);
-  const [profileStudent, setProfileStudent] = useState<Row | null>(null);
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
   const [seenAcademicYear, setSeenAcademicYear] = useState(academicYear);
@@ -317,11 +260,9 @@ export default function ProgressWorkspace({
         direction={filters.direction}
         onSort={changeSort}
         onClearFilters={clearFilters}
-        onOpenProfile={setProfileStudent}
       />
       <ProgressPagination page={page} totalPages={totalPages} rowCount={data.rows.length}
         totalMapped={data.counts.totalMapped} onPageChange={setPage} />
-      {profileStudent && <ProfilePanel student={profileStudent} academicYear={academicYear} onClose={() => setProfileStudent(null)} />}
     </div>
   );
 }
@@ -410,7 +351,6 @@ function ProgressResults({
   direction,
   onSort,
   onClearFilters,
-  onOpenProfile,
 }: {
   rows: Row[];
   loading: boolean;
@@ -421,7 +361,6 @@ function ProgressResults({
   direction: string;
   onSort: (key: string) => void;
   onClearFilters: () => void;
-  onOpenProfile: (row: Row) => void;
 }) {
   if (!loading && rows.length === 0) {
     return <ProgressEmptyState hasMappings={hasMappings} filtered={filtered} onClearFilters={onClearFilters} />;
@@ -445,7 +384,7 @@ function ProgressResults({
         <th className="relative px-3 py-3"><span className="sr-only">Actions</span></th>
       </tr></thead>
       <tbody className="divide-y divide-border">
-        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} onOpenProfile={onOpenProfile} />
+        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} />
       </tbody>
     </table>
   </div>;
@@ -472,22 +411,20 @@ function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear, onOpenProfile }: {
+function ProgressRows({ rows, loading, academicYear }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
-  onOpenProfile: (row: Row) => void;
 }) {
   if (loading && rows.length === 0) {
     return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
   }
-  return rows.map((row) => <ProgressRow key={row.studentId} row={row} academicYear={academicYear} onOpenProfile={onOpenProfile} />);
+  return rows.map((row) => <ProgressRow key={row.studentId} row={row} academicYear={academicYear} />);
 }
 
-function ProgressRow({ row, academicYear, onOpenProfile }: {
+function ProgressRow({ row, academicYear }: {
   row: Row;
   academicYear: string;
-  onOpenProfile: (row: Row) => void;
 }) {
   return <tr className="hover:bg-hover-bg/50">
     <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
@@ -497,7 +434,7 @@ function ProgressRow({ row, academicYear, onOpenProfile }: {
     <td className="px-3 py-3"><PhaseCell row={row} /></td>
     <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
     <td className="px-3 py-3 font-mono"><CompletionTime value={row.completedAt} /></td>
-    <td className="px-3 py-3"><ProgressActions row={row} academicYear={academicYear} onOpenProfile={onOpenProfile} /></td>
+    <td className="px-3 py-3"><ProgressActions row={row} academicYear={academicYear} /></td>
   </tr>;
 }
 
@@ -527,16 +464,12 @@ function CompletionTime({ value }: { value: string | null }) {
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(value));
 }
 
-function ProgressActions({ row, academicYear, onOpenProfile }: {
+function ProgressActions({ row, academicYear }: {
   row: Row;
   academicYear: string;
-  onOpenProfile: (row: Row) => void;
 }) {
   const openable = row.phaseId && row.phaseState !== "locked";
-  return <div className="flex items-center justify-end gap-1">
-    <Button className="min-w-11" variant="icon" aria-label={`Profile for ${row.studentName}`} onClick={() => onOpenProfile(row)}>
-      <Sparkles aria-hidden="true" className="h-4 w-4" />
-    </Button>
+  return <div className="flex items-center justify-end">
     {openable ? <Link aria-label={`Open ${row.studentName}`}
       className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({ school_code: row.schoolCode, academic_year: academicYear })}`}>
@@ -566,136 +499,4 @@ function ProgressPagination({ page, totalPages, rowCount, totalMapped, onPageCha
         onClick={() => onPageChange((value) => value + 1)}><ChevronRight aria-hidden="true" className="h-4 w-4" /></Button>
     </div>
   </div>;
-}
-
-function useProfilePanel(student: Row, academicYear: string) {
-  const [profile, setProfile] = useState<ProfilePayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [statusKnown, setStatusKnown] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [actionMessage, setActionMessage] = useState<{ error: boolean; text: string } | null>(null);
-  const load = useCallback(async () => {
-    setLoading(true);
-    setStatusKnown(false);
-    setLoadError("");
-    try {
-      setProfile(await fetchProfile(student.studentId, academicYear));
-      setStatusKnown(true);
-    } catch (problem) {
-      setLoadError(problem instanceof Error ? problem.message : "Unable to load Profile");
-    } finally {
-      setLoading(false);
-    }
-  }, [academicYear, student.studentId]);
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-  const regenerate = async () => {
-    if (!window.confirm(`Regenerate ${student.studentName}'s Profile from the approved source?`)) return;
-    const requestKey = profile?.regeneration?.state === "queued"
-      ? profile.regeneration.requestKey
-      : crypto.randomUUID();
-    setSubmitting(true);
-    setStatusKnown(false);
-    setActionMessage(null);
-    const result = await queueProfileRegeneration(student.studentId, requestKey);
-    setActionMessage(result.message);
-    if (result.refresh) await load();
-    setSubmitting(false);
-  };
-  return { profile, loading, statusKnown, submitting, loadError, actionMessage, load, regenerate };
-}
-
-function ProfilePanel({ student, academicYear, onClose }: { student: Row; academicYear: string; onClose: () => void }) {
-  const panel = useProfilePanel(student, academicYear);
-  const running = panel.profile?.regeneration?.state === "running";
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const openerRef = useRef<HTMLElement | null>(null);
-  const handledClose = useRef(false);
-  const onCloseRef = useRef(onClose);
-  const titleId = useId();
-  const subtitleId = useId();
-
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  const finishClose = useCallback(() => {
-    if (handledClose.current) return;
-    handledClose.current = true;
-    onCloseRef.current();
-  }, []);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (dialog && !dialog.open) {
-      if (typeof dialog.showModal === "function") dialog.showModal();
-      else dialog.setAttribute("open", "");
-    }
-    closeButtonRef.current?.focus();
-    return () => { openerRef.current?.focus(); };
-  }, []);
-
-  const requestClose = () => {
-    const dialog = dialogRef.current;
-    if (dialog?.open && typeof dialog.close === "function") dialog.close();
-    finishClose();
-  };
-
-  const keepFocusInDialog = (event: React.KeyboardEvent<HTMLDialogElement>) => {
-    if (event.key !== "Tab") return;
-    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((element) => element.getClientRects().length > 0);
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  return <dialog
-    ref={dialogRef}
-    aria-modal="true"
-    aria-labelledby={`${titleId} ${subtitleId}`}
-    className="fixed inset-0 z-50 m-0 h-dvh max-h-none w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent"
-    onClose={finishClose}
-    onCancel={(event) => { event.preventDefault(); requestClose(); }}
-    onKeyDown={keepFocusInDialog}
-  >
-    <div className="flex h-full justify-end bg-black/30">
-      <div className="h-full w-full max-w-xl min-w-0 overflow-y-auto overscroll-contain bg-bg-card p-4 shadow-xl sm:p-6">
-        <div className="flex items-start justify-between gap-4 border-b border-border pb-4"><div className="min-w-0"><h2 id={titleId} className="break-words text-lg font-semibold">{student.studentName}</h2><p id={subtitleId} className="text-sm text-text-muted">Student Profile</p></div>
-          <Button ref={closeButtonRef} className="shrink-0" variant="secondary" onClick={requestClose}>Close</Button></div>
-        <div className="space-y-4 py-5">
-          <ProfilePanelContent {...panel} />
-          <div className="flex flex-wrap gap-2">
-            <Button disabled={!panel.statusKnown || panel.submitting || running} onClick={panel.regenerate} aria-busy={panel.submitting}>
-              <RefreshCw aria-hidden="true" className="h-4 w-4" /> Regenerate Profile
-            </Button>
-            <Button variant="secondary" disabled={panel.loading || panel.submitting} onClick={() => void panel.load()}>
-              Refresh Status
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </dialog>;
-}
-
-function ProfilePanelContent({ profile, loading, loadError, actionMessage }: ReturnType<typeof useProfilePanel>) {
-  return <>
-    {profile?.regeneration && <p className="text-sm">Regeneration status: <Badge variant={regenerationVariant(profile.regeneration.state)}>{profile.regeneration.state}</Badge></p>}
-    {loading && <p role="status" className="text-sm text-text-muted">Refreshing Profile status...</p>}
-    {profile?.summaries.length === 0 && <p className="text-sm text-text-muted">Profile unavailable for the Active configuration.</p>}
-    {profile?.summaries.map((summary) => <section key={summary.position} className="min-w-0 border-b border-border pb-4"><h3 className="break-words text-sm font-semibold">{summary.title}</h3><p className="mt-1 break-words whitespace-pre-wrap text-sm text-text-secondary">{summary.summary}</p></section>)}
-    {loadError && <p role="alert" className="text-sm text-danger">{loadError}</p>}
-    {actionMessage && <p role={actionMessage.error ? "alert" : "status"} className={actionMessage.error ? "text-sm text-danger" : "text-sm text-text-secondary"}>{actionMessage.text}</p>}
-  </>;
 }
