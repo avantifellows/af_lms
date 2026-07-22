@@ -575,17 +575,16 @@ export default function StudentTable({
     selectedProgramId ??
     (students[0]?.program_id == null ? null : Number(students[0].program_id));
 
-  // Per-row ownership check: combines feature-level canEdit with program ownership
-  // fallow-ignore-next-line complexity
-  const canEditNvsStudent = (student: Student): boolean => {
-    if (!canEdit) return false;
+  // Per-row edit gate: feature-level student edit (the permission matrix) plus
+  // ownership of the selected program. Admins edit any student in the program;
+  // other staff edit students in a program they manage. Mirrors the server's
+  // requireStudentEditAccess. Not NVS-restricted — editing was previously (and
+  // incorrectly) limited to NVS students only.
+  const canEditStudentInSelectedProgram = (student: Student): boolean => {
+    if (!canEditStudentEntry || effectiveProgramId == null) return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
-    const hasNvsBatch = (student.student_program_ids ?? [])
-      .map(Number)
-      .includes(PROGRAM_IDS.NVS);
-    if (!hasNvsBatch) return false;
-    if (!userProgramIds || userProgramIds.length === 0) return false;
-    return userProgramIds.includes(PROGRAM_IDS.NVS);
+    if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
+    return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
   };
 
   const canDropoutFromSelectedProgram = (student: Student): boolean => {
@@ -748,8 +747,7 @@ export default function StudentTable({
               student={student}
               canEditStudent={
                 activeTab === "active" &&
-                canEditStudentEntry &&
-                canEditNvsStudent(student)
+                canEditStudentInSelectedProgram(student)
               }
               canDropout={
                 activeTab === "active" && canDropoutFromSelectedProgram(student)
@@ -777,6 +775,7 @@ export default function StudentTable({
           grades={grades}
           batches={batches}
           nvsStreams={nvsStreams}
+          programId={effectiveProgramId}
         />
       )}
 

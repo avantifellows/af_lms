@@ -501,7 +501,7 @@ function EnrollmentSchoolTab({
         activeStudents={data.activeStudents}
         dropoutStudents={data.dropoutStudents}
         canEdit={studentsAccess.canEdit}
-        canEditStudent={canAddStudent}
+        canEditStudent={studentsAccess.canEdit}
         canDropoutStudent={canDropoutStudent}
         dropoutProgramIds={data.dropoutProgramIds}
         canAddStudent={canAddStudent}

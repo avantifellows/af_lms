@@ -722,7 +722,10 @@ describe("SchoolPage (server component)", () => {
     expect(screen.queryByTestId("tab-visits")).not.toBeInTheDocument();
   });
 
-  it("passes the shared Student Addition gate to existing-student edit entry points", async () => {
+  it("gives inline student edit to a teacher (matrix students=edit), decoupled from the add gate", async () => {
+    // A teacher can edit student profiles (students=edit) but cannot ADD
+    // students. The inline-edit gate must follow the matrix, not the (NVS-only)
+    // add permission it used to be wired to.
     setupAdminDefaults();
     mockGetUserPermission.mockResolvedValue(
       makePermission({
@@ -751,7 +754,7 @@ describe("SchoolPage (server component)", () => {
       screen.getByTestId("student-table").dataset.props || "{}",
     );
     expect(props.canEdit).toBe(true);
-    expect(props.canEditStudent).toBe(false);
+    expect(props.canEditStudent).toBe(true);
   });
 
   it("shows add controls when NVS context comes from active centre mapping", async () => {

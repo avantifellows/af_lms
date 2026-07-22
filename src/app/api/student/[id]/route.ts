@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getDbServiceConfig } from "@/lib/db-service-config";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
-import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
+import { requireStudentEditAccess } from "@/lib/student-addition-access";
 import { canonicalizeStudentEditPayload } from "@/lib/student-addition-fields";
 
 // fallow-ignore-next-line complexity
@@ -58,7 +58,32 @@ export async function PATCH(
   }
 
   try {
-    const access = await requireStudentAdditionStudentAccess(session, id);
+    // Authorization runs before anything else that could leak state (DB-service
+    // config, body-shape validation); the body must still be parsed first
+    // because the program being edited under comes from it.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
+    }
+    const bodyObject = body as Record<string, unknown>;
+
+    // The client sends the program the student is being edited under (the
+    // enrollment view's selected program). Access is authorized against that
+    // program; db-service also verifies the student is currently enrolled in it.
+    const rawProgramId = bodyObject.program_id;
+    const programId =
+      typeof rawProgramId === "number"
+        ? rawProgramId
+        : typeof rawProgramId === "string" && rawProgramId.trim() !== ""
+          ? Number(rawProgramId)
+          : null;
+
+    const access = await requireStudentEditAccess(session, id, programId);
     if (!access.ok) {
       return NextResponse.json({ error: access.error }, { status: access.status });
     }
@@ -68,11 +93,7 @@ export async function PATCH(
       return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
     }
 
-    const body: unknown = await request.json();
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
-    }
-    const canonical = canonicalizeStudentEditPayload(body as Record<string, unknown>);
+    const canonical = canonicalizeStudentEditPayload(bodyObject);
     if (!canonical.ok) {
       return NextResponse.json(canonical, { status: 422 });
     }
