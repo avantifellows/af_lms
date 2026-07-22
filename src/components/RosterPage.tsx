@@ -14,6 +14,7 @@ import {
   getFeatureAccess,
   canAccessSchoolSync,
   canViewCentre,
+  isCentreSeated,
   hasMultipleSchools,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
@@ -255,14 +256,25 @@ function AcademicMentorshipSchoolTab({
   );
 }
 
-function AccessDenied({ message }: { message: string }) {
+function AccessDenied({
+  message,
+  link,
+}: {
+  message: string;
+  // Optional primary link shown in place of the default dashboard link (e.g.
+  // point a centre-seated user at their own centre).
+  link?: { href: string; label: string };
+}) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <Card elevation="xl" className="p-8 max-w-md text-center">
         <h1 className="text-xl font-bold text-red-600 mb-2">Access Denied</h1>
         <p className="text-gray-600 mb-4">{message}</p>
-        <Link href="/dashboard" className="text-accent hover:text-accent-hover">
-          Return to dashboard
+        <Link
+          href={link?.href ?? "/dashboard"}
+          className="text-accent hover:text-accent-hover"
+        >
+          {link?.label ?? "Return to dashboard"}
         </Link>
       </Card>
     </div>
@@ -289,9 +301,15 @@ export default async function RosterPage({
   const isPasscodeUser = session.isPasscodeUser;
   const passcodeSchoolCode = session.schoolCode;
 
-  // For passcode users, only allow access to their (parent) school
+  // For passcode users, only allow access to their (parent) school. Point them
+  // back to login, not the dashboard (a passcode user has no dashboard).
   if (isPasscodeUser && passcodeSchoolCode !== school.code) {
-    return <AccessDenied message="Your passcode only grants access to a different school." />;
+    return (
+      <AccessDenied
+        message="Your passcode only grants access to a different school."
+        link={{ href: "/", label: "Return to login" }}
+      />
+    );
   }
 
   // Single DB call for permission — reuse everywhere
@@ -306,6 +324,27 @@ export default async function RosterPage({
     }
     if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
       return <AccessDenied message="You don't have permission to view this page." />;
+    }
+
+    // Centre-seated staff are confined to their centre(s): the whole-school
+    // roster page isn't theirs to open (their seat grants school access only so
+    // school-linked actions like visits work). Point them at their centre — the
+    // single seat directly, otherwise the Centres tab to pick one.
+    if (!isCentre && isCentreSeated(permission)) {
+      const seatIds =
+        permission.scope?.centres instanceof Set
+          ? [...permission.scope.centres]
+          : [];
+      const centreLink =
+        seatIds.length === 1
+          ? { href: `/centre/${seatIds[0]}`, label: "Go to your centre" }
+          : { href: "/dashboard?view=centres", label: "Go to your centres" };
+      return (
+        <AccessDenied
+          message="This school page isn't available for your access. View your assigned centre instead."
+          link={centreLink}
+        />
+      );
     }
 
     // Centre pages are seat-scoped: a user with centre seats may only open the

@@ -294,11 +294,27 @@ function setupAdminDefaults(schoolOverrides = {}) {
   return { school, permission };
 }
 
+// SchoolPage returns <RosterPage/>, and RosterPage is itself an async server
+// component. React Testing Library can't resolve a nested async component, so
+// unwrap RosterPage to its already-resolved JSX before handing it to render().
+async function resolveAsyncComponent(
+  element: React.ReactElement,
+): Promise<React.ReactElement> {
+  const type = element.type;
+  if (typeof type === "function") {
+    return await (type as (p: unknown) => Promise<React.ReactElement>)(
+      element.props,
+    );
+  }
+  return element;
+}
+
+const renderResolved = async (jsx: React.ReactElement) =>
+  render(await resolveAsyncComponent(jsx));
+
 const renderPage = async (udise = "24120100101") => {
-  const jsx = await SchoolPage({
-    params: Promise.resolve({ udise }),
-  });
-  return render(jsx);
+  const jsx = await SchoolPage({ params: Promise.resolve({ udise }) });
+  return renderResolved(jsx);
 };
 
 // ---- tests ----
@@ -358,7 +374,7 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
     expect(
@@ -405,7 +421,7 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     // PageHeader should show school name and passcode email
     const header = screen.getByTestId("page-header");
@@ -435,12 +451,12 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /You don.t have permission to view this school/
+        /You don.t have permission to view this page/
       )
     ).toBeInTheDocument();
     expect(screen.getByText("Return to dashboard")).toBeInTheDocument();
@@ -459,11 +475,11 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
     expect(
-      screen.getByText(/You don.t have permission to view this school/)
+      screen.getByText(/You don.t have permission to view this page/)
     ).toBeInTheDocument();
   });
 
@@ -481,9 +497,40 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
+  });
+
+  it("confines a centre-seated user from the school page to their centre", async () => {
+    // A single-seat user has school access (their seat grants it) but is
+    // centre-scoped: the whole-school roster page redirects them to their centre.
+    mockGetServerSession.mockResolvedValue(googleSession());
+    mockQuery.mockResolvedValueOnce([makeSchool({ code: "70705" })]);
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        level: 1,
+        role: "teacher",
+        school_codes: ["70705"],
+        scope: {
+          schools: new Set(["70705"]),
+          centres: new Set([8]),
+          programs: new Set([1]),
+        },
+      })
+    );
+
+    const jsx = await SchoolPage({
+      params: Promise.resolve({ udise: "24120100101" }),
+    });
+    await renderResolved(jsx);
+
+    expect(screen.getByText("Access Denied")).toBeInTheDocument();
+    expect(
+      screen.getByText(/View your assigned centre instead/)
+    ).toBeInTheDocument();
+    const link = screen.getByText("Go to your centre").closest("a");
+    expect(link).toHaveAttribute("href", "/centre/8");
   });
 
   it("renders page for level 2 user with matching region", async () => {
@@ -546,7 +593,7 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     expect(screen.getByText("No Program Access")).toBeInTheDocument();
     expect(
@@ -1436,7 +1483,7 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     expect(screen.getByText("Access Denied")).toBeInTheDocument();
   });
@@ -1463,7 +1510,7 @@ describe("SchoolPage (server component)", () => {
     const jsx = await SchoolPage({
       params: Promise.resolve({ udise: "24120100101" }),
     });
-    render(jsx);
+    await renderResolved(jsx);
 
     // Passcode user should NOT see the "No Program Access" message
     // because the check is gated by `!isPasscodeUser`

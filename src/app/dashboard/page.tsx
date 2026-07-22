@@ -6,6 +6,7 @@ import {
   getResolvedPermission,
   getProgramContextSync,
   getFeatureAccess,
+  isCentreSeated,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import Link from "next/link";
@@ -176,7 +177,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const { q: searchQuery, page: pageParam, view: viewParam } = await searchParams;
   const currentPage = Math.max(1, parseInt(pageParam || "1", 10));
-  const view: DashboardView = viewParam === "centres" ? "centres" : "jnv-nvs";
 
   if (!session?.user?.email) {
     redirect("/");
@@ -252,10 +252,35 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
-  // If user has access to only one school and no search, redirect directly
-  // (skip heavy queries) — but not when they're explicitly viewing the Centres
-  // tab, which the single school may host.
+  // Centre-seated staff are centre-scoped: their home is their centre, not the
+  // whole-school roster. Default them to the Centres tab (an explicit ?view=
+  // still wins), so the single-school shortcut below never bounces them to the
+  // school page.
+  const seated = isCentreSeated(permission);
+  const view: DashboardView =
+    viewParam === "centres"
+      ? "centres"
+      : viewParam === "jnv-nvs"
+        ? "jnv-nvs"
+        : seated
+          ? "centres"
+          : "jnv-nvs";
+
+  // On the plain landing (no tab chosen, no search), send a single-seat user
+  // straight to their centre page — the centre analog of the single-school
+  // shortcut below. Multi-seat users stay on the Centres tab to pick one.
+  if (seated && !searchQuery && viewParam === undefined) {
+    const centres = permission.scope?.centres;
+    const seatIds = centres instanceof Set ? [...centres] : [];
+    if (seatIds.length === 1) {
+      redirect(`/centre/${seatIds[0]}`);
+    }
+  }
+
+  // School staff with a single school skip directly to it (skip heavy queries).
+  // Seated users are excluded — their home is the centre, resolved above.
   if (
+    !seated &&
     schoolCodes !== "all" &&
     schoolCodes.length === 1 &&
     !searchQuery &&
