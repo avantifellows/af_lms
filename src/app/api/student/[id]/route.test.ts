@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/student-addition-access", () => ({
-  requireStudentAdditionStudentAccess: vi.fn(),
+  requireStudentEditAccess: vi.fn(),
 }));
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: vi.fn(),
@@ -11,7 +11,7 @@ vi.mock("@/lib/lms-enrollment-date", () => ({
 
 import { getServerSession } from "next-auth";
 import { PATCH } from "./route";
-import { requireStudentAdditionStudentAccess } from "@/lib/student-addition-access";
+import { requireStudentEditAccess } from "@/lib/student-addition-access";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   jsonRequest,
@@ -21,7 +21,7 @@ import {
 } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockRequireStudentAdditionStudentAccess = vi.mocked(requireStudentAdditionStudentAccess);
+const mockRequireStudentEditAccess = vi.mocked(requireStudentEditAccess);
 const mockDeriveLmsEnrollmentPeriod = vi.mocked(deriveLmsEnrollmentPeriod);
 const mockFetch = vi.fn();
 
@@ -30,9 +30,10 @@ beforeEach(() => {
   process.env.DB_SERVICE_URL = "https://db.example.test/api";
   process.env.DB_SERVICE_TOKEN = "test-token";
   vi.stubGlobal("fetch", mockFetch);
-  mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+  mockRequireStudentEditAccess.mockResolvedValue({
     ok: true,
     programId: 64,
+    permission: {} as never,
     actor: {
       user_id: 501,
       email: "pm@example.org",
@@ -69,6 +70,7 @@ describe("PATCH /api/student/[id]", () => {
     const req = jsonRequest("http://localhost/api/student/100", {
       method: "PATCH",
       body: {
+        program_id: 64,
         first_name: "  ravi  KUMAR ",
         last_name: "",
         father_name: " suresh. KUMAR ",
@@ -89,7 +91,7 @@ describe("PATCH /api/student/[id]", () => {
     const res = await PATCH(req as never, params);
 
     expect(res.status).toBe(200);
-    expect(mockRequireStudentAdditionStudentAccess).toHaveBeenCalledWith(ADMIN_SESSION, "100");
+    expect(mockRequireStudentEditAccess).toHaveBeenCalledWith(ADMIN_SESSION, "100", 64);
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
       "https://db.example.test/api/lms/students/100/update-with-enrollments",
@@ -126,12 +128,89 @@ describe("PATCH /api/student/[id]", () => {
     });
   });
 
-  it("returns 403 and does not proxy when the shared student addition gate denies", async () => {
+  it("returns 403 and does not proxy when the edit gate denies", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockRequireStudentAdditionStudentAccess.mockResolvedValue({
+    mockRequireStudentEditAccess.mockResolvedValue({
       ok: false,
       status: 403,
       error: "Forbidden",
+    });
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 1, first_name: "Jane" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("Forbidden");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 (not 500) for a malformed JSON body", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+
+    const req = new Request("http://localhost/api/student/100", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: "{not json",
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(400);
+    expect(mockRequireStudentEditAccess).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("authorizes before revealing DB service configuration problems", async () => {
+    // A denied caller must see 403, not a 500 about missing DB_SERVICE_URL —
+    // config state is checked only after the gate passes.
+    delete process.env.DB_SERVICE_URL;
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockRequireStudentEditAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 1, first_name: "Jane" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("passes a non-NVS program through to the edit gate", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ status: "updated" }), { status: 200 }),
+    );
+
+    const req = jsonRequest("http://localhost/api/student/100", {
+      method: "PATCH",
+      body: { program_id: 1, first_name: "Ravi" },
+    });
+
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+    // Program 1 (JNV CoE) is non-NVS: the gate is called with it, proving the
+    // edit path is no longer NVS-only.
+    expect(mockRequireStudentEditAccess).toHaveBeenCalledWith(ADMIN_SESSION, "100", 1);
+  });
+
+  it("returns 400 when program_id is missing", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockRequireStudentEditAccess.mockResolvedValue({
+      ok: false,
+      status: 400,
+      error: "Program is required",
     });
 
     const req = jsonRequest("http://localhost/api/student/100", {
@@ -141,9 +220,8 @@ describe("PATCH /api/student/[id]", () => {
 
     const res = await PATCH(req as never, params);
 
-    expect(res.status).toBe(403);
-    const json = await res.json();
-    expect(json.error).toBe("Forbidden");
+    expect(res.status).toBe(400);
+    expect(mockRequireStudentEditAccess).toHaveBeenCalledWith(ADMIN_SESSION, "100", null);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 

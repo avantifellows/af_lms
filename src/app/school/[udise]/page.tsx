@@ -559,7 +559,7 @@ export default async function SchoolPage({ params }: PageProps) {
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
-        canEditStudent={canAddStudent}
+        canEditStudent={studentsAccess.canEdit}
         canDropoutStudent={
           studentsAccess.canEdit &&
           !isPasscodeUser &&

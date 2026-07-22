@@ -68,6 +68,16 @@ export type StudentProgramDropoutAccessResult =
     }
   | { ok: false; status: 401 | 403; error: string };
 
+export type StudentEditAccessResult =
+  | {
+      ok: true;
+      permission: UserPermission;
+      programId: number;
+      school: { code: string; udise_code: string | null };
+      actor: ReturnType<typeof studentAdditionActor>;
+    }
+  | { ok: false; status: 400 | 401 | 403; error: string };
+
 interface StudentWriteScopeRow {
   code: string;
   udise_code: string | null;
@@ -126,6 +136,22 @@ async function requireStudentWriteActor(session: StudentAdditionSession | null) 
   const permission = await getResolvedPermission(sessionEmail.email);
   if (!permission) return deny(403);
   if (!ALLOWED_STUDENT_ADDITION_ROLES.has(permission.role)) return deny(403);
+  if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
+
+  return { ok: true as const, email: sessionEmail.email, permission };
+}
+
+// Actor gate for editing an existing student's profile. Unlike the
+// student-addition actor, this follows the permission matrix directly: any role
+// with students=edit (teacher / program_manager / program_admin / admin, minus
+// read_only) may edit. Passcode users are excluded (requireGoogleSessionEmail
+// denies them). Program ownership is checked separately, per student.
+async function requireStudentEditActor(session: StudentAdditionSession | null) {
+  const sessionEmail = requireGoogleSessionEmail(session);
+  if (!sessionEmail.ok) return sessionEmail;
+
+  const permission = await getResolvedPermission(sessionEmail.email);
+  if (!permission) return deny(403);
   if (!getFeatureAccess(permission, "students").canEdit) return deny(403);
 
   return { ok: true as const, email: sessionEmail.email, permission };
@@ -331,6 +357,45 @@ export async function requireStudentAdditionStudentAccess(
   if (!actorHasProgramAccess(permission, PROGRAM_IDS.NVS)) return deny(403);
 
   return allowNvsStudentAccess(permission, email, scope);
+}
+
+// General per-student profile edit access, authorized against the student's
+// actual program (supplied by the caller from the enrollment view). Mirrors the
+// program dropout model — school access + current enrollment in that program +
+// program ownership (admin bypass) — but is NOT limited to NVS or JNV schools.
+// Who may edit is the permission matrix (requireStudentEditActor); which
+// programs they own gates the specific student.
+export async function requireStudentEditAccess(
+  session: StudentAdditionSession | null,
+  studentPkId: number | string,
+  programId: number | null,
+): Promise<StudentEditAccessResult> {
+  const actor = await requireStudentEditActor(session);
+  if (!actor.ok) return actor;
+
+  const { email, permission } = actor;
+
+  // Number.isInteger also rejects NaN and fractional values (e.g. "12.5" from
+  // the request body), which would otherwise 500 on the SQL integer bind.
+  if (programId == null || !Number.isInteger(programId)) {
+    return { ok: false, status: 400, error: "Program is required" };
+  }
+
+  const scope = await getStudentEditScope(studentPkId, programId);
+  if (!scope) return deny(403);
+  if (!(await hasSchoolAccess(permission, email, scope))) return deny(403);
+  if (!scope.has_program_enrollment) return deny(403);
+  if (permission.role !== "admin" && !actorHasProgramAccess(permission, programId)) {
+    return deny(403);
+  }
+
+  return {
+    ok: true,
+    permission,
+    programId,
+    school: { code: scope.code, udise_code: scope.udise_code },
+    actor: studentAdditionActor(permission, email),
+  };
 }
 
 export async function requireStudentDropoutUndoAccess(
