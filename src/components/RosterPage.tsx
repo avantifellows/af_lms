@@ -574,13 +574,19 @@ export default async function RosterPage({
           mentorUserId: teacherMentorUserId,
         })
       : null;
+  // Centre pages scope the manager overview to the centre's program — the
+  // school-wide mapping list (all programs, all centres) is school-page data.
+  // A program-less centre gets an empty overview rather than the school's.
   const mentorshipGroups =
     mentorshipAccess.canView && permission?.role !== "teacher"
-      ? await listAcademicMentorshipMappings({
-          schoolId,
-          academicYear: CURRENT_ACADEMIC_YEAR,
-          includeHistory: false,
-        })
+      ? isCentre && centreProgramId == null
+        ? []
+        : await listAcademicMentorshipMappings({
+            schoolId,
+            academicYear: CURRENT_ACADEMIC_YEAR,
+            includeHistory: false,
+            programId: centreProgramId ?? null,
+          })
       : null;
   const mentorshipContent = (
     <AcademicMentorshipSchoolTab

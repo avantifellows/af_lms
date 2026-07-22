@@ -132,6 +132,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const schoolIdParam = searchParams.get("schoolId");
   const classBatchId = searchParams.get("classBatchId");
+  const programIdParam = searchParams.get("programId");
   const page = Number(searchParams.get("page") || "0");
   const perPage = Number(searchParams.get("per_page") || "50");
 
@@ -154,7 +155,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const programIds = permission?.program_ids ?? [];
+  // Optional narrowing (centre pages pass their program). Intersected with the
+  // viewer's own programs — it can only restrict, never widen, their access.
+  const requestedProgramId = programIdParam ? Number(programIdParam) : null;
+  const allProgramIds = permission?.program_ids ?? [];
+  const programIds =
+    requestedProgramId !== null && !Number.isNaN(requestedProgramId)
+      ? allProgramIds.filter((id) => id === requestedProgramId)
+      : allProgramIds;
   const batches = await getBatchesForSchool(schoolId, programIds);
   const classBatchIds = batches
     .filter((b) => b.parent_id !== null)

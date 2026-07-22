@@ -412,6 +412,11 @@ export default function QuizSessionsTab({
         if (classBatchId) {
           params.set("classBatchId", classBatchId);
         }
+        // Centre pages: keep the "All batches" list scoped to the centre's
+        // program (the server intersects this with the viewer's own programs).
+        if (programId != null) {
+          params.set("programId", String(programId));
+        }
 
         const response = await fetch(`/api/quiz-sessions?${params.toString()}`);
         if (!response.ok) {
@@ -440,7 +445,7 @@ export default function QuizSessionsTab({
         }
       }
     },
-    [schoolId]
+    [schoolId, programId]
   );
 
   useEffect(() => {

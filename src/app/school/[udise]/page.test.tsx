@@ -1494,6 +1494,7 @@ describe("SchoolPage (server component)", () => {
       schoolId: 20,
       academicYear: "2026-2027",
       includeHistory: false,
+      programId: null,
     });
   });
 
@@ -1611,6 +1612,7 @@ describe("SchoolPage (server component)", () => {
       schoolId: 20,
       academicYear: "2026-2027",
       includeHistory: false,
+      programId: null,
     });
   });
 

@@ -123,13 +123,10 @@ export default function CurriculumTab({
         if (isCancelled) return;
 
         setOptions(data);
-        // Centre pages lock to their own program when it's available here;
-        // otherwise fall back to the school's default program.
-        const lockedProgramId =
-          programId != null && data.programs.some((p) => p.id === programId)
-            ? programId
-            : data.defaults.programId;
-        setSelectedProgramId(lockedProgramId);
+        // Centre pages stay locked to their own program even when it has no
+        // curriculum options here (empty state) — never silently fall back to
+        // another program's curriculum on a centre-scoped page.
+        setSelectedProgramId(programId ?? data.defaults.programId);
         setSelectedExamTrack(data.defaults.examTrack);
         setSelectedGrade(data.defaults.grade);
         setSelectedSubject(data.defaults.subject);

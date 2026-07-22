@@ -47,7 +47,9 @@ export default function PerformanceTab({ schoolUdise, lockedProgram }: Props) {
   const urlCategory = (searchParams.get("category") as TestCategory | null) || null;
 
   const [programs, setPrograms] = useState<string[] | null>(null);
-  const [selectedProgram, setSelectedProgram] = useState<string | null>(urlProgram ?? lockedProgram ?? null);
+  // lockedProgram (centre pages) must win over the URL param — otherwise a
+  // centre-confined viewer could open ?program=X and read another program's data.
+  const [selectedProgram, setSelectedProgram] = useState<string | null>(lockedProgram ?? urlProgram ?? null);
   const [grades, setGrades] = useState<number[] | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<number | null>(
     urlGrade ? parseInt(urlGrade, 10) : null
