@@ -24,7 +24,7 @@ export interface StudentAdditionSchool {
   centre_program_ids?: Array<number | string> | null;
 }
 
-interface StudentAdditionSession {
+interface StudentWriteSession {
   user?: { email?: string | null } | null;
   isPasscodeUser?: boolean;
 }
@@ -64,7 +64,7 @@ export type StudentProgramDropoutAccessResult =
       permission: UserPermission;
       programId: number;
       school: { code: string; udise_code: string | null };
-      actor: ReturnType<typeof studentAdditionActor>;
+      actor: ReturnType<typeof studentWriteActor>;
     }
   | { ok: false; status: 401 | 403; error: string };
 
@@ -74,7 +74,7 @@ export type StudentEditAccessResult =
       permission: UserPermission;
       programId: number;
       school: { code: string; udise_code: string | null };
-      actor: ReturnType<typeof studentAdditionActor>;
+      actor: ReturnType<typeof studentWriteActor>;
     }
   | { ok: false; status: 400 | 401 | 403; error: string };
 
@@ -94,7 +94,7 @@ function deny(
   return { ok: false, status, error };
 }
 
-function requireGoogleSessionEmail(session: StudentAdditionSession | null) {
+function requireGoogleSessionEmail(session: StudentWriteSession | null) {
   if (!session) return deny(401, "Unauthorized");
   if (session.isPasscodeUser) return deny(403);
 
@@ -102,7 +102,7 @@ function requireGoogleSessionEmail(session: StudentAdditionSession | null) {
   return email ? { ok: true as const, email } : deny(403);
 }
 
-function studentAdditionActor(permission: UserPermission, email: string) {
+function studentWriteActor(permission: UserPermission, email: string) {
   return {
     user_id: permission.user_id ?? null,
     email,
@@ -121,7 +121,7 @@ function allowNvsStudentAccess(
     permission,
     programId: PROGRAM_IDS.NVS,
     school: { code: scope.code, udise_code: scope.udise_code },
-    actor: studentAdditionActor(permission, email),
+    actor: studentWriteActor(permission, email),
   };
 }
 
@@ -129,7 +129,7 @@ function actorHasProgramAccess(permission: UserPermission, programId: number) {
   return getProgramContextSync(permission).programIds.includes(programId);
 }
 
-async function requireStudentWriteActor(session: StudentAdditionSession | null) {
+async function requireStudentWriteActor(session: StudentWriteSession | null) {
   const sessionEmail = requireGoogleSessionEmail(session);
   if (!sessionEmail.ok) return sessionEmail;
 
@@ -146,7 +146,7 @@ async function requireStudentWriteActor(session: StudentAdditionSession | null) 
 // with students=edit (teacher / program_manager / program_admin / admin, minus
 // read_only) may edit. Passcode users are excluded (requireGoogleSessionEmail
 // denies them). Program ownership is checked separately, per student.
-async function requireStudentEditActor(session: StudentAdditionSession | null) {
+async function requireStudentEditActor(session: StudentWriteSession | null) {
   const sessionEmail = requireGoogleSessionEmail(session);
   if (!sessionEmail.ok) return sessionEmail;
 
@@ -207,7 +207,7 @@ async function getStudentProgramDropoutScope(
 }
 
 export async function requireStudentProgramDropoutAccess(
-  session: StudentAdditionSession | null,
+  session: StudentWriteSession | null,
   studentPkId: number | string,
   programId: number,
 ): Promise<StudentProgramDropoutAccessResult> {
@@ -229,12 +229,12 @@ export async function requireStudentProgramDropoutAccess(
     permission,
     programId,
     school: { code: scope.code, udise_code: scope.udise_code },
-    actor: studentAdditionActor(permission, email),
+    actor: studentWriteActor(permission, email),
   };
 }
 
 export function getStudentAdditionAccessFromPermission(
-  session: StudentAdditionSession | null,
+  session: StudentWriteSession | null,
   school: StudentAdditionSchool,
   permission: UserPermission | null,
 ): StudentAdditionAccessResult {
@@ -255,12 +255,12 @@ export function getStudentAdditionAccessFromPermission(
     ok: true,
     permission,
     programId: PROGRAM_IDS.NVS,
-    actor: studentAdditionActor(permission, email),
+    actor: studentWriteActor(permission, email),
   };
 }
 
 export async function requireStudentAdditionAccess(
-  session: StudentAdditionSession | null,
+  session: StudentWriteSession | null,
   school: StudentAdditionSchool,
 ): Promise<StudentAdditionAccessResult> {
   const sessionEmail = requireGoogleSessionEmail(session);
@@ -340,7 +340,7 @@ async function getStudentDropoutUndoScope(studentPkId: number | string) {
 
 // fallow-ignore-next-line complexity
 export async function requireStudentAdditionStudentAccess(
-  session: StudentAdditionSession | null,
+  session: StudentWriteSession | null,
   studentPkId: number | string,
 ): Promise<StudentAdditionStudentAccessResult> {
   const actor = await requireStudentWriteActor(session);
@@ -366,7 +366,7 @@ export async function requireStudentAdditionStudentAccess(
 // Who may edit is the permission matrix (requireStudentEditActor); which
 // programs they own gates the specific student.
 export async function requireStudentEditAccess(
-  session: StudentAdditionSession | null,
+  session: StudentWriteSession | null,
   studentPkId: number | string,
   programId: number | null,
 ): Promise<StudentEditAccessResult> {
@@ -394,12 +394,12 @@ export async function requireStudentEditAccess(
     permission,
     programId,
     school: { code: scope.code, udise_code: scope.udise_code },
-    actor: studentAdditionActor(permission, email),
+    actor: studentWriteActor(permission, email),
   };
 }
 
 export async function requireStudentDropoutUndoAccess(
-  session: StudentAdditionSession | null,
+  session: StudentWriteSession | null,
   studentPkId: number | string,
 ): Promise<StudentAdditionStudentAccessResult> {
   const actor = await requireStudentWriteActor(session);
