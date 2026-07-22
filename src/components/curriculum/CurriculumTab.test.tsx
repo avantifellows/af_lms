@@ -281,12 +281,20 @@ function setupFetch() {
   });
 }
 
-function renderTab(props: Partial<{ schoolCode: string; schoolName: string; canEdit: boolean }> = {}) {
+function renderTab(
+  props: Partial<{
+    schoolCode: string;
+    schoolName: string;
+    canEdit: boolean;
+    programId: number;
+  }> = {}
+) {
   return render(
     <CurriculumTab
       schoolCode={props.schoolCode ?? "70705"}
       schoolName={props.schoolName ?? "Test School"}
       canEdit={props.canEdit ?? true}
+      programId={props.programId}
     />
   );
 }
@@ -813,6 +821,30 @@ describe("CurriculumTab", () => {
       await screen.findByText("Your permissions changed. Reload the page before trying again.")
     ).toBeInTheDocument();
     expect(screen.getByTestId("log-session-modal")).toBeInTheDocument();
+  });
+
+  it("stays locked to the centre's program even when it has no curriculum options", async () => {
+    // Program 99 isn't in the school's options — the locked page must not
+    // silently fall back to the default program's curriculum.
+    setupFetch();
+
+    renderTab({ programId: 99 });
+
+    await screen.findByText(/Curriculum Progress/);
+    // Chapters are fetched for the locked program, never program 1 (default).
+    await waitFor(() => {
+      const chapterCalls = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes("/api/curriculum/chapters"));
+      expect(chapterCalls.length).toBeGreaterThan(0);
+      expect(chapterCalls.every((url) => url.includes("program_id=99"))).toBe(true);
+    });
+    const allCalls = mockFetch.mock.calls.map(([url]) => String(url));
+    expect(
+      allCalls.some(
+        (url) => url.includes("/api/curriculum/chapters") && url.includes("program_id=1&")
+      )
+    ).toBe(false);
   });
 
   it("shows an empty state when backend config is empty", async () => {

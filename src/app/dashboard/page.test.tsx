@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { PROGRAM_IDS } from "@/lib/constants";
 
 // ---- mocks (hoisted) ----
 
@@ -32,6 +33,9 @@ vi.mock("@/lib/permissions", () => ({
   getProgramContextSync: mockGetProgramContextSync,
   getFeatureAccess: mockGetFeatureAccess,
   getAccessibleSchoolCodes: mockGetAccessibleSchoolCodes,
+  // Real logic (cheap, pure): seated ⇔ a non-empty centre-seat Set on the scope.
+  isCentreSeated: (p: { scope?: { centres?: unknown } } | null) =>
+    p?.scope?.centres instanceof Set && p.scope.centres.size > 0,
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("next/link", () => ({
@@ -393,6 +397,53 @@ describe("DashboardPage (server component)", () => {
     expect(mockRedirect).not.toHaveBeenCalledWith("/school/SC001");
   });
 
+  // --- Centre-seated redirect ---
+
+  const seatedPermission = {
+    email: "teacher@avantifellows.org",
+    level: 1,
+    role: "teacher",
+    school_codes: ["SC001"],
+    regions: null,
+    program_ids: [1],
+    scope: { schools: new Set(["SC001"]), centres: new Set([8]), programs: new Set([1]) },
+  };
+
+  it("redirects a single-seat centre-seated user straight to their centre page", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(seatedPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+
+    await expect(
+      DashboardPage({ searchParams: defaultSearchParams })
+    ).rejects.toThrow("REDIRECT:/centre/8");
+    expect(mockRedirect).toHaveBeenCalledWith("/centre/8");
+    // A seated user is never bounced to the whole-school roster page.
+    expect(mockRedirect).not.toHaveBeenCalledWith("/school/SC001");
+  });
+
+  it("does NOT redirect a single-seat user to their centre when a tab is chosen", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue(seatedPermission);
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+    // centres branch: getAccessibleCentresWithCounts (1) + getSchools (2)
+    mockQuery
+      .mockResolvedValueOnce([]) // centre counts
+      .mockResolvedValueOnce([]) // schools
+      .mockResolvedValueOnce([{ total: "0" }]); // count
+
+    const jsx = await DashboardPage({
+      searchParams: Promise.resolve({ view: "centres" }),
+    });
+    render(jsx);
+
+    expect(mockRedirect).not.toHaveBeenCalledWith("/centre/8");
+  });
+
   // --- Permission level subtitle ---
 
   it("shows 'Admin access' for level 4", async () => {
@@ -515,13 +566,13 @@ describe("DashboardPage (server component)", () => {
     expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
   });
 
-  it("keeps Schools in the PM nav and removes the Visits link", async () => {
+  it("keeps Home in the PM nav and removes the Visits link", async () => {
     setupPM([], 0);
 
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(screen.getByRole("link", { name: "Schools" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/dashboard");
     expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Visit Summary" })).not.toBeInTheDocument();
   });
@@ -875,7 +926,7 @@ describe("DashboardPage (server component)", () => {
     const jsx = await DashboardPage({ searchParams: defaultSearchParams });
     render(jsx);
 
-    expect(screen.getByRole("link", { name: "Schools" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/dashboard");
     expect(
       screen.getByText("admin@avantifellows.org")
     ).toBeInTheDocument();
@@ -928,7 +979,7 @@ describe("DashboardPage (server component)", () => {
     }
   });
 
-  it("passes school IDs to getSchoolGradeCounts", async () => {
+  it("passes school IDs to getNvsGradeCounts", async () => {
     const school = makeSchool({ id: "s99" });
     mockGetServerSession.mockResolvedValue(teacherSession);
     mockGetUserPermission.mockResolvedValue(teacherPermission);
@@ -938,23 +989,25 @@ describe("DashboardPage (server component)", () => {
     mockQuery
       .mockResolvedValueOnce([school]) // schools query
       .mockResolvedValueOnce([{ total: "1" }]) // count query
-      .mockResolvedValueOnce([]); // getSchoolGradeCounts
+      .mockResolvedValueOnce([]); // getNvsGradeCounts
 
     await DashboardPage({ searchParams: defaultSearchParams });
 
-    // Third query call is getSchoolGradeCounts (no PM queries for teacher)
+    // Third query call is getNvsGradeCounts (no PM queries for teacher). The
+    // JNV-NVS tab counts only students whose single attributed program is NVS,
+    // so the query filters on the attribution LATERAL, not the old cohort rule.
     const gradeCountsCall = mockQuery.mock.calls[2];
     const [sql, params] = gradeCountsCall;
     expect(sql).toContain("grade");
     expect(sql).toContain("er.academic_year = $2");
     expect(params[0]).toEqual(["s99"]);
     expect(params[1]).toBe("2026-2027");
-    // Cohort rule: JNV schools count all members, but non-JNV centre-linked
-    // schools count only students in a batch of one of the school's active-centre
-    // programs — so the card reflects the cohort, not the whole host school.
-    expect(sql).toContain("s.af_school_category = 'JNV'");
-    expect(sql).toContain("JOIN centres c ON c.school_id = s.id AND c.is_active");
-    expect(sql).toContain("c.program_id = b.program_id");
+    // NVS-attributed only: the LATERAL picks each student's single attributed
+    // program and the WHERE keeps just the NVS ones ($3), keeping the tab
+    // disjoint from the Physical Centres tab.
+    expect(sql).toContain("att.program_id = $3");
+    expect(sql).toContain("array_position");
+    expect(params[2]).toBe(PROGRAM_IDS.NVS);
   });
 
   it("skips grade count query when no schools found", async () => {

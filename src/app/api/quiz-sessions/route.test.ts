@@ -160,6 +160,38 @@ describe("GET /api/quiz-sessions", () => {
     );
   });
 
+  it("narrows the batch scope to ?programId= when the viewer holds that program", async () => {
+    const { GET } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await GET(
+      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&programId=1")
+    );
+
+    // Viewer holds [1, 64]; the centre page's programId=1 narrows to [1].
+    expect(mocks.mockQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("FROM school_batch sb"),
+      [42, [1]]
+    );
+  });
+
+  it("returns no sessions for a ?programId= the viewer does not hold", async () => {
+    const { GET } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+
+    const res = await GET(
+      new NextRequest("http://localhost/api/quiz-sessions?schoolId=42&programId=2")
+    );
+
+    // Intersection of [1, 64] with 2 is empty — the param can only restrict,
+    // never widen, so no batch query runs and the list is empty.
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ sessions: [], hasMore: false });
+    expect(mocks.mockQuery).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when the user cannot view quiz sessions", async () => {
     const { GET } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);

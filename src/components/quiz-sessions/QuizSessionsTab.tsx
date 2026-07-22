@@ -314,9 +314,13 @@ function areSessionsEqual(previous: QuizSession[], next: QuizSession[]): boolean
 export default function QuizSessionsTab({
   schoolId,
   canEdit = false,
+  programId,
 }: {
   schoolId: string;
   canEdit?: boolean;
+  // When set (centre pages), restricts every batch surface (selector, session
+  // creation) to this program's batches.
+  programId?: number;
 }) {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [sessions, setSessions] = useState<QuizSession[]>([]);
@@ -373,14 +377,20 @@ export default function QuizSessionsTab({
         throw new Error("Failed to fetch batches");
       }
       const data = await response.json();
-      setBatches(data.batches || []);
+      const fetched: BatchOption[] = data.batches || [];
+      // Centre pages see only their program's batches; school pages see all.
+      setBatches(
+        programId != null
+          ? fetched.filter((b) => b.program_id === programId)
+          : fetched,
+      );
     } catch (err) {
       console.error(err);
       setLoadError("Failed to fetch class batches.");
     } finally {
       setLoadingBatches(false);
     }
-  }, [schoolId]);
+  }, [schoolId, programId]);
 
   const fetchSessions = useCallback(
     async (
@@ -401,6 +411,11 @@ export default function QuizSessionsTab({
         });
         if (classBatchId) {
           params.set("classBatchId", classBatchId);
+        }
+        // Centre pages: keep the "All batches" list scoped to the centre's
+        // program (the server intersects this with the viewer's own programs).
+        if (programId != null) {
+          params.set("programId", String(programId));
         }
 
         const response = await fetch(`/api/quiz-sessions?${params.toString()}`);
@@ -430,7 +445,7 @@ export default function QuizSessionsTab({
         }
       }
     },
-    [schoolId]
+    [schoolId, programId]
   );
 
   useEffect(() => {

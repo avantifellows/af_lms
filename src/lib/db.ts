@@ -16,9 +16,11 @@ const pool =
       rejectUnauthorized: false,
     },
     min: 1,
-    // Connection ceiling per running instance. Explicit (pg defaults to 10) so
-    // the limit is visible alongside the shared-Postgres max_connections budget.
-    max: 10,
+    // Connection ceiling per running instance. Defaults to 10 (pg's own default,
+    // made explicit alongside the shared-Postgres max_connections budget), but
+    // overridable via DATABASE_POOL_MAX so a local dev server can hold a small
+    // pool and avoid starving a connection-tight shared DB (e.g. staging).
+    max: parseInt(process.env.DATABASE_POOL_MAX || "10", 10),
     // Fail fast instead of hanging forever if the pool can't hand out a
     // connection (e.g. all 10 busy or the DB is unreachable). The request
     // errors in 5s rather than blocking a server worker indefinitely.
