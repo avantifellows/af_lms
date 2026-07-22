@@ -36,7 +36,7 @@ export type FeatureAccess = "none" | "view" | "edit";
 // Feature permission matrix: feature → role → access level
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
-  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
+  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
   curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   academic_mentorship: { teacher: "view",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
   performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
@@ -481,8 +481,7 @@ export async function getStudentSchool(
        ON er_batch.user_id = s.user_id
        AND er_batch.group_type = 'batch'
        AND er_batch.is_current = true
-     LEFT JOIN "group" g_batch ON g_batch.id = er_batch.group_id AND g_batch.type = 'batch'
-     LEFT JOIN batch b ON b.id = g_batch.child_id
+     LEFT JOIN batch b ON b.id = er_batch.group_id
      WHERE s.id = $1
      LIMIT 1`,
     [studentPkId],

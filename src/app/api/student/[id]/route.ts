@@ -1,49 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getDbServiceConfig } from "@/lib/db-service-config";
+import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
+import { requireStudentEditAccess } from "@/lib/student-addition-access";
+import { canonicalizeStudentEditPayload } from "@/lib/student-addition-fields";
 
-const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
-const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
+// fallow-ignore-next-line complexity
+async function dbServiceError(response: Response) {
+  const text = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
 
-interface StudentUpdatePayload {
-  // user-table fields
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  whatsapp_phone?: string;
-  gender?: string;
-  date_of_birth?: string;
-  address?: string;
-  city?: string;
-  district?: string;
-  state?: string;
-  pincode?: string;
-  // student-table fields
-  category?: string;
-  stream?: string;
-  board_stream?: string;
-  school_medium?: string;
-  father_name?: string;
-  father_phone?: string;
-  father_profession?: string;
-  father_education_level?: string;
-  mother_name?: string;
-  mother_phone?: string;
-  mother_profession?: string;
-  mother_education_level?: string;
-  guardian_name?: string;
-  guardian_relation?: string;
-  guardian_phone?: string;
-  guardian_education_level?: string;
-  guardian_profession?: string;
-  annual_family_income?: string;
-  monthly_family_income?: string;
-  student_id?: string;
-  apaar_id?: string;
-  grade_id?: string | null; // grade_id for student table (from grade table)
-  group_id?: string; // group_id for grade enrollment_record update (from group table)
-  batch_group_id?: string; // group_id for batch enrollment_record update (from group table)
-  user_id?: string;
+  const error =
+    parsed &&
+    typeof parsed === "object" &&
+    "error" in parsed &&
+    parsed.error &&
+    typeof parsed.error === "object"
+      ? parsed.error as { code?: string; message?: string; fields?: string[] }
+      : null;
+  const message =
+    error?.message || "Failed to update student";
+  const fields = Array.isArray(error?.fields) ? error.fields : [];
+
+  return NextResponse.json(
+    {
+      error: message,
+      code: error?.code,
+      field_errors: Object.fromEntries(fields.map((field) => [field, message])),
+    },
+    { status: response.status },
+  );
 }
 
 export async function PATCH(
@@ -66,118 +58,70 @@ export async function PATCH(
   }
 
   try {
-    const body: StudentUpdatePayload = await request.json();
+    // Authorization runs before anything else that could leak state (DB-service
+    // config, body-shape validation); the body must still be parsed first
+    // because the program being edited under comes from it.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
+    }
+    const bodyObject = body as Record<string, unknown>;
 
-    // Extract group_id, batch_group_id, and user_id for separate handling (enrollments)
-    const { group_id, batch_group_id, user_id, ...studentFields } = body;
+    // The client sends the program the student is being edited under (the
+    // enrollment view's selected program). Access is authorized against that
+    // program; db-service also verifies the student is currently enrolled in it.
+    const rawProgramId = bodyObject.program_id;
+    const programId =
+      typeof rawProgramId === "number"
+        ? rawProgramId
+        : typeof rawProgramId === "string" && rawProgramId.trim() !== ""
+          ? Number(rawProgramId)
+          : null;
 
-    const results: { student?: unknown; grade?: unknown; batch?: unknown } = {};
-    const errors: string[] = [];
+    const access = await requireStudentEditAccess(session, id, programId);
+    if (!access.ok) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
+    }
 
-    // Update student fields if any are provided
-    const hasStudentFields = Object.keys(studentFields).length > 0;
-    if (hasStudentFields) {
-      const studentResponse = await fetch(`${DB_SERVICE_URL}/student/${id}`, {
+    const dbService = getDbServiceConfig();
+    if (!dbService) {
+      return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
+    }
+
+    const canonical = canonicalizeStudentEditPayload(bodyObject);
+    if (!canonical.ok) {
+      return NextResponse.json(canonical, { status: 422 });
+    }
+    const { fields } = canonical;
+    if (Object.keys(fields).length === 0) {
+      return NextResponse.json({ error: "No editable fields provided" }, { status: 400 });
+    }
+
+    const response = await fetch(
+      `${dbService.baseUrl}/lms/students/${id}/update-with-enrollments`,
+      {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
-        },
-        body: JSON.stringify(studentFields),
-      });
+        headers: dbService.headers,
+        body: JSON.stringify({
+          actor: access.actor,
+          school: access.school,
+          program_id: access.programId,
+          ...deriveLmsEnrollmentPeriod(),
+          ...fields,
+        }),
+      },
+    );
 
-      if (!studentResponse.ok) {
-        const errorText = await studentResponse.text();
-        console.error("DB service error (student update):", errorText);
-        errors.push(`Failed to update student: ${errorText}`);
-      } else {
-        results.student = await studentResponse.json();
-      }
+    if (!response.ok) {
+      return dbServiceError(response);
     }
 
-    // Update grade via PATCH /update-group-user-by-type if group_id is provided (and not empty)
-    const hasGroupId = group_id && group_id.trim() !== "";
-    const hasUserId = user_id && user_id.trim() !== "";
-
-    if (hasGroupId && hasUserId) {
-      const gradePayload = {
-        group_id: group_id,
-        user_id: user_id,
-        type: "grade",
-      };
-
-      const gradeResponse = await fetch(
-        `${DB_SERVICE_URL}/update-group-user-by-type`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
-          },
-          body: JSON.stringify(gradePayload),
-        }
-      );
-
-      if (!gradeResponse.ok) {
-        const errorText = await gradeResponse.text();
-        console.error("DB service error (grade update):", errorText);
-        errors.push(`Failed to update grade: ${errorText}`);
-      } else {
-        results.grade = await gradeResponse.json();
-      }
-    } else if (hasGroupId && !hasUserId) {
-      errors.push("user_id is required to update grade");
-    }
-
-    // Update batch via PATCH /update-group-user-by-type if batch_group_id is provided
-    const hasBatchGroupId = batch_group_id && batch_group_id.trim() !== "";
-
-    if (hasBatchGroupId && hasUserId) {
-      const batchPayload = {
-        group_id: batch_group_id,
-        user_id: user_id,
-        type: "batch",
-      };
-
-      const batchResponse = await fetch(
-        `${DB_SERVICE_URL}/update-group-user-by-type`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
-          },
-          body: JSON.stringify(batchPayload),
-        }
-      );
-
-      if (!batchResponse.ok) {
-        const errorText = await batchResponse.text();
-        console.error("DB service error (batch update):", errorText);
-        errors.push(`Failed to update batch: ${errorText}`);
-      } else {
-        results.batch = await batchResponse.json();
-      }
-    } else if (hasBatchGroupId && !hasUserId) {
-      errors.push("user_id is required to update batch");
-    }
-
-    // Return appropriate response
-    if (errors.length > 0 && Object.keys(results).length === 0) {
-      return NextResponse.json(
-        { error: errors.join("; ") },
-        { status: 400 }
-      );
-    }
-
-    if (errors.length > 0) {
-      return NextResponse.json({
-        ...results,
-        warnings: errors,
-      });
-    }
-
-    return NextResponse.json(results);
+    return NextResponse.json(await response.json());
   } catch (error) {
     console.error("Error updating student:", error);
     return NextResponse.json(

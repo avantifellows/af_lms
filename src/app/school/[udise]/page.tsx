@@ -9,13 +9,27 @@ async function getSchoolByCode(code: string): Promise<RosterSchool | null> {
   // centre (the non-JNV centre rollout: Punjab CoE meritorious / EMRS). Mirrors
   // the dashboard `schoolScope` predicate so a school listed there also opens.
   const schools = await query<RosterSchool>(
-    `SELECT id, name, code, udise_code, district, state, region
+    `SELECT
+       s.id,
+       s.name,
+       s.code,
+       s.udise_code,
+       s.district,
+       s.state,
+       s.region,
+       s.af_school_category,
+       COALESCE(
+         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
+         ARRAY[]::int[]
+       ) AS centre_program_ids
      FROM school s
+     LEFT JOIN centres c ON c.school_id = s.id AND c.is_active = true
      WHERE (
          s.af_school_category = 'JNV'
-         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+         OR c.id IS NOT NULL
        )
-       AND (s.udise_code = $1 OR s.code = $1)`,
+       AND (s.udise_code = $1 OR s.code = $1)
+     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region, s.af_school_category`,
     [code],
   );
   return schools[0] || null;

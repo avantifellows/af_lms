@@ -30,8 +30,14 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-import { buildProgramStats, type ProgramStats } from "@/lib/enrollment-stats";
+import {
+  buildProgramStats,
+  studentDroppedFromProgram,
+  studentHasCurrentProgram,
+  type ProgramStats,
+} from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
+import { getStudentAdditionAccessFromPermission } from "@/lib/student-addition-access";
 
 export interface RosterSchool {
   id: string;
@@ -41,6 +47,11 @@ export interface RosterSchool {
   district: string;
   state: string;
   region: string | null;
+  // Optional because the centre page resolves its school via getCentreWithSchool,
+  // which doesn't fetch these; centre scope never uses them (no student addition,
+  // dropout programs come from the centre itself).
+  af_school_category?: string | null;
+  centre_program_ids?: Array<number | string> | null;
 }
 
 /**
@@ -389,6 +400,15 @@ export default async function RosterPage({
   const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
+  // Student addition is an NVS school-page feature; a centre roster is scoped
+  // to the centre's own program, so it never offers Add Student.
+  const canAddStudent =
+    !isCentre &&
+    getStudentAdditionAccessFromPermission(
+      session,
+      { ...school, af_school_category: school.af_school_category ?? null },
+      permission,
+    ).ok;
 
   // Fetch enrollment data in parallel. THE fork: a centre pulls its own roster
   // from the centre_students view; a school pulls the full school roster.
@@ -400,27 +420,47 @@ export default async function RosterPage({
     ]);
 
   // Separate active and dropout students (all students visible; editability is per-row)
-  const activeStudents = dedupedStudents.filter((s) => s.status !== "dropout");
-  const dropoutStudents = dedupedStudents.filter((s) => s.status === "dropout");
+  const activeStudents = dedupedStudents.filter(
+    (s) =>
+      s.status !== "dropout" &&
+      PROGRAM_IDS_ORDERED.some((programId) =>
+        studentHasCurrentProgram(s, programId),
+      ),
+  );
+  const dropoutStudents = dedupedStudents.filter(
+    (s) => s.status === "dropout" || (s.dropout_program_ids?.length ?? 0) > 0,
+  );
 
   // Extract distinct streams from NVS batches
   const nvsStreams = getDistinctNVSStreams(batches);
 
-  // Programs that have at least one active student in scope
+  // Programs that have at least one student (active or dropped) in scope
   const programsWithStudents = new Set(
-    activeStudents
-      .map((s) => (s.program_id != null ? Number(s.program_id) : null))
-      .filter((v): v is number => v != null)
+    PROGRAM_IDS_ORDERED.filter((programId) =>
+      dedupedStudents.some(
+        (student) =>
+          studentHasCurrentProgram(student, programId) ||
+          studentDroppedFromProgram(student, programId),
+      ),
+    ),
   );
 
   // Programs shown as enrollment cards. Admins + passcode users see every
   // program present; everyone else sees the intersection of their effective
   // programs with what's here.
   const isAdmin = permission?.role === "admin";
-  const visibleProgramIds = (isPasscodeUser || isAdmin
-    ? PROGRAM_IDS_ORDERED
-    : programContext.programIds
-  ).filter((id) => programsWithStudents.has(id));
+  const visibleProgramSet = new Set(
+    (isPasscodeUser || isAdmin
+      ? PROGRAM_IDS_ORDERED
+      : programContext.programIds
+    ).filter((id) => programsWithStudents.has(id)),
+  );
+
+  if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
+
+  const visibleProgramIds = PROGRAM_IDS_ORDERED.filter((id) =>
+    visibleProgramSet.has(id),
+  );
 
   const programStatsList: ProgramStats[] = visibleProgramIds.map((id) =>
     buildProgramStats(activeStudents, id)
@@ -468,12 +508,34 @@ export default async function RosterPage({
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
+        canEditStudent={studentsAccess.canEdit}
+        canDropoutStudent={
+          studentsAccess.canEdit &&
+          !isPasscodeUser &&
+          ["admin", "program_manager", "program_admin"].includes(
+            permission?.role ?? "",
+          )
+        }
+        dropoutProgramIds={[
+          ...new Set([
+            // Dropout is offered for centre programs: on a centre page just the
+            // centre's own; on a school page every active centre at the school.
+            ...(isCentre
+              ? scope.centre.program_id != null
+                ? [Number(scope.centre.program_id)]
+                : []
+              : (school.centre_program_ids ?? []).map(Number)),
+            ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
+          ]),
+        ]}
+        canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser ?? false}
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
+        schoolUdise={school.udise_code || school.code}
         schoolCode={school.code}
       />
     </div>

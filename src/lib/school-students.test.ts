@@ -34,6 +34,7 @@ function makeStudent(overrides: Partial<Student> = {}): Student {
     gender: null,
     program_name: null,
     program_id: null,
+    student_program_ids: null,
     grade: 12,
     grade_id: null,
     status: null,
@@ -58,9 +59,16 @@ describe("getSchoolRoster", () => {
     const [sql, params] = mocks.mockQuery.mock.calls[0];
     expect(sql).toContain("g.type = 'school' AND g.child_id = $1");
     expect(sql).toContain("er_grade.academic_year = $2");
-    // Inner join (not LEFT) so prior-year cohorts are excluded entirely.
-    expect(sql).not.toContain("LEFT JOIN enrollment_record");
-    expect(sql).toContain("JOIN enrollment_record");
+    // Inner join (not LEFT) so prior-year grade cohorts are excluded entirely.
+    expect(sql).toContain("JOIN enrollment_record er_grade ON er_grade.user_id = u.id");
+    expect(sql).toContain("er_grade.is_current = true");
+    expect(sql).toContain("s.status = 'dropout'");
+    expect(sql).toContain("SELECT er_latest.id");
+    expect(sql).toContain("JOIN batch b ON b.id = er_batch.group_id");
+    expect(sql).toContain("AS student_program_ids");
+    expect(sql).toContain("AS can_undo_nvs_dropout");
+    expect(sql).toContain("s.pen_number");
+    expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
     expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR]);
   });
 

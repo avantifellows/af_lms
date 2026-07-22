@@ -23,6 +23,8 @@ The `.mex/` scaffold is the source of truth for *how* this project works.
 - Reads go through `query()` in `src/lib/db.ts` with `$1` placeholders — never string-interpolate SQL.
 - Student/batch/quiz-session/document **writes** go to the external DB Service over HTTP, never direct to Postgres.
 - Never bypass the permission layer (`src/lib/permissions.ts`) — gate before you act.
+- When role permissions change, keep the permission matrix, domain policy, route guards,
+  visible controls, and Admin user-management role descriptions in sync.
 - Never import server-only modules (`@/lib/db`, `@/lib/permissions`) into client components.
 - Never log GPS lat/lng; never commit secrets.
 
