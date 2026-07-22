@@ -37,7 +37,7 @@ export async function PATCH(
     }
 
     // Validate metadata fields
-    const validStreams = ["engineering", "medical", "ca", "clat", "pcmb", "pcb", "pcm", "foundation"];
+    const validStreams = ["engineering", "medical", "ca", "clat", "nda", "pcmb", "pcb", "pcm", "foundation"];
     const validGrades = [9, 10, 11, 12];
 
     if (metadata.stream && !validStreams.includes(metadata.stream)) {

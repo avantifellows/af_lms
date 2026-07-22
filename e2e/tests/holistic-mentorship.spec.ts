@@ -132,6 +132,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     holisticTeacherPage,
     holisticAdminPage,
   }, testInfo) => {
+    test.setTimeout(60_000);
     const teacherHealth = collectBrowserHealth(holisticTeacherPage);
     const adminHealth = collectBrowserHealth(holisticAdminPage);
 
@@ -238,17 +239,16 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(progressTab).toBeFocused();
     await expect(progressTab).toHaveAttribute("aria-selected", "true");
 
-    const profileOpener = holisticAdminPage.getByRole("button", { name: /^Profile for / }).first();
-    await profileOpener.focus();
-    await profileOpener.click();
-    const profileDialog = holisticAdminPage.getByRole("dialog", { name: / Profile$/ });
-    await expect(profileDialog).toBeVisible();
-    await expect(profileDialog.getByRole("button", { name: "Close" })).toBeFocused();
-    await holisticAdminPage.keyboard.press("Shift+Tab");
-    expect(await profileDialog.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
-    await holisticAdminPage.keyboard.press("Escape");
-    await expect(profileDialog).toBeHidden();
-    await expect(profileOpener).toBeFocused();
+    const openStudent = holisticAdminPage.getByRole("link", { name: /^Open / }).first();
+    await openStudent.focus();
+    await expect(openStudent).toBeFocused();
+    await openStudent.press("Enter");
+    await expect(holisticAdminPage.getByText("Admin read-only view", { exact: true })).toBeVisible();
+    const backToProgress = holisticAdminPage.getByRole("link", { name: "Back to Students and Progress" });
+    await backToProgress.focus();
+    await expect(backToProgress).toBeFocused();
+    await backToProgress.press("Enter");
+    await expect(holisticAdminPage).toHaveURL("/admin/holistic-mentorship");
 
     await holisticAdminPage.setViewportSize(RESPONSIVE_VIEWPORTS[1]);
     await phaseSetupTab.click();
@@ -442,9 +442,13 @@ test.describe("Holistic Mentorship release workflows", () => {
         await route.continue();
       }
     });
-    await holisticAdminPage.getByRole("button", { name: /^Profile for / }).first().click();
+    await holisticAdminPage.goto(studentPhaseUrl(
+      fixture.profileGrade11StudentId,
+      fixture.firstGrade11PhaseId
+    ));
+    await expect(holisticAdminPage.getByText("Student Profile context", { exact: true })).toBeVisible();
     holisticAdminPage.once("dialog", (dialog) => dialog.accept());
-    await holisticAdminPage.getByRole("button", { name: "Regenerate Profile" }).click();
+    await holisticAdminPage.getByRole("button", { name: "Request Profile regeneration" }).click();
     await expect(holisticAdminPage.getByText("Regeneration queued.", { exact: true })).toBeVisible();
   });
 

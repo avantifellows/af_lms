@@ -39,7 +39,9 @@ Auth config: `src/lib/auth.ts`.
 A `read_only` flag downgrades any `edit` to `view`.
 
 ## Feature access — the matrix
+
 `getFeatureAccess(permission, feature, opts?)` returns `{ access, canView, canEdit }`:
+
 - Looks up `FEATURE_PERMISSIONS[feature][role]` (`none`/`view`/`edit`).
 - **NVS gating:** features in `NVS_GATED_FEATURES` (`visits`, `curriculum`, `pm_dashboard`, `summary_stats`, `quiz_sessions`) become `none` unless the user `hasCoEOrNodal`.
 - **Academic Mentorship:** uses the `academic_mentorship` feature key and its own Program allowlist (`ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`, v1 wildcard `*`), so NVS-only users are not blocked by the NVS-gated feature set.
@@ -52,12 +54,16 @@ A `read_only` flag downgrades any `edit` to `view`.
 
 Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, null program_id (unassigned) is editable by anyone with feature edit, otherwise the record's `program_id` must be in the user's programs.
 
+Student Addition writes deliberately use a stricter gate than `ownsRecord`: admin, program admin, and program manager roles must all have the target Program in their resolved Program context. Global admins still resolve all Programs; an admin explicitly scoped only to CoE cannot edit or drop an NVS student.
+
 ## Scope resolution — `getResolvedPermission` vs `getUserPermission`
+
 - `getUserPermission(email)` — bare row from `user_permission` (only `revoked_at IS NULL`). Use for role/feature checks that don't touch school scope.
 - `getResolvedPermission(email)` — `getUserPermission` **+** `resolveScope`. Use **anywhere school/centre access is actually decided** so centre seats are included. `canAccessSchoolSync` only honours seats when `scope` is populated.
 - **Centre seats** (`centre_positions` → `centres` → `school`/`program`): additive. A seated user reaches that centre's school + program even with empty `school_codes`/`program_ids`. `resolveScope` degrades to explicit-only **only** on missing-schema errors (42P01/42703); any other DB error propagates (so a seated user is never silently handed an empty scope).
 
 ## The gate — what to call
+
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
@@ -66,6 +72,7 @@ Per-row ownership uses `ownsRecord(permission, programId)` — admins own all, n
 - **List queries:** scope at the SQL level with `getAccessibleSchoolCodes(email)` (returns `"all"` or `string[]`) or, for visits, `buildVisitScopePredicate(actor)`.
 
 ## Gotchas
+
 - **`getUserPermission` for a school decision = bug.** Seats are absent, so a seated-but-no-explicit-codes user is wrongly denied. Use `getResolvedPermission`.
 - **Raw `program_ids` for program filtering = bug.** Use `getProgramContextSync(permission).programIds` so centre-seat-derived programs are included. Otherwise a seated manager can access a school but see empty curriculum/program data for the wrong program.
 - **`requireEdit` matters on writes.** `canAccessStudent(session, id, { requireEdit: true })` for upload/delete — without it a `read_only` user could mutate via direct API call even though the UI hides the button. It also enforces per-program ownership in mixed schools.

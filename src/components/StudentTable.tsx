@@ -3,8 +3,16 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
-import { Card, Badge, Button, Modal, Input, DetailField, DetailGroup } from "@/components/ui";
+import {
+  Card,
+  Badge,
+  Button,
+  Modal,
+  DetailField,
+  DetailGroup,
+} from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 
 export interface Student {
   group_user_id: string;
@@ -16,10 +24,14 @@ export interface Student {
   email: string | null;
   date_of_birth: string | null;
   student_id: string | null;
+  pen_number?: string | null;
   apaar_id: string | null;
   category: string | null;
+  physically_handicapped?: boolean | null;
   stream: string | null;
   gender: string | null;
+  g10_board?: string | null;
+  g10_roll_no?: string | null;
   // Additional editable profile fields. Optional because not every consumer
   // (or test fixture) selects them; the school roster query populates them.
   whatsapp_phone?: string | null;
@@ -47,6 +59,9 @@ export interface Student {
   monthly_family_income?: string | null;
   program_name: string | null;
   program_id: number | null;
+  student_program_ids?: Array<number | string> | null;
+  dropout_program_ids?: Array<number | string> | null;
+  can_undo_nvs_dropout?: boolean;
   grade: number | null;
   grade_id: string | null;
   status: string | null;
@@ -62,8 +77,12 @@ export interface Grade {
 interface StudentTableProps {
   students: Student[];
   dropoutStudents?: Student[];
-  canEdit?: boolean;                   // feature-level edit (from matrix)
-  userProgramIds?: number[] | null;    // null = owns all (admin/passcode)
+  canEdit?: boolean; // feature-level edit (from matrix)
+  canEditStudent?: boolean; // student-addition edit gate
+  canDropoutStudent?: boolean;
+  selectedProgramId?: number | null;
+  dropoutProgramIds?: number[] | null;
+  userProgramIds?: number[] | null; // null = owns all (admin/passcode)
   isPasscodeUser?: boolean;
   isAdmin?: boolean;
   grades: Grade[];
@@ -75,6 +94,7 @@ interface StudentTableProps {
   // when the parent renders its own filter control above.
   selectedGrade?: string;
   onGradeChange?: (grade: string) => void;
+  selectedStream?: string;
   hideGradeFilterUI?: boolean;
   // Called after a save/upload (in addition to the internal router.refresh) so
   // the parent can refetch data it owns — e.g. the consent map behind the
@@ -82,10 +102,38 @@ interface StudentTableProps {
   onDataChanged?: () => void;
 }
 
+function studentBelongsToProgram(student: Student, programId: number) {
+  if (Array.isArray(student.student_program_ids)) {
+    return student.student_program_ids.map(Number).includes(programId);
+  }
+  return Number(student.program_id) === programId;
+}
+
+function userCanManageProgram(
+  isAdmin: boolean,
+  userProgramIds: number[] | null,
+  programId: number,
+) {
+  return isAdmin || Boolean(userProgramIds?.includes(programId));
+}
+
 function formatDate(dateString: string | null): string {
   if (!dateString) return "—";
   const d = new Date(dateString);
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   return `${String(d.getDate()).padStart(2, "0")} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
@@ -104,25 +152,15 @@ function getCategoryColor(category: string | null): string {
   }
 }
 
-function getCurrentAcademicYear(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  if (month >= 3) {
-    return `${year}-${year + 1}`;
-  }
-  return `${year - 1}-${year}`;
-}
-
-function formatDateForAPI(date: Date): string {
-  return date.toISOString().split("T")[0];
-}
-
 interface StudentCardProps {
   student: Student;
-  canEdit: boolean;
+  canEditStudent: boolean;
+  canDropout: boolean;
+  canUndoDropout: boolean;
   onEdit: () => void;
   onDropout: () => void;
+  onUndoDropout: () => void;
+  isDropoutView?: boolean;
   /**
    * Bumped by the parent when something outside this card may have changed
    * the student's documents (e.g. an upload via EditStudentModal). Forwarded
@@ -159,15 +197,20 @@ function KeyField({
   );
 }
 
+// fallow-ignore-next-line complexity
 function StudentCard({
   student,
-  canEdit,
+  canEditStudent,
+  canDropout,
+  canUndoDropout,
   onEdit,
   onDropout,
+  onUndoDropout,
+  isDropoutView = false,
   documentsRefreshNonce,
 }: StudentCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const isDropout = student.status === "dropout";
+  const isDropout = isDropoutView || student.status === "dropout";
   const studentPkId = parseStudentPkId(student.student_pk_id);
 
   return (
@@ -178,7 +221,9 @@ function StudentCard({
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-gray-900">
-              {[student.first_name, student.last_name].filter(Boolean).join(" ") || "—"}
+              {[student.first_name, student.last_name]
+                .filter(Boolean)
+                .join(" ") || "—"}
             </h3>
             {student.grade && (
               <Badge variant="info">Grade {student.grade}</Badge>
@@ -197,7 +242,12 @@ function StudentCard({
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
               </svg>
             </Button>
           </div>
@@ -206,6 +256,7 @@ function StudentCard({
         {/* Key fields — spread across the card width so it isn't mostly empty */}
         <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-3 lg:grid-cols-4">
           <KeyField label="Student ID">{student.student_id || "—"}</KeyField>
+          <KeyField label="PEN">{student.pen_number || "—"}</KeyField>
           <KeyField label="APAAR ID">{student.apaar_id || "—"}</KeyField>
           <KeyField label="Phone">{student.phone || "—"}</KeyField>
           <KeyField label="Gender">{student.gender || "—"}</KeyField>
@@ -221,13 +272,24 @@ function StudentCard({
         </div>
 
         {/* Action buttons */}
-        {canEdit && !isDropout && (
+        {(canEditStudent || canDropout) && !isDropout && (
           <div className="mt-3 flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={onEdit}>
-              Edit
-            </Button>
-            <Button variant="danger-ghost" size="sm" onClick={onDropout}>
-              Dropout
+            {canEditStudent && (
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+            )}
+            {canDropout && (
+              <Button variant="danger-ghost" size="sm" onClick={onDropout}>
+                Dropout
+              </Button>
+            )}
+          </div>
+        )}
+        {canUndoDropout && isDropout && (
+          <div className="mt-3 flex justify-end">
+            <Button variant="ghost" size="sm" onClick={onUndoDropout}>
+              Undo Dropout
             </Button>
           </div>
         )}
@@ -239,8 +301,16 @@ function StudentCard({
           {/* Phone / Gender / Category / Program now live in the always-visible
               card summary above, so the expanded view covers the rest. */}
           <DetailGroup title="Personal">
-            <DetailField label="Stream" value={student.stream} className="capitalize" />
-            <DetailField label="Email" value={student.email} className="truncate" />
+            <DetailField
+              label="Stream"
+              value={student.stream}
+              className="capitalize"
+            />
+            <DetailField
+              label="Email"
+              value={student.email}
+              className="truncate"
+            />
           </DetailGroup>
 
           <DetailGroup title="Academic">
@@ -261,27 +331,45 @@ function StudentCard({
             <DetailField label="Name" value={student.father_name} />
             <DetailField label="Phone" value={student.father_phone} />
             <DetailField label="Profession" value={student.father_profession} />
-            <DetailField label="Education Level" value={student.father_education_level} />
+            <DetailField
+              label="Education Level"
+              value={student.father_education_level}
+            />
           </DetailGroup>
 
           <DetailGroup title="Mother">
             <DetailField label="Name" value={student.mother_name} />
             <DetailField label="Phone" value={student.mother_phone} />
             <DetailField label="Profession" value={student.mother_profession} />
-            <DetailField label="Education Level" value={student.mother_education_level} />
+            <DetailField
+              label="Education Level"
+              value={student.mother_education_level}
+            />
           </DetailGroup>
 
           <DetailGroup title="Guardian">
             <DetailField label="Name" value={student.guardian_name} />
             <DetailField label="Relation" value={student.guardian_relation} />
             <DetailField label="Phone" value={student.guardian_phone} />
-            <DetailField label="Profession" value={student.guardian_profession} />
-            <DetailField label="Education Level" value={student.guardian_education_level} />
+            <DetailField
+              label="Profession"
+              value={student.guardian_profession}
+            />
+            <DetailField
+              label="Education Level"
+              value={student.guardian_education_level}
+            />
           </DetailGroup>
 
           <DetailGroup title="Socio-economic">
-            <DetailField label="Annual Family Income" value={student.annual_family_income} />
-            <DetailField label="Monthly Family Income" value={student.monthly_family_income} />
+            <DetailField
+              label="Annual Family Income"
+              value={student.annual_family_income}
+            />
+            <DetailField
+              label="Monthly Family Income"
+              value={student.monthly_family_income}
+            />
           </DetailGroup>
 
           {studentPkId !== null && (
@@ -291,7 +379,7 @@ function StudentCard({
               </h4>
               <DocumentsList
                 studentId={studentPkId}
-                canDelete={canEdit}
+                canDelete={canEditStudent || canDropout}
                 refreshNonce={documentsRefreshNonce}
               />
             </section>
@@ -307,11 +395,18 @@ interface DropoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  programId: number;
+  programLabel: string;
 }
 
-function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps) {
-  const [dropoutDate, setDropoutDate] = useState(formatDateForAPI(new Date()));
-  const [dropoutYear, setDropoutYear] = useState(getCurrentAcademicYear());
+function DropoutModal({
+  student,
+  isOpen,
+  onClose,
+  onConfirm,
+  programId,
+  programLabel,
+}: DropoutModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -320,17 +415,12 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
     setLoading(true);
 
     try {
-      const identifier = student.student_id
-        ? { student_id: student.student_id }
-        : { apaar_id: student.apaar_id };
-
       const response = await fetch("/api/student/dropout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...identifier,
-          start_date: dropoutDate,
-          academic_year: dropoutYear,
+          student_pk_id: student.student_pk_id,
+          program_id: programId,
         }),
       });
 
@@ -348,7 +438,9 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
     }
   };
 
-  const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ") || "this student";
+  const studentName =
+    [student.first_name, student.last_name].filter(Boolean).join(" ") ||
+    "this student";
 
   return (
     <Modal open={isOpen} onClose={onClose} className="max-w-md p-6">
@@ -363,47 +455,15 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
       )}
 
       <p className="text-sm text-gray-900 mb-4">
-        Are you sure you want to mark <strong>{studentName}</strong> as a dropout?
-        This action cannot be undone.
+        Are you sure you want to mark <strong>{studentName}</strong> as a
+        dropout from {programLabel}?
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">
-            Dropout Date
-          </label>
-          <Input
-            type="date"
-            value={dropoutDate}
-            onChange={(e) => setDropoutDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">
-            Academic Year
-          </label>
-          <Input
-            type="text"
-            value={dropoutYear}
-            onChange={(e) => setDropoutYear(e.target.value)}
-            placeholder="e.g., 2025-2026"
-          />
-        </div>
-      </div>
-
       <div className="flex justify-end gap-3">
-        <Button
-          variant="secondary"
-          onClick={onClose}
-          disabled={loading}
-        >
+        <Button variant="secondary" onClick={onClose} disabled={loading}>
           Cancel
         </Button>
-        <Button
-          variant="danger"
-          onClick={handleSubmit}
-          disabled={loading}
-        >
+        <Button variant="danger" onClick={handleSubmit} disabled={loading}>
           {loading ? "Processing..." : "Confirm Dropout"}
         </Button>
       </div>
@@ -411,23 +471,92 @@ function DropoutModal({ student, isOpen, onClose, onConfirm }: DropoutModalProps
   );
 }
 
+function UndoDropoutModal({
+  student,
+  isOpen,
+  onClose,
+  onConfirm,
+}: {
+  student: Student;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const name =
+    [student.first_name, student.last_name].filter(Boolean).join(" ") ||
+    "this student";
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/student/dropout/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_pk_id: student.student_pk_id }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to undo dropout");
+      }
+      onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to undo dropout");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal open={isOpen} onClose={onClose} className="max-w-md p-6">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">Undo Dropout</h2>
+      {error && (
+        <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <p className="mb-4 text-sm text-gray-900">
+        Restore <strong>{name}</strong> to their previous NVS batch?
+      </p>
+      <div className="flex justify-end gap-3">
+        <Button variant="secondary" onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>
+        <Button onClick={handleSubmit} disabled={loading}>
+          {loading ? "Restoring..." : "Undo Dropout"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+// fallow-ignore-next-line complexity
 export default function StudentTable({
   students,
   dropoutStudents = [],
   canEdit = true,
+  canEditStudent: canEditStudentEntry = canEdit,
+  canDropoutStudent = canEditStudentEntry,
+  selectedProgramId = null,
+  dropoutProgramIds = null,
   userProgramIds = null,
-  isPasscodeUser = false,
   isAdmin = false,
+  isPasscodeUser = false,
   grades,
   batches = [],
   nvsStreams = [],
   selectedGrade: controlledGrade,
   onGradeChange,
+  selectedStream = "all",
   hideGradeFilterUI = false,
   onDataChanged,
 }: StudentTableProps) {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [dropoutStudent, setDropoutStudent] = useState<Student | null>(null);
+  const [undoStudent, setUndoStudent] = useState<Student | null>(null);
   // Grade filter can be controlled by the parent (to also scope summary pills)
   // or managed internally when used standalone.
   const [internalGrade, setInternalGrade] = useState<string>("all");
@@ -440,17 +569,44 @@ export default function StudentTable({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTabState] = useState<"active" | "dropout">(
-    searchParams.get("students") === "dropout" ? "dropout" : "active"
+    searchParams.get("students") === "dropout" ? "dropout" : "active",
   );
+  const effectiveProgramId =
+    selectedProgramId ??
+    (students[0]?.program_id == null ? null : Number(students[0].program_id));
 
   // Per-row ownership check: combines feature-level canEdit with program ownership
-  const canEditStudent = (student: Student): boolean => {
+  // fallow-ignore-next-line complexity
+  const canEditNvsStudent = (student: Student): boolean => {
     if (!canEdit) return false;
-    if (isPasscodeUser || isAdmin) return true;
-    if (student.program_id === null) return true;
+    if (isPasscodeUser || !student.student_pk_id) return false;
+    const hasNvsBatch = (student.student_program_ids ?? [])
+      .map(Number)
+      .includes(PROGRAM_IDS.NVS);
+    if (!hasNvsBatch) return false;
     if (!userProgramIds || userProgramIds.length === 0) return false;
-    return userProgramIds.includes(Number(student.program_id));
+    return userProgramIds.includes(PROGRAM_IDS.NVS);
   };
+
+  const canDropoutFromSelectedProgram = (student: Student): boolean => {
+    if (!canDropoutStudent || effectiveProgramId == null) return false;
+    if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
+      return false;
+    if (isPasscodeUser || !student.student_pk_id) return false;
+    if (!studentBelongsToProgram(student, effectiveProgramId)) return false;
+    return userCanManageProgram(isAdmin, userProgramIds, effectiveProgramId);
+  };
+
+  const canUndoNvsDropout = (student: Student): boolean =>
+    Boolean(
+      canDropoutStudent &&
+      effectiveProgramId === PROGRAM_IDS.NVS &&
+      !isPasscodeUser &&
+      student.student_pk_id &&
+      student.can_undo_nvs_dropout &&
+      (isAdmin || userProgramIds?.includes(PROGRAM_IDS.NVS)) &&
+      student.dropout_program_ids?.map(Number).includes(PROGRAM_IDS.NVS),
+    );
 
   // Determine which students to show based on tab
   const currentStudents = activeTab === "active" ? students : dropoutStudents;
@@ -458,15 +614,19 @@ export default function StudentTable({
   // Get unique grades from current students for filtering
   const studentGrades = [
     ...new Set(
-      currentStudents.map((s) => s.grade).filter((g): g is number => g !== null),
+      currentStudents
+        .map((s) => s.grade)
+        .filter((g): g is number => g !== null),
     ),
   ].sort((a, b) => a - b);
 
   // Filter students by selected grade
-  const filteredStudents =
-    selectedGrade === "all"
-      ? currentStudents
-      : currentStudents.filter((s) => s.grade === parseInt(selectedGrade));
+  const filteredStudents = currentStudents.filter(
+    (student) =>
+      (selectedGrade === "all" || student.grade === parseInt(selectedGrade)) &&
+      (selectedStream === "all" ||
+        student.stream?.toLowerCase() === selectedStream.toLowerCase()),
+  );
 
   // Reset grade filter when switching tabs if the selected grade doesn't exist in new tab
   const handleTabChange = (tab: "active" | "dropout") => {
@@ -478,8 +638,17 @@ export default function StudentTable({
     router.replace(qs ? `?${qs}` : "?", { scroll: false });
 
     const targetStudents = tab === "active" ? students : dropoutStudents;
-    const targetGrades = [...new Set(targetStudents.map((s) => s.grade).filter((g): g is number => g !== null))];
-    if (selectedGrade !== "all" && !targetGrades.includes(parseInt(selectedGrade))) {
+    const targetGrades = [
+      ...new Set(
+        targetStudents
+          .map((s) => s.grade)
+          .filter((g): g is number => g !== null),
+      ),
+    ];
+    if (
+      selectedGrade !== "all" &&
+      !targetGrades.includes(parseInt(selectedGrade))
+    ) {
       setSelectedGrade("all");
     }
   };
@@ -544,13 +713,15 @@ export default function StudentTable({
             <option value="all">All Grades ({currentStudents.length})</option>
             {studentGrades.map((grade) => (
               <option key={grade} value={grade}>
-                Grade {grade} ({currentStudents.filter((s) => s.grade === grade).length})
+                Grade {grade} (
+                {currentStudents.filter((s) => s.grade === grade).length})
               </option>
             ))}
           </select>
           {selectedGrade !== "all" && (
             <span className="text-sm text-gray-500">
-              Showing {filteredStudents.length} of {currentStudents.length} students
+              Showing {filteredStudents.length} of {currentStudents.length}{" "}
+              students
             </span>
           )}
         </div>
@@ -560,7 +731,10 @@ export default function StudentTable({
           fills the width, so a single column reads cleanly. */}
       <div className="space-y-3">
         {filteredStudents.length === 0 ? (
-          <Card elevation="sm" className="p-8 text-center text-sm text-gray-500">
+          <Card
+            elevation="sm"
+            className="p-8 text-center text-sm text-gray-500"
+          >
             {currentStudents.length === 0
               ? activeTab === "active"
                 ? "No active students enrolled in this school"
@@ -572,9 +746,21 @@ export default function StudentTable({
             <StudentCard
               key={student.group_user_id}
               student={student}
-              canEdit={canEditStudent(student)}
+              canEditStudent={
+                activeTab === "active" &&
+                canEditStudentEntry &&
+                canEditNvsStudent(student)
+              }
+              canDropout={
+                activeTab === "active" && canDropoutFromSelectedProgram(student)
+              }
+              canUndoDropout={
+                activeTab === "dropout" && canUndoNvsDropout(student)
+              }
               onEdit={() => setEditingStudent(student)}
               onDropout={() => setDropoutStudent(student)}
+              onUndoDropout={() => setUndoStudent(student)}
+              isDropoutView={activeTab === "dropout"}
               documentsRefreshNonce={documentsRefresh}
             />
           ))
@@ -600,6 +786,19 @@ export default function StudentTable({
           student={dropoutStudent}
           isOpen={!!dropoutStudent}
           onClose={() => setDropoutStudent(null)}
+          onConfirm={handleSave}
+          programId={effectiveProgramId!}
+          programLabel={
+            PROGRAM_ID_TO_LABEL[effectiveProgramId!] ||
+            `Program ${effectiveProgramId}`
+          }
+        />
+      )}
+      {undoStudent && (
+        <UndoDropoutModal
+          student={undoStudent}
+          isOpen
+          onClose={() => setUndoStudent(null)}
           onConfirm={handleSave}
         />
       )}

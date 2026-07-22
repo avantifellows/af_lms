@@ -36,7 +36,7 @@ last_updated: 2026-07-15
 - **`@aws-sdk/client-dynamodb` + `lib-dynamodb`** — performance-dashboard reads (`src/lib/dynamodb.ts`).
 - **`@aws-sdk/client-s3` + `s3-request-presigner`** — document uploads + presigned URLs (`src/lib/s3.ts`).
 - **`@aws-sdk/client-sns`** — session-creation messages (`src/lib/sns.ts`).
-- **`recharts`** — performance/analytics charts; **`lucide-react`** — icons; **`csv-parse`** — centre/staff CSV imports.
+- **`recharts`** — performance/analytics charts; **`sonner`** — app toasts; **`lucide-react`** — icons; **`csv-parse`** — centre/staff CSV imports.
 - **`vitest` 4 + `@testing-library/react`** (not Jest) — unit/component tests, jsdom env. **`@playwright/test`** — E2E.
 - **`fallow`** — static codebase health/dead-code/risk analysis (`npm run fallow`, `npm run fallow:audit`, `npm run fallow:dead-code`, and `npm run fallow:health`).
 

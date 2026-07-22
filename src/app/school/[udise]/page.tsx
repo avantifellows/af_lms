@@ -16,13 +16,11 @@ import {
   getFeatureAccess,
   canAccessSchoolSync,
   hasMultipleSchools,
-  PROGRAM_IDS,
-  PROGRAM_IDS_ORDERED,
   type FeatureAccessResult,
   type ProgramPermissionContext,
   type UserPermission,
 } from "@/lib/permissions";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_IDS_ORDERED } from "@/lib/constants";
 import { type Grade, type Student } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
 import { type DataIssue } from "@/lib/school-student-list-data-issues";
@@ -34,8 +32,13 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
-import { buildProgramStats } from "@/lib/enrollment-stats";
+import {
+  buildProgramStats,
+  studentDroppedFromProgram,
+  studentHasCurrentProgram,
+} from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
+import { getStudentAdditionAccessFromPermission } from "@/lib/student-addition-access";
 import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
 import AdminSchoolRoster from "@/components/holistic-mentorship/AdminSchoolRoster";
 import {
@@ -53,6 +56,8 @@ interface School {
   district: string;
   state: string;
   region: string | null;
+  af_school_category: string | null;
+  centre_program_ids: Array<number | string> | null;
 }
 
 async function getSchoolByCode(code: string): Promise<School | null> {
@@ -60,13 +65,27 @@ async function getSchoolByCode(code: string): Promise<School | null> {
   // centre (the non-JNV centre rollout: Punjab CoE meritorious / EMRS). Mirrors
   // the dashboard `schoolScope` predicate so a school listed there also opens.
   const schools = await query<School>(
-    `SELECT id, name, code, udise_code, district, state, region
+    `SELECT
+       s.id,
+       s.name,
+       s.code,
+       s.udise_code,
+       s.district,
+       s.state,
+       s.region,
+       s.af_school_category,
+       COALESCE(
+         ARRAY_AGG(DISTINCT c.program_id) FILTER (WHERE c.program_id IS NOT NULL),
+         ARRAY[]::int[]
+       ) AS centre_program_ids
      FROM school s
+     LEFT JOIN centres c ON c.school_id = s.id AND c.is_active = true
      WHERE (
          s.af_school_category = 'JNV'
-         OR EXISTS (SELECT 1 FROM centres c WHERE c.school_id = s.id AND c.is_active)
+         OR c.id IS NOT NULL
        )
-       AND (s.udise_code = $1 OR s.code = $1)`,
+       AND (s.udise_code = $1 OR s.code = $1)
+     GROUP BY s.id, s.name, s.code, s.udise_code, s.district, s.state, s.region, s.af_school_category`,
     [code],
   );
   return schools[0] || null;
@@ -78,7 +97,7 @@ async function getGrades(): Promise<Grade[]> {
      FROM grade gr
      JOIN "group" g ON g.child_id = gr.id AND g.type = 'grade'
      ORDER BY gr.number`,
-    []
+    [],
   );
 }
 
@@ -97,7 +116,7 @@ async function getBatchesWithMetadata(): Promise<Batch[]> {
      JOIN "group" g ON g.child_id = b.id AND g.type = 'batch'
      WHERE b.metadata IS NOT NULL AND b.program_id = $1
      ORDER BY b.name`,
-    [PROGRAM_IDS.NVS]
+    [PROGRAM_IDS.NVS],
   );
   return batches;
 }
@@ -133,11 +152,16 @@ function AcademicMentorshipFlatList({
 }) {
   if (mentees.length === 0) {
     return (
-      <Card elevation="sm" className="border-dashed p-8 text-center text-sm text-text-muted">
+      <Card
+        elevation="sm"
+        className="border-dashed p-8 text-center text-sm text-text-muted"
+      >
         <div className="font-semibold text-text-primary">
           No mentees assigned for this academic year.
         </div>
-        <p className="mt-1">Assigned Students will appear here once mappings are active.</p>
+        <p className="mt-1">
+          Assigned Students will appear here once mappings are active.
+        </p>
       </Card>
     );
   }
@@ -148,9 +172,12 @@ function AcademicMentorshipFlatList({
         <Card key={mentee.studentPkId} elevation="sm" className="p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="font-semibold text-text-primary">{mentee.name}</div>
+              <div className="font-semibold text-text-primary">
+                {mentee.name}
+              </div>
               <div className="mt-1 text-sm text-text-muted">
-                {menteeMeta(mentee.grade, mentee.studentId) || "Student details unavailable"}
+                {menteeMeta(mentee.grade, mentee.studentId) ||
+                  "Student details unavailable"}
               </div>
             </div>
             {mentee.grade !== null ? (
@@ -179,11 +206,16 @@ function AcademicMentorshipGroupedOverview({
 
   if (activeGroups.length === 0) {
     return (
-      <Card elevation="sm" className="border-dashed p-8 text-center text-sm text-text-muted">
+      <Card
+        elevation="sm"
+        className="border-dashed p-8 text-center text-sm text-text-muted"
+      >
         <div className="font-semibold text-text-primary">
           No active Academic Mentor-Mentee Mappings for this academic year.
         </div>
-        <p className="mt-1">Use the admin page to add mappings for the selected School.</p>
+        <p className="mt-1">
+          Use the admin page to add mappings for the selected School.
+        </p>
       </Card>
     );
   }
@@ -191,16 +223,23 @@ function AcademicMentorshipGroupedOverview({
   return (
     <div className="space-y-3">
       {activeGroups.map((group) => (
-        <Card key={group.mentor.userId} elevation="sm" className="overflow-hidden p-0">
+        <Card
+          key={group.mentor.userId}
+          elevation="sm"
+          className="overflow-hidden p-0"
+        >
           <div className="flex flex-col gap-3 border-b border-border bg-bg-card-alt px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="font-bold text-text-primary">{group.mentor.name}</h3>
+              <h3 className="font-bold text-text-primary">
+                {group.mentor.name}
+              </h3>
               {group.mentor.email && (
                 <p className="text-sm text-text-muted">{group.mentor.email}</p>
               )}
             </div>
             <Badge variant="accent" className="w-fit font-mono">
-              {group.mappings.length} {group.mappings.length === 1 ? "Mentee" : "Mentees"}
+              {group.mappings.length}{" "}
+              {group.mappings.length === 1 ? "Mentee" : "Mentees"}
             </Badge>
           </div>
           <div className="divide-y divide-border">
@@ -210,7 +249,9 @@ function AcademicMentorshipGroupedOverview({
                 className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
               >
                 <div>
-                  <div className="font-medium text-text-primary">{mapping.mentee.name}</div>
+                  <div className="font-medium text-text-primary">
+                    {mapping.mentee.name}
+                  </div>
                   <div className="mt-1 text-sm text-text-muted">
                     {mapping.mentee.grade === null
                       ? "Grade unavailable"
@@ -375,7 +416,9 @@ function EnrollmentSchoolTab({
   grades,
   batches,
   nvsStreams,
-  schoolCode,
+  school,
+  canAddStudent,
+  canDropoutStudent,
 }: {
   students: Student[];
   dataIssues: DataIssue[];
@@ -386,19 +429,30 @@ function EnrollmentSchoolTab({
   grades: Grade[];
   batches: Batch[];
   nvsStreams: string[];
-  schoolCode: string;
+  school: School;
+  canAddStudent: boolean;
+  canDropoutStudent: boolean;
 }) {
-  const activeStudents = students.filter((student) => student.status !== "dropout");
-  const dropoutStudents = students.filter((student) => student.status === "dropout");
-  const programsWithStudents = new Set<number>();
-  for (const student of activeStudents) {
-    if (student.program_id !== null) programsWithStudents.add(Number(student.program_id));
-  }
-  const candidatePrograms = isPasscodeUser || isAdmin
-    ? PROGRAM_IDS_ORDERED
-    : programContext.programIds;
-  const programStatsList = candidatePrograms
-    .filter((id) => programsWithStudents.has(id))
+  const activeStudents = students.filter(
+    (student) => student.status !== "dropout" &&
+      PROGRAM_IDS_ORDERED.some((programId) => studentHasCurrentProgram(student, programId))
+  );
+  const dropoutStudents = students.filter(
+    (student) => student.status === "dropout" || (student.dropout_program_ids?.length ?? 0) > 0
+  );
+  const programsWithStudents = new Set(
+    PROGRAM_IDS_ORDERED.filter((programId) => students.some(
+      (student) => studentHasCurrentProgram(student, programId) ||
+        studentDroppedFromProgram(student, programId)
+    ))
+  );
+  const visibleProgramSet = new Set(
+    (isPasscodeUser || isAdmin ? PROGRAM_IDS_ORDERED : programContext.programIds)
+      .filter((id) => programsWithStudents.has(id))
+  );
+  if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
+  const programStatsList = PROGRAM_IDS_ORDERED
+    .filter((id) => visibleProgramSet.has(id))
     .map((id) => buildProgramStats(activeStudents, id));
 
   return (
@@ -429,13 +483,23 @@ function EnrollmentSchoolTab({
         activeStudents={activeStudents}
         dropoutStudents={dropoutStudents}
         canEdit={studentsAccess.canEdit}
+        canEditStudent={canAddStudent}
+        canDropoutStudent={canDropoutStudent}
+        dropoutProgramIds={[
+          ...new Set([
+            ...(school.centre_program_ids ?? []).map(Number),
+            ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
+          ]),
+        ]}
+        canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser}
         isAdmin={isAdmin}
         grades={grades}
         batches={batches}
         nvsStreams={nvsStreams}
-        schoolCode={schoolCode}
+        schoolUdise={school.udise_code || school.code}
+        schoolCode={school.code}
       />
     </div>
   );
@@ -673,7 +737,18 @@ export default async function SchoolPage({ params }: PageProps) {
   const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
   const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
-  const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
+  const quizSessionsAccess = getFeatureAccess(
+    permission,
+    "quiz_sessions",
+    opts,
+  );
+  const canAddStudent = getStudentAdditionAccessFromPermission(
+    session,
+    school,
+    permission,
+  ).ok;
+  const canDropoutStudent = studentsAccess.canEdit && !session.isPasscodeUser &&
+    ["admin", "program_manager", "program_admin"].includes(permission?.role ?? "");
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
@@ -699,7 +774,9 @@ export default async function SchoolPage({ params }: PageProps) {
       grades={grades}
       batches={batches}
       nvsStreams={nvsStreams}
-      schoolCode={school.code}
+      school={school}
+      canAddStudent={canAddStudent}
+      canDropoutStudent={canDropoutStudent}
     />
   );
   const academicMentorshipContent = await buildAcademicMentorshipContent({

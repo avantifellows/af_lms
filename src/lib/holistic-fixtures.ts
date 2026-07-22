@@ -65,7 +65,7 @@ type FixtureStudent = {
   student_id: number | string;
   user_id: number | string;
   grade: number | string;
-  batch_id: number | string;
+  batch_group_id: number | string;
 };
 
 export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
@@ -97,7 +97,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
       `/* fixture_students */
      WITH candidates AS (
        SELECT DISTINCT student.id AS student_id, student.user_id, grade.number AS grade,
-              roster_program.batch_id
+              roster_program.batch_group_id
        FROM centres centre
        JOIN "group" school_group ON school_group.type = 'school' AND school_group.child_id = centre.school_id
        JOIN group_user school_member ON school_member.group_id = school_group.id
@@ -107,7 +107,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
          AND grade_enrollment.is_current IS TRUE
        JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
        JOIN LATERAL (
-         SELECT batch.program_id, batch.id AS batch_id
+         SELECT batch.program_id, batch_group.id AS batch_group_id
          FROM group_user batch_member
          JOIN "group" batch_group ON batch_group.id = batch_member.group_id AND batch_group.type = 'batch'
          JOIN batch ON batch.id = batch_group.child_id
@@ -121,7 +121,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
               ROW_NUMBER() OVER (PARTITION BY grade ORDER BY student_id) AS position
        FROM candidates
      )
-     SELECT student_id, user_id, grade, batch_id FROM ranked
+     SELECT student_id, user_id, grade, batch_group_id FROM ranked
      WHERE position <= 3 ORDER BY grade, position`,
       [candidateScope.centre_id, HOLISTIC_FIXTURE_MANIFEST.academicYear, PROGRAM_IDS.COE]
     );
@@ -143,7 +143,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
     await client.query(
       `UPDATE enrollment_record SET is_current = false, updated_at = now()
        WHERE user_id = $1 AND group_type = 'batch' AND is_current IS TRUE AND group_id <> $2`,
-      [student.user_id, student.batch_id]
+      [student.user_id, student.batch_group_id]
     );
     await client.query(
       `WITH updated AS (
@@ -154,7 +154,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
          (user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at)
        SELECT $1, $2, 'batch', $3, true, now(), now()
        WHERE NOT EXISTS (SELECT 1 FROM updated)`,
-      [student.user_id, student.batch_id, HOLISTIC_FIXTURE_MANIFEST.academicYear]
+      [student.user_id, student.batch_group_id, HOLISTIC_FIXTURE_MANIFEST.academicYear]
     );
   }
 
