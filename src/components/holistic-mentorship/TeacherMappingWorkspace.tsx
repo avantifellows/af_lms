@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import StudentIdentity, { studentInitials } from "./StudentIdentity";
 
 interface Student {
   studentId: number;
@@ -158,15 +159,6 @@ function visibleMentees(mentees: Student[], filters: SavedFilters) {
       MENTEE_STATUS_RANK[menteeStatus(a)] - MENTEE_STATUS_RANK[menteeStatus(b)] ||
       a.name.localeCompare(b.name)
     );
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join("");
 }
 
 function studentCount(count: number): string {
@@ -361,44 +353,64 @@ export default function TeacherMappingWorkspace({
       </div>
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
       {success && <p role="status" className="text-sm text-success">{success}</p>}
-      {loading ? (
-        <p role="status" aria-live="polite" className="py-12 text-center text-sm text-text-muted">
-          Loading Students...
-        </p>
-      ) : (
-        <>
-          <AssignmentRoster
-            students={pagedRoster}
-            visibleCount={visibleRoster.length}
-            page={rosterPage}
-            pageCount={rosterPageCount}
-            allCount={roster.length}
-            filters={filters}
-            canEdit={canEdit}
-            selected={selected}
-            busy={busy}
-            open={assignOpen}
-            onOpenChange={setAssignOpen}
-            onFilterChange={changeFilter}
-            onToggle={toggle}
-            onSelectShown={() => setSelected(pagedRoster.map((student) => student.studentId))}
-            onAssign={assign}
-          />
-          <MenteesSection
-            mentees={mentees}
-            shown={shownMentees}
-            filters={filters}
-            canEdit={canEdit}
-            busy={busy}
-            schoolCode={schoolCode}
-            onFilterChange={changeFilter}
-            onRemove={remove}
-            onOpenRoster={() => setAssignOpen(true)}
-          />
-        </>
-      )}
+      <MappingWorkspaceContent loading={loading} roster={roster} visibleRoster={visibleRoster}
+        pagedRoster={pagedRoster} rosterPage={rosterPage} rosterPageCount={rosterPageCount}
+        mentees={mentees} shownMentees={shownMentees} filters={filters} canEdit={canEdit}
+        selected={selected} busy={busy} assignOpen={assignOpen} schoolCode={schoolCode}
+        onOpenChange={setAssignOpen} onFilterChange={changeFilter} onToggle={toggle}
+        onSelectShown={() => setSelected(pagedRoster.map((student) => student.studentId))}
+        onAssign={assign} onRemove={remove} />
     </section>
   );
+}
+
+type MappingWorkspaceContentProps = {
+  loading: boolean;
+  roster: Student[];
+  visibleRoster: Student[];
+  pagedRoster: Student[];
+  rosterPage: number;
+  rosterPageCount: number;
+  mentees: Student[];
+  shownMentees: Student[];
+  filters: SavedFilters;
+  canEdit: boolean;
+  selected: number[];
+  busy: boolean;
+  assignOpen: boolean;
+  schoolCode: string;
+  onOpenChange: (open: boolean) => void;
+  onFilterChange: (updates: Partial<SavedFilters>) => void;
+  onToggle: (studentId: number) => void;
+  onSelectShown: () => void;
+  onAssign: () => Promise<void>;
+  onRemove: (student: Student) => Promise<void>;
+};
+
+function MappingWorkspaceContent(props: MappingWorkspaceContentProps) {
+  return props.loading ? <MappingLoading /> : <LoadedMappingWorkspace {...props} />;
+}
+
+function MappingLoading() {
+  return <p role="status" aria-live="polite" className="py-12 text-center text-sm text-text-muted">
+    Loading Students...
+  </p>;
+}
+
+function LoadedMappingWorkspace({ roster, visibleRoster, pagedRoster, rosterPage,
+  rosterPageCount, mentees, shownMentees, filters, canEdit, selected, busy, assignOpen,
+  schoolCode, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign, onRemove }:
+  MappingWorkspaceContentProps) {
+  return <>
+    <AssignmentRoster students={pagedRoster} visibleCount={visibleRoster.length}
+      page={rosterPage} pageCount={rosterPageCount} allCount={roster.length} filters={filters}
+      canEdit={canEdit} selected={selected} busy={busy} open={assignOpen}
+      onOpenChange={onOpenChange} onFilterChange={onFilterChange} onToggle={onToggle}
+      onSelectShown={onSelectShown} onAssign={onAssign} />
+    <MenteesSection mentees={mentees} shown={shownMentees} filters={filters}
+      canEdit={canEdit} busy={busy} schoolCode={schoolCode} onFilterChange={onFilterChange}
+      onRemove={onRemove} onOpenRoster={() => onOpenChange(true)} />
+  </>;
 }
 
 function AssignmentRoster({ students, visibleCount, page, pageCount, allCount, filters, canEdit, selected, busy, open, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign }: {
@@ -571,7 +583,7 @@ function RosterTable({ students, allCount, canEdit, selected, page, visibleCount
               </label>
             </td>}
             <td className="px-3 py-2">
-              <StudentCell student={student} />
+              <StudentIdentity student={student} />
             </td>
             <td className="px-3 py-2 text-text-muted">Grade {student.grade}</td>
             <td className="px-3 py-2"><AssignmentBadge student={student} /></td>
@@ -580,21 +592,6 @@ function RosterTable({ students, allCount, canEdit, selected, page, visibleCount
       </table>
     </div>
   </>;
-}
-
-function StudentCell({ student }: { student: Student }) {
-  return <span className="flex min-w-0 items-center gap-2.5">
-    <span aria-hidden="true"
-      className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-info-bg text-xs font-extrabold text-info">
-      {initials(student.name)}
-    </span>
-    <span className="min-w-0">
-      <span className="block font-semibold text-text-primary">{student.name}</span>
-      {student.externalStudentId && (
-        <span className="block font-mono text-xs text-text-muted">{student.externalStudentId}</span>
-      )}
-    </span>
-  </span>;
 }
 
 function AssignmentBadge({ student }: { student: Student }) {
@@ -735,7 +732,7 @@ function MenteeCard({ student, canEdit, busy, schoolCode, onRemove }: {
       <span className="flex min-w-0 items-center gap-2.5">
         <span aria-hidden="true"
           className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-info-bg text-xs font-extrabold text-info">
-          {initials(student.name)}
+          {studentInitials(student.name)}
         </span>
         <span className="min-w-0">
           <span className="block truncate text-base font-bold text-text-primary">{student.name}</span>

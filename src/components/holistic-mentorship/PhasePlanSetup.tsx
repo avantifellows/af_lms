@@ -99,6 +99,21 @@ function draftFromPhase(phase: Phase): Draft {
   };
 }
 
+async function fetchPhasePlan(year: string) {
+  const response = await fetch(`/api/holistic-mentorship/phase-plans?academic_year=${year}`);
+  const body = await response.json();
+  return {
+    plan: (body.plan ?? null) as Plan | null,
+    error: response.ok ? "" : body.error ?? "Could not load the Plan",
+  };
+}
+
+async function priorPlanCanBeCopied(plan: Plan | null, year: string) {
+  if (plan || year !== CURRENT_ACADEMIC_YEAR) return false;
+  const prior = await fetchPhasePlan(PRIOR_ACADEMIC_YEAR);
+  return !prior.error && prior.plan !== null;
+}
+
 export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }: { academicYear?: string }) {
   const [plan, setPlan] = useState<Plan | null | undefined>();
   const [canCopyPriorPlan, setCanCopyPriorPlan] = useState(false);
@@ -114,15 +129,10 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
     setDraft(null);
     setMessage("");
     try {
-      const result = await fetch(`/api/holistic-mentorship/phase-plans?academic_year=${year}`);
-      const data = await result.json();
-      if (!result.ok) setMessage(data.error ?? "Could not load the Plan");
-      const nextPlan: Plan | null = data.plan ?? null;
-      if (!nextPlan && year === CURRENT_ACADEMIC_YEAR) {
-        const priorResult = await fetch(`/api/holistic-mentorship/phase-plans?academic_year=${PRIOR_ACADEMIC_YEAR}`);
-        const priorData = await priorResult.json();
-        setCanCopyPriorPlan(priorResult.ok && !!priorData.plan);
-      }
+      const loaded = await fetchPhasePlan(year);
+      const nextPlan = loaded.plan;
+      setMessage(loaded.error);
+      setCanCopyPriorPlan(await priorPlanCanBeCopied(nextPlan, year));
       setPlan(nextPlan);
       const keep = selectPhaseId ? nextPlan?.phases.find((phase) => phase.id === selectPhaseId) : undefined;
       if (keep) setDraft(draftFromPhase(keep));
@@ -373,100 +383,151 @@ function PhaseEditor({ draft, plan, selectedPhase, definitionReadOnly, busy, onC
   onMove: (index: number, offset: -1 | 1) => Promise<void>;
   onRemove: (phase: Phase) => Promise<void>;
 }) {
-  const identityReadOnly = definitionReadOnly;
   const phase = selectedPhase;
   const dirty = draftIsDirty(draft, phase);
   return <article className="min-w-0 rounded-md border border-border bg-bg-card">
-    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
-      <div>
-        <h3 className="text-base font-semibold text-text-primary">
-          {phase ? `Phase ${phase.number} - ${phase.title || "Untitled Phase"}` : "New Phase"}
-        </h3>
-        <p className="text-sm text-text-muted">
-          Grade {draft.grade}{phase ? ` - ${phaseStatusLabel(phase)}${phase.used ? " - Started" : ""}` : ""}
-        </p>
-      </div>
-      {plan.editable && phase && <PhaseLifecycleActions phase={phase} plan={plan} busy={busy}
-        onChangeState={onChangeState} onMove={onMove} onRemove={onRemove} />}
-    </div>
+    <PhaseEditorHeader draft={draft} phase={phase} plan={plan} busy={busy}
+      onChangeState={onChangeState} onMove={onMove} onRemove={onRemove} />
     <div className="space-y-5 px-4 py-4">
-      {phase?.used && <InlineAlert tone="info" icon={<Snowflake className="h-4 w-4" />} title="Definition frozen."
-        copy="A Mentor has saved Notes for this Phase. Title, Grade, Guidance, Questions, and position are now read-only." />}
-      {!plan.editable && <InlineAlert tone="info" icon={<History className="h-4 w-4" />} title="Historical Phase Plan."
-        copy="Prior Academic Year definitions and state are read-only." />}
-      {plan.editable && phase?.state === "open" && !phase.used && <InlineAlert tone="warning" icon={<Eye className="h-4 w-4" />}
-        title="Mentors can see this Phase." copy="Saved Guidance and Question changes are visible immediately across Program 1." />}
-      <section>
-        <h4 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-text-secondary">Definition</h4>
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <label className="text-[11px] font-extrabold uppercase tracking-wide text-text-muted">Phase title
-            <Input className="mt-1 font-normal normal-case tracking-normal" aria-label="Title" maxLength={120} value={draft.title} disabled={identityReadOnly}
-              onChange={(event) => onChange({ ...draft, title: event.target.value })} />
-          </label>
-          <fieldset disabled={identityReadOnly}>
-            <legend className="text-[11px] font-extrabold uppercase tracking-wide text-text-muted">Grade</legend>
-            <div role="group" aria-label="Grade" className="mt-1 inline-flex rounded-md border border-border bg-bg-card-alt p-1">
-              {([11, 12] as const).map((grade) => (
-                <button key={grade} type="button" aria-pressed={draft.grade === grade}
-                  onClick={() => onChange({ ...draft, grade })}
-                  className={`min-h-9 rounded px-3 text-sm font-semibold transition-colors ${
-                    draft.grade === grade ? "bg-bg-card text-accent shadow-sm" : "text-text-secondary"
-                  }`}>
-                  Grade {grade}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-        </div>
-      </section>
+      <PhaseEditorAlerts phase={phase} editable={plan.editable} />
+      <PhaseDefinition draft={draft} readOnly={definitionReadOnly} onChange={onChange} />
       <section>
         <h4 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-text-secondary">Phase Guidance</h4>
         <GuidanceEditor value={draft.guidanceMarkdown} readOnly={definitionReadOnly}
           onChange={(guidanceMarkdown) => onChange({ ...draft, guidanceMarkdown })} />
       </section>
-      <section>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h4 className="text-xs font-extrabold uppercase tracking-wide text-text-secondary">Post-Session Questions</h4>
-          {!identityReadOnly && <Button type="button" variant="secondary" className="text-xs"
-            disabled={draft.questions.length === 4}
-            title={draft.questions.length === 4 ? "Maximum 4 questions" : undefined}
-            onClick={() => onChange({ ...draft, questions: [...draft.questions, { text: "" }] })}>
-            <Plus className="h-4 w-4" /> Add Question
-          </Button>}
-        </div>
-        <fieldset className="space-y-2" disabled={identityReadOnly}>
-          <legend className="sr-only">Questions</legend>
-          {draft.questions.map((question, index) => <div key={question.id ?? index}
-            className="grid grid-cols-[1.5rem_minmax(0,1fr)_repeat(3,2.75rem)] items-center gap-2">
-            <span aria-hidden="true" className="text-center text-xs font-extrabold text-text-muted">{index + 1}</span>
-            <Input className="min-w-0" aria-label={`Question ${index + 1}`} value={question.text}
-              onChange={(event) => onChange(updateQuestion(draft, index, event.target.value))} />
-            <Button type="button" variant="icon" title="Move Question up" aria-label={`Move Question ${index + 1} up`}
-              disabled={index === 0} onClick={() => onChange(moveQuestion(draft, index, -1))}>
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-            <Button type="button" variant="icon" title="Move Question down" aria-label={`Move Question ${index + 1} down`}
-              disabled={index === draft.questions.length - 1} onClick={() => onChange(moveQuestion(draft, index, 1))}>
-              <ArrowDown className="h-4 w-4" />
-            </Button>
-            <Button type="button" variant="icon" title="Remove Question" aria-label={`Remove Question ${index + 1}`}
-              disabled={draft.questions.length === 1} onClick={() => onChange(removeQuestion(draft, index))}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>)}
-          {draft.questions.length === 0 && <InlineAlert tone="warning" icon={<TriangleAlert className="h-4 w-4" />}
-            title="No Questions yet." copy="Add at least one Question before Opening this Phase." />}
-        </fieldset>
-      </section>
+      <QuestionsEditor draft={draft} readOnly={definitionReadOnly} onChange={onChange} />
     </div>
-    {plan.editable && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-4">
-      {dirty && !definitionReadOnly && <p role="status" className="mr-auto text-xs font-semibold text-warning-text">Unsaved changes</p>}
-      <Button type="button" variant="secondary" onClick={onDiscard} disabled={busy || definitionReadOnly || !dirty}>Discard</Button>
-      <Button type="button" onClick={() => void onSave()} disabled={busy || definitionReadOnly || !dirty}>
-        <Save aria-hidden="true" className="h-4 w-4" /> Save Phase
-      </Button>
-    </footer>}
+    <PhaseEditorFooter editable={plan.editable} dirty={dirty} readOnly={definitionReadOnly}
+      busy={busy} onSave={onSave} onDiscard={onDiscard} />
   </article>;
+}
+
+function PhaseEditorHeader({ draft, phase, plan, busy, onChangeState, onMove, onRemove }: {
+  draft: Draft;
+  phase: Phase | undefined;
+  plan: Plan;
+  busy: boolean;
+  onChangeState: (phase: Phase) => Promise<void>;
+  onMove: (index: number, offset: -1 | 1) => Promise<void>;
+  onRemove: (phase: Phase) => Promise<void>;
+}) {
+  const title = phase ? `Phase ${phase.number} - ${phase.title || "Untitled Phase"}` : "New Phase";
+  const status = phase ? ` - ${phaseStatusLabel(phase)}${phase.used ? " - Started" : ""}` : "";
+  return <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4">
+    <div>
+      <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+      <p className="text-sm text-text-muted">Grade {draft.grade}{status}</p>
+    </div>
+    {plan.editable && phase && <PhaseLifecycleActions phase={phase} plan={plan} busy={busy}
+      onChangeState={onChangeState} onMove={onMove} onRemove={onRemove} />}
+  </div>;
+}
+
+function PhaseEditorAlerts({ phase, editable }: { phase: Phase | undefined; editable: boolean }) {
+  return <>
+    {phase?.used && <InlineAlert tone="info" icon={<Snowflake className="h-4 w-4" />} title="Definition frozen."
+      copy="A Mentor has saved Notes for this Phase. Title, Grade, Guidance, Questions, and position are now read-only." />}
+    {!editable && <InlineAlert tone="info" icon={<History className="h-4 w-4" />} title="Historical Phase Plan."
+      copy="Prior Academic Year definitions and state are read-only." />}
+    {editable && phase?.state === "open" && !phase.used && <InlineAlert tone="warning" icon={<Eye className="h-4 w-4" />}
+      title="Mentors can see this Phase." copy="Saved Guidance and Question changes are visible immediately across Program 1." />}
+  </>;
+}
+
+function PhaseDefinition({ draft, readOnly, onChange }: {
+  draft: Draft;
+  readOnly: boolean;
+  onChange: (draft: Draft) => void;
+}) {
+  return <section>
+    <h4 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-text-secondary">Definition</h4>
+    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <label className="text-[11px] font-extrabold uppercase tracking-wide text-text-muted">Phase title
+        <Input className="mt-1 font-normal normal-case tracking-normal" aria-label="Title" maxLength={120}
+          value={draft.title} disabled={readOnly}
+          onChange={(event) => onChange({ ...draft, title: event.target.value })} />
+      </label>
+      <fieldset disabled={readOnly}>
+        <legend className="text-[11px] font-extrabold uppercase tracking-wide text-text-muted">Grade</legend>
+        <div role="group" aria-label="Grade" className="mt-1 inline-flex rounded-md border border-border bg-bg-card-alt p-1">
+          {([11, 12] as const).map((grade) => <button key={grade} type="button"
+            aria-pressed={draft.grade === grade} onClick={() => onChange({ ...draft, grade })}
+            className={`min-h-9 rounded px-3 text-sm font-semibold transition-colors ${
+              draft.grade === grade ? "bg-bg-card text-accent shadow-sm" : "text-text-secondary"
+            }`}>Grade {grade}</button>)}
+        </div>
+      </fieldset>
+    </div>
+  </section>;
+}
+
+function QuestionsEditor({ draft, readOnly, onChange }: {
+  draft: Draft;
+  readOnly: boolean;
+  onChange: (draft: Draft) => void;
+}) {
+  return <section>
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <h4 className="text-xs font-extrabold uppercase tracking-wide text-text-secondary">Post-Session Questions</h4>
+      {!readOnly && <Button type="button" variant="secondary" className="text-xs"
+        disabled={draft.questions.length === 4}
+        title={draft.questions.length === 4 ? "Maximum 4 questions" : undefined}
+        onClick={() => onChange({ ...draft, questions: [...draft.questions, { text: "" }] })}>
+        <Plus className="h-4 w-4" /> Add Question
+      </Button>}
+    </div>
+    <fieldset className="space-y-2" disabled={readOnly}>
+      <legend className="sr-only">Questions</legend>
+      {draft.questions.map((question, index) => <QuestionEditorRow key={question.id ?? index}
+        draft={draft} index={index} question={question} onChange={onChange} />)}
+      {draft.questions.length === 0 && <InlineAlert tone="warning" icon={<TriangleAlert className="h-4 w-4" />}
+        title="No Questions yet." copy="Add at least one Question before Opening this Phase." />}
+    </fieldset>
+  </section>;
+}
+
+function QuestionEditorRow({ draft, question, index, onChange }: {
+  draft: Draft;
+  question: Question;
+  index: number;
+  onChange: (draft: Draft) => void;
+}) {
+  return <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_repeat(3,2.75rem)] items-center gap-2">
+    <span aria-hidden="true" className="text-center text-xs font-extrabold text-text-muted">{index + 1}</span>
+    <Input className="min-w-0" aria-label={`Question ${index + 1}`} value={question.text}
+      onChange={(event) => onChange(updateQuestion(draft, index, event.target.value))} />
+    <Button type="button" variant="icon" title="Move Question up" aria-label={`Move Question ${index + 1} up`}
+      disabled={index === 0} onClick={() => onChange(moveQuestion(draft, index, -1))}>
+      <ArrowUp className="h-4 w-4" />
+    </Button>
+    <Button type="button" variant="icon" title="Move Question down" aria-label={`Move Question ${index + 1} down`}
+      disabled={index === draft.questions.length - 1} onClick={() => onChange(moveQuestion(draft, index, 1))}>
+      <ArrowDown className="h-4 w-4" />
+    </Button>
+    <Button type="button" variant="icon" title="Remove Question" aria-label={`Remove Question ${index + 1}`}
+      disabled={draft.questions.length === 1} onClick={() => onChange(removeQuestion(draft, index))}>
+      <Trash2 className="h-4 w-4" />
+    </Button>
+  </div>;
+}
+
+function PhaseEditorFooter({ editable, dirty, readOnly, busy, onSave, onDiscard }: {
+  editable: boolean;
+  dirty: boolean;
+  readOnly: boolean;
+  busy: boolean;
+  onSave: () => Promise<void>;
+  onDiscard: () => void;
+}) {
+  if (!editable) return null;
+  return <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-4">
+    {dirty && !readOnly && <p role="status" className="mr-auto text-xs font-semibold text-warning-text">Unsaved changes</p>}
+    <Button type="button" variant="secondary" onClick={onDiscard} disabled={busy || readOnly || !dirty}>Discard</Button>
+    <Button type="button" onClick={() => void onSave()} disabled={busy || readOnly || !dirty}>
+      <Save aria-hidden="true" className="h-4 w-4" /> Save Phase
+    </Button>
+  </footer>;
 }
 
 function PhaseLifecycleActions({ phase, plan, busy, onChangeState, onMove, onRemove }: {
@@ -482,7 +543,6 @@ function PhaseLifecycleActions({ phase, plan, busy, onChangeState, onMove, onRem
   const mutable = phaseIsMutable(phase, plan.editable);
   const canMoveUp = mutable && phaseIsMutable(plan.phases[index - 1], plan.editable);
   const canMoveDown = mutable && phaseIsMutable(plan.phases[index + 1], plan.editable);
-  const closeMenu = () => { if (menuRef.current) menuRef.current.open = false; };
   return <div className="flex items-center gap-2">
     <Button type="button" variant={phase.state === "locked" ? "primary" : "secondary"}
       onClick={() => void onChangeState(phase)} disabled={busy || phase.frozen || phase.used}>
@@ -490,7 +550,23 @@ function PhaseLifecycleActions({ phase, plan, busy, onChangeState, onMove, onRem
         ? <><Eye aria-hidden="true" className="h-4 w-4" /> Open Phase</>
         : <><EyeOff aria-hidden="true" className="h-4 w-4" /> Return to Locked</>}
     </Button>
-    {mutable && <details ref={menuRef} className="relative">
+    {mutable && <PhaseActionMenu menuRef={menuRef} phase={phase} busy={busy} index={index}
+      canMoveUp={canMoveUp} canMoveDown={canMoveDown} onMove={onMove} onRemove={onRemove} />}
+  </div>;
+}
+
+function PhaseActionMenu({ menuRef, phase, busy, index, canMoveUp, canMoveDown, onMove, onRemove }: {
+  menuRef: React.RefObject<HTMLDetailsElement | null>;
+  phase: Phase;
+  busy: boolean;
+  index: number;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (index: number, offset: -1 | 1) => Promise<void>;
+  onRemove: (phase: Phase) => Promise<void>;
+}) {
+  const closeMenu = () => { if (menuRef.current) menuRef.current.open = false; };
+  return <details ref={menuRef} className="relative">
       <summary aria-label="More Phase actions" title="More Phase actions"
         className="inline-flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-md p-2 text-text-muted hover:bg-hover-bg hover:text-text-primary [&::-webkit-details-marker]:hidden">
         <MoreVertical aria-hidden="true" className="h-4 w-4" />
@@ -512,8 +588,7 @@ function PhaseLifecycleActions({ phase, plan, busy, onChangeState, onMove, onRem
           <Trash2 aria-hidden="true" className="h-4 w-4" /> Delete Phase
         </button>
       </div>
-    </details>}
-  </div>;
+    </details>;
 }
 
 function updateQuestion(draft: Draft, index: number, text: string): Draft {

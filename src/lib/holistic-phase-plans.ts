@@ -522,6 +522,20 @@ async function validateOpenReadiness(
   return guidanceError ? { ok: false, status: 422, error: guidanceError } : null;
 }
 
+async function validatePhaseStateChange(
+  client: PoolClient,
+  phase: MutablePhaseRow,
+  input: { phaseId: number; state: "locked" | "open" }
+): Promise<PhasePlanResult | null> {
+  if (phase.state === input.state) {
+    return { ok: true, id: input.phaseId, revision: phase.revision };
+  }
+  if (input.state === "locked" && (phase.used || phase.frozen_at)) {
+    return { ok: false, status: 422, error: "A used Phase cannot return to Locked" };
+  }
+  return input.state === "open" ? validateOpenReadiness(client, input.phaseId) : null;
+}
+
 async function setPhaseStateTransaction(
   client: PoolClient,
   input: {
@@ -533,14 +547,8 @@ async function setPhaseStateTransaction(
   const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
   if (checked.error) return checked.error;
   const phase = checked.phase;
-  if (phase.state === input.state) return { ok: true, id: input.phaseId, revision: phase.revision };
-  if (input.state === "locked" && (phase.used || phase.frozen_at)) {
-    return { ok: false, status: 422, error: "A used Phase cannot return to Locked" };
-  }
-  if (input.state === "open") {
-    const readinessError = await validateOpenReadiness(client, input.phaseId);
-    if (readinessError) return readinessError;
-  }
+  const validation = await validatePhaseStateChange(client, phase, input);
+  if (validation) return validation;
   const updated = await client.query<{ revision: number }>(
     `UPDATE holistic_mentorship_phases
      SET state = $2, revision = revision + 1, updated_at = NOW()

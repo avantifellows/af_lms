@@ -595,26 +595,35 @@ function submittedPhaseNotes(
   });
 }
 
-function selectedPhaseContext(params: OpenSelectedPhaseParams) {
-  const profile = params.profileRows.flatMap(({ title, summary }) =>
+function profileContext(rows: OpenSelectedPhaseParams["profileRows"]) {
+  const profile = rows.flatMap(({ title, summary }) =>
     title !== null && summary !== null ? [{ title, summary }] : []
   );
-  const request = params.profileRows[0];
+  return profile.length ? profile : null;
+}
+
+function profileRegeneration(rows: OpenSelectedPhaseParams["profileRows"]) {
+  const request = rows[0];
+  if (!request?.regeneration_request_key || !request.regeneration_state) return null;
+  return {
+    requestKey: request.regeneration_request_key,
+    state: request.regeneration_state,
+    errorCode: request.regeneration_error_code,
+  };
+}
+
+function historicalContext(rows: OpenSelectedPhaseParams["historicalRows"]) {
+  return rows.length ? rows.map(({ question, answer }) => ({ question, answer })) : null;
+}
+
+function selectedPhaseContext(params: OpenSelectedPhaseParams) {
   return resolveHolisticStudentContext({
     targetPhaseId: params.selected.id,
     phases: params.applicable.map(({ id, number, title }) => ({ id, number, title })),
     submittedNotes: submittedPhaseNotes(params.applicable, params.notesByPhase),
-    profile: profile.length ? profile : null,
-    profileRegeneration: request?.regeneration_request_key && request.regeneration_state
-      ? {
-          requestKey: request.regeneration_request_key,
-          state: request.regeneration_state,
-          errorCode: request.regeneration_error_code,
-        }
-      : null,
-    historicalAnswers: params.historicalRows.length
-      ? params.historicalRows.map(({ question, answer }) => ({ question, answer }))
-      : null,
+    profile: profileContext(params.profileRows),
+    profileRegeneration: profileRegeneration(params.profileRows),
+    historicalAnswers: historicalContext(params.historicalRows),
     launchGrade12: params.currentGrade === 12 && params.entryGrade === 12 && !params.hasPriorYearMapping,
     entryGradeFirstPhaseId: params.applicable.find(({ grade }) => grade === params.entryGrade)?.id ?? null,
   });

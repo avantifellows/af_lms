@@ -1,9 +1,8 @@
 "use client";
 
-import { ClipboardList, Users } from "lucide-react";
 import { useCallback, useId, useRef, useState } from "react";
 
-import { Card, Select } from "@/components/ui";
+import { Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
 import PhasePlanSetup from "./PhasePlanSetup";
 import ProgressWorkspace from "./ProgressWorkspace";
@@ -13,10 +12,18 @@ type WorkspaceMode = "teacher" | "admin";
 
 const WORKSPACES = {
   admin: [
-    { id: "progress", label: "Students & Progress", empty: "No mapped Students to show yet.", icon: Users },
-    { id: "phases", label: "Phase Setup", empty: "No Holistic Phases configured yet.", icon: ClipboardList },
+    { id: "progress", label: "Students & Progress" },
+    { id: "phases", label: "Phase Setup" },
   ],
 } as const;
+
+function nextWorkspaceIndex(key: string, index: number, count: number) {
+  if (key === "ArrowRight") return (index + 1) % count;
+  if (key === "ArrowLeft") return (index - 1 + count) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
 
 export default function HolisticMentorshipWorkspace({
   mode,
@@ -30,7 +37,6 @@ export default function HolisticMentorshipWorkspace({
   const workspaces = WORKSPACES.admin;
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
-  const Icon = active.icon;
   const tabSetId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [academicYear, setAcademicYear] = useState(CURRENT_ACADEMIC_YEAR);
@@ -49,11 +55,7 @@ export default function HolisticMentorshipWorkspace({
   };
 
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight") nextIndex = (index + 1) % workspaces.length;
-    if (event.key === "ArrowLeft") nextIndex = (index - 1 + workspaces.length) % workspaces.length;
-    if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = workspaces.length - 1;
+    const nextIndex = nextWorkspaceIndex(event.key, index, workspaces.length);
     if (nextIndex === null) return;
 
     event.preventDefault();
@@ -69,8 +71,7 @@ export default function HolisticMentorshipWorkspace({
 
   return (
     <section className="min-w-0 max-w-full space-y-4">
-      {mode === "admin" && (
-        <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
+      <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
           <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             Program
             <Select aria-label="Program" className="mt-1 w-full font-normal normal-case tracking-normal" value={PROGRAM_IDS.COE} disabled>
@@ -84,8 +85,7 @@ export default function HolisticMentorshipWorkspace({
               {academicYears.map((year) => <option key={year}>{year}</option>)}
             </Select>
           </label>
-        </div>
-      )}
+      </div>
       <div
         aria-label="Holistic Mentorship sections"
         className="flex gap-1 overflow-x-auto border-b border-border"
@@ -121,15 +121,10 @@ export default function HolisticMentorshipWorkspace({
         tabIndex={0}
         className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
-        {mode === "admin" && active.id === "phases" ? (
+        {active.id === "phases" ? (
           <PhasePlanSetup academicYear={academicYear} />
-        ) : mode === "admin" && active.id === "progress" ? (
-          <ProgressWorkspace academicYear={academicYear} onAcademicYears={updateAcademicYears} />
         ) : (
-          <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">
-            <Icon aria-hidden="true" className="h-7 w-7 text-text-muted" />
-            <p className="text-sm font-medium text-text-muted">{active.empty}</p>
-          </Card>
+          <ProgressWorkspace academicYear={academicYear} onAcademicYears={updateAcademicYears} />
         )}
       </div>
     </section>

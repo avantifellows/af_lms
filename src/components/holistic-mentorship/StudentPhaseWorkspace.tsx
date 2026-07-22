@@ -989,13 +989,9 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
   };
   return <nav role="tablist" aria-label="Holistic Phases" onKeyDown={onKeyDown}
     className="flex overflow-x-auto border-b border-border">
-    {phases.map((phase) => readOnly
-      ? <AdminPhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
-        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
-        academicYear={academicYear} source={source} />
-      : <PhaseNavigationLink key={`${phase.number}-${phase.title}`} phase={phase}
-        current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
-        academicYear={academicYear} source={source} />)}
+    {phases.map((phase) => <PhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
+      current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
+      academicYear={academicYear} source={source} admin={readOnly} />)}
   </nav>;
 }
 
@@ -1006,65 +1002,72 @@ const ADMIN_PHASE_STAGE_TEXT: Record<PhaseStage, string> = {
   Locked: "text-text-muted",
 };
 
-function AdminPhaseTab({ phase, current, studentId, schoolCode, academicYear, source }: {
+type PhaseTabProps = {
   phase: PhaseNavigationItem;
   current: boolean;
   studentId: number;
   schoolCode: string;
   academicYear: string;
   source?: "school";
-}) {
+  admin: boolean;
+};
+
+function PhaseTab(props: PhaseTabProps) {
+  const phase = props.phase;
   if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
-    return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
-      aria-disabled="true" aria-selected="false" tabIndex={-1} disabled
-      className="min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-2 border-transparent px-3 py-2 text-left opacity-60">
-      <span className="block text-sm font-semibold text-text-muted">Phase {phase.number}</span>
-      <span className="mt-1 flex items-center gap-1 text-xs font-medium text-text-muted">
-        <Lock aria-hidden="true" className="h-3 w-3" />
-        Locked
-      </span>
-    </button>;
+    return <LockedPhaseTab {...props} />;
   }
+  return <OpenPhaseTab {...props} phase={phase} />;
+}
+
+function LockedPhaseTab({ phase, studentId, admin }: PhaseTabProps) {
+  const className = admin
+    ? "border-b-2 border-transparent"
+    : "border-b-[3px] border-transparent bg-bg-card-alt";
+  return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
+    aria-disabled="true" aria-selected="false" tabIndex={-1} disabled
+    className={`min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 px-3 py-2 text-left opacity-60 ${className}`}>
+    <span className={`block text-sm text-text-muted ${admin ? "font-semibold" : "font-bold"}`}>
+      Phase {phase.number}
+    </span>
+    {admin ? <span className="mt-1 flex items-center gap-1 text-xs font-medium text-text-muted">
+      <Lock aria-hidden="true" className="h-3 w-3" /> Locked
+    </span> : <PhaseStatusBadge stage="Locked" />}
+  </button>;
+}
+
+function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, source, admin }:
+  PhaseTabProps & { phase: PhaseNavigationItem & { phaseId: number } }) {
   const stage = phaseStage(phase);
+  const className = admin
+    ? `border-b-2 ${current ? "border-accent" : "border-transparent hover:bg-hover-bg"}`
+    : `border-b-[3px] ${current
+      ? "border-accent bg-bg-card text-text-primary"
+      : "border-transparent text-text-muted hover:bg-accent/5"}`;
   return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear, source)}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${stage}`}
-    className={`min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-2 px-3 py-2 text-left ${current ? "border-accent" : "border-transparent hover:bg-hover-bg"}`}>
-    <span className={`block text-sm font-semibold ${current ? "text-text-primary" : "text-text-muted"}`}>
-      Phase {phase.number}
-    </span>
-    <span className={`mt-1 block text-xs font-medium ${ADMIN_PHASE_STAGE_TEXT[stage]}`}>{stage}</span>
+    className={`min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 px-3 py-2 text-left ${className}`}>
+    <span className={`block text-sm ${admin ? "font-semibold" : "font-bold"} ${
+      admin ? (current ? "text-text-primary" : "text-text-muted") : ""
+    }`}>Phase {phase.number}</span>
+    {admin
+      ? <span className={`mt-1 block text-xs font-medium ${ADMIN_PHASE_STAGE_TEXT[stage]}`}>{stage}</span>
+      : <PhaseStatusBadge stage={stage} />}
   </Link>;
 }
 
-function PhaseNavigationLink({ phase, current, studentId, schoolCode, academicYear, source }: {
-  phase: PhaseNavigationItem;
-  current: boolean;
+function LockedPhasePanel({ studentId, selectedPhase, bordered = false }: {
   studentId: number;
-  schoolCode: string;
-  academicYear: string;
-  source?: "school";
+  selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
+  bordered?: boolean;
 }) {
-  if (phase.phaseId === null || ("locked" in phase && phase.locked)) {
-    return <button id={phaseTabId(studentId, phase)} type="button" role="tab"
-      aria-disabled="true" aria-selected="false" tabIndex={-1} disabled
-      className="min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-[3px] border-transparent bg-bg-card-alt px-3 py-2 text-left opacity-60">
-      <span className="block text-sm font-bold text-text-muted">Phase {phase.number}</span>
-      <PhaseStatusBadge stage="Locked" />
-    </button>;
-  }
-  const className = current
-    ? "border-accent bg-bg-card text-text-primary"
-    : "border-transparent text-text-muted hover:bg-accent/5";
-  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear, source)}
-    id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
-    aria-controls={phasePanelId(studentId, phase)}
-    aria-label={`Phase ${phase.number} - ${phase.title} - ${phaseStage(phase)}`}
-    className={`min-h-[70px] min-w-[9.5rem] flex-1 shrink-0 border-b-[3px] px-3 py-2 text-left ${className}`}>
-    <span className="block text-sm font-bold">Phase {phase.number}</span>
-    <PhaseStatusBadge stage={phaseStage(phase)} />
-  </Link>;
+  return <p id={phasePanelId(studentId, selectedPhase)} role="tabpanel"
+    aria-labelledby={phaseTabId(studentId, selectedPhase)} tabIndex={0}
+    className={`${bordered ? "border-y border-border" : ""} py-10 text-center text-sm text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
+    This Phase is locked.
+  </p>;
 }
 
 function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
@@ -1079,12 +1082,7 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
   const tabId = phaseTabId(studentId, selectedPhase);
   const panelId = phasePanelId(studentId, selectedPhase);
-  if (!phase) {
-    return <p id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
-      className="border-y border-border py-10 text-center text-sm text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-      This Phase is locked.
-    </p>;
-  }
+  if (!phase) return <LockedPhasePanel bordered studentId={studentId} selectedPhase={selectedPhase} />;
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
     className="space-y-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <PhaseHeading phase={phase} />
@@ -1145,12 +1143,7 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear }: {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
   const tabId = phaseTabId(studentId, selectedPhase);
   const panelId = phasePanelId(studentId, selectedPhase);
-  if (!phase) {
-    return <p id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
-      className="py-10 text-center text-sm text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-      This Phase is locked.
-    </p>;
-  }
+  if (!phase) return <LockedPhasePanel studentId={studentId} selectedPhase={selectedPhase} />;
   return <section id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0}
     className="space-y-5 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-5">
     <AdminPhaseContextHead phase={phase} />
@@ -1253,6 +1246,63 @@ function ProfileRegenerationStatus({ regeneration }: {
 }
 
 type ProfileStatusPayload = { regeneration?: HolisticProfileRegeneration | null };
+type QueueRegenerationResult = {
+  regeneration: HolisticProfileRegeneration | null;
+  message: { error: boolean; text: string };
+  refresh: boolean;
+};
+
+type QueueRegenerationBody = {
+  error?: string;
+  requestKey?: string;
+  state?: HolisticProfileRegeneration["state"];
+  delivery?: "ambiguous";
+} | null;
+
+function rejectedRegeneration(response: Response, body: QueueRegenerationBody): QueueRegenerationResult {
+  return {
+    regeneration: null,
+    message: { error: true, text: body?.error || `Unable to queue regeneration (${response.status})` },
+    refresh: true,
+  };
+}
+
+function acceptedRegeneration(body: QueueRegenerationBody, requestKey: string): QueueRegenerationResult {
+  return {
+    regeneration: {
+      requestKey: body?.requestKey ?? requestKey,
+      state: body?.state ?? "queued",
+      errorCode: null,
+    },
+    message: {
+      error: false,
+      text: body?.delivery === "ambiguous"
+        ? "Regeneration queued. Delivery is not yet confirmed."
+        : "Regeneration queued.",
+    },
+    refresh: false,
+  };
+}
+
+async function queueProfileRegeneration(studentId: number, requestKey: string): Promise<QueueRegenerationResult> {
+  try {
+    const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_key: requestKey, force: true }),
+    });
+    const body = await response.json().catch(() => null) as QueueRegenerationBody;
+    return response.ok
+      ? acceptedRegeneration(body, requestKey)
+      : rejectedRegeneration(response, body);
+  } catch {
+    return {
+      regeneration: { requestKey, state: "queued", errorCode: null },
+      message: { error: true, text: "Could not confirm regeneration. Status will refresh automatically." },
+      refresh: true,
+    };
+  }
+}
 
 function AdminProfileRegeneration({ studentId, academicYear, initial }: {
   studentId: number;
@@ -1304,37 +1354,10 @@ function AdminProfileRegeneration({ studentId, academicYear, initial }: {
       ? regeneration.requestKey
       : crypto.randomUUID();
     try {
-      const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request_key: requestKey, force: true }),
-      });
-      const body = await response.json().catch(() => null) as {
-        error?: string;
-        requestKey?: string;
-        state?: HolisticProfileRegeneration["state"];
-        delivery?: "ambiguous";
-      } | null;
-      if (response.ok) {
-        setRegeneration({
-          requestKey: body?.requestKey ?? requestKey,
-          state: body?.state ?? "queued",
-          errorCode: null,
-        });
-        setMessage({
-          error: false,
-          text: body?.delivery === "ambiguous"
-            ? "Regeneration queued. Delivery is not yet confirmed."
-            : "Regeneration queued.",
-        });
-      } else {
-        setMessage({ error: true, text: body?.error || `Unable to queue regeneration (${response.status})` });
-        await loadStatus().catch(() => undefined);
-      }
-    } catch {
-      setMessage({ error: true, text: "Could not confirm regeneration. Status will refresh automatically." });
-      setRegeneration({ requestKey, state: "queued", errorCode: null });
-      await loadStatus().catch(() => undefined);
+      const result = await queueProfileRegeneration(studentId, requestKey);
+      setMessage(result.message);
+      if (result.regeneration) setRegeneration(result.regeneration);
+      if (result.refresh) await loadStatus().catch(() => undefined);
     } finally {
       setSubmitting(false);
     }

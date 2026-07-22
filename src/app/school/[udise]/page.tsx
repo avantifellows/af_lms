@@ -406,6 +406,62 @@ function getSchoolNavigation(
   };
 }
 
+function enrollmentSchoolData({ students, isPasscodeUser, isAdmin, programContext, canAddStudent, school }: {
+  students: Student[];
+  isPasscodeUser: boolean;
+  isAdmin: boolean;
+  programContext: ProgramPermissionContext;
+  canAddStudent: boolean;
+  school: School;
+}) {
+  const activeStudents = students.filter(
+    (student) => student.status !== "dropout" &&
+      PROGRAM_IDS_ORDERED.some((programId) => studentHasCurrentProgram(student, programId))
+  );
+  const dropoutStudents = students.filter(
+    (student) => student.status === "dropout" || (student.dropout_program_ids?.length ?? 0) > 0
+  );
+  const programsWithStudents = new Set(PROGRAM_IDS_ORDERED.filter((programId) =>
+    students.some((student) => studentHasCurrentProgram(student, programId) ||
+      studentDroppedFromProgram(student, programId))
+  ));
+  const visiblePrograms = (isPasscodeUser || isAdmin ? PROGRAM_IDS_ORDERED : programContext.programIds)
+    .filter((id) => programsWithStudents.has(id));
+  if (canAddStudent) visiblePrograms.push(PROGRAM_IDS.NVS);
+  return {
+    activeStudents,
+    dropoutStudents,
+    programStatsList: [...new Set(visiblePrograms)].map((id) => buildProgramStats(activeStudents, id)),
+    dropoutProgramIds: [...new Set([
+      ...(school.centre_program_ids ?? []).map(Number),
+      ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
+    ])],
+  };
+}
+
+function DataIssuesAlert({ dataIssues }: { dataIssues: DataIssue[] }) {
+  if (dataIssues.length === 0) return null;
+  return <div className="mb-4">
+    <details className="rounded-lg border border-amber-200 bg-amber-50">
+      <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100">
+        {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
+      </summary>
+      <div className="space-y-2 px-4 pb-3">
+        {dataIssues.map((issue) => <div key={issue.groupUserId}
+          className="flex items-start gap-2 text-sm text-amber-700">
+          <span className="mt-0.5 h-4 w-4 shrink-0 text-amber-500">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </span>
+          <span><strong>{issue.studentName}</strong>: {issue.details}</span>
+        </div>)}
+      </div>
+    </details>
+  </div>;
+}
+
 function EnrollmentSchoolTab({
   students,
   dataIssues,
@@ -433,64 +489,21 @@ function EnrollmentSchoolTab({
   canAddStudent: boolean;
   canDropoutStudent: boolean;
 }) {
-  const activeStudents = students.filter(
-    (student) => student.status !== "dropout" &&
-      PROGRAM_IDS_ORDERED.some((programId) => studentHasCurrentProgram(student, programId))
-  );
-  const dropoutStudents = students.filter(
-    (student) => student.status === "dropout" || (student.dropout_program_ids?.length ?? 0) > 0
-  );
-  const programsWithStudents = new Set(
-    PROGRAM_IDS_ORDERED.filter((programId) => students.some(
-      (student) => studentHasCurrentProgram(student, programId) ||
-        studentDroppedFromProgram(student, programId)
-    ))
-  );
-  const visibleProgramSet = new Set(
-    (isPasscodeUser || isAdmin ? PROGRAM_IDS_ORDERED : programContext.programIds)
-      .filter((id) => programsWithStudents.has(id))
-  );
-  if (canAddStudent) visibleProgramSet.add(PROGRAM_IDS.NVS);
-  const programStatsList = PROGRAM_IDS_ORDERED
-    .filter((id) => visibleProgramSet.has(id))
-    .map((id) => buildProgramStats(activeStudents, id));
+  const data = enrollmentSchoolData({
+    students, isPasscodeUser, isAdmin, programContext, canAddStudent, school,
+  });
 
   return (
     <div>
-      {dataIssues.length > 0 && (
-        <div className="mb-4">
-          <details className="rounded-lg border border-amber-200 bg-amber-50">
-            <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100">
-              {dataIssues.length} data {dataIssues.length === 1 ? "issue" : "issues"} found
-            </summary>
-            <div className="space-y-2 px-4 pb-3">
-              {dataIssues.map((issue) => (
-                <div key={issue.groupUserId} className="flex items-start gap-2 text-sm text-amber-700">
-                  <span className="mt-0.5 h-4 w-4 shrink-0 text-amber-500">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                    </svg>
-                  </span>
-                  <span><strong>{issue.studentName}</strong>: {issue.details}</span>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-      )}
+      <DataIssuesAlert dataIssues={dataIssues} />
       <EnrollmentTabContent
-        programs={programStatsList}
-        activeStudents={activeStudents}
-        dropoutStudents={dropoutStudents}
+        programs={data.programStatsList}
+        activeStudents={data.activeStudents}
+        dropoutStudents={data.dropoutStudents}
         canEdit={studentsAccess.canEdit}
         canEditStudent={canAddStudent}
         canDropoutStudent={canDropoutStudent}
-        dropoutProgramIds={[
-          ...new Set([
-            ...(school.centre_program_ids ?? []).map(Number),
-            ...(canAddStudent ? [PROGRAM_IDS.NVS] : []),
-          ]),
-        ]}
+        dropoutProgramIds={data.dropoutProgramIds}
         canAddStudent={canAddStudent}
         userProgramIds={isPasscodeUser ? null : programContext.programIds}
         isPasscodeUser={isPasscodeUser}
@@ -706,6 +719,28 @@ function SchoolPageLayout({
   );
 }
 
+function schoolFeatureAccess(permission: UserPermission | null, isPasscodeUser?: boolean) {
+  const options = { isPasscodeUser };
+  return {
+    students: getFeatureAccess(permission, "students", options),
+    curriculum: getFeatureAccess(permission, "curriculum", options),
+    performance: getFeatureAccess(permission, "performance", options),
+    mentorship: getFeatureAccess(permission, "academic_mentorship", options),
+    holisticMentorship: getFeatureAccess(permission, "holistic_mentorship", options),
+    visits: getFeatureAccess(permission, "visits", options),
+    quizSessions: getFeatureAccess(permission, "quiz_sessions", options),
+  };
+}
+
+function canDropoutStudent(
+  access: FeatureAccessResult,
+  session: Session,
+  permission: UserPermission | null
+) {
+  if (!access.canEdit || session.isPasscodeUser) return false;
+  return ["admin", "program_manager", "program_admin"].includes(permission?.role ?? "");
+}
+
 export default async function SchoolPage({ params }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
@@ -729,26 +764,14 @@ export default async function SchoolPage({ params }: PageProps) {
   const programAccessMessage = getProgramAccessMessage(session, programContext);
   if (programAccessMessage) return programAccessMessage;
 
-  // Derive feature access from the permission matrix
-  const opts = { isPasscodeUser: session.isPasscodeUser };
-  const studentsAccess = getFeatureAccess(permission, "students", opts);
-  const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
-  const performanceAccess = getFeatureAccess(permission, "performance", opts);
-  const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
-  const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship", opts);
-  const visitsAccess = getFeatureAccess(permission, "visits", opts);
-  const quizSessionsAccess = getFeatureAccess(
-    permission,
-    "quiz_sessions",
-    opts,
-  );
+  const access = schoolFeatureAccess(permission, session.isPasscodeUser);
+  const studentsAccess = access.students;
   const canAddStudent = getStudentAdditionAccessFromPermission(
     session,
     school,
     permission,
   ).ok;
-  const canDropoutStudent = studentsAccess.canEdit && !session.isPasscodeUser &&
-    ["admin", "program_manager", "program_admin"].includes(permission?.role ?? "");
+  const canDropout = canDropoutStudent(studentsAccess, session, permission);
 
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
@@ -776,12 +799,12 @@ export default async function SchoolPage({ params }: PageProps) {
       nvsStreams={nvsStreams}
       school={school}
       canAddStudent={canAddStudent}
-      canDropoutStudent={canDropoutStudent}
+      canDropoutStudent={canDropout}
     />
   );
   const academicMentorshipContent = await buildAcademicMentorshipContent({
     permission,
-    canView: mentorshipAccess.canView,
+    canView: access.mentorship.canView,
     school,
   });
   const tabs = await buildSchoolTabs({
@@ -790,12 +813,12 @@ export default async function SchoolPage({ params }: PageProps) {
     school,
     enrollmentContent,
     academicMentorshipContent,
-    curriculumAccess,
-    performanceAccess,
-    mentorshipAccess,
-    holisticMentorshipAccess,
-    visitsAccess,
-    quizSessionsAccess,
+    curriculumAccess: access.curriculum,
+    performanceAccess: access.performance,
+    mentorshipAccess: access.mentorship,
+    holisticMentorshipAccess: access.holisticMentorship,
+    visitsAccess: access.visits,
+    quizSessionsAccess: access.quizSessions,
   });
 
   return (

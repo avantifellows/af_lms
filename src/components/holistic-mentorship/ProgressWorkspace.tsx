@@ -127,6 +127,40 @@ function useProgressExport(params: URLSearchParams, academicYear: string) {
   return { exporting, exportError, exportProgress };
 }
 
+function useProgressView(academicYear: string) {
+  const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [page, setPage] = useState(1);
+  const [seenAcademicYear, setSeenAcademicYear] = useState(academicYear);
+  if (seenAcademicYear !== academicYear) {
+    setSeenAcademicYear(academicYear);
+    setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
+    setPage(1);
+  }
+  return { filters, setFilters, page, setPage };
+}
+
+function progressParams(academicYear: string, filters: ProgressFilters, page: number) {
+  const params = new URLSearchParams({
+    academic_year: academicYear,
+    page: String(page),
+    sort: filters.sort,
+    direction: filters.direction,
+  });
+  if (filters.school) params.set("school_code", filters.school);
+  if (filters.grade) params.set("grade", filters.grade);
+  if (filters.mentor) params.set("mentor_user_id", filters.mentor);
+  if (filters.phase) params.set("phase_id", filters.phase);
+  if (filters.progress) params.set("progress", filters.progress);
+  if (filters.search.trim()) params.set("search", filters.search.trim());
+  return params;
+}
+
+function progressIsFiltered(filters: ProgressFilters) {
+  return Object.entries(filters).some(([key, value]) =>
+    !["sort", "direction"].includes(key) && value.trim() !== ""
+  );
+}
+
 export default function ProgressWorkspace({
   academicYear = CURRENT_ACADEMIC_YEAR,
   onAcademicYears,
@@ -134,33 +168,14 @@ export default function ProgressWorkspace({
   academicYear?: string;
   onAcademicYears?: (years: string[]) => void;
 }) {
-  const [filters, setFilters] = useState(INITIAL_FILTERS);
-  const [page, setPage] = useState(1);
+  const { filters, setFilters, page, setPage } = useProgressView(academicYear);
   const [ready, setReady] = useState(false);
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
-  const [seenAcademicYear, setSeenAcademicYear] = useState(academicYear);
-  if (seenAcademicYear !== academicYear) {
-    setSeenAcademicYear(academicYear);
-    setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
-    setPage(1);
-  }
-
-  const params = useMemo(() => {
-    const value = new URLSearchParams({
-      academic_year: academicYear,
-      page: String(page),
-      sort: filters.sort,
-      direction: filters.direction,
-    });
-    if (filters.school) value.set("school_code", filters.school);
-    if (filters.grade) value.set("grade", filters.grade);
-    if (filters.mentor) value.set("mentor_user_id", filters.mentor);
-    if (filters.phase) value.set("phase_id", filters.phase);
-    if (filters.progress) value.set("progress", filters.progress);
-    if (filters.search.trim()) value.set("search", filters.search.trim());
-    return value;
-  }, [academicYear, filters, page]);
+  const params = useMemo(
+    () => progressParams(academicYear, filters, page),
+    [academicYear, filters, page]
+  );
 
   const { data, loading, error, reload } = useProgressData(params, ready);
   const { exporting, exportError, exportProgress } = useProgressExport(params, academicYear);
@@ -181,7 +196,7 @@ export default function ProgressWorkspace({
     const rememberScroll = () => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
     window.addEventListener("scroll", rememberScroll, { passive: true });
     return () => window.removeEventListener("scroll", rememberScroll);
-  }, []);
+  }, [setFilters, setPage]);
 
   useEffect(() => {
     if (!ready) return;
@@ -210,28 +225,12 @@ export default function ProgressWorkspace({
     }));
     setPage(1);
   };
-  const filtered = Boolean(filters.school || filters.grade || filters.mentor || filters.phase
-    || filters.progress || filters.search.trim());
+  const filtered = progressIsFiltered(filters);
   const totalPages = Math.max(1, Math.ceil(data.counts.totalMapped / 50));
   return (
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">Students &amp; Progress</h2>
-          <p className="text-sm text-text-muted">Mapped Mentees only. Mapping and Notes are read-only for Admins.</p>
-        </div>
-        <Button type="button" onClick={() => void exportProgress()} disabled={exporting}>
-          <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
-        </Button>
-      </div>
-      {academicYear !== CURRENT_ACADEMIC_YEAR && (
-        <div className="flex items-start gap-3 rounded-md bg-info-bg p-3 text-sm text-text-secondary">
-          <History aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
-          <p><strong className="text-text-primary">Viewing {academicYear}.</strong> This view shows Students
-            who had a Mapping during that Academic Year. Earlier academic years are read-only.</p>
-        </div>
-      )}
-      {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
+      <ProgressIntro academicYear={academicYear} exporting={exporting} exportError={exportError}
+        onExport={exportProgress} />
       <ProgressFilterPanel filters={filters} options={data.options} onChange={update} />
       <ProgressCounts counts={data.counts} />
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -265,6 +264,32 @@ export default function ProgressWorkspace({
         totalMapped={data.counts.totalMapped} onPageChange={setPage} />
     </div>
   );
+}
+
+function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
+  academicYear: string;
+  exporting: boolean;
+  exportError: string;
+  onExport: () => Promise<void>;
+}) {
+  return <>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-semibold text-text-primary">Students &amp; Progress</h2>
+        <p className="text-sm text-text-muted">Mapped Mentees only. Mapping and Notes are read-only for Admins.</p>
+      </div>
+      <Button type="button" onClick={() => void onExport()} disabled={exporting}>
+        <Download aria-hidden="true" className="h-4 w-4" /> {exporting ? "Exporting..." : "Export CSV"}
+      </Button>
+    </div>
+    {academicYear !== CURRENT_ACADEMIC_YEAR && <div
+      className="flex items-start gap-3 rounded-md bg-info-bg p-3 text-sm text-text-secondary">
+      <History aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+      <p><strong className="text-text-primary">Viewing {academicYear}.</strong> This view shows Students
+        who had a Mapping during that Academic Year. Earlier academic years are read-only.</p>
+    </div>}
+    {exportError && <p role="alert" className="text-sm text-danger">{exportError}</p>}
+  </>;
 }
 
 function refreshedLabel(refreshedAt: string) {

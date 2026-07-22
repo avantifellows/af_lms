@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Badge, Input, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import type { HolisticAssignmentRosterStudent as Student } from "@/lib/holistic-mappings";
+import StudentIdentity from "./StudentIdentity";
 
 type AssignmentFilter = "all" | "assigned" | "unassigned";
 type Progress = "completed" | "draft" | "pending" | "none" | "unassigned";
@@ -33,11 +34,6 @@ function progress(student: Student): Progress {
   if (student.activeNotesState === "submitted") return "completed";
   if (student.activeNotesState === "draft") return "draft";
   return "pending";
-}
-
-function initials(name: string) {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2)
-    .map((part) => part[0]?.toUpperCase()).join("");
 }
 
 function studentHref(student: Student, schoolCode: string) {
@@ -68,20 +64,6 @@ function Summary({ students }: { students: Student[] }) {
       <div className="text-[11px] font-bold uppercase tracking-wide text-text-muted">{label}</div>
     </div>)}
   </div>;
-}
-
-function StudentIdentity({ student }: { student: Student }) {
-  return <span className="flex min-w-0 items-center gap-2.5">
-    <span aria-hidden="true"
-      className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-info-bg text-xs font-extrabold text-info">
-      {initials(student.name)}
-    </span>
-    <span className="min-w-0">
-      <span className="block font-semibold text-text-primary">{student.name}</span>
-      {student.externalStudentId &&
-        <span className="block font-mono text-xs text-text-muted">{student.externalStudentId}</span>}
-    </span>
-  </span>;
 }
 
 function CoverageTable({ students, schoolCode }: { students: Student[]; schoolCode: string }) {
@@ -121,6 +103,36 @@ function CoverageTable({ students, schoolCode }: { students: Student[]; schoolCo
   </div>;
 }
 
+function filterStudents(
+  students: Student[],
+  search: string,
+  grade: string,
+  assignment: AssignmentFilter
+) {
+  const query = search.trim().toLowerCase();
+  return students.filter((student) =>
+    matchesGrade(student, grade) &&
+    matchesAssignment(student, assignment) &&
+    matchesStudentQuery(student, query)
+  );
+}
+
+function matchesGrade(student: Student, grade: string) {
+  return !grade || String(student.grade) === grade;
+}
+
+function matchesAssignment(student: Student, assignment: AssignmentFilter) {
+  if (assignment === "assigned") return student.ownership !== null;
+  if (assignment === "unassigned") return student.ownership === null;
+  return true;
+}
+
+function matchesStudentQuery(student: Student, query: string) {
+  if (!query) return true;
+  return student.name.toLowerCase().includes(query) ||
+    (student.externalStudentId ?? "").toLowerCase().includes(query);
+}
+
 export default function AdminSchoolRoster({ students, schoolCode }: {
   students: Student[];
   schoolCode: string;
@@ -128,16 +140,10 @@ export default function AdminSchoolRoster({ students, schoolCode }: {
   const [search, setSearch] = useState("");
   const [grade, setGrade] = useState("");
   const [assignment, setAssignment] = useState<AssignmentFilter>("all");
-  const shown = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return students.filter((student) => {
-      if (grade && String(student.grade) !== grade) return false;
-      if (assignment === "assigned" && !student.ownership) return false;
-      if (assignment === "unassigned" && student.ownership) return false;
-      return !query || student.name.toLowerCase().includes(query) ||
-        (student.externalStudentId ?? "").toLowerCase().includes(query);
-    });
-  }, [assignment, grade, search, students]);
+  const shown = useMemo(
+    () => filterStudents(students, search, grade, assignment),
+    [assignment, grade, search, students]
+  );
 
   return <section className="min-w-0 max-w-full space-y-5">
     <div>
