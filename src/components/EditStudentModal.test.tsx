@@ -44,6 +44,8 @@ const defaultProps = {
   onClose: vi.fn(),
   onSave: vi.fn(),
   grades,
+  // The roster's selected program — what the Edit gate authorized against.
+  programId: 64 as number | null,
 };
 
 let mockFetch: ReturnType<typeof vi.fn>;
@@ -205,6 +207,8 @@ describe("EditStudentModal", () => {
       physically_handicapped: true,
       stream: "nda",
       grade: 12,
+      // The program the student is edited under, so the API can authorize it.
+      program_id: 64,
     });
     expect(body).not.toHaveProperty("student_id");
     expect(body).not.toHaveProperty("apaar_id");
@@ -250,7 +254,48 @@ describe("EditStudentModal", () => {
     await user.click(screen.getByText("Save Changes"));
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ phone: "9999999999" });
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      phone: "9999999999",
+      program_id: 64,
+    });
+  });
+
+  it("sends the selected program, not the student's primary program", async () => {
+    // Mixed-program student: the roster row's program_id is the tiebreak pick
+    // (e.g. CoE) while the user acts under the roster's selected program. The
+    // payload must carry the selected program — the one the Edit gate and the
+    // server authorization both check.
+    const user = userEvent.setup();
+    renderModal({
+      student: { ...baseStudent, program_id: 1, program_name: "JNV CoE" },
+      programId: 64,
+    });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "9999999999");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      phone: "9999999999",
+      program_id: 64,
+    });
+  });
+
+  it("omits program_id when no roster program is selected", async () => {
+    const user = userEvent.setup();
+    renderModal({ programId: null });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ status: "updated" }) });
+
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "9999999999");
+    await user.click(screen.getByText("Save Changes"));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      phone: "9999999999",
+    });
   });
 
   it("does not submit when nothing changed", async () => {

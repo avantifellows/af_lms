@@ -631,7 +631,7 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
-  it("admin without NVS scope cannot edit NVS students", () => {
+  it("admin can edit an NVS student even without explicit NVS scope", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.NVS });
     render(
       <StudentTable
@@ -641,10 +641,10 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+    expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("admin cannot edit non-NVS students through the Student Addition gate", () => {
+  it("admin can edit a non-NVS student", () => {
     const student = makeStudent({ program_id: PROGRAM_IDS.COE });
     render(
       <StudentTable
@@ -654,10 +654,10 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+    expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("admin without NVS scope cannot edit a mixed-program row", () => {
+  it("admin can edit a student in the selected program regardless of scope", () => {
     const student = makeStudent({
       program_id: PROGRAM_IDS.COE,
       student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
@@ -671,10 +671,10 @@ describe("StudentTable - canEditStudent logic", () => {
         userProgramIds={[PROGRAM_IDS.COE]}
       />,
     );
-    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+    expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("hides Edit when the roster has no current NVS Batch", () => {
+  it("hides Edit when the student has no program (unattributed)", () => {
     const student = makeStudent({ program_id: null, student_program_ids: [] });
     render(
       <StudentTable
@@ -704,7 +704,9 @@ describe("StudentTable - canEditStudent logic", () => {
     expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
-  it("non-admin with NVS access can edit mixed-program students with an NVS current batch", () => {
+  it("non-admin can edit a mixed-program student under a program they own", () => {
+    // Student belongs to both COE and NVS; the roster is scoped to NVS and the
+    // user owns NVS, so the row is editable under that selected program.
     const student = makeStudent({
       program_id: PROGRAM_IDS.COE,
       student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
@@ -716,10 +718,31 @@ describe("StudentTable - canEditStudent logic", () => {
         canEdit={true}
         isAdmin={false}
         isPasscodeUser={false}
+        selectedProgramId={PROGRAM_IDS.NVS}
         userProgramIds={[PROGRAM_IDS.NVS]}
       />,
     );
     expect(screen.getByText("Edit")).toBeInTheDocument();
+  });
+
+  it("non-admin cannot edit under a selected program they don't own", () => {
+    // Same mixed-program student, but scoped to COE which the user does not own.
+    const student = makeStudent({
+      program_id: PROGRAM_IDS.COE,
+      student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+    });
+    render(
+      <StudentTable
+        students={[student]}
+        grades={defaultGrades}
+        canEdit={true}
+        isAdmin={false}
+        isPasscodeUser={false}
+        selectedProgramId={PROGRAM_IDS.COE}
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
   });
 
   it("non-admin without NVS program access cannot edit NVS students", () => {

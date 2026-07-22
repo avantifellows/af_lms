@@ -33,6 +33,13 @@ interface EditStudentModalProps {
   grades: Grade[];
   batches?: Batch[];
   nvsStreams?: string[];
+  /**
+   * The program the roster is scoped to — the same program the per-row Edit
+   * gate authorized. Must NOT fall back to student.program_id: for
+   * mixed-program students that is the roster's tiebreak pick and can differ
+   * from the program the user is acting under.
+   */
+  programId?: number | null;
 }
 
 const STREAM_OPTIONS = [
@@ -125,6 +132,7 @@ export default function EditStudentModal({
   onClose,
   onSave,
   grades,
+  programId = null,
 }: EditStudentModalProps) {
   const initialData = initialFormData(student);
   const [formData, setFormData] = useState(initialData);
@@ -201,6 +209,12 @@ export default function EditStudentModal({
       payload.category = formData.category;
       payload.physically_handicapped = formData.physically_handicapped;
     }
+    // The program the student is being edited under — the roster's selected
+    // program, the same one the Edit button was gated on. The API authorizes
+    // the edit against it and passes it to the DB service for enrollment
+    // context. Never send student.program_id here: for mixed-program students
+    // it is the roster's tiebreak pick and may differ from the acting program.
+    if (programId != null) payload.program_id = Number(programId);
 
     try {
       const response = await fetch(`/api/student/${student.student_pk_id}`, {
