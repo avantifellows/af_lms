@@ -11,9 +11,6 @@ import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
 
 type WorkspaceMode = "teacher" | "admin";
 
-const [currentStartYear] = CURRENT_ACADEMIC_YEAR.split("-").map(Number);
-const PRIOR_ACADEMIC_YEAR = `${currentStartYear - 1}-${currentStartYear}`;
-
 const WORKSPACES = {
   admin: [
     { id: "progress", label: "Students & Progress", empty: "No mapped Students to show yet.", icon: Users },
@@ -37,14 +34,13 @@ export default function HolisticMentorshipWorkspace({
   const tabSetId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [academicYear, setAcademicYear] = useState(CURRENT_ACADEMIC_YEAR);
-  const [academicYears, setAcademicYears] = useState<string[]>([CURRENT_ACADEMIC_YEAR, PRIOR_ACADEMIC_YEAR]);
-  const mergeAcademicYears = useCallback((years: string[]) => {
+  const [academicYears, setAcademicYears] = useState<string[]>([CURRENT_ACADEMIC_YEAR]);
+  const updateAcademicYears = useCallback((years: string[]) => {
     if (years.length === 0) return;
     setAcademicYears((current) => {
-      const merged = Array.from(new Set([...years, PRIOR_ACADEMIC_YEAR]));
-      return merged.length === current.length && merged.every((year, index) => year === current[index])
+      return years.length === current.length && years.every((year, index) => year === current[index])
         ? current
-        : merged;
+        : years;
     });
   }, []);
 
@@ -128,7 +124,7 @@ export default function HolisticMentorshipWorkspace({
         {mode === "admin" && active.id === "phases" ? (
           <PhasePlanSetup academicYear={academicYear} />
         ) : mode === "admin" && active.id === "progress" ? (
-          <ProgressWorkspace academicYear={academicYear} onAcademicYears={mergeAcademicYears} />
+          <ProgressWorkspace academicYear={academicYear} onAcademicYears={updateAcademicYears} />
         ) : (
           <Card elevation="sm" className="flex min-h-48 flex-col items-center justify-center gap-3 border-dashed p-6 text-center">
             <Icon aria-hidden="true" className="h-7 w-7 text-text-muted" />

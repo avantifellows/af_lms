@@ -87,6 +87,8 @@ describe("HolisticMentorshipWorkspace", () => {
 
     expect(screen.getByRole("tab", { name: "Students & Progress" })).toBeInTheDocument();
     expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
+    expect(screen.getAllByRole("option", { name: "2026-2027" })).toHaveLength(1);
+    expect(screen.queryByRole("option", { name: "2025-2026" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
     expect(await screen.findByRole("button", { name: "Start blank" })).toBeInTheDocument();
