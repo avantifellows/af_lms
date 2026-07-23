@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 ---
 
 # Student Addition
@@ -92,6 +92,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Slice #157 adds the shared LMS create gate in `src/lib/student-addition-access.ts`, client-safe field/identity helpers in `src/lib/student-addition-fields.ts`, and the IST enrollment date helper in `src/lib/lms-enrollment-date.ts`.
 - One-by-one creation now uses `POST /api/school/[udise]/students`, which validates one canonical row, derives actor/school/program/start-date/academic-year server-side, and proxies DB Service `POST /api/lms/students/bulk-create-with-enrollments` with a single-row payload.
 - Bulk creation also uses `POST /api/school/[udise]/students` with only a multipart `.xlsx`/`.csv` file. LMS parses only the `Template` sheet, normalises real Excel date cells, validates mixed Grade 11/12 files with up to 200 nonblank rows locally, sends accepted rows to the same DB Service endpoint, and merges local rejects with DB Service statuses.
+- Before ExcelJS loads an `.xlsx`, LMS removes formatting-only blank cells and the empty rows they leave behind from the workbook's worksheet XML. This preserves real cell values and physical row numbers while preventing large preformatted blank ranges from exhausting the serverless request timeout. The 200-nonblank-row limit is unchanged.
 - `GET /api/school/[udise]/students` serves the checked-in official `src/assets/nvs-student-addition-template.xlsx` after authorization. The asset retains `Template`, `Dropdown values`, formatting, validations, prepared rows, the Grade 12 example row, and text-formatted PEN cells. DOB, PEN, and phone validations are present in the workbook. `Field details` is removed and no runtime workbook is generated.
 - Rejected-row CSV contains every row that was not created (`rejected`, `duplicate_in_file`, and `already_exists`), retains original row numbers and canonical PEN inputs, includes safe Student ID/PEN/historical APAAR and school match context, escapes spreadsheet formulas, and can be uploaded directly through the same parser. Bulk progress counts only `created` rows as done; every other row remains to go.
 - The client sends each bulk file once. It must not automatically retry an unreadable response because a gateway timeout does not cancel DB Service work; a retry repeats the complete upload and doubles the wait. On an unreadable response, refresh the roster and report that the final status was not returned. Independent nonduplicate rows are processed concurrently in DB Service after the complete-file duplicate pre-scan so normal uploads finish within the gateway limit.
@@ -108,7 +109,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - New LMS-audited NVS dropouts can be undone only in the same school and only when the exact prior NVS batch still exists, is open, and no other NVS batch is current. Undo restores that exact batch and membership; if NVS was the final active program, it also restores the exact school/grade records ended by global dropout and clears the generated dropout status. Legacy dropouts without the new audit metadata cannot be undone, and every undo writes a separate audit record.
 - When the selected Program has no dropout rows, the enrollment tab falls back to Active and removes the stale `students=dropout` query parameter. Undoing the final visible dropout does the same immediately.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
-- `csv-parse` and `exceljs` are installed in af_lms for upload parsing. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes every row that was not created.
+- `csv-parse`, `exceljs`, and `jszip` are installed in af_lms for upload parsing and blank-formatting compaction. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes every row that was not created.
 
 ## DB Service Context
 Repo: `/Users/deepanshmathur/Documents/AF/db-service`.
@@ -154,6 +155,8 @@ NDA batch metadata is an operational prerequisite. The isolated QA database used
 On 2026-07-17, the follow-up feedback was browser-tested again with Playwright against a freshly recreated E2E database. Combined Grade/Stream controls, the two-sheet NVS download, final APAAR/Student ID columns, leading-zero input blocking, and absence of page errors passed. The first run exposed that live Postgres can return DOB as a `Date` rather than a string in the export path; the route was fixed to support both representations and the browser check then passed.
 
 On 2026-07-23, the #228 LMS follow-up was manually checked in Chrome against an isolated E2E database. The stale empty-dropout URL fell back to Active and cleaned the query string, the leading-zero PEN remained intact and valid in Add Student, and enrollment/add/bulk layouts had no horizontal overflow at desktop or 390px. The replacement workbook opened in Quick Look; automated workbook tests verified its sheets, Grade 12 example row, text PEN cells, and DOB/PEN/phone validations.
+
+On 2026-07-24, staging tracing isolated the intermittent bulk timeout to ExcelJS spending 41.8 seconds building 26,000 mostly blank formatted cell records from the reported workbook; session, file read, DB Service, and response work together took under 200 ms. The blank-formatting compaction regression test preserves an actual row at physical row 47, and the exact reported workbook parsed locally in 33 ms with the expected two accepted and five ignored example rows.
 
 ## Batch Mapping
 Initial prod check showed `batch.metadata.grade + batch.metadata.stream` was ambiguous for NVS because both old `EnableStudents_11_25` / `EnableStudents_12_25` batches and new Lakshya `2027` / `2028` batches carried the same metadata. The team cleared conflicting metadata on the old batches; prod recheck on 2026-06-30 showed exactly one matching NVS batch for each v1 Grade x Primary Stream pair.

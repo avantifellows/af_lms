@@ -1,5 +1,6 @@
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 
 import {
   STUDENT_ADDITION_UPLOAD_COLUMNS,
@@ -217,10 +218,33 @@ function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
   return parseRowsFromAoA(rows, today, academicYear);
 }
 
+async function removeBlankXlsxFormatting(data: Buffer) {
+  const archive = await JSZip.loadAsync(data);
+  const worksheetEntries = Object.values(archive.files).filter(
+    (entry) => /^xl\/worksheets\/sheet\d+\.xml$/.test(entry.name),
+  );
+
+  await Promise.all(worksheetEntries.map(async (entry) => {
+    const xml = await entry.async("string");
+    const compacted = xml
+      .replace(/<c\b[^>]*\/>/g, "")
+      .replace(/<row\b[^>]*>\s*<\/row>/g, "")
+      .replace(/<row\b[^>]*\/>/g, "");
+    if (compacted !== xml) archive.file(entry.name, compacted);
+  }));
+
+  return archive.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+    compressionOptions: { level: 1 },
+  });
+}
+
 async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const compacted = await removeBlankXlsxFormatting(data);
+    await workbook.xlsx.load(compacted as unknown as Parameters<typeof workbook.xlsx.load>[0]);
   } catch {
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }

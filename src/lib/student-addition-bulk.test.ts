@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 
 import { parseStudentAdditionUpload } from "./student-addition-bulk";
 import { buildRejectedRowsCsv, CBSE_BOARD } from "./student-addition-fields";
@@ -65,6 +66,49 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected valid upload");
     expect(result.rows[0].student_name).toBe("Asha K Kumar");
+  });
+
+  it("removes blank formatted cells before loading xlsx", async () => {
+    const sourceWorkbook = new ExcelJS.Workbook();
+    const sourceSheet = sourceWorkbook.addWorksheet("Template");
+    sourceSheet.addRow(uploadHeaders);
+    validRowValues.forEach((value, index) => {
+      sourceSheet.getCell(47, index + 1).value = value as ExcelJS.CellValue;
+    });
+    for (let rowNumber = 2; rowNumber <= 1_000; rowNumber += 1) {
+      sourceSheet.getCell(rowNumber, 26).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFFFFF" },
+      };
+    }
+    const data = Buffer.from(await sourceWorkbook.xlsx.writeBuffer());
+    const xlsxPrototype = Object.getPrototypeOf(new ExcelJS.Workbook().xlsx) as {
+      load: (...args: unknown[]) => unknown;
+    };
+    const loadSpy = vi.spyOn(xlsxPrototype, "load");
+
+    try {
+      const result = await parseStudentAdditionUpload({
+        filename: "students.xlsx",
+        data,
+        today: new Date("2026-07-01T00:00:00Z"),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected valid upload");
+      expect(result.rows[0].row_number).toBe(47);
+      expect(loadSpy).toHaveBeenCalledOnce();
+      const loadedArchive = await JSZip.loadAsync(
+        Buffer.from(loadSpy.mock.calls[0][0] as Buffer),
+      );
+      const templateXml = await loadedArchive
+        .file("xl/worksheets/sheet1.xml")!
+        .async("string");
+      expect(templateXml).not.toContain('r="Z1000"');
+    } finally {
+      loadSpy.mockRestore();
+    }
   });
 
   it("rejects legacy xls uploads with a save-as-xlsx message", async () => {
