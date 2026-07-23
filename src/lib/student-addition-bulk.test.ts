@@ -269,6 +269,22 @@ describe("parseStudentAdditionUpload", () => {
     });
   });
 
+  it("lists missing columns with latest-template guidance", async () => {
+    const headers = uploadHeaders.filter((header) =>
+      !["Gender", "Parents Phone Number"].includes(header)
+    );
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [headers] }),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Missing required columns: Gender, Parents Phone Number. Download the latest template and upload it again",
+    });
+  });
+
   it("parses real xlsx date cells without rejecting valid DOB values", async () => {
     const row = [...validRowValues];
     row[2] = new Date(2010, 0, 2);
@@ -313,7 +329,7 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected parsed upload");
     expect(result.rejectedResults[0].field_errors.g10_roll_no).toContain("cannot start with zero");
-    expect(result.rejectedResults[0].field_errors.phone).toContain("cannot start with zero");
+    expect(result.rejectedResults[0].field_errors.phone).toBe("Enter a valid phone number");
   });
 
   it("returns a validation error for corrupt xlsx uploads", async () => {
@@ -402,6 +418,7 @@ describe("parseStudentAdditionUpload", () => {
         row_number: 5,
         status: "duplicate_in_file",
         original: { "Student Name": "Duplicate Student" },
+        duplicate_identifiers: ["PEN Number", "Grade 10 Roll no"],
       },
     ], "JNV001");
 
@@ -418,7 +435,7 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).toContain("Existing School Relationship");
     expect(csv).toContain("Different school");
     expect(csv).toContain("This identifier already belongs to Existing Student at JNV Other (JNV999)");
-    expect(csv).toContain("Duplicate row in uploaded file");
+    expect(csv).toContain("Duplicate in uploaded file: PEN Number, Grade 10 Roll no");
   });
 
   it("round-trips a PEN-based rejected CSV with its original row number", async () => {

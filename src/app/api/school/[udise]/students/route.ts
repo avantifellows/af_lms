@@ -70,6 +70,11 @@ function safeUpstreamResults(value: unknown) {
       "row_number", "status", "generated_student_id", "field_errors", "row_errors",
     ]) ?? {};
     const record = result as Record<string, unknown>;
+    const duplicateIdentifiers = Array.isArray(record.duplicate_identifiers)
+      ? record.duplicate_identifiers.filter(
+        (identifier): identifier is string => typeof identifier === "string",
+      )
+      : undefined;
     const normalized = safeFields(record.normalized, [
       "student_id", "pen_number", "student_name", "g10_roll_no",
     ]);
@@ -79,6 +84,7 @@ function safeUpstreamResults(value: unknown) {
     ]);
     return {
       ...safe,
+      ...(duplicateIdentifiers ? { duplicate_identifiers: duplicateIdentifiers } : {}),
       ...(normalized ? { normalized } : {}),
       ...(existingMatch ? { existing_match: existingMatch } : {}),
     };

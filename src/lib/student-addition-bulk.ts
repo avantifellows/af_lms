@@ -119,7 +119,10 @@ function parseRowsFromAoA(
   }
   const missing = missingColumns(headers);
   if (missing.length > 0) {
-    return { ok: false, error: `Missing required columns: ${missing.join(", ")}` };
+    return {
+      ok: false,
+      error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
+    };
   }
 
   const headerIndex = new Map(headers.map((header, index) => [header, index]));

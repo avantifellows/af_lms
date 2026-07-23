@@ -70,12 +70,13 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 
 ## Validation And Normalisation
 - PEN or G10 Roll Number: at least one is required; both are allowed. PEN is exactly 11 digits and may start with zero. Keep PEN as text through forms, parsers, rejected-row CSVs, and the DB Service payload.
-- Duplicate PEN and duplicate generated Student ID are blocked. Historical APAAR is display-only for this NVS flow.
+- Duplicate PEN, G10 Roll Number, and generated Student ID are blocked. Before any row is created, DB Service scans the full upload and rejects every row that shares one of those identifiers, including the first occurrence. The result names each duplicated identifier so the LMS can show the same reason on screen and in the rejected CSV. Historical APAAR is display-only for this NVS flow.
 - Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. PEN-only rows leave `student.student_id` null.
 - G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
 - G10 roll normalisation: CBSE preserves an exact eight-digit text value. Others removes non-alphanumerics, uppercases, removes leading zeroes, then requires 4-10 characters.
 - Name normalisation: collapse spaces and proper-case words. Manual Add/Edit rejects a Student Name containing `.` with an explicit field error; bulk upload replaces each `.` with one space before normalisation.
-- Parents Phone Number is exactly 10 digits without a leading zero in Add, Bulk, and Edit. Bulk DOB additionally accepts `D.M.YYYY`, `DD.MM.YYYY`, and two-digit years with `/`, `-`, or `.`; manual Add/Edit keeps the existing date formats.
+- Father Name is optional text in bulk upload and has no letters-only validation.
+- Parents Phone Number is exactly 10 digits without a leading zero in Add, Bulk, and Edit. Its user-facing validation message is `Enter a valid phone number`. Bulk DOB additionally accepts `D.M.YYYY`, `DD.MM.YYYY`, and two-digit years with `/`, `-`, or `.`; manual Add/Edit keeps the existing date formats.
 - Bulk upload has no separate Grade selector; each nonblank row supplies Grade 11 or 12 and mixed-grade files are valid.
 - The official workbook contains an example row. Before row limits, validation, totals, rejected-row generation, or DB Service writes, ignore any row whose trimmed Student Name is `Example Student`, PEN is `12345678910`, Grade 10 Roll no is `11111111`, or Parents Phone Number is `9999999999`. Report the physical row number and matching fields to the user. This applies to both Excel and CSV retries.
 - Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
@@ -133,7 +134,7 @@ Existing-student NVS edit is atomic and program-scoped without a Centre requirem
 
 DB Service implementation now includes the PEN/G10 fields, the dedicated create-only bulk endpoint, atomic existing-student edit, and program-specific LMS dropout described above. LMS validates first; DB Service enforces uniqueness, no-overwrite ownership, per-row transactions, and structured duplicate/existing/rejected results.
 
-The leading-zero PEN rule from #228 still requires a separate DB Service change so service-boundary validation accepts the same exact 11-digit text contract. Do not treat the LMS-only change as complete end-to-end rollout coverage.
+The #231 DB Service follow-up aligns service-boundary PEN validation with LMS by accepting any exact 11-digit text, including a leading zero. It also owns the full-upload duplicate pre-scan, final identifier-conflict messages, and the generic creation-failure message. LMS and DB Service changes must deploy together for complete end-to-end behavior.
 
 ## Manual QA Evidence
 On 2026-07-16, the stacked LMS and DB Service PRs were exercised together in Playwright against an isolated clone of the local database. The clone was migrated before startup; the source database was not changed.

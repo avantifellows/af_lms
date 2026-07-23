@@ -154,7 +154,12 @@ describe("BulkStudentUploadModal", () => {
                 stream: "engineering",
               },
             },
-            { row_number: 3, status: "duplicate_in_file", original: { "Student Name": "Duplicate" } },
+            {
+              row_number: 3,
+              status: "duplicate_in_file",
+              duplicate_identifiers: ["PEN Number", "Grade 10 Roll no"],
+              original: { "Student Name": "Duplicate" },
+            },
           ],
         }),
         { status: 200 },
@@ -175,6 +180,9 @@ describe("BulkStudentUploadModal", () => {
     await waitFor(() => expect(screen.getByText("0 done, 2 to go")).toBeInTheDocument());
     expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
     expect(screen.getByText(/JNV999, UDISE 99999999999/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Duplicate in uploaded file: PEN Number, Grade 10 Roll no"),
+    ).toBeInTheDocument();
     const download = screen.getByRole("link", { name: "Download rejected rows CSV" });
     expect(download).toHaveAttribute("href", expect.stringContaining("Existing"));
     expect(download).toHaveAttribute("href", expect.stringContaining("Duplicate"));
@@ -221,6 +229,23 @@ describe("BulkStudentUploadModal", () => {
       "href",
       expect.stringContaining("Same%20school"),
     );
+  });
+
+  it("shows a curated error for a non-JSON server failure", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response("Gateway timeout", { status: 504 }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText("Upload failed")).toBeInTheDocument();
+    expect(screen.queryByText(/JSON/)).not.toBeInTheDocument();
   });
 
   it("resets upload state when reopened", async () => {

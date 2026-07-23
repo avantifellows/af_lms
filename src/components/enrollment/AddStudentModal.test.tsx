@@ -101,7 +101,9 @@ describe("AddStudentModal", () => {
     await user.click(screen.getByRole("button", { name: "Add Student" }));
 
     expect(
-      await screen.findByText("This student is already part of this school. Student ID: 202812345678."),
+      await screen.findByText(
+        "This student identifier is already part of this school. Student ID: 202812345678.",
+      ),
     ).toBeInTheDocument();
     expect(baseProps.onCreated).not.toHaveBeenCalled();
   });
@@ -214,7 +216,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("PEN must be exactly 11 digits")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
-    expect(screen.getByText("Parents Phone Number must be exactly 10 digits and cannot start with zero")).toBeInTheDocument();
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
   });
 
   it("marks required fields without showing Optional for annual family income", () => {

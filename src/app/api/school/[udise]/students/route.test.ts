@@ -333,15 +333,22 @@ describe("POST /api/school/[udise]/students", () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
-          results: [{
-            status: "already_exists",
-            private_token: "must-not-leak",
-            existing_match: {
-              student_id: "2028AB12Z",
-              pen_number: "12345678901",
-              internal_note: "must-not-leak",
+          results: [
+            {
+              status: "already_exists",
+              private_token: "must-not-leak",
+              existing_match: {
+                student_id: "2028AB12Z",
+                pen_number: "12345678901",
+                internal_note: "must-not-leak",
+              },
             },
-          }],
+            {
+              status: "duplicate_in_file",
+              duplicate_identifiers: ["PEN Number", 123, { unsafe: true }],
+              private_token: "must-not-leak",
+            },
+          ],
         }),
         { status: 409, headers: { "Content-Type": "application/json" } },
       ),
@@ -357,10 +364,16 @@ describe("POST /api/school/[udise]/students", () => {
 
     expect(await response.json()).toEqual({
       error: "Student could not be created",
-      results: [{
-        status: "already_exists",
-        existing_match: { student_id: "2028AB12Z", pen_number: "12345678901" },
-      }],
+      results: [
+        {
+          status: "already_exists",
+          existing_match: { student_id: "2028AB12Z", pen_number: "12345678901" },
+        },
+        {
+          status: "duplicate_in_file",
+          duplicate_identifiers: ["PEN Number"],
+        },
+      ],
     });
   });
 

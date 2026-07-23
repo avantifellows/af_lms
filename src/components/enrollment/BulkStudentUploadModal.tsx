@@ -6,6 +6,7 @@ import { Download, Upload, X } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
 import {
   buildRejectedRowsCsv,
+  formatStudentAdditionDuplicateInFile,
   formatStudentAdditionExistingMatch,
   type StudentAdditionCsvResult,
 } from "@/lib/student-addition-fields";
@@ -54,6 +55,9 @@ function rowIssues(result: UploadResult, schoolCode: string): string {
     ...(result.row_errors ?? []),
   ];
   return issues.join("; ") ||
+    (result.status === "duplicate_in_file"
+      ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
+      : "") ||
     (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
 }
 
@@ -109,7 +113,8 @@ export default function BulkStudentUploadModal({
         method: "POST",
         body,
       });
-      const json = (await response.json()) as UploadResponse;
+      const json = await response.json().catch(() => null) as UploadResponse | null;
+      if (!json) throw new Error("Upload failed");
       setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
       if (!response.ok && !json.results) {
         throw new Error(json.details || json.error || "Upload failed");

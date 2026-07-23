@@ -85,9 +85,31 @@ describe("validateStudentAdditionInput", () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected invalid input");
-    expect(result.fieldErrors.phone).toContain("cannot start with zero");
+    expect(result.fieldErrors.phone).toBe("Enter a valid phone number");
     expect(result.fieldErrors.g10_roll_no).toContain("cannot start with zero");
     expect(canonicalizeStudentEditPayload({ phone: "0876543210" }).ok).toBe(false);
+  });
+
+  it("uses the approved bulk DOB format message", () => {
+    const result = validateStudentAdditionInput(
+      { ...validInput, date_of_birth: "not-a-date" },
+      { bulkUpload: true },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid input");
+    expect(result.fieldErrors.date_of_birth).toBe(
+      "Date of Birth must be DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY",
+    );
+  });
+
+  it("accepts Father Name as optional text", () => {
+    const result = validateStudentAdditionInput({
+      ...validInput,
+      father_name: "Ravi D'Souza-2",
+    });
+
+    expect(result.ok).toBe(true);
   });
 
   it("uses an 11-digit PEN as the canonical optional identifier", () => {
@@ -228,11 +250,11 @@ describe("validateStudentAdditionInput", () => {
     if (result.ok) throw new Error("expected invalid input");
     expect(result.fieldErrors).toMatchObject({
       date_of_birth: "Date of Birth must be between 2000 and 2015",
-      phone: "Parents Phone Number must be exactly 10 digits and cannot start with zero",
+      phone: "Enter a valid phone number",
       pen_number: "PEN must be exactly 11 digits",
       g10_roll_no: "CBSE Grade 10 Roll no must be exactly 8 digits and cannot start with zero",
-      father_name: "Father Name must contain only letters",
     });
+    expect(result.fieldErrors).not.toHaveProperty("father_name");
   });
 
   it("accepts uppercase alphanumeric non-CBSE Grade 10 rolls", () => {
@@ -320,6 +342,17 @@ describe("formatStudentAdditionExistingMatch", () => {
   it("does not claim a same-school match when school details are unavailable", () => {
     expect(
       formatStudentAdditionExistingMatch({ student_id: "2028AB12Z" }, "JNV001"),
-    ).toBe("This student already exists. Student ID: 2028AB12Z.");
+    ).toBe(
+      "This student identifier already exists, but its school could not be identified. Student ID: 2028AB12Z. Please contact the admin.",
+    );
+  });
+
+  it("describes a same-school identifier without claiming the student identity", () => {
+    expect(
+      formatStudentAdditionExistingMatch(
+        { student_id: "2028AB12Z", school_code: "JNV001" },
+        "JNV001",
+      ),
+    ).toBe("This student identifier is already part of this school. Student ID: 2028AB12Z.");
   });
 });
