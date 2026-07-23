@@ -106,15 +106,28 @@ export default function BulkStudentUploadModal({
     setResults([]);
     setIgnoredRows([]);
     try {
-      const body = new FormData();
-      body.append("file", file);
-
-      const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
-        method: "POST",
-        body,
-      });
-      const json = await response.json().catch(() => null) as UploadResponse | null;
-      if (!json) throw new Error("Upload failed");
+      let response: Response | null = null;
+      let json: UploadResponse | null = null;
+      let retried = false;
+      for (let attempt = 0; attempt < 2 && !json; attempt += 1) {
+        const body = new FormData();
+        body.append("file", file);
+        retried = attempt > 0;
+        try {
+          response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
+            method: "POST",
+            body,
+          });
+          json = await response.json().catch(() => null) as UploadResponse | null;
+        } catch {
+          response = null;
+        }
+      }
+      if (!response || !json) {
+        throw new Error(
+          "Upload status could not be confirmed. Some rows may have been processed. Re-upload the same file to check the result.",
+        );
+      }
       setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
       if (!response.ok && !json.results) {
         throw new Error(json.details || json.error || "Upload failed");
@@ -122,7 +135,7 @@ export default function BulkStudentUploadModal({
 
       setTotals(json.totals ?? emptyTotals);
       setResults(json.results ?? []);
-      if ((json.totals?.created ?? 0) > 0) onUploaded();
+      if (retried || (json.totals?.created ?? 0) > 0) onUploaded();
       if (!response.ok && json.error) setError(json.error);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
