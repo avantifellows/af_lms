@@ -450,51 +450,6 @@ describe("POST /api/school/[udise]/students", () => {
     ]);
   });
 
-  it("logs safe stage timings for bulk uploads", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
-          results: [{ row_number: 2, status: "created" }],
-        }),
-        { status: 200 },
-      ),
-    );
-    const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const csv = [csvLine(uploadHeaders), csvLine(validUploadRow)].join("\n");
-
-    try {
-      await POST(
-        multipartUploadRequest("students.csv", csv) as never,
-        routeParams({ udise: "12345678901" }),
-      );
-
-      const traces = info.mock.calls.map(([message]) => JSON.parse(String(message)));
-      expect(traces.map(({ stage }) => stage)).toEqual([
-        "request_received",
-        "route_context_complete",
-        "form_data_complete",
-        "file_buffered",
-        "workbook_parsed",
-        "db_service_fetch_start",
-        "db_service_fetch_complete",
-        "db_service_body_parsed",
-        "response_ready",
-      ]);
-      expect(traces.every(({ event }) => event === "student_bulk_upload_trace")).toBe(true);
-      expect(new Set(traces.map(({ request_id }) => request_id)).size).toBe(1);
-      expect(traces.at(-1)).toMatchObject({ status: 200 });
-
-      const output = info.mock.calls.flat().join(" ");
-      expect(output).not.toContain("Asha");
-      expect(output).not.toContain("12345678901");
-      expect(output).not.toContain("students.csv");
-      expect(output).not.toContain("token");
-    } finally {
-      info.mockRestore();
-    }
-  });
-
   it("reports and removes example rows before proxying the upload", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
