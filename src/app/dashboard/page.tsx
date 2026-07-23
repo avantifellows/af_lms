@@ -305,8 +305,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const schoolCodes = await getAccessibleSchoolCodes(session.user.email, permission);
 
-  // If user has access to only one school and no search, redirect directly (skip heavy queries)
-  if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery) {
+  // If user has access to only one school and no search, redirect directly (skip heavy queries).
+  // BUT never skip the dashboard for a seated user — the dashboard is their only
+  // doorway to "My Centres" (where quiz sessions now live); auto-redirecting them
+  // to the school page would strand them with no way to reach the centre flow.
+  if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery && !hasCentres) {
     redirect(`/school/${schoolCodes[0]}`);
   }
 
