@@ -442,6 +442,20 @@ describe("ownsRecord", () => {
     const perm = makePermission({ program_ids: [] });
     expect(ownsRecord(perm, PROGRAM_IDS.NVS)).toBe(false);
   });
+
+  // Regression: pg returns bigint columns (batch.program_id) as strings.
+  // Before the coercion fix, [1].includes("1") was false and every non-admin
+  // got 403 Forbidden on document upload/delete once getStudentSchool started
+  // resolving real program ids (post-#162 batch join).
+  it("owns the record when programId arrives as a bigint string", () => {
+    const perm = makePermission({ program_ids: [PROGRAM_IDS.COE] });
+    expect(ownsRecord(perm, String(PROGRAM_IDS.COE))).toBe(true);
+  });
+
+  it("still rejects a non-owned program passed as a string", () => {
+    const perm = makePermission({ program_ids: [PROGRAM_IDS.COE] });
+    expect(ownsRecord(perm, String(PROGRAM_IDS.NVS))).toBe(false);
+  });
 });
 
 // --- Async function tests (DB-dependent) ---
@@ -956,6 +970,15 @@ describe("getStudentSchool", () => {
     mockQuery.mockResolvedValueOnce([]);
     const result = await getStudentSchool(999);
     expect(result).toBeNull();
+  });
+
+  // batch.program_id is a Postgres bigint, which pg returns as a string
+  // unless cast. The ::int cast keeps program_id a number so ownsRecord's
+  // includes() check matches. Regression pin for the post-#162 403s.
+  it("casts program_id to int in the SQL", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await getStudentSchool(42);
+    expect(mockQuery.mock.calls[0][0]).toContain("b.program_id::int");
   });
 });
 
