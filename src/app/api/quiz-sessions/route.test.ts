@@ -376,4 +376,130 @@ describe("POST /api/quiz-sessions", () => {
       id: 321,
     });
   });
+
+  it("creates a form session with canonical form metadata from a grade-agnostic template", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 5165,
+          type: "form_template",
+          code: "FORM-STUDENT-PROFILE",
+          name: [{ resource: "Student Profile Questions", lang_code: "en" }],
+          type_params: {
+            // grade-agnostic: no grade key
+            course: "Photon",
+            stream: "Others",
+            test_format: "questionnaire",
+            test_purpose: "baseline",
+            test_type: "form",
+            optional_limits: "N/A",
+            marking_scheme: "1, 0",
+            cms_link:
+              "https://docs.google.com/spreadsheets/d/1F_W58M6Uw2U-XsGgK3ocAfnH2ifPcZRCfaNCt9i_c1E/edit",
+            cms_test_id:
+              "https://docs.google.com/spreadsheets/d/1F_W58M6Uw2U-XsGgK3ocAfnH2ifPcZRCfaNCt9i_c1E/edit",
+            sheet_name: "Student Profile Questions",
+            single_page_header_text: "Student Profile Form",
+            require_all_questions: false,
+          },
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 777 }));
+
+    const res = await POST(
+      jsonRequest("http://localhost/api/quiz-sessions", {
+        method: "POST",
+        body: {
+          // no stream sent — forms don't require it
+          resourceId: 5165,
+          grade: 11, // from the batch
+          parentBatchId: "EnableStudents_11_Engg",
+          classBatchIds: ["EnableStudents_11_Engg_A"],
+          startTime: "2026-04-15T04:30:00.000Z",
+          endTime: "2026-04-15T08:30:00.000Z",
+        },
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ id: 777 });
+
+    const createPayload = JSON.parse(
+      String((mocks.mockFetch.mock.calls[1]?.[1] as RequestInit).body)
+    );
+    expect(createPayload.meta_data).toMatchObject({
+      test_type: "form",
+      test_format: "questionnaire",
+      gurukul_format_type: "qa",
+      marking_scheme: "1, 0",
+      stream: "Others",
+      grade: 11,
+      show_answers: false,
+      show_scores: false,
+      shuffle: false,
+      single_page_mode: true,
+      single_page_header_text: "Student Profile Form Grade 11",
+      require_all_questions: false,
+      sheet_name: "Student Profile Questions",
+      cms_test_id:
+        "https://docs.google.com/spreadsheets/d/1F_W58M6Uw2U-XsGgK3ocAfnH2ifPcZRCfaNCt9i_c1E/edit",
+    });
+    expect(mocks.mockPublishMessage).toHaveBeenCalledWith({ action: "db_id", id: 777 });
+  });
+
+  it("uses the template grade + base header for a grade-specific form template", async () => {
+    const { POST } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 5166,
+          type: "form_template",
+          code: "FORM-BASELINE-G11",
+          name: [{ resource: "Baseline Questions G11", lang_code: "en" }],
+          type_params: {
+            grade: 11,
+            course: "Photon",
+            stream: "Others",
+            test_format: "questionnaire",
+            test_purpose: "baseline",
+            test_type: "form",
+            optional_limits: "N/A",
+            marking_scheme: "1, 0",
+            cms_link:
+              "https://docs.google.com/spreadsheets/d/1F_W58M6Uw2U-XsGgK3ocAfnH2ifPcZRCfaNCt9i_c1E/edit",
+            cms_test_id:
+              "https://docs.google.com/spreadsheets/d/1F_W58M6Uw2U-XsGgK3ocAfnH2ifPcZRCfaNCt9i_c1E/edit",
+            sheet_name: "Baseline Questions G11",
+            single_page_header_text: "Student Mentoring Baseline G11",
+          },
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 888 }));
+
+    const res = await POST(
+      jsonRequest("http://localhost/api/quiz-sessions", {
+        method: "POST",
+        body: {
+          resourceId: 5166,
+          parentBatchId: "EnableStudents_11_Engg",
+          classBatchIds: ["EnableStudents_11_Engg_A"],
+          startTime: "2026-04-15T04:30:00.000Z",
+          endTime: "2026-04-15T08:30:00.000Z",
+        },
+      }) as never
+    );
+
+    expect(res.status).toBe(200);
+    const createPayload = JSON.parse(
+      String((mocks.mockFetch.mock.calls[1]?.[1] as RequestInit).body)
+    );
+    expect(createPayload.meta_data).toMatchObject({
+      grade: 11,
+      single_page_header_text: "Student Mentoring Baseline G11",
+      sheet_name: "Baseline Questions G11",
+    });
+  });
 });
