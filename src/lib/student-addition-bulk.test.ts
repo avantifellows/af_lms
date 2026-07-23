@@ -102,6 +102,85 @@ describe("parseStudentAdditionUpload", () => {
     ]);
   });
 
+  it("ignores moved example rows by any exact marker before validation and totals", async () => {
+    const nameMarker = [...validRowValues];
+    nameMarker[1] = " Example Student ";
+    nameMarker[2] = "not a date";
+    nameMarker[6] = "not a PEN";
+    const multipleMarkers = [...validRowValues];
+    multipleMarkers[1] = "Another Student";
+    multipleMarkers[6] = " 12345678910 ";
+    multipleMarkers[8] = "11111111";
+    multipleMarkers[12] = "9999999999";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({
+        Template: [uploadHeaders, nameMarker, validRowValues, multipleMarkers],
+      }),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.totalRows).toBe(1);
+    expect(result.rows).toEqual([
+      expect.objectContaining({ row_number: 3, pen_number: "12345678901" }),
+    ]);
+    expect(result.rejectedResults).toEqual([]);
+    expect(result.ignoredRows).toEqual([
+      {
+        row_number: 2,
+        matched_fields: ["Student Name"],
+        message: "Row 2 was ignored as the example row. Matched: Student Name.",
+      },
+      {
+        row_number: 4,
+        matched_fields: ["PEN", "Grade 10 Roll No", "Phone"],
+        message: "Row 4 was ignored as the example row. Matched: PEN, Grade 10 Roll No, Phone.",
+      },
+    ]);
+  });
+
+  it("ignores example markers in retry CSV uploads", async () => {
+    const penMarker = [...validRowValues];
+    penMarker[1] = "Moved Example";
+    penMarker[6] = "12345678910";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "student-addition-rejected-rows.csv",
+      data: Buffer.from([
+        csvHeaders,
+        csvLine(penMarker),
+        validCsvRow,
+      ].join("\n")),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.totalRows).toBe(1);
+    expect(result.rows[0]).toEqual(expect.objectContaining({ row_number: 3 }));
+    expect(result.ignoredRows).toEqual([
+      expect.objectContaining({ row_number: 2, matched_fields: ["PEN"] }),
+    ]);
+  });
+
+  it("keeps a leading-zero PEN as text from xlsx parsing", async () => {
+    const row = [...validRowValues];
+    row[6] = "01234567890";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [uploadHeaders, row] }),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.rows[0].pen_number).toBe("01234567890");
+  });
+
   it("parses the Template xlsx sheet, ignoring extra columns and blank rows", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xlsx",
@@ -263,14 +342,19 @@ describe("parseStudentAdditionUpload", () => {
 
   it("allows exactly 200 non-blank rows and rejects 201", async () => {
     const twoHundredRows = Array.from({ length: 200 }, () => validCsvRow).join("\n");
+    const exampleRow = [...validRowValues];
+    exampleRow[1] = "Example Student";
     const allowed = await parseStudentAdditionUpload({
       filename: "students.csv",
-      data: Buffer.from(`${csvHeaders}\n${twoHundredRows}`),
+      data: Buffer.from(`${csvHeaders}\n${csvLine(exampleRow)}\n${twoHundredRows}`),
     });
 
     expect(allowed.ok).toBe(true);
     if (!allowed.ok) throw new Error("expected valid upload");
     expect(allowed.totalRows).toBe(200);
+    expect(allowed.ignoredRows).toEqual([
+      expect.objectContaining({ row_number: 2, matched_fields: ["Student Name"] }),
+    ]);
 
     const tooMany = await parseStudentAdditionUpload({
       filename: "students.csv",

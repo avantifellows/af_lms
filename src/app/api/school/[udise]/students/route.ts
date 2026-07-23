@@ -245,12 +245,25 @@ async function bulkUploadResponse(
   });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   if (parsed.totalRows === 0) {
+    if (parsed.ignoredRows.length > 0) {
+      return NextResponse.json(
+        {
+          error: `No students to upload. ${parsed.ignoredRows.map((row) => row.message).join(" ")} Add at least one student and upload again.`,
+          ignored_rows: parsed.ignoredRows,
+        },
+        { status: 400 },
+      );
+    }
     return NextResponse.json({ error: "Upload has no student rows" }, { status: 400 });
   }
 
   if (parsed.rows.length === 0) {
     return NextResponse.json(
-      { totals: countTotals(parsed.rejectedResults), results: parsed.rejectedResults },
+      {
+        totals: countTotals(parsed.rejectedResults),
+        results: parsed.rejectedResults,
+        ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
+      },
       { status: 400 },
     );
   }
@@ -282,6 +295,7 @@ async function bulkUploadResponse(
     ...body,
     totals: countTotals(results),
     results,
+    ...(parsed.ignoredRows.length > 0 ? { ignored_rows: parsed.ignoredRows } : {}),
   }, { status });
 }
 

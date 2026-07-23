@@ -518,8 +518,8 @@ export function validateStudentAdditionInput(
     : categoryInput;
 
   const pen_number = stringValue(input.pen_number);
-  if (pen_number && !/^[1-9]\d{10}$/.test(pen_number)) {
-    addError(fieldErrors, "pen_number", "PEN must be exactly 11 digits and cannot start with zero");
+  if (pen_number && !/^\d{11}$/.test(pen_number)) {
+    addError(fieldErrors, "pen_number", "PEN must be exactly 11 digits");
   }
 
   const g10BoardInput = stringValue(input.g10_board);

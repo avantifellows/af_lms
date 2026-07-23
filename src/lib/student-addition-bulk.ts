@@ -24,11 +24,18 @@ export interface StudentAdditionUploadRowResult {
   original: Record<string, string>;
 }
 
+export interface StudentAdditionIgnoredExampleRow {
+  row_number: number;
+  matched_fields: string[];
+  message: string;
+}
+
 export type StudentAdditionUploadParseResult =
   | {
       ok: true;
       rows: LmsStudentAdditionRow[];
       rejectedResults: StudentAdditionUploadRowResult[];
+      ignoredRows: StudentAdditionIgnoredExampleRow[];
       totalRows: number;
       originalRows: Map<number, Record<string, string>>;
     }
@@ -40,6 +47,13 @@ interface ParseUploadInput {
   today?: Date;
   academicYear?: string;
 }
+
+const EXAMPLE_ROW_MARKERS = [
+  { column: "Student Name", field: "Student Name", value: "Example Student" },
+  { column: "PEN Number", field: "PEN", value: "12345678910" },
+  { column: "Grade 10 Roll no", field: "Grade 10 Roll No", value: "11111111" },
+  { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
+] as const;
 
 function text(value: unknown): string {
   if (value instanceof Date) {
@@ -114,10 +128,27 @@ function parseRowsFromAoA(
   const rejectedResults: StudentAdditionUploadRowResult[] = [];
   const originalRows = new Map<number, Record<string, string>>();
   const dataRows = rows.slice(1).map((sourceRow, index) => ({ sourceRow, index }));
-  const nonBlankRows = dataRows.filter(({ sourceRow }) =>
-    STUDENT_ADDITION_UPLOAD_COLUMNS.some((column) =>
-      text(sourceRow[headerIndex.get(column.label) ?? -1]),
-    ),
+  const ignoredRows = dataRows.flatMap(({ sourceRow, index }) => {
+    const matchedFields = EXAMPLE_ROW_MARKERS
+      .filter((marker) =>
+        text(sourceRow[headerIndex.get(marker.column) ?? -1]) === marker.value,
+      )
+      .map((marker) => marker.field);
+    if (matchedFields.length === 0) return [];
+    const rowNumber = index + 2;
+    return [{
+      row_number: rowNumber,
+      matched_fields: matchedFields,
+      message: `Row ${rowNumber} was ignored as the example row. Matched: ${matchedFields.join(", ")}.`,
+    }];
+  });
+  const ignoredIndexes = new Set(ignoredRows.map((row) => row.row_number - 2));
+  const nonBlankRows = dataRows.filter(
+    ({ sourceRow, index }) =>
+      !ignoredIndexes.has(index) &&
+      STUDENT_ADDITION_UPLOAD_COLUMNS.some((column) =>
+        text(sourceRow[headerIndex.get(column.label) ?? -1]),
+      ),
   );
 
   if (nonBlankRows.length > 200) {
@@ -163,6 +194,7 @@ function parseRowsFromAoA(
     ok: true,
     rows: acceptedRows,
     rejectedResults,
+    ignoredRows,
     totalRows: acceptedRows.length + rejectedResults.length,
     originalRows,
   };
@@ -230,5 +262,12 @@ export async function parseStudentAdditionUpload({
     return parseXlsx(data, today, academicYear);
   }
 
-  return { ok: true, rows: [], rejectedResults: [], totalRows: 0, originalRows: new Map() };
+  return {
+    ok: true,
+    rows: [],
+    rejectedResults: [],
+    ignoredRows: [],
+    totalRows: 0,
+    originalRows: new Map(),
+  };
 }

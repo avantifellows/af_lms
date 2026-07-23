@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-22
+last_updated: 2026-07-23
 ---
 
 # Student Addition
@@ -69,7 +69,7 @@ Edit/dropout scope is decided: the PM/staff rollout uses the same school-scoped 
 Enrollment date handling is decided: LMS supplies DB Service `start_date` and `academic_year`; schools do not enter them. For creates, `start_date` is the successful creation date in Asia/Kolkata as `YYYY-MM-DD`. `academic_year` is derived from that date using an April-March year: April 1 or later -> `YYYY-YYYY+1`, January-March -> `YYYY-1-YYYY`. Keep this in one shared LMS backend helper for one-by-one and bulk create, with tests around March 31 / April 1. Do not use the hardcoded `CURRENT_ACADEMIC_YEAR` constant or the client-only `StudentTable.tsx` dropout helper for create flows.
 
 ## Validation And Normalisation
-- PEN or G10 Roll Number: at least one is required; both are allowed. PEN is exactly 11 digits and cannot start with zero pending rollout confirmation.
+- PEN or G10 Roll Number: at least one is required; both are allowed. PEN is exactly 11 digits and may start with zero. Keep PEN as text through forms, parsers, rejected-row CSVs, and the DB Service payload.
 - Duplicate PEN and duplicate generated Student ID are blocked. Historical APAAR is display-only for this NVS flow.
 - Student ID is `<G12 passing-out year><normalised G10 roll>`, no separator, when G10 Roll Number is present. PEN-only rows leave `student.student_id` null.
 - G12 passing year is derived from the active academic year, not hardcoded: Grade 11 -> academic-year start + 2, Grade 12 -> academic-year start + 1. For AY26-27 this means Grade 11 -> 2028 and Grade 12 -> 2027.
@@ -77,6 +77,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Name normalisation: collapse spaces and proper-case words. Manual Add/Edit rejects a Student Name containing `.` with an explicit field error; bulk upload replaces each `.` with one space before normalisation.
 - Parents Phone Number is exactly 10 digits without a leading zero in Add, Bulk, and Edit. Bulk DOB additionally accepts `D.M.YYYY`, `DD.MM.YYYY`, and two-digit years with `/`, `-`, or `.`; manual Add/Edit keeps the existing date formats.
 - Bulk upload has no separate Grade selector; each nonblank row supplies Grade 11 or 12 and mixed-grade files are valid.
+- The official workbook contains an example row. Before row limits, validation, totals, rejected-row generation, or DB Service writes, ignore any row whose trimmed Student Name is `Example Student`, PEN is `12345678910`, Grade 10 Roll no is `11111111`, or Parents Phone Number is `9999999999`. Report the physical row number and matching fields to the user. This applies to both Excel and CSV retries.
 - Batch assignment is system-driven from grade x `stream`, not `board_stream`. Derive the batch using NVS program + batch metadata only; require exactly one match.
 - Auth group is the constant `EnableStudents`.
 
@@ -90,7 +91,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Slice #157 adds the shared LMS create gate in `src/lib/student-addition-access.ts`, client-safe field/identity helpers in `src/lib/student-addition-fields.ts`, and the IST enrollment date helper in `src/lib/lms-enrollment-date.ts`.
 - One-by-one creation now uses `POST /api/school/[udise]/students`, which validates one canonical row, derives actor/school/program/start-date/academic-year server-side, and proxies DB Service `POST /api/lms/students/bulk-create-with-enrollments` with a single-row payload.
 - Bulk creation also uses `POST /api/school/[udise]/students` with only a multipart `.xlsx`/`.csv` file. LMS parses only the `Template` sheet, normalises real Excel date cells, validates mixed Grade 11/12 files with up to 200 nonblank rows locally, sends accepted rows to the same DB Service endpoint, and merges local rejects with DB Service statuses.
-- `GET /api/school/[udise]/students` serves the checked-in official `src/assets/nvs-student-addition-template.xlsx` after authorization. The asset retains `Template`, `Dropdown values`, formatting, validations, and prepared rows; `Field details` is removed and no runtime workbook is generated.
+- `GET /api/school/[udise]/students` serves the checked-in official `src/assets/nvs-student-addition-template.xlsx` after authorization. The asset retains `Template`, `Dropdown values`, formatting, validations, prepared rows, the Grade 12 example row, and text-formatted PEN cells. DOB, PEN, and phone validations are present in the workbook. `Field details` is removed and no runtime workbook is generated.
 - Rejected-row CSV contains every row that was not created (`rejected`, `duplicate_in_file`, and `already_exists`), retains original row numbers and canonical PEN inputs, includes safe Student ID/PEN/historical APAAR and school match context, escapes spreadsheet formulas, and can be uploaded directly through the same parser. Bulk progress counts only `created` rows as done; every other row remains to go.
 - Existing-Student conflicts distinguish a match in the target school from a match in another school. DB Service returns the matched identifier plus safe Student, latest School, Grade, Program, and Stream context; the Add/Bulk UI and rejected CSV show the relationship and available details. Missing School context stays explicitly unknown rather than being treated as a same-school match.
 - The school enrollment tab shows `Add Student` and `Bulk Upload` only when the shared Student Addition gate passes and NVS is selected; the gate is Centre-free but JNV-only.
@@ -103,6 +104,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - Dropout accepts the opaque `student_pk_id` plus an explicit `program_id`. NVS reuses the Centre-free JNV-only existing-Student gate and derives Student ID or PEN server-side; other Programs retain their existing Centre-based Program dropout gate and Student ID or historical APAAR fallback. Non-admin actors need the target Program in their resolved scope, while the existing global-admin exception remains for newer centre Programs that are not in the hand-maintained JNV Program constants. Both paths proxy LMS `POST /api/student/dropout` to the DB Service program-dropout contract at `PATCH /api/dropout`.
 - LMS-audited DB Service dropout closes only the selected program batch and its group membership. It preserves other program batches, grade, school, and global status; when no current batch remains it applies the existing global dropout flow. Generic non-LMS `/api/dropout` callers retain the existing global behavior.
 - New LMS-audited NVS dropouts can be undone only in the same school and only when the exact prior NVS batch still exists, is open, and no other NVS batch is current. Undo restores that exact batch and membership; if NVS was the final active program, it also restores the exact school/grade records ended by global dropout and clears the generated dropout status. Legacy dropouts without the new audit metadata cannot be undone, and every undo writes a separate audit record.
+- When the selected Program has no dropout rows, the enrollment tab falls back to Active and removes the stale `students=dropout` query parameter. Undoing the final visible dropout does the same immediately.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
 - `csv-parse` and `exceljs` are installed in af_lms for upload parsing. Do not add runtime template generation or reintroduce the direct `xlsx` dependency. Rejected-row retry is CSV and includes every row that was not created.
 
@@ -131,6 +133,8 @@ Existing-student NVS edit is atomic and program-scoped without a Centre requirem
 
 DB Service implementation now includes the PEN/G10 fields, the dedicated create-only bulk endpoint, atomic existing-student edit, and program-specific LMS dropout described above. LMS validates first; DB Service enforces uniqueness, no-overwrite ownership, per-row transactions, and structured duplicate/existing/rejected results.
 
+The leading-zero PEN rule from #228 still requires a separate DB Service change so service-boundary validation accepts the same exact 11-digit text contract. Do not treat the LMS-only change as complete end-to-end rollout coverage.
+
 ## Manual QA Evidence
 On 2026-07-16, the stacked LMS and DB Service PRs were exercised together in Playwright against an isolated clone of the local database. The clone was migrated before startup; the source database was not changed.
 
@@ -146,6 +150,8 @@ Passed browser checks covered:
 NDA batch metadata is an operational prerequisite. The isolated QA database used one Grade 11 and one Grade 12 NDA batch fixture because the shared local snapshot did not yet contain the planned NDA batches.
 
 On 2026-07-17, the follow-up feedback was browser-tested again with Playwright against a freshly recreated E2E database. Combined Grade/Stream controls, the two-sheet NVS download, final APAAR/Student ID columns, leading-zero input blocking, and absence of page errors passed. The first run exposed that live Postgres can return DOB as a `Date` rather than a string in the export path; the route was fixed to support both representations and the browser check then passed.
+
+On 2026-07-23, the #228 LMS follow-up was manually checked in Chrome against an isolated E2E database. The stale empty-dropout URL fell back to Active and cleaned the query string, the leading-zero PEN remained intact and valid in Add Student, and enrollment/add/bulk layouts had no horizontal overflow at desktop or 390px. The replacement workbook opened in Quick Look; automated workbook tests verified its sheets, Grade 12 example row, text PEN cells, and DOB/PEN/phone validations.
 
 ## Batch Mapping
 Initial prod check showed `batch.metadata.grade + batch.metadata.stream` was ambiguous for NVS because both old `EnableStudents_11_25` / `EnableStudents_12_25` batches and new Lakshya `2027` / `2028` batches carried the same metadata. The team cleared conflicting metadata on the old batches; prod recheck on 2026-06-30 showed exactly one matching NVS batch for each v1 Grade x Primary Stream pair.

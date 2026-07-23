@@ -42,7 +42,7 @@ const validBody = {
   gender: "Female",
   category: "Gen",
   physically_handicapped: "No",
-  pen_number: "12345678901",
+  pen_number: "01234567890",
   g10_board: "CBSE",
   g10_roll_no: "12345678",
   board_stream: "PCM",
@@ -184,7 +184,7 @@ describe("POST /api/school/[udise]/students", () => {
           row_number: 1,
           grade: 11,
           student_name: "Asha K Kumar",
-          pen_number: "12345678901",
+          pen_number: "01234567890",
           g10_roll_no: "12345678",
           stream: "engineering",
         },
@@ -221,7 +221,7 @@ describe("POST /api/school/[udise]/students", () => {
 
     const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
     expect(payload.rows[0]).toMatchObject({
-      pen_number: "12345678901",
+      pen_number: "01234567890",
       gender: "Other",
       category: "PWD-ST",
       physically_handicapped: true,
@@ -437,6 +437,74 @@ describe("POST /api/school/[udise]/students", () => {
     ]);
   });
 
+  it("reports and removes example rows before proxying the upload", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          totals: { total: 1, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 0 },
+          results: [{ row_number: 3, status: "created" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const exampleRow = [...validUploadRow];
+    exampleRow[1] = "Example Student";
+    exampleRow[6] = "invalid";
+    const csv = [
+      csvLine(uploadHeaders),
+      csvLine(exampleRow),
+      csvLine(validUploadRow),
+    ].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      totals: { total: 1, created: 1 },
+      ignored_rows: [
+        {
+          row_number: 2,
+          matched_fields: ["Student Name"],
+          message: "Row 2 was ignored as the example row. Matched: Student Name.",
+        },
+      ],
+      results: [expect.objectContaining({ row_number: 3, status: "created" })],
+    });
+    const payload = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(payload.rows).toEqual([
+      expect.objectContaining({ row_number: 3, student_name: "Asha K Kumar" }),
+    ]);
+  });
+
+  it("stops before DB Service when the upload contains only example rows", async () => {
+    const exampleRow = [...validUploadRow];
+    exampleRow[1] = "Moved Example";
+    exampleRow[6] = "12345678910";
+    const csv = [csvLine(uploadHeaders), csvLine(exampleRow)].join("\n");
+
+    const response = await POST(
+      multipartUploadRequest("students.csv", csv) as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error:
+        "No students to upload. Row 2 was ignored as the example row. Matched: PEN. Add at least one student and upload again.",
+      ignored_rows: [
+        {
+          row_number: 2,
+          matched_fields: ["PEN"],
+          message: "Row 2 was ignored as the example row. Matched: PEN.",
+        },
+      ],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("merges structured DB Service rejects into a non-200 bulk response", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -565,7 +633,7 @@ describe("GET /api/school/[udise]/students template", () => {
     });
   });
 
-  it("returns the gated official workbook unchanged except for Field details", async () => {
+  it("returns the updated gated workbook with the three restored validations", async () => {
     const response = await GET(
       new Request("http://localhost/api/school/12345678901/students") as never,
       routeParams({ udise: "12345678901" }),
@@ -597,30 +665,53 @@ describe("GET /api/school/[udise]/students template", () => {
       "Parents Phone Number",
       "Yearly / Annual Family Income",
     ]);
-    expect(template?.rowCount).toBe(200);
+    expect(template?.rowCount).toBe(472);
     expect(template?.getColumn(1).width).toBe(9);
     expect(template?.getCell("A1").fill).toEqual(
-      expect.objectContaining({ type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } }),
+      expect.objectContaining({ type: "pattern", pattern: "solid" }),
     );
     expect(template?.getCell("A2").dataValidation).toEqual(
       expect.objectContaining({
         type: "list",
-        formulae: ["'Dropdown values'!$A$2:$A200"],
+        formulae: ["'Dropdown values'!$A$2:$A$3"],
       }),
     );
     expect(template?.getCell("G2").dataValidation).toEqual(
       expect.objectContaining({
-        type: "decimal",
-        operator: "between",
-        formulae: [10000000000, 99999999999],
+        type: "custom",
+        formulae: [
+          'AND(LEN(G2&"")=11,IFERROR(TEXT(VALUE(G2&""),"00000000000")=G2&"",FALSE))',
+        ],
       }),
     );
+    expect(template?.getCell("G2").numFmt).toBe("@");
+    expect(template?.getCell("C2").dataValidation).toEqual(
+      expect.objectContaining({
+        type: "custom",
+        formulae: [
+          "AND(ISNUMBER(C2),C2>=DATE(2000,1,1),C2<=DATE(2015,12,31))",
+        ],
+      }),
+    );
+    expect(template?.getCell("M2").dataValidation).toEqual(
+      expect.objectContaining({
+        type: "custom",
+        formulae: [
+          'AND(LEN(M2&"")=10,LEFT(M2&"",1)<>"0",IFERROR(TEXT(VALUE(M2&""),"0000000000")=M2&"",FALSE))',
+        ],
+      }),
+    );
+    expect(template?.getCell("B2").value).toBe("Example Student");
+    expect(String(template?.getCell("G2").value)).toBe("12345678910");
+    expect(String(template?.getCell("I2").value)).toBe("11111111");
+    expect(String(template?.getCell("M2").value)).toBe("9999999999");
     expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
       "Template",
       "Dropdown values",
     ]);
     const dropdowns = workbook.getWorksheet("Dropdown values");
     expect(dropdowns?.getCell("A2").value).toBe(11);
+    expect(dropdowns?.getCell("A3").value).toBe(12);
     expect(dropdowns?.getCell("B4").value).toBe("Other");
     expect(dropdowns?.getCell("G6").value).toBe("NDA");
   });

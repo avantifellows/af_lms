@@ -22,7 +22,7 @@ edges:
     condition: when working on self-service student addition, bulk upload, lateral entry, or school-facing edit/delete rollout
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-07-17
+last_updated: 2026-07-23
 ---
 
 # Session Bootstrap
@@ -41,12 +41,12 @@ Then read this file fully before doing anything else in this session.
 - PM school visits: GPS-tracked lifecycle + 7 visit action types (registry pattern), scoped by `visits-policy`; PM completion requires six Action Types, while Admin and Program Admin completion permits zero Actions; Program Admins manage their own in-progress Visits while retaining scoped read access; teacher pickers use the Staff Management Visit Teacher roster.
 - Curriculum tracking, quiz sessions + quiz analytics (BigQuery), performance dashboard (DynamoDB), admin of users/schools/batches/centres/staff.
 - Academic Mentorship foundation: `academic_mentorship` feature key, School page current-year Mentorship tab views, guarded `/admin/academic-mentorship` grouped mapping overview with Program filtering, current-year manual add/remove/reassign controls, CSV template/upload import for supported years with prior-year rows stored as historical, selector options API, direct LMS-owned mapping writes, and Staff Management delete/exit safeguards for Academic Mentors with Mapping history.
-- Deploy via AWS Amplify; ~2472 unit tests (Vitest/RTL) + 65 E2E (Playwright).
+- Deploy via AWS Amplify; 2,676 passing unit tests (Vitest/RTL) + 65 E2E (Playwright).
 
 **Not yet built / in progress:**
 
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
-- Student Addition #197 revision is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; every row not written is counted as to go and included in rejected-row CSV retry, with same-school versus other-school details for existing Students.
+- Student Addition #197/#228 follow-up is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; example rows are removed before limits, validation, totals, rejected-row output, and writes; PEN accepts exact 11-digit text including a leading zero; empty dropout views return to Active. DB Service must receive the matching leading-zero PEN validation change in a separate PR.
 
 **Known issues:**
 

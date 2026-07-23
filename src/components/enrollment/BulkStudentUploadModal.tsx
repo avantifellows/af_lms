@@ -37,6 +37,7 @@ interface UploadResponse {
   details?: string;
   totals?: UploadTotals;
   results?: UploadResult[];
+  ignored_rows?: Array<{ message: string }>;
 }
 
 const emptyTotals: UploadTotals = {
@@ -69,6 +70,7 @@ export default function BulkStudentUploadModal({
   const [error, setError] = useState<string | null>(null);
   const [totals, setTotals] = useState<UploadTotals | null>(null);
   const [results, setResults] = useState<UploadResult[]>([]);
+  const [ignoredRows, setIgnoredRows] = useState<string[]>([]);
 
   const rejectedCsvHref = useMemo(() => {
     if (!results.some((result) => result.status !== "created")) return null;
@@ -85,6 +87,7 @@ export default function BulkStudentUploadModal({
       setError(null);
       setTotals(null);
       setResults([]);
+      setIgnoredRows([]);
     }
   }, [open]);
 
@@ -97,6 +100,7 @@ export default function BulkStudentUploadModal({
     setError(null);
     setTotals(null);
     setResults([]);
+    setIgnoredRows([]);
     try {
       const body = new FormData();
       body.append("file", file);
@@ -106,6 +110,7 @@ export default function BulkStudentUploadModal({
         body,
       });
       const json = (await response.json()) as UploadResponse;
+      setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
       if (!response.ok && !json.results) {
         throw new Error(json.details || json.error || "Upload failed");
       }
@@ -139,6 +144,11 @@ export default function BulkStudentUploadModal({
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
               {error}
+            </div>
+          )}
+          {ignoredRows.length > 0 && (
+            <div className="space-y-1 rounded-lg border border-info/30 bg-info-bg p-3 text-sm text-info">
+              {ignoredRows.map((message) => <p key={message}>{message}</p>)}
             </div>
           )}
 
