@@ -17,12 +17,18 @@ export type AccessLevel = 1 | 2 | 3;
 // 3 = All schools access
 
 // User roles
-export type UserRole =
-  | "teacher"
-  | "program_manager"
-  | "program_admin"
-  | "holistic_mentorship_admin"
-  | "admin";
+export const USER_ROLES = [
+  "teacher",
+  "program_manager",
+  "program_admin",
+  "holistic_mentorship_admin",
+  "admin",
+] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export function isUserRole(value: unknown): value is UserRole {
+  return typeof value === "string" && USER_ROLES.includes(value as UserRole);
+}
 
 // Feature types for permission checking
 export type Feature =

@@ -1,18 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
+import { isUserRole, type UserRole } from "@/lib/permissions";
 import { requireAdminApiAccess } from "../route-helpers";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
-
-const USER_ROLES = new Set([
-  "teacher",
-  "program_manager",
-  "program_admin",
-  "holistic_mentorship_admin",
-  "admin",
-]);
 
 type UserWrite = {
   email: string;
@@ -25,8 +18,8 @@ type UserWrite = {
   full_name?: string | null;
 };
 
-function userRole(value: UserWrite): string {
-  return USER_ROLES.has(value.role ?? "") ? value.role! : "teacher";
+function userRole(value: UserWrite): UserRole {
+  return isUserRole(value.role) ? value.role : "teacher";
 }
 
 function validateUserWrite(value: UserWrite): string | null {
@@ -34,6 +27,7 @@ function validateUserWrite(value: UserWrite): string | null {
   if (!value.level) return "Email and level are required";
   if (value.level < 1) return "Level must be between 1 and 3";
   if (value.level > 3) return "Level must be between 1 and 3";
+  if (value.role !== undefined && !isUserRole(value.role)) return "Invalid role";
   if (userRole(value) === "holistic_mentorship_admin") return null;
   if (!Array.isArray(value.program_ids)) return "At least one program must be assigned";
   if (value.program_ids.length === 0) return "At least one program must be assigned";

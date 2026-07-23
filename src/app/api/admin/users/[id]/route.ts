@@ -5,6 +5,7 @@ import {
   blockIfAcademicMentorshipHistory,
   endIneligibleHolisticMappings,
 } from "@/lib/staff-admin";
+import { isUserRole } from "@/lib/permissions";
 import { requireAdminApiAccess } from "../../route-helpers";
 
 interface RouteParams {
@@ -20,14 +21,6 @@ interface UserPatchBody {
   read_only?: boolean;
   full_name?: string | null;
 }
-
-const VALID_ROLES = [
-  "teacher",
-  "program_manager",
-  "program_admin",
-  "holistic_mentorship_admin",
-  "admin",
-];
 
 function validatePatch(body: UserPatchBody, isHolisticAdmin: boolean) {
   if (body.level && (body.level < 1 || body.level > 3)) {
@@ -162,7 +155,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const body = (await request.json()) as UserPatchBody;
     const { role, school_codes, regions } = body;
-    const userRole = role && VALID_ROLES.includes(role) ? role : undefined;
+    if (role !== undefined && !isUserRole(role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+    const userRole = role;
     const isHolisticAdmin = userRole === "holistic_mentorship_admin";
     const validationError = validatePatch(body, isHolisticAdmin);
     if (validationError) return validationError;

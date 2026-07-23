@@ -31,6 +31,9 @@ Core file: `src/lib/permissions.ts`. Client-safe constants: `src/lib/constants.t
 (`PROGRAM_IDS`, `PROGRAM_ID_TO_LABEL`, `ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`).
 Auth config: `src/lib/auth.ts`.
 
+`USER_ROLES` in `src/lib/permissions.ts` is the canonical server-side role list.
+Admin user create/update APIs reject unknown roles with 400 instead of silently defaulting them.
+
 ## The model — three independent axes
 1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `holistic_mentorship_admin` | `admin`.
 2. **School scope** (`AccessLevel`): `1` = specific `school_codes`, `2` = `regions`, `3` = all schools. (`isAdmin` is by **role**, not level.)

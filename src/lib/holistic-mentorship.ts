@@ -1,5 +1,6 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
 import { query } from "./db";
+import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
   canAccessSchoolSync,
@@ -7,7 +8,6 @@ import {
   getResolvedPermission,
   type UserPermission,
 } from "./permissions";
-import { PM_SEAT_ROLES } from "./staff-shared";
 
 export type HolisticMentorshipAction =
   | "roster_view"
@@ -105,35 +105,6 @@ async function findProgramSchool(
   return rows[0] ? { ...rows[0], id: Number(rows[0].id) } : null;
 }
 
-async function findEligibleTeacherUserId(
-  email: string,
-  schoolId: number
-): Promise<number | null> {
-  const rows = await query<{ user_id: number | string }>(
-    `SELECT DISTINCT u.id AS user_id
-     FROM teacher t
-     JOIN "user" u ON u.id = t.user_id
-     JOIN user_permission up
-       ON up.revoked_at IS NULL
-      AND (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
-     JOIN centre_positions cp
-       ON cp.user_id = u.id
-      AND cp.deleted_at IS NULL
-      AND NOT (cp.role = ANY($4::text[]))
-     JOIN centres c
-       ON c.id = cp.centre_id
-      AND c.is_active IS TRUE
-     WHERE LOWER(up.email) = LOWER($1)
-       AND c.school_id = $2
-       AND c.program_id = $3
-       AND t.is_af_teacher = true
-       AND t.exit_date IS NULL
-     LIMIT 1`,
-    [email, schoolId, PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
-  );
-  return rows[0] ? Number(rows[0].user_id) : null;
-}
-
 async function ownsActiveMapping(params: {
   actorUserId: number;
   schoolId: number;
@@ -207,7 +178,10 @@ async function teacherAccess(params: {
   academicYear?: string;
 }): Promise<HolisticMentorshipAccessResult> {
   if (!params.school) return denied(403, "Forbidden");
-  const actorUserId = await findEligibleTeacherUserId(params.email, params.school.id);
+  const actorUserId = await findEligibleHolisticMentorUserId({
+    email: params.email,
+    schoolId: params.school.id,
+  });
   if (actorUserId === null) return denied(403, "Forbidden");
   if (MAPPING_REQUIRED_ACTIONS.has(params.action)) {
     await reconcileHolisticMappings({

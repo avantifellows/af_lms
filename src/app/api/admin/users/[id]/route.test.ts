@@ -20,7 +20,10 @@ const { mockQuery, mockWithTransaction } = vi.hoisted(() => {
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: vi.fn() }));
+vi.mock("@/lib/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/permissions")>()),
+  isAdmin: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({
   query: mockQuery,
   withTransaction: mockWithTransaction,
@@ -362,21 +365,17 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(updateArgs[2]).toEqual(["54019"]); // school_codes applied
   });
 
-  it("ignores invalid role values", async () => {
+  it("rejects invalid role values", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
-    mockQuery.mockResolvedValue([]);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { role: "invalid_role" },
     });
     const res = await PATCH(req as never, params);
-    expect(res.status).toBe(200);
-    // role should be undefined (COALESCE keeps existing)
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining([undefined]),
-    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid role" });
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 500 on query error", async () => {

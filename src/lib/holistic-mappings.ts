@@ -1,7 +1,7 @@
 import { PROGRAM_IDS } from "./constants";
 import { query, withTransaction } from "./db";
+import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
-import { PM_SEAT_ROLES } from "./staff-shared";
 import type { PoolClient } from "pg";
 
 interface RosterRow {
@@ -56,29 +56,6 @@ class MappingMutationError extends Error {
 
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "23505";
-}
-
-async function actorIsEligible(
-  client: PoolClient,
-  actorUserId: number,
-  schoolId: number
-): Promise<boolean> {
-  const actor = await client.query(
-    `SELECT DISTINCT u.id AS user_id
-     FROM teacher t
-     JOIN "user" u ON u.id = t.user_id
-     JOIN user_permission up
-       ON (up.user_id = u.id OR LOWER(up.email) = LOWER(u.email))
-      AND up.revoked_at IS NULL AND up.role = 'teacher'
-     JOIN centre_positions cp
-       ON cp.user_id = u.id AND cp.deleted_at IS NULL AND NOT (cp.role = ANY($4::text[]))
-     JOIN centres c ON c.id = cp.centre_id AND c.is_active IS TRUE
-     WHERE u.id = $1 AND c.school_id = $2 AND c.program_id = $3
-       AND t.is_af_teacher = true AND t.exit_date IS NULL
-     LIMIT 1`,
-    [actorUserId, schoolId, PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
-  );
-  return actor.rows.length > 0;
 }
 
 export async function lockHolisticMentorMappingMutation(
@@ -157,7 +134,7 @@ async function currentOwnership(
 }
 
 async function requireEligibleActor(client: PoolClient, actorUserId: number, schoolId: number) {
-  if (!(await actorIsEligible(client, actorUserId, schoolId))) {
+  if (!(await findEligibleHolisticMentorUserId({ client, userId: actorUserId, schoolId }))) {
     throw new MappingMutationError(422, "Teacher is no longer eligible for this School");
   }
 }
