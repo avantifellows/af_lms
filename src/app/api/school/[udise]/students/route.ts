@@ -1,5 +1,6 @@
 import { readFile } from "fs/promises";
 import path from "path";
+import { randomUUID } from "crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -56,6 +57,28 @@ const STUDENT_ADDITION_TEMPLATE = path.join(
   process.env.NODE_ENV === "production" ? ".next/server/assets" : "src/assets",
   "nvs-student-addition-template.xlsx",
 );
+
+interface BulkUploadTrace {
+  requestId: string;
+  startedAt: number;
+}
+
+function logBulkUploadTrace(
+  trace: BulkUploadTrace,
+  stage: string,
+  stageStartedAt: number,
+  details: Record<string, number> = {},
+) {
+  const now = performance.now();
+  console.info(JSON.stringify({
+    event: "student_bulk_upload_trace",
+    request_id: trace.requestId,
+    stage,
+    stage_ms: Math.round((now - stageStartedAt) * 100) / 100,
+    elapsed_ms: Math.round((now - trace.startedAt) * 100) / 100,
+    ...details,
+  }));
+}
 
 function safeFields(value: unknown, keys: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -185,18 +208,26 @@ async function proxyRowsToDbService({
   rows,
   upload,
   period,
+  trace,
 }: {
   access: StudentAdditionAccess;
   school: RouteSchool;
   rows: LmsStudentAdditionRow[];
   upload: { id: string; filename: string };
   period: ReturnType<typeof deriveLmsEnrollmentPeriod>;
+  trace?: BulkUploadTrace;
 }) {
   const dbService = getDbServiceConfig();
   if (!dbService) {
     return NextResponse.json({ error: "DB Service is not configured" }, { status: 500 });
   }
 
+  const fetchStartedAt = performance.now();
+  if (trace) {
+    logBulkUploadTrace(trace, "db_service_fetch_start", fetchStartedAt, {
+      accepted_rows: rows.length,
+    });
+  }
   const response = await fetch(`${dbService.baseUrl}/lms/students/bulk-create-with-enrollments`, {
     method: "POST",
     headers: dbService.headers,
@@ -209,11 +240,22 @@ async function proxyRowsToDbService({
       rows,
     }),
   });
+  if (trace) {
+    logBulkUploadTrace(trace, "db_service_fetch_complete", fetchStartedAt, {
+      status: response.status,
+    });
+  }
 
+  const bodyStartedAt = performance.now();
   if (!response.ok) {
     const upstream = response.headers.get("content-type")?.includes("application/json")
       ? await response.json().catch(() => null) as Record<string, unknown> | null
       : null;
+    if (trace) {
+      logBulkUploadTrace(trace, "db_service_body_parsed", bodyStartedAt, {
+        status: response.status,
+      });
+    }
     return NextResponse.json(
       {
         error: "Student could not be created",
@@ -225,7 +267,13 @@ async function proxyRowsToDbService({
     );
   }
 
-  return NextResponse.json(await response.json());
+  const body = await response.json();
+  if (trace) {
+    logBulkUploadTrace(trace, "db_service_body_parsed", bodyStartedAt, {
+      status: response.status,
+    });
+  }
+  return NextResponse.json(body);
 }
 
 // fallow-ignore-next-line complexity
@@ -233,8 +281,11 @@ async function bulkUploadResponse(
   request: NextRequest,
   access: StudentAdditionAccess,
   school: RouteSchool,
+  trace: BulkUploadTrace,
 ) {
+  const formStartedAt = performance.now();
   const form = await request.formData();
+  logBulkUploadTrace(trace, "form_data_complete", formStartedAt);
   const file = form.get("file");
   if (!isUploadFile(file)) {
     return NextResponse.json({ error: "Upload a .xlsx or rejected-row .csv file" }, { status: 400 });
@@ -244,10 +295,18 @@ async function bulkUploadResponse(
   }
 
   const period = deriveLmsEnrollmentPeriod();
+  const bufferStartedAt = performance.now();
+  const data = Buffer.from(await file.arrayBuffer());
+  logBulkUploadTrace(trace, "file_buffered", bufferStartedAt, { file_size: file.size });
+  const parseStartedAt = performance.now();
   const parsed = await parseStudentAdditionUpload({
     filename: uploadFilename(file),
-    data: Buffer.from(await file.arrayBuffer()),
+    data,
     academicYear: period.academic_year,
+  });
+  logBulkUploadTrace(trace, "workbook_parsed", parseStartedAt, {
+    accepted_rows: parsed.ok ? parsed.rows.length : 0,
+    local_rejected_rows: parsed.ok ? parsed.rejectedResults.length : 0,
   });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   if (parsed.totalRows === 0) {
@@ -283,6 +342,7 @@ async function bulkUploadResponse(
       filename: uploadFilename(file),
     },
     period,
+    trace,
   });
   const status = response.status;
   const body = await response.json();
@@ -297,6 +357,8 @@ async function bulkUploadResponse(
     (a, b) => (a.row_number ?? 0) - (b.row_number ?? 0),
   ) as Array<DbServiceResult | StudentAdditionUploadRowResult>;
 
+  const responseStartedAt = performance.now();
+  logBulkUploadTrace(trace, "response_ready", responseStartedAt, { status });
   return NextResponse.json({
     ...body,
     totals: countTotals(results),
@@ -309,13 +371,20 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ udise: string }> },
 ) {
+  const contentType = request.headers.get("content-type") ?? "";
+  const trace = contentType.includes("multipart/form-data")
+    ? { requestId: randomUUID(), startedAt: performance.now() }
+    : undefined;
+  if (trace) logBulkUploadTrace(trace, "request_received", trace.startedAt);
+
+  const contextStartedAt = performance.now();
   const resolved = await resolveRouteContext(params);
+  if (trace) logBulkUploadTrace(trace, "route_context_complete", contextStartedAt);
   if (resolved.response) return resolved.response;
   const { school, access } = resolved;
 
-  const contentType = request.headers.get("content-type") ?? "";
-  if (contentType.includes("multipart/form-data")) {
-    return bulkUploadResponse(request, access, school);
+  if (trace) {
+    return bulkUploadResponse(request, access, school, trace);
   }
 
   const body = await request.json();
