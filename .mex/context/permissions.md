@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-07-15
+last_updated: 2026-07-23
 ---
 
 # Permissions
@@ -75,5 +75,6 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **`requireEdit` matters on writes.** `canAccessStudent(session, id, { requireEdit: true })` for upload/delete — without it a `read_only` user could mutate via direct API call even though the UI hides the button. It also enforces per-program ownership in mixed schools.
 - **Passcode users** must be handled explicitly (`session.isPasscodeUser`) — they're blocked from visits and all non-`students` features; the gate checks `session.schoolCode` against the target school.
 - **`revoked_at`** is the single "exited" switch — a revoked user resolves to no permission everywhere.
+- **Postgres `bigint` columns arrive as JS strings** (no `setTypeParser` in `db.ts`). Any numeric comparison against them must cast in SQL (`::int`) or coerce (`Number()`). This bit for real in Jul 2026: `getStudentSchool` started resolving `batch.program_id` (bigint) after the #162 batch-join fix, `ownsRecord` did `[1].includes("1")` → false, and every non-admin got 403 on document upload/delete in prod for 3 days. `ownsRecord` now coerces and the query casts; keep both when touching this path.
 - **`PROGRAM_IDS` is hand-maintained** in `constants.ts` (transitional debt) — add a program id here when a non-JNV centre is onboarded.
 - Import `PROGRAM_IDS` from `@/lib/constants`, not `@/lib/permissions`, in client components — `permissions.ts` pulls in the server-only DB pool.
