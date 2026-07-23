@@ -106,26 +106,19 @@ export default function BulkStudentUploadModal({
     setResults([]);
     setIgnoredRows([]);
     try {
-      let response: Response | null = null;
-      let json: UploadResponse | null = null;
-      let retried = false;
-      for (let attempt = 0; attempt < 2 && !json; attempt += 1) {
-        const body = new FormData();
-        body.append("file", file);
-        retried = attempt > 0;
-        try {
-          response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
-            method: "POST",
-            body,
-          });
-          json = await response.json().catch(() => null) as UploadResponse | null;
-        } catch {
-          response = null;
-        }
-      }
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
+        method: "POST",
+        body,
+      }).catch(() => null);
+      const json = response
+        ? await response.json().catch(() => null) as UploadResponse | null
+        : null;
       if (!response || !json) {
+        onUploaded();
         throw new Error(
-          "Upload status could not be confirmed. Some rows may have been processed. Re-upload the same file to check the result.",
+          "Upload timed out before the final result was returned. Some rows may still be processing. The student list has been refreshed. Wait a minute, then re-upload the same file to check the result.",
         );
       }
       setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
@@ -135,7 +128,7 @@ export default function BulkStudentUploadModal({
 
       setTotals(json.totals ?? emptyTotals);
       setResults(json.results ?? []);
-      if (retried || (json.totals?.created ?? 0) > 0) onUploaded();
+      if ((json.totals?.created ?? 0) > 0) onUploaded();
       if (!response.ok && json.error) setError(json.error);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");

@@ -231,50 +231,7 @@ describe("BulkStudentUploadModal", () => {
     );
   });
 
-  it("retries once when the upload response cannot be read", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(new Response("Gateway timeout", { status: 504 }))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            totals: {
-              total: 1,
-              created: 0,
-              duplicate_in_file: 0,
-              already_exists: 1,
-              rejected: 0,
-            },
-            results: [{
-              row_number: 2,
-              status: "already_exists",
-              existing_match: {
-                student_id: "202812222223",
-                school_code: "JNV001",
-              },
-            }],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    const user = userEvent.setup();
-    render(<BulkStudentUploadModal {...baseProps} />);
-
-    await user.upload(
-      screen.getByLabelText("Student upload file"),
-      new File(["fake"], "students.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload students" }));
-
-    expect(await screen.findByText(
-      "This student identifier is already part of this school. Student ID: 202812222223.",
-    )).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(baseProps.onUploaded).toHaveBeenCalled();
-  });
-
-  it("shows an accurate error when two upload responses cannot be read", async () => {
+  it("does not repeat an upload when its response times out", async () => {
     vi.mocked(fetch).mockResolvedValue(new Response("Gateway timeout", { status: 504 }));
     const user = userEvent.setup();
     render(<BulkStudentUploadModal {...baseProps} />);
@@ -288,9 +245,10 @@ describe("BulkStudentUploadModal", () => {
     await user.click(screen.getByRole("button", { name: "Upload students" }));
 
     expect(await screen.findByText(
-      "Upload status could not be confirmed. Some rows may have been processed. Re-upload the same file to check the result.",
+      "Upload timed out before the final result was returned. Some rows may still be processing. The student list has been refreshed. Wait a minute, then re-upload the same file to check the result.",
     )).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(baseProps.onUploaded).toHaveBeenCalled();
     expect(screen.queryByText(/JSON/)).not.toBeInTheDocument();
   });
 
