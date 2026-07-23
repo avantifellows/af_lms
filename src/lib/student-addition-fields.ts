@@ -125,6 +125,7 @@ export interface StudentAdditionCsvResult {
   original?: Record<string, unknown>;
   field_errors?: Record<string, string>;
   row_errors?: string[];
+  duplicate_identifiers?: string[];
   existing_match?: Record<string, unknown> | null;
 }
 
@@ -155,10 +156,10 @@ export function formatStudentAdditionExistingMatch(
   ].filter(Boolean).join(" | ");
 
   if (schoolCode && matchSchoolCode === schoolCode) {
-    return `This student is already part of this school. ${identities}.`;
+    return `This student identifier is already part of this school. ${identities}.`;
   }
   if (!matchSchoolCode) {
-    return `This student already exists. ${identities}.`;
+    return `This student identifier already exists, but its school could not be identified. ${identities}. Please contact the admin.`;
   }
 
   const schoolName = matchText(match.school_name) || "another school";
@@ -175,6 +176,15 @@ export function formatStudentAdditionExistingMatch(
     `This identifier already belongs to ${matchText(match.student_name) || "a student"} at ${schoolName} (${matchSchoolCode}${udise ? `, UDISE ${udise}` : ""})${location ? `, ${location}` : ""}.`,
     identifiers,
   ].filter(Boolean).join(" ");
+}
+
+export function formatStudentAdditionDuplicateInFile(
+  identifiers: string[] | null | undefined,
+): string {
+  const names = (identifiers ?? []).filter(Boolean);
+  return names.length > 0
+    ? `Duplicate in uploaded file: ${names.join(", ")}`
+    : "Duplicate in uploaded file";
 }
 
 function formatFieldErrors(errors: Record<string, string> | undefined): string {
@@ -226,7 +236,7 @@ export function buildRejectedRowsCsv(
       const issue = result.status === "already_exists"
         ? formatStudentAdditionExistingMatch(existing, schoolCode)
         : result.status === "duplicate_in_file"
-          ? "Duplicate row in uploaded file"
+          ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
           : "";
       return [
         result.row_number ?? "",
@@ -495,7 +505,7 @@ export function validateStudentAdditionInput(
       fieldErrors,
       "date_of_birth",
       options.bulkUpload
-        ? "Date of Birth must be DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, or use a 2-digit year"
+        ? "Date of Birth must be DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY"
         : "Date of Birth must be DD/MM/YYYY or YYYY-MM-DD",
     );
   } else if (date_of_birth < STUDENT_DOB_MIN || date_of_birth > STUDENT_DOB_MAX || date_of_birth > isoToday(today)) {
@@ -518,8 +528,8 @@ export function validateStudentAdditionInput(
     : categoryInput;
 
   const pen_number = stringValue(input.pen_number);
-  if (pen_number && !/^[1-9]\d{10}$/.test(pen_number)) {
-    addError(fieldErrors, "pen_number", "PEN must be exactly 11 digits and cannot start with zero");
+  if (pen_number && !/^\d{11}$/.test(pen_number)) {
+    addError(fieldErrors, "pen_number", "PEN must be exactly 11 digits");
   }
 
   const g10BoardInput = stringValue(input.g10_board);
@@ -546,12 +556,9 @@ export function validateStudentAdditionInput(
   if (!stream) addError(fieldErrors, "stream", "Primary Exam preparing for is not valid");
 
   const father_name = normalizeName(input.father_name);
-  if (father_name && !/^[A-Za-z ]+$/.test(father_name)) {
-    addError(fieldErrors, "father_name", "Father Name must contain only letters");
-  }
   const phone = stringValue(input.phone);
   if (!/^[1-9]\d{9}$/.test(phone)) {
-    addError(fieldErrors, "phone", "Parents Phone Number must be exactly 10 digits and cannot start with zero");
+    addError(fieldErrors, "phone", "Enter a valid phone number");
   }
 
   const annual_family_income = stringValue(input.annual_family_income);

@@ -6,6 +6,7 @@ import { Download, Upload, X } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
 import {
   buildRejectedRowsCsv,
+  formatStudentAdditionDuplicateInFile,
   formatStudentAdditionExistingMatch,
   type StudentAdditionCsvResult,
 } from "@/lib/student-addition-fields";
@@ -37,6 +38,7 @@ interface UploadResponse {
   details?: string;
   totals?: UploadTotals;
   results?: UploadResult[];
+  ignored_rows?: Array<{ message: string }>;
 }
 
 const emptyTotals: UploadTotals = {
@@ -53,6 +55,9 @@ function rowIssues(result: UploadResult, schoolCode: string): string {
     ...(result.row_errors ?? []),
   ];
   return issues.join("; ") ||
+    (result.status === "duplicate_in_file"
+      ? formatStudentAdditionDuplicateInFile(result.duplicate_identifiers)
+      : "") ||
     (result.existing_match ? formatStudentAdditionExistingMatch(result.existing_match, schoolCode) : "");
 }
 
@@ -69,6 +74,7 @@ export default function BulkStudentUploadModal({
   const [error, setError] = useState<string | null>(null);
   const [totals, setTotals] = useState<UploadTotals | null>(null);
   const [results, setResults] = useState<UploadResult[]>([]);
+  const [ignoredRows, setIgnoredRows] = useState<string[]>([]);
 
   const rejectedCsvHref = useMemo(() => {
     if (!results.some((result) => result.status !== "created")) return null;
@@ -85,6 +91,7 @@ export default function BulkStudentUploadModal({
       setError(null);
       setTotals(null);
       setResults([]);
+      setIgnoredRows([]);
     }
   }, [open]);
 
@@ -97,15 +104,24 @@ export default function BulkStudentUploadModal({
     setError(null);
     setTotals(null);
     setResults([]);
+    setIgnoredRows([]);
     try {
       const body = new FormData();
       body.append("file", file);
-
       const response = await fetch(`/api/school/${encodeURIComponent(schoolUdise)}/students`, {
         method: "POST",
         body,
-      });
-      const json = (await response.json()) as UploadResponse;
+      }).catch(() => null);
+      const json = response
+        ? await response.json().catch(() => null) as UploadResponse | null
+        : null;
+      if (!response || !json) {
+        onUploaded();
+        throw new Error(
+          "Upload timed out before the final result was returned. Some rows may still be processing. The student list has been refreshed. Wait a minute, then re-upload the same file to check the result.",
+        );
+      }
+      setIgnoredRows((json.ignored_rows ?? []).map((row) => row.message));
       if (!response.ok && !json.results) {
         throw new Error(json.details || json.error || "Upload failed");
       }
@@ -139,6 +155,11 @@ export default function BulkStudentUploadModal({
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
               {error}
+            </div>
+          )}
+          {ignoredRows.length > 0 && (
+            <div className="space-y-1 rounded-lg border border-info/30 bg-info-bg p-3 text-sm text-info">
+              {ignoredRows.map((message) => <p key={message}>{message}</p>)}
             </div>
           )}
 

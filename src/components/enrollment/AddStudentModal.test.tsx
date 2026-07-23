@@ -21,7 +21,7 @@ async function fillValidForm() {
   await user.selectOptions(screen.getByLabelText("Gender"), "Female");
   await user.selectOptions(screen.getByLabelText("Category"), "Gen");
   await user.selectOptions(screen.getByLabelText("CWSN"), "No");
-  await user.type(screen.getByLabelText("PEN"), "12345678901");
+  await user.type(screen.getByLabelText("PEN"), "01234567890");
   await user.selectOptions(screen.getByLabelText("G10 board"), CBSE_BOARD);
   await user.type(screen.getByLabelText("Grade 10 Roll no"), "1234 5678");
   await user.selectOptions(screen.getByLabelText("Board Stream"), "PCM");
@@ -71,7 +71,7 @@ describe("AddStudentModal", () => {
     expect(screen.getByText("Student ID will be 202812345678")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add Student" }));
 
-    await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalledWith("202812345678", "12345678901"));
+    await waitFor(() => expect(baseProps.onCreated).toHaveBeenCalledWith("202812345678", "01234567890"));
     expect(baseProps.onClose).toHaveBeenCalled();
     expect(screen.queryByText(/Student added/)).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(
@@ -101,7 +101,9 @@ describe("AddStudentModal", () => {
     await user.click(screen.getByRole("button", { name: "Add Student" }));
 
     expect(
-      await screen.findByText("This student is already part of this school. Student ID: 202812345678."),
+      await screen.findByText(
+        "This student identifier is already part of this school. Student ID: 202812345678.",
+      ),
     ).toBeInTheDocument();
     expect(baseProps.onCreated).not.toHaveBeenCalled();
   });
@@ -211,10 +213,10 @@ describe("AddStudentModal", () => {
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText("PEN"), "123");
-    expect(screen.getByText("PEN must be exactly 11 digits and cannot start with zero")).toBeInTheDocument();
+    expect(screen.getByText("PEN must be exactly 11 digits")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Parents Phone Number"), "12345");
-    expect(screen.getByText("Parents Phone Number must be exactly 10 digits and cannot start with zero")).toBeInTheDocument();
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
   });
 
   it("marks required fields without showing Optional for annual family income", () => {

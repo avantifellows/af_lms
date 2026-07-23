@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 
 import { parseStudentAdditionUpload } from "./student-addition-bulk";
 import { buildRejectedRowsCsv, CBSE_BOARD } from "./student-addition-fields";
@@ -67,6 +68,49 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.rows[0].student_name).toBe("Asha K Kumar");
   });
 
+  it("removes blank formatted cells before loading xlsx", async () => {
+    const sourceWorkbook = new ExcelJS.Workbook();
+    const sourceSheet = sourceWorkbook.addWorksheet("Template");
+    sourceSheet.addRow(uploadHeaders);
+    validRowValues.forEach((value, index) => {
+      sourceSheet.getCell(47, index + 1).value = value as ExcelJS.CellValue;
+    });
+    for (let rowNumber = 2; rowNumber <= 1_000; rowNumber += 1) {
+      sourceSheet.getCell(rowNumber, 26).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFFFFF" },
+      };
+    }
+    const data = Buffer.from(await sourceWorkbook.xlsx.writeBuffer());
+    const xlsxPrototype = Object.getPrototypeOf(new ExcelJS.Workbook().xlsx) as {
+      load: (...args: unknown[]) => unknown;
+    };
+    const loadSpy = vi.spyOn(xlsxPrototype, "load");
+
+    try {
+      const result = await parseStudentAdditionUpload({
+        filename: "students.xlsx",
+        data,
+        today: new Date("2026-07-01T00:00:00Z"),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected valid upload");
+      expect(result.rows[0].row_number).toBe(47);
+      expect(loadSpy).toHaveBeenCalledOnce();
+      const loadedArchive = await JSZip.loadAsync(
+        Buffer.from(loadSpy.mock.calls[0][0] as Buffer),
+      );
+      const templateXml = await loadedArchive
+        .file("xl/worksheets/sheet1.xml")!
+        .async("string");
+      expect(templateXml).not.toContain('r="Z1000"');
+    } finally {
+      loadSpy.mockRestore();
+    }
+  });
+
   it("rejects legacy xls uploads with a save-as-xlsx message", async () => {
     const result = await parseStudentAdditionUpload({
       filename: "students.xls",
@@ -100,6 +144,85 @@ describe("parseStudentAdditionUpload", () => {
         stream: "engineering",
       }),
     ]);
+  });
+
+  it("ignores moved example rows by any exact marker before validation and totals", async () => {
+    const nameMarker = [...validRowValues];
+    nameMarker[1] = " Example Student ";
+    nameMarker[2] = "not a date";
+    nameMarker[6] = "not a PEN";
+    const multipleMarkers = [...validRowValues];
+    multipleMarkers[1] = "Another Student";
+    multipleMarkers[6] = " 12345678910 ";
+    multipleMarkers[8] = "11111111";
+    multipleMarkers[12] = "9999999999";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({
+        Template: [uploadHeaders, nameMarker, validRowValues, multipleMarkers],
+      }),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.totalRows).toBe(1);
+    expect(result.rows).toEqual([
+      expect.objectContaining({ row_number: 3, pen_number: "12345678901" }),
+    ]);
+    expect(result.rejectedResults).toEqual([]);
+    expect(result.ignoredRows).toEqual([
+      {
+        row_number: 2,
+        matched_fields: ["Student Name"],
+        message: "Row 2 was ignored as the example row. Matched: Student Name.",
+      },
+      {
+        row_number: 4,
+        matched_fields: ["PEN", "Grade 10 Roll No", "Phone"],
+        message: "Row 4 was ignored as the example row. Matched: PEN, Grade 10 Roll No, Phone.",
+      },
+    ]);
+  });
+
+  it("ignores example markers in retry CSV uploads", async () => {
+    const penMarker = [...validRowValues];
+    penMarker[1] = "Moved Example";
+    penMarker[6] = "12345678910";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "student-addition-rejected-rows.csv",
+      data: Buffer.from([
+        csvHeaders,
+        csvLine(penMarker),
+        validCsvRow,
+      ].join("\n")),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.totalRows).toBe(1);
+    expect(result.rows[0]).toEqual(expect.objectContaining({ row_number: 3 }));
+    expect(result.ignoredRows).toEqual([
+      expect.objectContaining({ row_number: 2, matched_fields: ["PEN"] }),
+    ]);
+  });
+
+  it("keeps a leading-zero PEN as text from xlsx parsing", async () => {
+    const row = [...validRowValues];
+    row[6] = "01234567890";
+
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [uploadHeaders, row] }),
+      today: new Date("2026-07-01T00:00:00Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected valid upload");
+    expect(result.rows[0].pen_number).toBe("01234567890");
   });
 
   it("parses the Template xlsx sheet, ignoring extra columns and blank rows", async () => {
@@ -190,6 +313,22 @@ describe("parseStudentAdditionUpload", () => {
     });
   });
 
+  it("lists missing columns with latest-template guidance", async () => {
+    const headers = uploadHeaders.filter((header) =>
+      !["Gender", "Parents Phone Number"].includes(header)
+    );
+    const result = await parseStudentAdditionUpload({
+      filename: "students.xlsx",
+      data: await workbookBuffer({ Template: [headers] }),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Missing required columns: Gender, Parents Phone Number. Download the latest template and upload it again",
+    });
+  });
+
   it("parses real xlsx date cells without rejecting valid DOB values", async () => {
     const row = [...validRowValues];
     row[2] = new Date(2010, 0, 2);
@@ -234,7 +373,7 @@ describe("parseStudentAdditionUpload", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected parsed upload");
     expect(result.rejectedResults[0].field_errors.g10_roll_no).toContain("cannot start with zero");
-    expect(result.rejectedResults[0].field_errors.phone).toContain("cannot start with zero");
+    expect(result.rejectedResults[0].field_errors.phone).toBe("Enter a valid phone number");
   });
 
   it("returns a validation error for corrupt xlsx uploads", async () => {
@@ -263,14 +402,19 @@ describe("parseStudentAdditionUpload", () => {
 
   it("allows exactly 200 non-blank rows and rejects 201", async () => {
     const twoHundredRows = Array.from({ length: 200 }, () => validCsvRow).join("\n");
+    const exampleRow = [...validRowValues];
+    exampleRow[1] = "Example Student";
     const allowed = await parseStudentAdditionUpload({
       filename: "students.csv",
-      data: Buffer.from(`${csvHeaders}\n${twoHundredRows}`),
+      data: Buffer.from(`${csvHeaders}\n${csvLine(exampleRow)}\n${twoHundredRows}`),
     });
 
     expect(allowed.ok).toBe(true);
     if (!allowed.ok) throw new Error("expected valid upload");
     expect(allowed.totalRows).toBe(200);
+    expect(allowed.ignoredRows).toEqual([
+      expect.objectContaining({ row_number: 2, matched_fields: ["Student Name"] }),
+    ]);
 
     const tooMany = await parseStudentAdditionUpload({
       filename: "students.csv",
@@ -318,6 +462,7 @@ describe("parseStudentAdditionUpload", () => {
         row_number: 5,
         status: "duplicate_in_file",
         original: { "Student Name": "Duplicate Student" },
+        duplicate_identifiers: ["PEN Number", "Grade 10 Roll no"],
       },
     ], "JNV001");
 
@@ -334,7 +479,7 @@ describe("parseStudentAdditionUpload", () => {
     expect(csv).toContain("Existing School Relationship");
     expect(csv).toContain("Different school");
     expect(csv).toContain("This identifier already belongs to Existing Student at JNV Other (JNV999)");
-    expect(csv).toContain("Duplicate row in uploaded file");
+    expect(csv).toContain("Duplicate in uploaded file: PEN Number, Grade 10 Roll no");
   });
 
   it("round-trips a PEN-based rejected CSV with its original row number", async () => {

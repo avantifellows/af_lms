@@ -23,6 +23,13 @@ describe("BulkStudentUploadModal", () => {
       new Response(
         JSON.stringify({
           totals: { total: 2, created: 1, duplicate_in_file: 0, already_exists: 0, rejected: 1 },
+          ignored_rows: [
+            {
+              row_number: 7,
+              matched_fields: ["Student Name", "PEN"],
+              message: "Row 7 was ignored as the example row. Matched: Student Name, PEN.",
+            },
+          ],
           results: [
             {
               row_number: 2,
@@ -72,6 +79,9 @@ describe("BulkStudentUploadModal", () => {
     const form = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
     expect(Array.from(form.keys())).toEqual(["file"]);
     expect(screen.getByText("1 done, 1 to go")).toBeInTheDocument();
+    expect(
+      screen.getByText("Row 7 was ignored as the example row. Matched: Student Name, PEN."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Grade" })).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("11")).toBeInTheDocument();
@@ -83,6 +93,42 @@ describe("BulkStudentUploadModal", () => {
       "href",
       expect.stringContaining("data:text/csv"),
     );
+  });
+
+  it("shows a clear error when the upload contains only example rows", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error:
+            "No students to upload. Row 2 was ignored as the example row. Matched: PEN. Add at least one student and upload again.",
+          ignored_rows: [
+            {
+              row_number: 2,
+              matched_fields: ["PEN"],
+              message: "Row 2 was ignored as the example row. Matched: PEN.",
+            },
+          ],
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(
+      await screen.findByText(/No students to upload.*Add at least one student/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Row 2 was ignored as the example row. Matched: PEN."),
+    ).toBeInTheDocument();
+    expect(baseProps.onUploaded).not.toHaveBeenCalled();
   });
 
   it("counts every uncreated row as to go and includes skipped rows in the rejected CSV", async () => {
@@ -108,7 +154,12 @@ describe("BulkStudentUploadModal", () => {
                 stream: "engineering",
               },
             },
-            { row_number: 3, status: "duplicate_in_file", original: { "Student Name": "Duplicate" } },
+            {
+              row_number: 3,
+              status: "duplicate_in_file",
+              duplicate_identifiers: ["PEN Number", "Grade 10 Roll no"],
+              original: { "Student Name": "Duplicate" },
+            },
           ],
         }),
         { status: 200 },
@@ -129,6 +180,9 @@ describe("BulkStudentUploadModal", () => {
     await waitFor(() => expect(screen.getByText("0 done, 2 to go")).toBeInTheDocument());
     expect(screen.getByText(/This identifier already belongs to Existing Student/)).toBeInTheDocument();
     expect(screen.getByText(/JNV999, UDISE 99999999999/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Duplicate in uploaded file: PEN Number, Grade 10 Roll no"),
+    ).toBeInTheDocument();
     const download = screen.getByRole("link", { name: "Download rejected rows CSV" });
     expect(download).toHaveAttribute("href", expect.stringContaining("Existing"));
     expect(download).toHaveAttribute("href", expect.stringContaining("Duplicate"));
@@ -175,6 +229,27 @@ describe("BulkStudentUploadModal", () => {
       "href",
       expect.stringContaining("Same%20school"),
     );
+  });
+
+  it("does not repeat an upload when its response times out", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response("Gateway timeout", { status: 504 }));
+    const user = userEvent.setup();
+    render(<BulkStudentUploadModal {...baseProps} />);
+
+    await user.upload(
+      screen.getByLabelText("Student upload file"),
+      new File(["fake"], "students.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload students" }));
+
+    expect(await screen.findByText(
+      "Upload timed out before the final result was returned. Some rows may still be processing. The student list has been refreshed. Wait a minute, then re-upload the same file to check the result.",
+    )).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(baseProps.onUploaded).toHaveBeenCalled();
+    expect(screen.queryByText(/JSON/)).not.toBeInTheDocument();
   });
 
   it("resets upload state when reopened", async () => {
