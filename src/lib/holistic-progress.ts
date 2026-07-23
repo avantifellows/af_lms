@@ -1,5 +1,6 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "./constants";
 import { query } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
 
 export type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
@@ -90,6 +91,10 @@ export async function listHolisticProgress(
   rows: HolisticProgressRow[];
   counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
 }> {
+  await reconcileHolisticMappings({
+    academicYear: filters.academicYear,
+    schoolCode: filters.schoolCode ?? undefined,
+  });
   const direction = filters.direction === "desc" ? "DESC" : "ASC";
   const order = progressOrder(filters.sort, direction);
   const limit = options.all ? null : 50;
@@ -105,7 +110,25 @@ export async function listHolisticProgress(
               mapping.student_id, mapping.school_id, mapping.mentor_user_id,
               mapping.started_at, mapping.first_started_at, mapping.id AS mapping_id
        FROM mapping_history mapping
-       WHERE ($2 <> $11 OR mapping.ended_at IS NULL)
+       WHERE ($2 <> $11 OR (
+         mapping.ended_at IS NULL
+         AND EXISTS (
+           SELECT 1
+           FROM student live_student
+           JOIN centre_students roster_student
+             ON roster_student.user_id = live_student.user_id
+           JOIN centres roster_centre
+             ON roster_centre.id = roster_student.centre_id
+            AND roster_centre.school_id = mapping.school_id
+            AND roster_centre.program_id = mapping.program_id
+            AND roster_centre.is_active IS TRUE
+           WHERE live_student.id = mapping.student_id
+             AND live_student.status IS DISTINCT FROM 'dropout'
+             AND roster_student.academic_year = mapping.academic_year
+             AND roster_student.program_id = mapping.program_id
+             AND roster_student.grade IN (11, 12)
+         )
+       ))
        ORDER BY mapping.student_id, mapping.started_at DESC, mapping.id DESC
      ), base AS (
        SELECT mapped.*, school.name AS school_name, school.code AS school_code,

@@ -1,5 +1,6 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
 import { query } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
@@ -148,6 +149,21 @@ async function ownsActiveMapping(params: {
        AND program_id = $4
        AND academic_year = $5
        AND ended_at IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM student
+         JOIN centre_students roster_student ON roster_student.user_id = student.user_id
+         JOIN centres roster_centre
+           ON roster_centre.id = roster_student.centre_id
+          AND roster_centre.school_id = $2
+          AND roster_centre.program_id = $4
+          AND roster_centre.is_active IS TRUE
+         WHERE student.id = $3
+           AND student.status IS DISTINCT FROM 'dropout'
+           AND roster_student.academic_year = $5
+           AND roster_student.program_id = $4
+           AND roster_student.grade IN (11, 12)
+       )
      LIMIT 1`,
     [
       params.actorUserId,
@@ -194,6 +210,11 @@ async function teacherAccess(params: {
   const actorUserId = await findEligibleTeacherUserId(params.email, params.school.id);
   if (actorUserId === null) return denied(403, "Forbidden");
   if (MAPPING_REQUIRED_ACTIONS.has(params.action)) {
+    await reconcileHolisticMappings({
+      academicYear: params.academicYear ?? CURRENT_ACADEMIC_YEAR,
+      schoolId: params.school.id,
+      studentIds: params.studentId ? [params.studentId] : undefined,
+    });
     const ownsMapping = params.studentId && await ownsActiveMapping({
       actorUserId,
       schoolId: params.school.id,
@@ -269,6 +290,14 @@ export async function requireHolisticMentorshipAccess(
       school,
       studentId: options.studentId,
       academicYear: options.academicYear,
+    });
+  }
+
+  if (MAPPING_REQUIRED_ACTIONS.has(action) && options.studentId) {
+    await reconcileHolisticMappings({
+      academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
+      schoolId: school?.id,
+      studentIds: [options.studentId],
     });
   }
 

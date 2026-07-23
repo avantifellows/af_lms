@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ withTransaction: vi.fn(), query: vi.fn() }));
+vi.mock("./holistic-reconciliation", () => ({ reconcileHolisticMappings: vi.fn() }));
 
 import { query, withTransaction } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { getHolisticProfileAdmin, requestHolisticProfileRegeneration } from "./holistic-profiles";
 
 const mockTransaction = vi.mocked(withTransaction);
 const mockQuery = vi.mocked(query);
+const mockReconcile = vi.mocked(reconcileHolisticMappings);
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 const requestKey = "d16e7d82-dc60-4b79-a064-9ed80badc119";
@@ -32,6 +35,7 @@ function mockRegenerationClient(
 describe("Holistic Profile regeneration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockReconcile.mockResolvedValue(0);
     process.env.APP_ENV = "staging";
     process.env.HOLISTIC_PROFILE_ETL_URL = "https://etl.example.test/api/internal/holistic-profiles/regeneration-requests/";
     process.env.HOLISTIC_PROFILE_ETL_TOKEN = "machine-token";
@@ -47,6 +51,11 @@ describe("Holistic Profile regeneration", () => {
     expect(mockQuery.mock.calls[1][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
     expect(mockQuery.mock.calls[1][0]).toContain("configuration.state = 'active'");
     expect(mockQuery.mock.calls[1][0]).toContain("configuration.id = request.prompt_configuration_id");
+    expect(mockQuery.mock.calls[0][0]).toContain("FROM student live_student");
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      studentIds: [41],
+    });
   });
 
   it("records actor, Student, Active configuration and force before sending only the request reference", async () => {

@@ -74,6 +74,19 @@ async function loadScope(
        WHERE mapping.student_id = $2 AND mapping.school_id = $3
          AND mapping.program_id = $4 AND mapping.academic_year = $5
          AND mapping.ended_at IS NULL AND plan.program_id = $4
+         AND EXISTS (
+           SELECT 1
+           FROM centre_students roster_student
+           JOIN centres roster_centre
+             ON roster_centre.id = roster_student.centre_id
+            AND roster_centre.school_id = mapping.school_id
+            AND roster_centre.program_id = mapping.program_id
+            AND roster_centre.is_active IS TRUE
+           WHERE roster_student.user_id = student_user.id
+             AND roster_student.academic_year = mapping.academic_year
+             AND roster_student.program_id = mapping.program_id
+             AND roster_student.grade IN (11, 12)
+         )
          AND NOT EXISTS (
            SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
            WHERE deletion.student_id = mapping.student_id

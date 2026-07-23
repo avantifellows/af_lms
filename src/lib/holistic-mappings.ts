@@ -1,5 +1,6 @@
 import { PROGRAM_IDS } from "./constants";
 import { query, withTransaction } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { PM_SEAT_ROLES } from "./staff-shared";
 import type { PoolClient } from "pg";
 
@@ -348,6 +349,7 @@ export async function assignHolisticMentees(params: {
   takeoverConfirmed: boolean;
 }): Promise<HolisticMappingMutationResult> {
   const studentIds = params.selections.map(({ studentId }) => studentId).sort((a, b) => a - b);
+  await reconcileHolisticMappings({ academicYear: params.academicYear, studentIds });
   try {
     return await withTransaction((client) => assignInTransaction(client, params, studentIds));
   } catch (error) {
@@ -406,6 +408,7 @@ export async function removeHolisticMentees(params: {
   if (!params.confirmed) {
     return { ok: false, status: 422, error: "Removal confirmation is required" };
   }
+  await reconcileHolisticMappings({ academicYear: params.academicYear, studentIds });
   try {
     return await withTransaction((client) => removeInTransaction(client, params, studentIds));
   } catch (error) {
@@ -422,6 +425,10 @@ export async function listHolisticAssignmentRoster(params: {
   search?: string;
   grade?: 11 | 12 | null;
 }): Promise<HolisticAssignmentRosterStudent[]> {
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+  });
   const rows = await query<RosterRow>(
     `SELECT st.id AS student_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,

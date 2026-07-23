@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn() }));
+vi.mock("./holistic-reconciliation", () => ({ reconcileHolisticMappings: vi.fn() }));
 
 import { query } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { requireHolisticMentorshipAccess } from "./holistic-mentorship";
 
 const mockQuery = vi.mocked(query);
+const mockReconcile = vi.mocked(reconcileHolisticMappings);
 
 function permissionRow(
   role: string,
@@ -43,6 +46,8 @@ function mockTeacherScope(overrides: Record<string, unknown> = {}) {
 describe("requireHolisticMentorshipAccess", () => {
   beforeEach(() => {
     mockQuery.mockReset();
+    mockReconcile.mockReset();
+    mockReconcile.mockResolvedValue(0);
   });
 
   it("rejects unauthenticated access before data access", async () => {
@@ -240,6 +245,17 @@ describe("requireHolisticMentorshipAccess", () => {
         { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
       )
     ).resolves.toMatchObject({ ok: true, actorUserId: 10 });
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      schoolId: 20,
+      studentIds: [41],
+    });
+    expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
+      "FROM student"
+    );
+    expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
+      "JOIN centre_students roster_student"
+    );
   });
 
   it.each(["admin", "holistic_mentorship_admin"] as const)(

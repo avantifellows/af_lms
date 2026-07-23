@@ -1,5 +1,6 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
 import { query, withTransaction } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 
 type RegenerationState = "queued" | "running" | "completed" | "failed";
 
@@ -7,6 +8,7 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
   summaries: Array<{ position: number; title: string; summary: string }>;
   regeneration: null | { requestKey: string; state: RegenerationState; requestedAt: string; errorCode: string | null };
 }> {
+  await reconcileHolisticMappings({ academicYear, studentIds: [studentId] });
   const [summaries, requests] = await Promise.all([
     query<{ position: number; title: string; summary: string }>(
       `SELECT summary.position, summary.question_set_title AS title, summary.summary
@@ -19,7 +21,25 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
          AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
                      WHERE mapping.student_id = journey.student_id AND mapping.program_id = $2
                        AND mapping.academic_year = $3
-                       AND ($3 <> $4 OR mapping.ended_at IS NULL))
+                       AND ($3 <> $4 OR (
+                         mapping.ended_at IS NULL
+                         AND EXISTS (
+                           SELECT 1
+                           FROM student live_student
+                           JOIN centre_students roster_student
+                             ON roster_student.user_id = live_student.user_id
+                           JOIN centres roster_centre
+                             ON roster_centre.id = roster_student.centre_id
+                            AND roster_centre.school_id = mapping.school_id
+                            AND roster_centre.program_id = mapping.program_id
+                            AND roster_centre.is_active IS TRUE
+                           WHERE live_student.id = mapping.student_id
+                             AND live_student.status IS DISTINCT FROM 'dropout'
+                             AND roster_student.academic_year = mapping.academic_year
+                             AND roster_student.program_id = mapping.program_id
+                             AND roster_student.grade IN (11, 12)
+                         )
+                       )))
        ORDER BY summary.position`,
       [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
@@ -32,7 +52,25 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
          AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
                      WHERE mapping.student_id = $1 AND mapping.program_id = $2
                        AND mapping.academic_year = $3
-                       AND ($3 <> $4 OR mapping.ended_at IS NULL))
+                       AND ($3 <> $4 OR (
+                         mapping.ended_at IS NULL
+                         AND EXISTS (
+                           SELECT 1
+                           FROM student live_student
+                           JOIN centre_students roster_student
+                             ON roster_student.user_id = live_student.user_id
+                           JOIN centres roster_centre
+                             ON roster_centre.id = roster_student.centre_id
+                            AND roster_centre.school_id = mapping.school_id
+                            AND roster_centre.program_id = mapping.program_id
+                            AND roster_centre.is_active IS TRUE
+                           WHERE live_student.id = mapping.student_id
+                             AND live_student.status IS DISTINCT FROM 'dropout'
+                             AND roster_student.academic_year = mapping.academic_year
+                             AND roster_student.program_id = mapping.program_id
+                             AND roster_student.grade IN (11, 12)
+                         )
+                       )))
        ORDER BY request.inserted_at DESC, request.id DESC LIMIT 1`,
       [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
@@ -63,6 +101,10 @@ export async function requestHolisticProfileRegeneration(params: {
   if (!endpoint || !token || (environment !== "staging" && environment !== "production")) {
     return { ok: false, status: 500, error: "Profile regeneration is not configured" };
   }
+  await reconcileHolisticMappings({
+    academicYear: CURRENT_ACADEMIC_YEAR,
+    studentIds: [params.studentId],
+  });
   const request = await withTransaction(async (client) => {
     const scope = await client.query<{
       actor_user_id: number | string;

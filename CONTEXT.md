@@ -374,7 +374,9 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Holistic Mentor-Mentee Mappings** retain their School, Program, academic year, Mentor, Student, start/end times, action actor or system source, and end reason as history; v1 has no separate Mapping-history view or export
 - At academic-year rollover, an active **Holistic Mentor-Mentee Mapping** creates a new-year Mapping only when both Mentor and Mentee remain eligible at the same School; the prior-year Mapping remains as history
 - Losing Mentor eligibility automatically ends affected active Mappings, makes those Students unassigned, and removes the former Mentor's access without blocking the staff change
-- A Mentee becoming ineligible automatically ends the active Mapping while preserving Mapping and Notes history; v1 has no cross-School transfer workflow
+- Live eligibility is the access boundary for Holistic Profile, Context, Notes, and Mapping actions; an active Mapping row alone never grants access
+- AF LMS reconciles stale active Mappings before Holistic roster, progress, direct Student, Profile, Notes, and Mapping work; School/Program enrollment writes may leave the row active until that next Holistic request
+- Reconciliation ends ineligible Mappings idempotently, preserves submitted Notes and Mapping history, and erases unsubmitted draft answers with a content-free audit; v1 has no cross-School transfer workflow
 - Hard-deleting a User is blocked when Holistic Mapping or authored-Notes history exists
 - Only a Holistic Mentee's currently assigned **Holistic Mentor** can draft and submit that Mentee's Post-Session Notes
 - A Holistic Mentee's currently assigned **Holistic Mentor** may read prior submitted Post-Session Notes for that Mentee but may edit only Notes they authored; a former Mentor loses access after reassignment, Admins remain read-only, and no reopen workflow is required

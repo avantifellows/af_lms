@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn() }));
+vi.mock("./holistic-reconciliation", () => ({ reconcileHolisticMappings: vi.fn() }));
 
 import { query } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
   DEFAULT_HOLISTIC_PROGRESS_SORT,
   formatHolisticProgressCsv,
@@ -13,6 +15,7 @@ import {
 } from "./holistic-progress";
 
 const mockQuery = vi.mocked(query);
+const mockReconcile = vi.mocked(reconcileHolisticMappings);
 
 const databaseRow = {
   student_id: "41",
@@ -43,7 +46,11 @@ const databaseRow = {
 };
 
 describe("Holistic progress", () => {
-  beforeEach(() => mockQuery.mockReset());
+  beforeEach(() => {
+    mockQuery.mockReset();
+    mockReconcile.mockReset();
+    mockReconcile.mockResolvedValue(0);
+  });
 
   it("returns full-result counts while applying fixed 50-row pagination", async () => {
     mockQuery.mockResolvedValueOnce([databaseRow]);
@@ -77,7 +84,13 @@ describe("Holistic progress", () => {
     const sql = String(mockQuery.mock.calls[0][0]);
     expect(sql).toContain("MIN(mapping.started_at) OVER (PARTITION BY mapping.student_id) AS first_started_at");
     expect(sql).toContain("AND transition.occurred_at <= mapped.first_started_at");
-    expect(sql).toContain("WHERE ($2 <> $11 OR mapping.ended_at IS NULL)");
+    expect(sql).toContain("WHERE ($2 <> $11 OR (");
+    expect(sql).toContain("mapping.ended_at IS NULL");
+    expect(sql).toContain("FROM student live_student");
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      schoolCode: undefined,
+    });
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
     expect(sql).toContain("THEN 'active'");
     expect(sql).toContain("WHEN notes.state = 'submitted' THEN 'completed'");

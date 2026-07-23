@@ -120,6 +120,11 @@ record this checklist:
   drill-down, inspect the downloaded CSV, and request Profile regeneration.
 - Cross-repo: observe the regeneration complete in `etl-next`, then confirm the
   new active Profile appears in AF LMS without exposing raw answers.
+- Cross-repo eligibility: move a mapped disposable Student to another School or
+  Program through db-service. Confirm the Mapping remains stored until the next
+  Holistic roster or direct-page request, then closes with
+  `end_source = 'af_lms_student_eligibility'`; the former Mentor must receive
+  `404` without Profile, Context, or Notes content being returned.
 - Global Admin: verify role management and approved deletion gates. On a
   disposable Student, confirm Profile, Post-Session, and Historical answer
   content is erased once, the immutable content-free tombstone remains, and

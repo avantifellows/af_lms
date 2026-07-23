@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./db", () => ({ query: vi.fn(), withTransaction: vi.fn() }));
+vi.mock("./holistic-reconciliation", () => ({ reconcileHolisticMappings: vi.fn() }));
 
 import { query, withTransaction } from "./db";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
   assignHolisticMentees,
   listHolisticAssignmentRoster,
@@ -11,6 +13,7 @@ import {
 
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
+const mockReconcile = vi.mocked(reconcileHolisticMappings);
 const mockClientQuery = vi.fn();
 
 describe("Holistic Mentor-Mentee Mappings", () => {
@@ -18,6 +21,8 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     mockQuery.mockReset();
     mockClientQuery.mockReset();
     mockWithTransaction.mockReset();
+    mockReconcile.mockReset();
+    mockReconcile.mockResolvedValue(0);
     mockWithTransaction.mockImplementation(async (fn) =>
       fn({ query: mockClientQuery } as never)
     );
@@ -71,6 +76,10 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).not.toMatch(/profile|historical|academic_mentorship/i);
     expect(sql).not.toContain("LIMIT 100");
     expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      schoolId: 4,
+    });
   });
 
   it("claims multiple eligible Students atomically with deterministic audit metadata", async () => {
@@ -120,6 +129,10 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       String(text).includes("FROM holistic_mentorship_mentor_mentee_mappings")
     );
     expect(mappingLock?.[1]).toEqual([[41, 42], "2026-2027", 4, 1]);
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      studentIds: [41, 42],
+    });
   });
 
   it("removes only confirmed actor-owned Mappings while retaining history", async () => {
