@@ -110,7 +110,7 @@ export function getFeatureAccess(
  */
 export function ownsRecord(
   permission: UserPermission | null,
-  programId: number | null,
+  programId: number | string | null,
   opts?: { isPasscodeUser?: boolean },
 ): boolean {
   // Passcode users own all records at their school
@@ -120,9 +120,10 @@ export function ownsRecord(
   if (permission.role === "admin") return true;
   // Unassigned records are editable by anyone with feature-level edit
   if (programId === null) return true;
-  // Check program_ids
+  // Check program_ids. Coerce before comparing: pg returns bigint columns
+  // (e.g. batch.program_id) as strings, and [1].includes("1") is false.
   if (!permission.program_ids || permission.program_ids.length === 0) return false;
-  return permission.program_ids.includes(programId);
+  return permission.program_ids.includes(Number(programId));
 }
 
 export interface UserPermission {
@@ -447,7 +448,7 @@ export async function getStudentSchool(
   studentPkId: number | string,
 ): Promise<StudentScope | null> {
   const rows = await query<StudentScope>(
-    `SELECT sch.code, sch.region, b.program_id
+    `SELECT sch.code, sch.region, b.program_id::int AS program_id
      FROM student s
      JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
      JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
