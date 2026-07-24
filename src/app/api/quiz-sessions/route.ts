@@ -119,7 +119,10 @@ async function fetchQuizTemplateResource(
 
   const rawResource = (await response.json()) as RawQuizTemplateResource;
   const parsed = parseQuizTemplateResource(rawResource);
-  return parsed.type === "quiz_template" ? parsed : null;
+  // Accept both quiz papers and form templates — the create path handles both.
+  return parsed.type === "quiz_template" || parsed.type === "form_template"
+    ? parsed
+    : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -276,7 +279,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!body.stream) {
+  const selectedTemplate = await fetchQuizTemplateResource(Number(body.resourceId));
+  if (!selectedTemplate) {
+    return NextResponse.json(
+      { error: "Selected template was not found" },
+      { status: 404 }
+    );
+  }
+
+  const isForm = selectedTemplate.testType === "form";
+
+  // stream is required for quiz papers (it must match the batch); forms use a
+  // fixed "Others" stream, so it is not required in the form payload.
+  if (!body.stream && !isForm) {
     return NextResponse.json(
       { error: "stream is required" },
       { status: 400 }
@@ -290,22 +305,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const selectedTemplate = await fetchQuizTemplateResource(Number(body.resourceId));
-  if (!selectedTemplate) {
-    return NextResponse.json(
-      { error: "Selected template was not found" },
-      { status: 404 }
-    );
-  }
-
-  if (selectedTemplate.grade === null) {
+  // Form templates (e.g. Student Profile) can be grade-agnostic — grade comes
+  // from the selected batch, sent as body.grade. Quiz papers still require it on
+  // the template.
+  const resolvedGrade = selectedTemplate.grade ?? (isForm ? body.grade ?? null : null);
+  if (resolvedGrade === null) {
     return NextResponse.json(
       { error: "Selected template is missing grade metadata" },
       { status: 400 }
     );
   }
 
-  if (selectedTemplate.stream && selectedTemplate.stream !== body.stream) {
+  // Forms carry a fixed stream ("Others") that intentionally does not match a
+  // batch's engineering/medical stream, so skip the stream-match check for them.
+  if (!isForm && selectedTemplate.stream && selectedTemplate.stream !== body.stream) {
     return NextResponse.json(
       { error: "Selected template stream does not match selected batches" },
       { status: 400 }
@@ -335,10 +348,26 @@ export async function POST(request: NextRequest) {
 
   const sessionName = body.name?.trim() || getDefaultSessionName(selectedTemplate.name);
   const testType = selectedTemplate.testType || "assessment";
-  const shuffle = body.shuffle ?? false;
-  const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
+  const shuffle = isForm ? false : body.shuffle ?? false;
+  // Forms are single-page questionnaires: gurukul_format_type is always "qa".
+  const gurukulFormatType = isForm
+    ? "qa"
+    : shuffle
+      ? "qa"
+      : body.gurukulFormatType || "both";
   const cmsLink = selectedTemplate.cmsLink;
   const cmsSourceId = selectedTemplate.cmsSourceId;
+
+  // Form single-page header: the template carries a base header
+  // (single_page_header_text). For a grade-agnostic template (grade sourced from
+  // the batch) append the grade so the same form reads "… Grade 11" / "… Grade 12"
+  // per batch. Falls back to the template name if no header was set.
+  const formHeaderBase = selectedTemplate.singlePageHeaderText || selectedTemplate.name || "";
+  const formHeaderText = isForm
+    ? selectedTemplate.grade === null
+      ? `${formHeaderBase} Grade ${resolvedGrade}`.trim()
+      : formHeaderBase.trim()
+    : "";
 
   // Resolve the program group + auth type from the selected class batch via the
   // batch→auth_group FK (was hardcoded to EnableStudents/"ID,DOB"). Gurukul
@@ -383,9 +412,10 @@ export async function POST(request: NextRequest) {
       batch_id: Array.isArray(body.classBatchIds)
         ? body.classBatchIds.join(",")
         : body.classBatchIds,
-      grade: selectedTemplate.grade,
+      grade: resolvedGrade,
       course: selectedTemplate.course,
-      stream: body.stream,
+      // Forms carry a fixed canonical stream ("Others"); quizzes use the batch stream.
+      stream: isForm ? "Others" : body.stream,
       resource_id: selectedTemplate.id,
       resource_code: selectedTemplate.code,
       resource_name: selectedTemplate.name,
@@ -395,8 +425,11 @@ export async function POST(request: NextRequest) {
       test_purpose: selectedTemplate.testPurpose,
       test_type: testType,
       gurukul_format_type: gurukulFormatType,
-      marking_scheme:
-        testType === "homework" || testType === "form" ? "1,0" : "4,-1",
+      marking_scheme: isForm
+        ? "1, 0"
+        : testType === "homework"
+          ? "1,0"
+          : "4,-1",
       optional_limits: selectedTemplate.optionalLimits,
       cms_test_id: cmsLink,
       cms_link: cmsLink,
@@ -413,13 +446,19 @@ export async function POST(request: NextRequest) {
       admin_testing_link: "",
       admin_testing_omr_link: "",
       number_of_fields_in_popup_form: "",
-      show_answers: body.showAnswers ?? true,
-      show_scores: body.showScores ?? true,
+      // Forms have no scores and no answer review (the form player short-circuits
+      // both regardless), so both are fixed false — matching the fixtures. Quizzes
+      // keep the caller's choices (defaulting to show both).
+      show_answers: isForm ? false : body.showAnswers ?? true,
+      show_scores: isForm ? false : body.showScores ?? true,
       shuffle,
       next_step_url: "",
       next_step_text: "",
-      single_page_mode: false,
-      single_page_header_text: "",
+      // Forms render as a single page with a header; sessionCreator force-sets
+      // single_page_mode for forms anyway, but set it here for a correct session row.
+      single_page_mode: isForm,
+      single_page_header_text: formHeaderText,
+      require_all_questions: isForm ? selectedTemplate.requireAllQuestions : false,
       test_takers_count: 100,
       status: "pending",
       date_created: utcToISTDate(new Date().toISOString()),

@@ -9,7 +9,7 @@ import { getSchoolByPasscode } from "./permissions";
 export const DEV_LOGIN_PERSONAS = {
   admin: { email: "pritam@avantifellows.org", name: "Dev Admin" },
   program_manager: { email: "deepansh.mathur96@gmail.com", name: "Dev PM" },
-  teacher: { email: "sanghamitrapatil06@gmail.com", name: "Dev Teacher" },
+  teacher: { email: "teja.surya59@gmail.com", name: "Dev Teacher" },
   read_only: { email: "lokesh@avantifellows.org", name: "Dev Read-Only" },
 } as const;
 

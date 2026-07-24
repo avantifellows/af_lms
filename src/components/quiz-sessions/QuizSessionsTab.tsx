@@ -89,7 +89,7 @@ const GradeOptions = [11, 12];
 
 // New-CMS chapter-test picker (source toggle inside session creation). Test subtypes +
 // their labels are shared with the server routes via CMS_TEST_TYPE_OPTIONS (@/lib/cms-tests).
-type TestSource = "legacy" | "cms";
+type TestSource = "legacy" | "cms" | "form";
 const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
   { value: "jee_main", label: "JEE Main" },
   { value: "jee_advanced", label: "JEE Advanced" },
@@ -1064,7 +1064,13 @@ function QuizSessionCreateModal({
   }, [startTime, endTimeEdited]);
 
   useEffect(() => {
-    if (!batchDerivation.stream || !selectedGrade || !testFormat) {
+    // CMS mode has its own picker (not template-based); skip this effect.
+    if (testSource === "cms") return;
+
+    // Form templates are grade-agnostic and stream-fixed, so they load as soon as
+    // Form mode is active — no batch stream / grade / format gating like papers.
+    const isFormMode = testSource === "form";
+    if (!isFormMode && (!batchDerivation.stream || !selectedGrade || !testFormat)) {
       setTemplates([]);
       setSelectedTemplateId(null);
       setTemplateError(null);
@@ -1077,13 +1083,15 @@ function QuizSessionCreateModal({
       setTemplateError(null);
 
       try {
-        const params = new URLSearchParams({
-          grade: selectedGrade,
-          stream: batchDerivation.stream,
-          testFormat,
-        });
+        const url = isFormMode
+          ? `/api/quiz-sessions/form-templates`
+          : `/api/quiz-sessions/templates?${new URLSearchParams({
+              grade: selectedGrade,
+              stream: batchDerivation.stream,
+              testFormat,
+            }).toString()}`;
 
-        const response = await fetch(`/api/quiz-sessions/templates?${params.toString()}`);
+        const response = await fetch(url);
         if (!response.ok) {
           throw new Error("Failed to fetch templates");
         }
@@ -1095,7 +1103,11 @@ function QuizSessionCreateModal({
         console.error(err);
         if (!cancelled) {
           setTemplates([]);
-          setTemplateError("Failed to load papers for the selected batch and format.");
+          setTemplateError(
+            isFormMode
+              ? "Failed to load form templates."
+              : "Failed to load papers for the selected batch and format."
+          );
         }
       } finally {
         if (!cancelled) {
@@ -1109,6 +1121,7 @@ function QuizSessionCreateModal({
       cancelled = true;
     };
   }, [
+    testSource,
     batchDerivation.stream,
     selectedGrade,
     testFormat,
@@ -1124,6 +1137,17 @@ function QuizSessionCreateModal({
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates]
   );
+
+  const isForm = testSource === "form";
+
+  // Forms pick grade first (like legacy papers), then show templates that fit:
+  // grade-specific templates only under their own grade; grade-agnostic ones
+  // (grade === null, e.g. Student Profile) under any selected grade.
+  const formTemplatesForGrade = useMemo(() => {
+    if (!isForm || !selectedGrade) return [];
+    const g = Number(selectedGrade);
+    return templates.filter((t) => t.grade === null || t.grade === g);
+  }, [isForm, selectedGrade, templates]);
 
   // CMS cascade: fetch in-syllabus chapters once exam-track + grade + subject are chosen.
   // Only chapter tests drill by chapter; major tests skip this step entirely.
@@ -1270,6 +1294,10 @@ function QuizSessionCreateModal({
         return "Chapter is required.";
       }
       if (selectedCmsTestId === null) return "Please select a CMS test.";
+    } else if (testSource === "form") {
+      // Grade is chosen first, then a form is picked from the grade-matching list.
+      if (!selectedGrade) return "Grade is required.";
+      if (!selectedTemplate) return "Please select a form.";
     } else {
       if (!selectedGrade) return "Grade is required.";
       if (!testFormat) return "Test format is required.";
@@ -1361,12 +1389,17 @@ function QuizSessionCreateModal({
         return;
       }
 
-      if (!selectedTemplate || selectedTemplate.grade === null) return;
+      if (!selectedTemplate) return;
+      // Grade: quiz papers require it on the template; forms fall back to the
+      // batch-derived grade when the template is grade-agnostic.
+      const resolvedGrade =
+        selectedTemplate.grade ?? (isForm ? Number(selectedGrade) || null : null);
+      if (resolvedGrade === null) return;
 
       const payload = {
         name: name.trim() || getDefaultSessionName(selectedTemplate.name),
         resourceId: selectedTemplate.id,
-        grade: selectedTemplate.grade,
+        grade: resolvedGrade,
         parentBatchId: batchDerivation.parentBatchId,
         classBatchIds,
         stream: batchDerivation.stream,
@@ -1479,6 +1512,7 @@ function QuizSessionCreateModal({
                       [
                         { value: "legacy", label: "Legacy paper" },
                         { value: "cms", label: "New CMS Test" },
+                        { value: "form", label: "Form / Survey" },
                       ] as { value: TestSource; label: string }[]
                     ).map((option) => (
                       <button
@@ -1626,6 +1660,95 @@ function QuizSessionCreateModal({
                       })}
                     </div>
                   )}
+                  </div>
+                  )}
+
+                  {testSource === "form" && (
+                  <div className="space-y-4">
+                    <div>
+                      <label
+                        htmlFor="form-session-grade"
+                        className="mb-2 block text-xs font-bold uppercase tracking-wide text-text-muted"
+                      >
+                        Grade
+                      </label>
+                      <select
+                        id="form-session-grade"
+                        value={selectedGrade}
+                        onChange={(event) => {
+                          setSelectedGrade(event.target.value);
+                          setSelectedTemplateId(null);
+                        }}
+                        className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                      >
+                        <option value="">Select grade</option>
+                        {GradeOptions.map((grade) => (
+                          <option key={grade} value={grade}>
+                            {grade}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {loadingTemplates ? (
+                      <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                        Loading forms...
+                      </div>
+                    ) : templateError ? (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+                        {templateError}
+                      </div>
+                    ) : !selectedGrade ? (
+                      <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                        Select a grade to see available forms.
+                      </div>
+                    ) : formTemplatesForGrade.length === 0 ? (
+                      <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-3 text-sm text-text-secondary">
+                        No forms are available for this grade.
+                      </div>
+                    ) : (
+                      <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
+                        {formTemplatesForGrade.map((template) => {
+                          const isSelected = template.id === selectedTemplateId;
+                          return (
+                            <div
+                              key={template.id}
+                              role="button"
+                              aria-pressed={isSelected}
+                              tabIndex={0}
+                              onClick={() => toggleTemplate(template.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  toggleTemplate(template.id);
+                                }
+                              }}
+                              className={`flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left last:border-b-0 ${
+                                isSelected
+                                  ? "bg-success-bg"
+                                  : "bg-bg-card hover:bg-hover-bg"
+                              }`}
+                            >
+                              <span
+                                className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border text-[11px] leading-none ${
+                                  isSelected
+                                    ? "border-accent bg-accent text-text-on-accent"
+                                    : "border-border bg-bg-card text-transparent"
+                                }`}
+                                aria-hidden="true"
+                              >
+                                ✓
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-semibold text-text-primary">
+                                  {template.name}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                   )}
 
@@ -1939,66 +2062,73 @@ function QuizSessionCreateModal({
                           />
                         </div>
 
-                        <label className="flex items-center gap-2 text-sm text-text-primary">
-                          <input
-                            type="checkbox"
-                            checked={showScores}
-                            onChange={(event) => setShowScores(event.target.checked)}
-                            className="h-4 w-4 accent-accent"
-                          />
-                          Show scores after submission
-                        </label>
-                        <label className="flex items-center gap-2 text-sm text-text-primary">
-                          <input
-                            type="checkbox"
-                            checked={showAnswers}
-                            onChange={(event) => setShowAnswers(event.target.checked)}
-                            className="h-4 w-4 accent-accent"
-                          />
-                          Show answers after submission
-                        </label>
-                        <label className="flex items-center gap-2 text-sm text-text-primary">
-                          <input
-                            type="checkbox"
-                            checked={shuffle}
-                            onChange={(event) => {
-                              const checked = event.target.checked;
-                              setShuffle(checked);
-                              if (checked) setGurukulFormatType(QA_GURUKUL_FORMAT);
-                            }}
-                            className="h-4 w-4 accent-accent"
-                          />
-                          Shuffle question order
-                        </label>
+                        {/* Forms have fixed semantics — always q&a, no shuffle,
+                            review always on, no scores — so these quiz-only
+                            controls are hidden; the server sends the fixed values. */}
+                        {!isForm && (
+                          <>
+                            <label className="flex items-center gap-2 text-sm text-text-primary">
+                              <input
+                                type="checkbox"
+                                checked={showScores}
+                                onChange={(event) => setShowScores(event.target.checked)}
+                                className="h-4 w-4 accent-accent"
+                              />
+                              Show scores after submission
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-text-primary">
+                              <input
+                                type="checkbox"
+                                checked={showAnswers}
+                                onChange={(event) => setShowAnswers(event.target.checked)}
+                                className="h-4 w-4 accent-accent"
+                              />
+                              Show answers after submission
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-text-primary">
+                              <input
+                                type="checkbox"
+                                checked={shuffle}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  setShuffle(checked);
+                                  if (checked) setGurukulFormatType(QA_GURUKUL_FORMAT);
+                                }}
+                                className="h-4 w-4 accent-accent"
+                              />
+                              Shuffle question order
+                            </label>
 
-                        <div className="space-y-2">
-                          <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
-                            Gurukul Format
-                          </div>
-                          <div className="inline-flex w-full flex-wrap overflow-hidden rounded-lg border border-border sm:w-auto">
-                            {GurukulFormatOptions.map((option) => {
-                              const selected = gurukulFormatType === option.value;
-                              return (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  onClick={() => {
-                                    if (shuffle && option.value !== QA_GURUKUL_FORMAT) return;
-                                    setGurukulFormatType(option.value);
-                                  }}
-                                  disabled={shuffle && option.value !== QA_GURUKUL_FORMAT}
-                                  className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
-                                    selected
-                                      ? "bg-accent text-text-on-accent"
-                                      : "bg-bg-card text-text-primary hover:bg-hover-bg"
-                                  }`}
-                                >
-                                  {option.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
+                            <div className="space-y-2">
+                              <div className="text-xs font-bold uppercase tracking-wide text-text-muted">
+                                Gurukul Format
+                              </div>
+                              <div className="inline-flex w-full flex-wrap overflow-hidden rounded-lg border border-border sm:w-auto">
+                                {GurukulFormatOptions.map((option) => {
+                                  const selected = gurukulFormatType === option.value;
+                                  return (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      onClick={() => {
+                                        if (shuffle && option.value !== QA_GURUKUL_FORMAT) return;
+                                        setGurukulFormatType(option.value);
+                                      }}
+                                      disabled={shuffle && option.value !== QA_GURUKUL_FORMAT}
+                                      className={`min-h-[44px] px-3 py-2 text-xs font-bold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
+                                        selected
+                                          ? "bg-accent text-text-on-accent"
+                                          : "bg-bg-card text-text-primary hover:bg-hover-bg"
+                                      }`}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -2441,6 +2571,10 @@ function QuizSessionDetailsModal({
                   label="Test Code"
                   value={getMetaString(session.meta_data, "test_code") || "-"}
                   mono
+                />
+                <InfoRow
+                  label="Grade"
+                  value={getMetaScalar(session.meta_data, "grade") || "-"}
                 />
                 <InfoRow
                   label="Ranking Cutoff"

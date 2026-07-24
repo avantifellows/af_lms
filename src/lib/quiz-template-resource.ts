@@ -21,6 +21,8 @@ export interface QuizTemplateTypeParams {
   test_code?: string;
   test_name?: string;
   sheet_name?: string;
+  single_page_header_text?: string;
+  require_all_questions?: boolean;
 }
 
 export interface RawQuizTemplateResource {
@@ -54,6 +56,8 @@ export interface QuizTemplateResource {
   rankingCutoffDate: string;
   isActive: boolean;
   sheetName: string;
+  singlePageHeaderText: string;
+  requireAllQuestions: boolean;
 }
 
 function parseJsonIfNeeded<T>(value: T | string | null | undefined): T | null {
@@ -133,5 +137,7 @@ export function parseQuizTemplateResource(
     rankingCutoffDate: `${typeParams.ranking_cutoff_date || ""}`.trim(),
     isActive: typeParams.is_active !== false,
     sheetName: `${typeParams.sheet_name || ""}`.trim(),
+    singlePageHeaderText: `${typeParams.single_page_header_text || ""}`.trim(),
+    requireAllQuestions: typeParams.require_all_questions === true,
   };
 }
