@@ -1,5 +1,6 @@
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 
 import {
   STUDENT_ADDITION_UPLOAD_COLUMNS,
@@ -24,11 +25,18 @@ export interface StudentAdditionUploadRowResult {
   original: Record<string, string>;
 }
 
+export interface StudentAdditionIgnoredExampleRow {
+  row_number: number;
+  matched_fields: string[];
+  message: string;
+}
+
 export type StudentAdditionUploadParseResult =
   | {
       ok: true;
       rows: LmsStudentAdditionRow[];
       rejectedResults: StudentAdditionUploadRowResult[];
+      ignoredRows: StudentAdditionIgnoredExampleRow[];
       totalRows: number;
       originalRows: Map<number, Record<string, string>>;
     }
@@ -40,6 +48,13 @@ interface ParseUploadInput {
   today?: Date;
   academicYear?: string;
 }
+
+const EXAMPLE_ROW_MARKERS = [
+  { column: "Student Name", field: "Student Name", value: "Example Student" },
+  { column: "PEN Number", field: "PEN", value: "12345678910" },
+  { column: "Grade 10 Roll no", field: "Grade 10 Roll No", value: "11111111" },
+  { column: "Parents Phone Number", field: "Phone", value: "9999999999" },
+] as const;
 
 function text(value: unknown): string {
   if (value instanceof Date) {
@@ -105,7 +120,10 @@ function parseRowsFromAoA(
   }
   const missing = missingColumns(headers);
   if (missing.length > 0) {
-    return { ok: false, error: `Missing required columns: ${missing.join(", ")}` };
+    return {
+      ok: false,
+      error: `Missing required columns: ${missing.join(", ")}. Download the latest template and upload it again`,
+    };
   }
 
   const headerIndex = new Map(headers.map((header, index) => [header, index]));
@@ -114,10 +132,27 @@ function parseRowsFromAoA(
   const rejectedResults: StudentAdditionUploadRowResult[] = [];
   const originalRows = new Map<number, Record<string, string>>();
   const dataRows = rows.slice(1).map((sourceRow, index) => ({ sourceRow, index }));
-  const nonBlankRows = dataRows.filter(({ sourceRow }) =>
-    STUDENT_ADDITION_UPLOAD_COLUMNS.some((column) =>
-      text(sourceRow[headerIndex.get(column.label) ?? -1]),
-    ),
+  const ignoredRows = dataRows.flatMap(({ sourceRow, index }) => {
+    const matchedFields = EXAMPLE_ROW_MARKERS
+      .filter((marker) =>
+        text(sourceRow[headerIndex.get(marker.column) ?? -1]) === marker.value,
+      )
+      .map((marker) => marker.field);
+    if (matchedFields.length === 0) return [];
+    const rowNumber = index + 2;
+    return [{
+      row_number: rowNumber,
+      matched_fields: matchedFields,
+      message: `Row ${rowNumber} was ignored as the example row. Matched: ${matchedFields.join(", ")}.`,
+    }];
+  });
+  const ignoredIndexes = new Set(ignoredRows.map((row) => row.row_number - 2));
+  const nonBlankRows = dataRows.filter(
+    ({ sourceRow, index }) =>
+      !ignoredIndexes.has(index) &&
+      STUDENT_ADDITION_UPLOAD_COLUMNS.some((column) =>
+        text(sourceRow[headerIndex.get(column.label) ?? -1]),
+      ),
   );
 
   if (nonBlankRows.length > 200) {
@@ -163,6 +198,7 @@ function parseRowsFromAoA(
     ok: true,
     rows: acceptedRows,
     rejectedResults,
+    ignoredRows,
     totalRows: acceptedRows.length + rejectedResults.length,
     originalRows,
   };
@@ -182,10 +218,33 @@ function parseCsv(data: Buffer, today?: Date, academicYear?: string) {
   return parseRowsFromAoA(rows, today, academicYear);
 }
 
+async function removeBlankXlsxFormatting(data: Buffer) {
+  const archive = await JSZip.loadAsync(data);
+  const worksheetEntries = Object.values(archive.files).filter(
+    (entry) => /^xl\/worksheets\/sheet\d+\.xml$/.test(entry.name),
+  );
+
+  await Promise.all(worksheetEntries.map(async (entry) => {
+    const xml = await entry.async("string");
+    const compacted = xml
+      .replace(/<c\b[^>]*\/>/g, "")
+      .replace(/<row\b[^>]*>\s*<\/row>/g, "")
+      .replace(/<row\b[^>]*\/>/g, "");
+    if (compacted !== xml) archive.file(entry.name, compacted);
+  }));
+
+  return archive.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+    compressionOptions: { level: 1 },
+  });
+}
+
 async function parseXlsx(data: Buffer, today?: Date, academicYear?: string) {
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.load(data as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const compacted = await removeBlankXlsxFormatting(data);
+    await workbook.xlsx.load(compacted as unknown as Parameters<typeof workbook.xlsx.load>[0]);
   } catch {
     return { ok: false, error: "Upload a valid .xlsx file or rejected-row .csv file" } as const;
   }
@@ -230,5 +289,12 @@ export async function parseStudentAdditionUpload({
     return parseXlsx(data, today, academicYear);
   }
 
-  return { ok: true, rows: [], rejectedResults: [], totalRows: 0, originalRows: new Map() };
+  return {
+    ok: true,
+    rows: [],
+    rejectedResults: [],
+    ignoredRows: [],
+    totalRows: 0,
+    originalRows: new Map(),
+  };
 }
