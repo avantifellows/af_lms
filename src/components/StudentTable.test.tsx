@@ -574,6 +574,50 @@ describe("StudentTable - Dropout button", () => {
     expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
   });
 
+  it("shows centre-program Dropout for a teacher (canDropoutStudent off, students=edit on)", () => {
+    render(
+      <StudentTable
+        students={[
+          makeStudent({
+            program_id: PROGRAM_IDS.COE,
+            student_program_ids: [PROGRAM_IDS.COE],
+          }),
+        ]}
+        selectedProgramId={PROGRAM_IDS.COE}
+        grades={defaultGrades}
+        canEditStudent
+        canDropoutStudent={false}
+        isAdmin={false}
+        userProgramIds={[PROGRAM_IDS.COE]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
+  });
+
+  it("keeps NVS Dropout hidden for a teacher even when they manage NVS", () => {
+    render(
+      <StudentTable
+        students={[
+          makeStudent({
+            program_id: PROGRAM_IDS.NVS,
+            student_program_ids: [PROGRAM_IDS.NVS],
+          }),
+        ]}
+        selectedProgramId={PROGRAM_IDS.NVS}
+        grades={defaultGrades}
+        canEditStudent
+        canDropoutStudent={false}
+        isAdmin={false}
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Dropout" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows Dropout button for active editable student", () => {
     render(
       <StudentTable

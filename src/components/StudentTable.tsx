@@ -588,7 +588,17 @@ export default function StudentTable({
   };
 
   const canDropoutFromSelectedProgram = (student: Student): boolean => {
-    if (!canDropoutStudent || effectiveProgramId == null) return false;
+    if (effectiveProgramId == null) return false;
+    // NVS dropout stays admin/PM/PA (canDropoutStudent). Centre-program dropout
+    // follows the general students=edit gate (canEditStudentEntry), so a teacher
+    // can drop a student from a centre they manage — matching the server's
+    // requireStudentProgramDropoutAccess. Per-program ownership is enforced by
+    // userCanManageProgram below.
+    const allowed =
+      effectiveProgramId === PROGRAM_IDS.NVS
+        ? canDropoutStudent
+        : canEditStudentEntry;
+    if (!allowed) return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
     if (isPasscodeUser || !student.student_pk_id) return false;

@@ -18,7 +18,7 @@ edges:
     condition: when adding LMS API routes for create or bulk upload
   - target: patterns/db-service-write.md
     condition: when proxying student writes to the DB Service
-last_updated: 2026-07-22
+last_updated: 2026-07-24
 ---
 
 # Student Addition
@@ -101,6 +101,7 @@ Enrollment date handling is decided: LMS supplies DB Service `start_date` and `a
 - The enrollment tab uses all current batch program IDs, so a student enrolled in CoE and NVS appears in both program views and counts. Program-dropout audits provide `dropout_program_ids`, allowing the same student to appear as CoE Dropout and NVS Active at the same time.
 - The enrollment tab applies Grade and Stream filters together. For NVS, allowed write actors can export an Excel workbook with `Active` and `Dropout` sheets: Active follows both filters, while Dropout always contains every NVS dropout. The export mirrors the upload fields and appends historical APAAR ID and generated Student ID as the final columns.
 - Dropout accepts the opaque `student_pk_id` plus an explicit `program_id`. NVS reuses the Centre-free JNV-only existing-Student gate and derives Student ID or PEN server-side; other Programs retain their existing Centre-based Program dropout gate and Student ID or historical APAAR fallback. Non-admin actors need the target Program in their resolved scope, while the existing global-admin exception remains for newer centre Programs that are not in the hand-maintained JNV Program constants. Both paths proxy LMS `POST /api/student/dropout` to the DB Service program-dropout contract at `PATCH /api/dropout`.
+- Actor role gate differs by path (2026-07): NVS dropout stays admin/PM/PA-only (`requireStudentWriteActor`), but **Centre-program dropout follows the general `students=edit` matrix gate — teachers included** (`requireStudentProgramDropoutAccess` now uses `requireStudentEditActor`, mirroring the restored per-student Edit). Teachers had lost centre dropout in the July program-specific rework (`3386c35`) when it inherited the student-addition allow-list; per-program ownership (`actorHasProgramAccess`, admin bypass) still scopes a teacher to centres they manage. UI mirrors this: `StudentTable.canDropoutFromSelectedProgram` uses `canDropoutStudent` (admin/PM/PA) for NVS and `canEditStudent` (teacher-inclusive) for centre programs; NVS undo is unchanged.
 - LMS-audited DB Service dropout closes only the selected program batch and its group membership. It preserves other program batches, grade, school, and global status; when no current batch remains it applies the existing global dropout flow. Generic non-LMS `/api/dropout` callers retain the existing global behavior.
 - New LMS-audited NVS dropouts can be undone only in the same school and only when the exact prior NVS batch still exists, is open, and no other NVS batch is current. Undo restores that exact batch and membership; if NVS was the final active program, it also restores the exact school/grade records ended by global dropout and clears the generated dropout status. Legacy dropouts without the new audit metadata cannot be undone, and every undo writes a separate audit record.
 - Remaining LMS write proxy not safe enough for school rollout: `src/app/api/student/route.ts` only checks `session` before proxying.
