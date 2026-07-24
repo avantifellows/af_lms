@@ -1,0 +1,12 @@
+# Keep Holistic Mentorship in Main Postgres with repo-specific write boundaries
+
+Main Postgres is the sole durable store for Holistic Mentorship. It holds Phase configuration, Mapping history, Notes and audits, Historical Holistic Notes, generated Student Profiles and provenance, prompt/model configuration, and regeneration requests. This avoids a second operational store in DynamoDB or S3 and keeps live Student Context, progress, and permission checks close to the canonical User, Student, School, and Program identities.
+
+- `db-service` owns additive Ecto migrations, database constraints, targeted synchronous Mapping cleanup for Student status/Grade/dropout mutations, and narrow machine APIs for Profile identity preflight, prompt/config registration, and idempotent Profile ingestion. Generic School/Program enrollment CRUD has no Holistic dependency.
+- `af_lms` owns authenticated product reads and writes directly through its existing Postgres transaction boundary. It also owns demand-driven School/Program Mapping reconciliation before protected Holistic work, the one-time Historical Notes import, academic-year Mapping rollover, live Student Context resolution, progress queries and CSV, and regeneration-request records.
+- `etl-next` owns operator-run Profile generation from the existing BigQuery form-response projection, de-identification, OpenRouter calls, prompt files, retries, and atomic per-Student publication through `db-service`. LMS may enqueue one Student through a scoped `af_lms` service account in `etl-next`; normal batch generation remains manual.
+- `reporting` has no Holistic Mentorship production role in v1. Its request-time DynamoDB/OpenRouter proof of concept remains unrelated and is not extended.
+
+This split follows the existing LMS-owned table pattern while avoiding direct ETL database credentials, duplicated authorization logic, request-time AI generation, and multiple sources of truth. The implementation dependency order is `db-service`, then `etl-next`, then `af_lms`; rollout and data-operation ordering is decided separately.
+
+V1 deliberately consumes the current BigQuery projection without changing its upstream writer. It records the AF Session ID and warehouse insertion time that already exist, uses Question IDs/positions/titles for the schema fingerprint, and uses an answer fingerprint for idempotency. Exact per-user Quiz attempt ID and source update time are not retained in v1.

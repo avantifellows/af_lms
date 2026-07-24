@@ -480,6 +480,22 @@ describe("AddUserModal — role descriptions", () => {
       screen.getByText("Program Admins can oversee scoped schools and manage their own school visits"),
     ).toBeInTheDocument();
   });
+
+  it("offers the dedicated Holistic Mentorship Admin role and its Program 1 scope", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.selectOptions(
+      screen.getAllByRole("combobox")[0],
+      "holistic_mentorship_admin"
+    );
+
+    expect(
+      screen.getByText("Holistic Mentorship Admins can manage Holistic Mentorship for Program 1")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Program 1 Schools/)).toBeInTheDocument();
+    expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

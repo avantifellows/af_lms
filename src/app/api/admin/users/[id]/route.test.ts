@@ -8,14 +8,22 @@ const { mockQuery, mockWithTransaction } = vi.hoisted(() => {
     // top-level and in-transaction queries are captured in one call list.
     mockWithTransaction: vi.fn(
       async (fn: (client: { query: typeof mockQuery }) => Promise<unknown>) =>
-        fn({ query: mockQuery })
+        fn({
+          query: async (...args: unknown[]) => {
+            const result = await mockQuery(...args);
+            return result && !Array.isArray(result) ? result : { rows: result ?? [] };
+          },
+        })
     ),
   };
 });
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: vi.fn() }));
+vi.mock("@/lib/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/permissions")>()),
+  isAdmin: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({
   query: mockQuery,
   withTransaction: mockWithTransaction,
@@ -38,7 +46,12 @@ beforeEach(() => {
   vi.resetAllMocks();
   mockWithTransaction.mockImplementation(
     async (fn: (client: { query: typeof mockQuery }) => Promise<unknown>) =>
-      fn({ query: mockQuery })
+      fn({
+        query: async (...args: unknown[]) => {
+          const result = await mockQuery(...args);
+          return result && !Array.isArray(result) ? result : { rows: result ?? [] };
+        },
+      })
   );
 });
 
@@ -98,6 +111,37 @@ describe("DELETE /api/admin/users/[id]", () => {
     expect(String(mockQuery.mock.calls[1][0])).toContain("m.mentor_user_id = $1");
     expect(mockQuery.mock.calls[1][1]).toEqual([70]);
     expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("revokes LMS access and ends Holistic Mappings without blocking on history", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([{ email: "mentor@test.com", user_id: 70 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([]);
+
+    const req = jsonRequest("http://localhost/api/admin/users/5", { method: "DELETE" });
+    const res = await DELETE(req as never, params);
+
+    expect(res.status).toBe(200);
+    const cleanup = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(cleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_access_revoked",
+      true,
+      expect.any(Array),
+    ]);
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes("DELETE FROM user_permission"))
+    ).toBe(true);
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes("has_mapping_history"))
+    ).toBe(false);
   });
 
   it("resolves legacy null permission user_id by email before mapping-history checks", async () => {
@@ -220,6 +264,58 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(json.success).toBe(true);
   });
 
+  it("ends Holistic Mappings in the same transaction when a Teacher role changes", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery.mockResolvedValueOnce([{ one: 1, user_id: 70 }]);
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: { role: "program_manager", program_ids: [1] },
+    });
+
+    expect((await PATCH(req as never, params)).status).toBe(200);
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    const cleanup = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(cleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_role_changed",
+      true,
+      expect.any(Array),
+    ]);
+  });
+
+  it("changes an unseated user to Program 1-wide Holistic Mentorship Admin", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const req = jsonRequest("http://localhost/api/admin/users/5", {
+      method: "PATCH",
+      body: {
+        level: 1,
+        role: "holistic_mentorship_admin",
+        program_ids: [64],
+        school_codes: ["SCH001"],
+      },
+    });
+
+    expect((await PATCH(req as never, params)).status).toBe(200);
+    expect(mockQuery.mock.calls[1][1]).toEqual([
+      3,
+      "holistic_mentorship_admin",
+      null,
+      null,
+      [1],
+      undefined,
+      null,
+      "5",
+    ]);
+  });
+
   it("rejects (409) editing school_codes for a user with a centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
@@ -269,21 +365,17 @@ describe("PATCH /api/admin/users/[id]", () => {
     expect(updateArgs[2]).toEqual(["54019"]); // school_codes applied
   });
 
-  it("ignores invalid role values", async () => {
+  it("rejects invalid role values", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
-    mockQuery.mockResolvedValue([]);
     const req = jsonRequest("http://localhost/api/admin/users/5", {
       method: "PATCH",
       body: { role: "invalid_role" },
     });
     const res = await PATCH(req as never, params);
-    expect(res.status).toBe(200);
-    // role should be undefined (COALESCE keeps existing)
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining([undefined]),
-    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid role" });
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 500 on query error", async () => {

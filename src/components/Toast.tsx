@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -101,10 +101,12 @@ export default function Toast({
   autoDismissMs = 6000,
   placement = "top",
 }: ToastProps) {
+  const toastId = useId();
+
   useEffect(() => {
     if (process.env.NODE_ENV === "test") return;
 
-    const id = toast.custom(
+    toast.custom(
       (id) => (
         <ToastCard
           variant={variant}
@@ -117,6 +119,7 @@ export default function Toast({
         />
       ),
       {
+        id: toastId,
         dismissible: false,
         duration: autoDismissMs > 0 ? autoDismissMs : Infinity,
         onAutoClose: onDismiss,
@@ -124,10 +127,7 @@ export default function Toast({
       },
     );
 
-    return () => {
-      toast.dismiss(id);
-    };
-  }, [autoDismissMs, details, message, onDismiss, placement, variant]);
+  }, [autoDismissMs, details, message, onDismiss, placement, toastId, variant]);
 
   if (process.env.NODE_ENV === "test") {
     return (

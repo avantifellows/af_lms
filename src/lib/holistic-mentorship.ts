@@ -1,0 +1,285 @@
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import { query } from "./db";
+import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
+import { reconcileHolisticMappings } from "./holistic-reconciliation";
+import {
+  canAccessSchoolSync,
+  getFeatureAccess,
+  getResolvedPermission,
+  type UserPermission,
+} from "./permissions";
+
+export type HolisticMentorshipAction =
+  | "roster_view"
+  | "mapping_mutation"
+  | "mapped_student_read"
+  | "notes_draft"
+  | "notes_submit"
+  | "notes_edit"
+  | "program_read"
+  | "phase_configure"
+  | "profile_regenerate"
+  | "privacy_delete";
+
+export type HolisticMentorshipSession = {
+  user?: { email?: string | null } | null;
+  isPasscodeUser?: boolean;
+} | null;
+
+export type HolisticMentorshipAccessResult =
+  | {
+      ok: true;
+      email: string;
+      permission: UserPermission;
+      canEdit: boolean;
+      actorUserId?: number;
+      school?: HolisticMentorshipSchool;
+    }
+  | {
+      ok: false;
+      status: 401 | 403 | 404;
+      error: "Unauthorized" | "Forbidden" | "School not found" | "Not found";
+    };
+
+export interface HolisticMentorshipSchool {
+  id: number;
+  code: string;
+  name: string;
+  region: string | null;
+}
+
+interface HolisticMentorshipSchoolRow extends Omit<HolisticMentorshipSchool, "id"> {
+  id: number | string;
+}
+
+const PROGRAM_ACTIONS = new Set<HolisticMentorshipAction>([
+  "program_read",
+  "mapped_student_read",
+  "phase_configure",
+  "profile_regenerate",
+]);
+const TEACHER_ACTIONS = new Set<HolisticMentorshipAction>([
+  "roster_view",
+  "mapping_mutation",
+  "mapped_student_read",
+  "notes_draft",
+  "notes_submit",
+  "notes_edit",
+]);
+const MAPPING_REQUIRED_ACTIONS = new Set<HolisticMentorshipAction>([
+  "mapped_student_read",
+  "notes_draft",
+  "notes_submit",
+  "notes_edit",
+]);
+const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
+  "program_read",
+  "mapped_student_read",
+  "roster_view",
+]);
+
+function denied(
+  status: 401 | 403 | 404,
+  error: "Unauthorized" | "Forbidden" | "School not found" | "Not found"
+): HolisticMentorshipAccessResult {
+  return { ok: false, status, error };
+}
+
+async function findProgramSchool(
+  schoolCode: string
+): Promise<HolisticMentorshipSchool | null> {
+  const rows = await query<HolisticMentorshipSchoolRow>(
+    `SELECT school.id, school.code, school.name, school.region
+     FROM school
+     WHERE school.code = $1
+       AND EXISTS (
+         SELECT 1
+         FROM centres centre
+         WHERE centre.school_id = school.id
+           AND centre.program_id = $2
+           AND centre.is_active IS TRUE
+       )
+     LIMIT 1`,
+    [schoolCode, PROGRAM_IDS.COE]
+  );
+  return rows[0] ? { ...rows[0], id: Number(rows[0].id) } : null;
+}
+
+async function ownsActiveMapping(params: {
+  actorUserId: number;
+  schoolId: number;
+  studentId: number;
+  academicYear: string;
+}): Promise<boolean> {
+  const rows = await query<{ id: number | string }>(
+    `SELECT id
+     FROM holistic_mentorship_mentor_mentee_mappings
+     WHERE mentor_user_id = $1
+       AND school_id = $2
+       AND student_id = $3
+       AND program_id = $4
+       AND academic_year = $5
+       AND ended_at IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM student
+         JOIN centre_students roster_student ON roster_student.user_id = student.user_id
+         JOIN centres roster_centre
+           ON roster_centre.id = roster_student.centre_id
+          AND roster_centre.school_id = $2
+          AND roster_centre.program_id = $4
+          AND roster_centre.is_active IS TRUE
+         WHERE student.id = $3
+           AND student.status IS DISTINCT FROM 'dropout'
+           AND roster_student.academic_year = $5
+           AND roster_student.program_id = $4
+           AND roster_student.grade IN (11, 12)
+       )
+     LIMIT 1`,
+    [
+      params.actorUserId,
+      params.schoolId,
+      params.studentId,
+      PROGRAM_IDS.COE,
+      params.academicYear,
+    ]
+  );
+  return rows.length > 0;
+}
+
+function allowedActor(permission: UserPermission, action: HolisticMentorshipAction) {
+  const programWide = permission.role === "admin" || permission.role === "holistic_mentorship_admin";
+  return {
+    teacher: permission.role === "teacher" && TEACHER_ACTIONS.has(action),
+    program: (action === "privacy_delete" && permission.role === "admin") ||
+      (programWide && PROGRAM_ACTIONS.has(action)),
+  };
+}
+
+async function resolveSchool(
+  permission: UserPermission,
+  schoolCode?: string
+): Promise<HolisticMentorshipSchool | HolisticMentorshipAccessResult | undefined> {
+  if (!schoolCode) return undefined;
+  const school = await findProgramSchool(schoolCode);
+  if (!school) return denied(404, "School not found");
+  return canAccessSchoolSync(permission, school.code, school.region ?? undefined)
+    ? school
+    : denied(403, "Forbidden");
+}
+
+async function teacherAccess(params: {
+  email: string;
+  permission: UserPermission;
+  canEdit: boolean;
+  action: HolisticMentorshipAction;
+  school?: HolisticMentorshipSchool;
+  studentId?: number;
+  academicYear?: string;
+}): Promise<HolisticMentorshipAccessResult> {
+  if (!params.school) return denied(403, "Forbidden");
+  const actorUserId = await findEligibleHolisticMentorUserId({
+    email: params.email,
+    schoolId: params.school.id,
+  });
+  if (actorUserId === null) return denied(403, "Forbidden");
+  if (MAPPING_REQUIRED_ACTIONS.has(params.action)) {
+    await reconcileHolisticMappings({
+      academicYear: params.academicYear ?? CURRENT_ACADEMIC_YEAR,
+      schoolId: params.school.id,
+      studentIds: params.studentId ? [params.studentId] : undefined,
+    });
+    const ownsMapping = params.studentId && await ownsActiveMapping({
+      actorUserId,
+      schoolId: params.school.id,
+      studentId: params.studentId,
+      academicYear: params.academicYear ?? CURRENT_ACADEMIC_YEAR,
+    });
+    if (!ownsMapping) return denied(404, "Not found");
+  }
+  return {
+    ok: true,
+    email: params.email,
+    permission: params.permission,
+    canEdit: params.canEdit,
+    actorUserId,
+    school: params.school,
+  };
+}
+
+function programAccess(params: {
+  email: string;
+  permission: UserPermission;
+  canEdit: boolean;
+  action: HolisticMentorshipAction;
+  school?: HolisticMentorshipSchool;
+}): HolisticMentorshipAccessResult {
+  const actorUserId = params.permission.user_id == null
+    ? undefined
+    : Number(params.permission.user_id);
+  if (
+    params.action === "privacy_delete" &&
+    (!Number.isSafeInteger(actorUserId) || (actorUserId ?? 0) < 1)
+  ) {
+    return denied(403, "Forbidden");
+  }
+  return {
+    ok: true,
+    email: params.email,
+    permission: params.permission,
+    canEdit: params.canEdit,
+    actorUserId,
+    school: params.school,
+  };
+}
+
+export async function requireHolisticMentorshipAccess(
+  session: HolisticMentorshipSession,
+  action: HolisticMentorshipAction,
+  options: { schoolCode?: string; studentId?: number; academicYear?: string } = {}
+): Promise<HolisticMentorshipAccessResult> {
+  const email = session?.user?.email;
+  if (!email) return denied(401, "Unauthorized");
+  if (session.isPasscodeUser) return denied(403, "Forbidden");
+
+  const permission = await getResolvedPermission(email);
+  const access = getFeatureAccess(permission, "holistic_mentorship");
+  if (!permission || !access.canView) return denied(403, "Forbidden");
+
+  const allowed = allowedActor(permission, action);
+  if ((!allowed.program && !allowed.teacher) || (!READ_ONLY_ACTIONS.has(action) && !access.canEdit)) {
+    return denied(403, "Forbidden");
+  }
+
+  const resolvedSchool = await resolveSchool(permission, options.schoolCode);
+  if (resolvedSchool && "ok" in resolvedSchool) return resolvedSchool;
+  const school = resolvedSchool as HolisticMentorshipSchool | undefined;
+
+  if (allowed.teacher) {
+    return teacherAccess({
+      email,
+      permission,
+      canEdit: access.canEdit,
+      action,
+      school,
+      studentId: options.studentId,
+      academicYear: options.academicYear,
+    });
+  }
+
+  if (MAPPING_REQUIRED_ACTIONS.has(action) && options.studentId) {
+    await reconcileHolisticMappings({
+      academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
+      schoolId: school?.id,
+      studentIds: [options.studentId],
+    });
+  }
+
+  return programAccess({
+    email,
+    permission,
+    canEdit: access.canEdit,
+    action,
+    school,
+  });
+}

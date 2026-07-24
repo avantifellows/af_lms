@@ -15,7 +15,7 @@ edges:
     condition: when configuring which backend env vars point at
   - target: context/architecture.md
     condition: when understanding how components connect during setup
-last_updated: 2026-06-25
+last_updated: 2026-07-17
 ---
 
 # Setup
@@ -56,6 +56,7 @@ Never commit real values — `.env.local` is gitignored; CI injects prod/preview
 - `npm run build` — production Next build.
 - `npm run fallow:health` — codebase health/hotspots; `fallow:dead-code`, `fallow:audit` for cleanup/PR risk.
 - Data scripts (one-off, via `ts-node`): `npm run centres:import`, `npm run pm:import`, `npm run db:setup-permissions`, etc. (see `scripts/`).
+- Holistic release setup: `npm run holistic:setup-local -- --confirm-synthetic-database` applies the sibling DB Service migrations and synthetic fixtures to a local-only database. `npm run holistic:preflight -- --confirm-production-read-only --historical-source=<private-json>` performs the read-only production reconciliation. Follow `docs/holistic-mentorship-release.md` for staging, sign-off, monitoring, and rollback.
 
 ## Common Issues
 - **Port 3000 in use:** `lsof -i :3000` then `kill -9 <PID>`.

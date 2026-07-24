@@ -309,6 +309,11 @@ describe("updateTeacherRecord", () => {
     mockQuery
       .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
       .mockResolvedValueOnce([]);
+    mockClientQuery.mockImplementation(async (sql: unknown) => ({
+      rows: String(sql).includes("RETURNING mapping.student_id")
+        ? [{ student_id: 41 }]
+        : [],
+    }));
 
     const result = await updateTeacherRecord({
       id: 1,
@@ -326,6 +331,11 @@ describe("updateTeacherRecord", () => {
     expect(String(blockerCall?.[0])).toContain("m.ended_at IS NULL");
     expect(blockerCall?.[1]).toEqual([70]);
     const clientSql = mockClientQuery.mock.calls.map((call) => call[0]).join("\n");
+    expect(clientSql).toContain("pg_advisory_xact_lock");
+    expect(clientSql).toContain("holistic_mentorship_mentor_mentee_mappings");
+    expect(clientSql).toContain("end_reason = $3");
+    expect(clientSql).toContain("holistic_mentorship_post_session_answers");
+    expect(clientSql).toContain("holistic_mentorship_post_session_note_audits");
     expect(clientSql).toContain("UPDATE centre_positions SET user_id = NULL");
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
   });
@@ -724,6 +734,25 @@ describe("positions", () => {
       String(sql).includes("UPDATE centre_positions SET user_id = $1")
     )!;
     expect(updateCall[1]).toEqual([null, 44]);
+    const holisticCleanup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(holisticCleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_seat_changed",
+      false,
+      expect.any(Array),
+    ]);
+    expect(String(holisticCleanup?.[0])).toContain("NOT EXISTS");
+    const advisoryLockIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("pg_advisory_xact_lock")
+    );
+    const holisticCleanupIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(advisoryLockIndex).toBeGreaterThanOrEqual(0);
+    expect(advisoryLockIndex).toBeLessThan(holisticCleanupIndex);
     expect(
       mockClientQuery.mock.calls.some(([sql]) =>
         String(sql).includes("SET school_codes = NULL")
@@ -837,7 +866,7 @@ describe("positions", () => {
       String(sql).includes("SET role = $2")
     );
 
-  it("createPosition promotes teacher → program_manager on a PM-tier seat", async () => {
+  it("createPosition promotes Teachers without overwriting manually elevated roles", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
     mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
@@ -851,7 +880,7 @@ describe("positions", () => {
     ).toEqual({ ok: true });
     const roleUpdate = appRoleUpdate()!;
     expect(roleUpdate[1]).toEqual([70, "program_manager"]);
-    // never touches an already-elevated program_admin/admin
+    // The narrow role band also preserves holistic_mentorship_admin.
     expect(String(roleUpdate[0])).toContain(
       "role IN ('teacher', 'program_manager')"
     );
@@ -949,8 +978,10 @@ describe("positions", () => {
     ).toEqual({ ok: true });
     const upd = progUpdate()!;
     expect(upd[1]).toEqual([70, [1, 2]]); // sorted union
-    // never shrinks an admin's set; only the live row
-    expect(String(upd[0])).toContain("role <> 'admin'");
+    // Seat sync never shrinks either manually elevated admin role's Program scope.
+    expect(String(upd[0])).toContain(
+      "role NOT IN ('admin', 'holistic_mentorship_admin')"
+    );
     expect(String(upd[0])).toContain("revoked_at IS NULL");
   });
 

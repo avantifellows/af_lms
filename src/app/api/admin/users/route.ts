@@ -1,10 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
+import { isUserRole, type UserRole } from "@/lib/permissions";
 import { requireAdminApiAccess } from "../route-helpers";
 
 // Disable Next.js caching for this route
 export const dynamic = "force-dynamic";
+
+type UserWrite = {
+  email: string;
+  level: number;
+  role?: string;
+  school_codes?: string[] | null;
+  regions?: string[] | null;
+  program_ids?: number[] | null;
+  read_only?: boolean;
+  full_name?: string | null;
+};
+
+function userRole(value: UserWrite): UserRole {
+  return isUserRole(value.role) ? value.role : "teacher";
+}
+
+function validateUserWrite(value: UserWrite): string | null {
+  if (!value.email) return "Email and level are required";
+  if (!value.level) return "Email and level are required";
+  if (![1, 2, 3].includes(value.level)) return "Level must be between 1 and 3";
+  if (value.role !== undefined && !isUserRole(value.role)) return "Invalid role";
+  if (userRole(value) === "holistic_mentorship_admin") return null;
+  if (!Array.isArray(value.program_ids) || value.program_ids.length === 0) {
+    return "At least one program must be assigned";
+  }
+  return null;
+}
+
+function userWriteParams(value: UserWrite) {
+  const role = userRole(value);
+  const holisticAdmin = role === "holistic_mentorship_admin";
+  const scope = holisticAdmin
+    ? { level: 3, schoolCodes: null, regions: null, programIds: [1] }
+    : {
+        level: value.level,
+        schoolCodes: value.school_codes || null,
+        regions: value.regions || null,
+        programIds: value.program_ids,
+      };
+  return [
+    value.email,
+    scope.level,
+    role,
+    scope.schoolCodes,
+    scope.regions,
+    scope.programIds,
+    value.read_only || false,
+    value.full_name || null,
+  ];
+}
 
 // GET /api/admin/users - List all users
 export async function GET() {
@@ -41,33 +92,11 @@ export async function POST(request: NextRequest) {
   if (!access.ok) return access.response;
 
   try {
-    const body = await request.json();
-    const { email, level, role, school_codes, regions, program_ids, read_only, full_name } = body;
-
-    if (!email || !level) {
-      return NextResponse.json(
-        { error: "Email and level are required" },
-        { status: 400 }
-      );
+    const body = await request.json() as UserWrite;
+    const validationError = validateUserWrite(body);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
     }
-
-    if (level < 1 || level > 3) {
-      return NextResponse.json(
-        { error: "Level must be between 1 and 3" },
-        { status: 400 }
-      );
-    }
-
-    // Validate program_ids
-    if (!program_ids || !Array.isArray(program_ids) || program_ids.length === 0) {
-      return NextResponse.json(
-        { error: "At least one program must be assigned" },
-        { status: 400 }
-      );
-    }
-
-    const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
-    const userRole = validRoles.includes(role) ? role : "teacher";
 
     const result = await query<{ id: number }>(
       `INSERT INTO user_permission (email, level, role, school_codes, regions, program_ids, read_only, full_name)
@@ -82,7 +111,7 @@ export async function POST(request: NextRequest) {
          full_name = EXCLUDED.full_name,
          updated_at = NOW()
        RETURNING id`,
-      [email, level, userRole, school_codes || null, regions || null, program_ids, read_only || false, full_name || null]
+      userWriteParams(body)
     );
 
     return NextResponse.json({ id: result[0].id, success: true });
