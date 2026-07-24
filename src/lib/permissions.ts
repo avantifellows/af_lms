@@ -17,7 +17,7 @@ export type AccessLevel = 1 | 2 | 3;
 // 3 = All schools access
 
 // User roles
-export const USER_ROLES = [
+const USER_ROLES = [
   "teacher",
   "program_manager",
   "program_admin",

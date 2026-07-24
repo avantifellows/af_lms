@@ -25,12 +25,12 @@ function userRole(value: UserWrite): UserRole {
 function validateUserWrite(value: UserWrite): string | null {
   if (!value.email) return "Email and level are required";
   if (!value.level) return "Email and level are required";
-  if (value.level < 1) return "Level must be between 1 and 3";
-  if (value.level > 3) return "Level must be between 1 and 3";
+  if (![1, 2, 3].includes(value.level)) return "Level must be between 1 and 3";
   if (value.role !== undefined && !isUserRole(value.role)) return "Invalid role";
   if (userRole(value) === "holistic_mentorship_admin") return null;
-  if (!Array.isArray(value.program_ids)) return "At least one program must be assigned";
-  if (value.program_ids.length === 0) return "At least one program must be assigned";
+  if (!Array.isArray(value.program_ids) || value.program_ids.length === 0) {
+    return "At least one program must be assigned";
+  }
   return null;
 }
 
