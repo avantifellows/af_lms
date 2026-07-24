@@ -136,6 +136,14 @@ export async function runHolisticReleasePreflight(params: PreflightParams) {
 }
 
 async function loadPreflightEvidence(params: PreflightParams): Promise<PreflightEvidence> {
+  const profileTables = await params.db<{ profile_tables_ready: boolean }>(
+    `/* preflight_profile_tables */
+     SELECT to_regclass('public.holistic_mentorship_profile_journeys') IS NOT NULL
+       AND to_regclass('public.holistic_mentorship_student_profiles') IS NOT NULL
+       AND to_regclass('public.holistic_mentorship_prompt_configurations') IS NOT NULL
+       AS profile_tables_ready`
+  );
+  const profileTablesReady = profileTables[0]?.profile_tables_ready === true;
   const [schools, roster, actors, identities, historical] = await Promise.all([
     params.db<{ school_id: number }>(
       `/* preflight_program_schools */
@@ -148,14 +156,14 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
       `/* preflight_roster */
        SELECT DISTINCT student.id AS student_id, student.user_id::text AS user_id,
               centre_students.grade,
-              EXISTS (
+              ${profileTablesReady ? `EXISTS (
                 SELECT 1
                 FROM holistic_mentorship_profile_journeys journey
                 JOIN holistic_mentorship_student_profiles profile ON profile.profile_journey_id = journey.id
                 JOIN holistic_mentorship_prompt_configurations configuration
                   ON configuration.id = profile.prompt_configuration_id AND configuration.state = 'active'
                 WHERE journey.student_id = student.id
-              ) AS has_profile
+              )` : "FALSE"} AS has_profile
        FROM centre_students
        JOIN student ON student.user_id = centre_students.user_id
        WHERE centre_students.program_id = $1
@@ -250,7 +258,7 @@ function hasApprovedQuestions(questions: ProfileQuestion[]): boolean {
 
 function hasSequentialPositions(questions: ProfileQuestion[]): boolean {
   const positions = questions.map(({ position }) => position).sort((a, b) => a - b);
-  return positions.every((position, index) => position === index + 1);
+  return positions.every((position, index) => position === index);
 }
 
 function hasApprovedThemeCounts(questions: ProfileQuestion[]): boolean {

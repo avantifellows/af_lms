@@ -30,6 +30,7 @@ describe("Holistic release preflight", () => {
     const calls: string[] = [];
     const db = async (sql: string) => {
       calls.push(sql);
+      if (sql.includes("preflight_profile_tables")) return [{ profile_tables_ready: true }];
       if (sql.includes("preflight_program_schools")) return [{ school_id: 10 }];
       if (sql.includes("preflight_roster")) {
         return [
@@ -58,10 +59,17 @@ describe("Holistic release preflight", () => {
       throw new Error(`Unexpected query: ${sql}`);
     };
 
+    const questionSetTitles = [
+      ...Array(3).fill("Set 1"),
+      ...Array(6).fill("Set 2"),
+      ...Array(7).fill("Set 3"),
+      ...Array(8).fill("Set 4"),
+      ...Array(10).fill("Set 5"),
+    ];
     const questions = Array.from({ length: 34 }, (_, index) => ({
       questionId: `q${index + 1}`,
-      position: index + 2,
-      questionSetTitle: `Set ${Math.min(Math.floor(index / 7) + 1, 5)}`,
+      position: index,
+      questionSetTitle: questionSetTitles[index],
     }));
     const result = await runHolisticReleasePreflight({
       db,
@@ -87,7 +95,6 @@ describe("Holistic release preflight", () => {
 
     expect(result.ok).toBe(false);
     expect(result.blockers).toEqual([
-      "Approved Grade 11 Profile Form structure is invalid",
       "Approved Grade 12 Profile Form structure is invalid",
       "1 BigQuery User identity is missing from LMS",
       "1 BigQuery User identity is ambiguous in LMS",
@@ -108,6 +115,34 @@ describe("Holistic release preflight", () => {
     expect(calls.every((sql) => /^\s*(?:\/\*[\s\S]*?\*\/\s*)?(?:WITH\b|SELECT\b)/i.test(sql))).toBe(true);
     expect(calls.every((sql) => !/\b(?:insert|update|delete|alter|drop|create)\b/i.test(sql))).toBe(true);
     expect(calls.find((sql) => sql.includes("preflight_historical"))).toContain("COUNT(DISTINCT student.id)");
+  });
+
+  it("runs before the Profile migrations exist", async () => {
+    let rosterQuery = "";
+    const db = async (sql: string) => {
+      if (sql.includes("preflight_profile_tables")) return [{ profile_tables_ready: false }];
+      if (sql.includes("preflight_roster")) {
+        rosterQuery = sql;
+        return [{ student_id: 101, user_id: "1001", grade: 11, has_profile: false }];
+      }
+      if (sql.includes("preflight_historical")) {
+        return [{ safe_candidates: 0, excluded_rows: 0 }];
+      }
+      return [];
+    };
+
+    const result = await runHolisticReleasePreflight({
+      db,
+      academicYear: "2026-2027",
+      profileSource: { forms: [], sourceUserIds: [] },
+    });
+
+    expect(result.counts.incompleteProfiles).toBe(1);
+    expect(result.warnings).toEqual([
+      "1 eligible Student has no successful Active-configuration Profile",
+    ]);
+    expect(rosterQuery).toContain("FALSE AS has_profile");
+    expect(rosterQuery).not.toContain("holistic_mentorship_profile_journeys");
   });
 
   it("uses db-service migrations and declares the complete synthetic local fixture", () => {
