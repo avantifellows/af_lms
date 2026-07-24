@@ -294,7 +294,7 @@ function ProgressIntro({ academicYear, exporting, exportError, onExport }: {
 
 function refreshedLabel(refreshedAt: string) {
   if (!refreshedAt) return "Not refreshed";
-  return <>Last refreshed <span className="font-mono">{new Date(refreshedAt).toLocaleString()}</span></>;
+  return <>Last refreshed <span className="font-mono">{new Date(refreshedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span></>;
 }
 
 function ProgressCounts({ counts }: { counts: Payload["counts"] }) {
@@ -486,7 +486,7 @@ function ProgressBadge({ progress }: { progress: Row["progress"] }) {
 
 function CompletionTime({ value }: { value: string | null }) {
   if (!value) return <span className="text-text-muted">-</span>;
-  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeZone: "Asia/Kolkata" }).format(new Date(value));
 }
 
 function ProgressActions({ row, academicYear }: {
