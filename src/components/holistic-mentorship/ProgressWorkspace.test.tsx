@@ -41,7 +41,9 @@ describe("ProgressWorkspace", () => {
     render(<ProgressWorkspace onAcademicYears={onAcademicYears} />);
 
     expect(await screen.findByText("Student One")).toBeInTheDocument();
-    expect(onAcademicYears).toHaveBeenCalledWith(["2026-2027", "2025-2026", "2023-2024"]);
+    await waitFor(() => expect(onAcademicYears).toHaveBeenCalledWith(
+      ["2026-2027", "2025-2026", "2023-2024"]
+    ));
     expect(screen.getAllByText("73").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("mentor@example.com")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
@@ -63,7 +65,9 @@ describe("ProgressWorkspace", () => {
     await screen.findByText("Student One");
     fireEvent.change(screen.getByLabelText("Filter by School"), { target: { value: "SCH001" } });
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(refresh).toBeEnabled());
+    fireEvent.click(refresh);
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   });
 
