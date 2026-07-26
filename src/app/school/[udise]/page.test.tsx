@@ -16,6 +16,8 @@ const {
   mockGetAcademicMentorshipActorUserId,
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
+  mockListHolisticAssignmentRoster,
+  mockRequireHolisticMentorshipAccess,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -33,6 +35,8 @@ const {
   mockGetAcademicMentorshipActorUserId: vi.fn(),
   mockListAcademicMentorshipMappings: vi.fn(),
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
+  mockListHolisticAssignmentRoster: vi.fn(),
+  mockRequireHolisticMentorshipAccess: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -61,6 +65,12 @@ vi.mock("@/lib/academic-mentorship", () => ({
   listAcademicMentorshipMappings: mockListAcademicMentorshipMappings,
   listAcademicMentorshipTeacherMentees:
     mockListAcademicMentorshipTeacherMentees,
+}));
+vi.mock("@/lib/holistic-mentorship", () => ({
+  requireHolisticMentorshipAccess: mockRequireHolisticMentorshipAccess,
+}));
+vi.mock("@/lib/holistic-mappings", () => ({
+  listHolisticAssignmentRoster: mockListHolisticAssignmentRoster,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -330,7 +340,13 @@ describe("SchoolPage (server component)", () => {
     );
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
     mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
+    mockListHolisticAssignmentRoster.mockResolvedValue([]);
     mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+    });
   });
 
   // --- Auth redirects ---
@@ -1394,7 +1410,7 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
 
     expect(screen.getByTestId("tab-mentorship")).toBeInTheDocument();
-    expect(screen.getByText("Academic Mentorship")).toBeInTheDocument();
+    expect(screen.getAllByText("Academic Mentorship")).toHaveLength(2);
     expect(screen.getByText("Anaya Student")).toBeInTheDocument();
     expect(screen.getByText("Ravi Student")).toBeInTheDocument();
     expect(screen.queryByText("Manage mappings")).not.toBeInTheDocument();
@@ -1404,6 +1420,106 @@ describe("SchoolPage (server component)", () => {
       mentorUserId: 101,
     });
     expect(mockListAcademicMentorshipMappings).not.toHaveBeenCalled();
+  });
+
+  it("keeps Academic Mentorship separate and shows the eligible Teacher workspace", async () => {
+    setupAdminDefaults();
+    const teacherPermission = makePermission({
+      role: "teacher",
+      email: "teacher@avantifellows.org",
+    });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } })
+    );
+    mockGetUserPermission.mockResolvedValue(teacherPermission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission: teacherPermission,
+      school: { id: 20, code: "70705" },
+      actorUserId: 101,
+    });
+
+    await renderPage();
+
+    expect(screen.getByTestId("tab-mentorship")).toHaveTextContent("Academic Mentorship");
+    expect(screen.getByTestId("tab-holistic_mentorship")).toHaveTextContent(
+      "Holistic Mentorship"
+    );
+    expect(screen.getByRole("heading", { name: "Holistic Mentorship" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Assign Students to yourself to start mentorship")
+    ).toBeInTheDocument();
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ user: { email: "teacher@avantifellows.org" } }),
+      "roster_view",
+      { schoolCode: "70705" }
+    );
+  });
+
+  it("hides Holistic navigation when the shared policy denies access", async () => {
+    setupAdminDefaults();
+    await renderPage();
+    expect(screen.queryByTestId("tab-holistic_mentorship")).not.toBeInTheDocument();
+  });
+
+  it("checks the current School is in Program 1 before showing Admin Holistic navigation", async () => {
+    setupAdminDefaults();
+    await renderPage();
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "program_read",
+      { schoolCode: "70705" }
+    );
+  });
+
+  it("shows Admin read-only Holistic assignment coverage for the current School", async () => {
+    const { permission } = setupAdminDefaults({ id: "20", code: "SCH001" });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001" },
+      actorUserId: 101,
+      canEdit: false,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 41,
+      name: "Asha Rao",
+      externalStudentId: "S41",
+      grade: 11,
+      activePhaseId: 73,
+      activeNotesState: "draft",
+      ownership: { mappingId: 8, mentorUserId: 9, mentorName: "Anita Mentor" },
+    }]);
+
+    await renderPage();
+
+    expect(screen.getByText("School assignment coverage for 2026-2027")).toBeInTheDocument();
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
+      schoolId: 20,
+      academicYear: "2026-2027",
+    });
+  });
+
+  it("keeps the dedicated Admin out of non-Holistic School data", async () => {
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "holistic@example.com" } })
+    );
+    mockQuery.mockResolvedValueOnce([makeSchool()]);
+    mockGetUserPermission.mockResolvedValue(
+      makePermission({
+        email: "holistic@example.com",
+        level: 3,
+        role: "holistic_mentorship_admin",
+        program_ids: [1],
+      })
+    );
+
+    await expect(
+      SchoolPage({ params: Promise.resolve({ udise: "70705" }) })
+    ).rejects.toThrow("REDIRECT:/admin/holistic-mentorship");
+    expect(mockProcessStudents).not.toHaveBeenCalled();
   });
 
   it("renders Admin read-only Academic Mentorship overview with a prefilled Manage mappings link", async () => {

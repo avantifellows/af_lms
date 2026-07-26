@@ -16,6 +16,10 @@
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
 import {
+  eraseDraftHolisticNotes,
+  lockHolisticMentorMappingMutation,
+} from "./holistic-mappings";
+import {
   type AdminGuardResult,
   type AdminSession,
   makeSchemaChecker,
@@ -35,18 +39,18 @@ export async function requireStaffAdmin(
 
 // --- Schema readiness ---
 
-export interface StaffSchemaReady {
+interface StaffSchemaReady {
   ok: true;
 }
 
-export interface StaffSchemaUnavailable {
+interface StaffSchemaUnavailable {
   ok: false;
   status: 503;
   error: "Staff management schema unavailable";
   details: string[];
 }
 
-export type StaffSchemaStatus = StaffSchemaReady | StaffSchemaUnavailable;
+type StaffSchemaStatus = StaffSchemaReady | StaffSchemaUnavailable;
 
 export const STAFF_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "staff", column: "id" },
@@ -100,7 +104,7 @@ async function loadStaffSchemaStatus(): Promise<StaffSchemaStatus> {
 
 const staffSchemaChecker = makeSchemaChecker(loadStaffSchemaStatus);
 
-export function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
+function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
   return staffSchemaChecker.check();
 }
 
@@ -648,6 +652,7 @@ async function vacateSeatsAndRevoke(
   client: PoolClient,
   userId: number
 ): Promise<void> {
+  await endIneligibleHolisticMappings(client, userId, "mentor_exit", true);
   await client.query(
     `UPDATE centre_positions SET user_id = NULL, updated_at = now()
      WHERE user_id = $1 AND deleted_at IS NULL`,
@@ -657,6 +662,43 @@ async function vacateSeatsAndRevoke(
     `UPDATE user_permission SET revoked_at = now(), updated_at = now()
      WHERE user_id = $1 AND revoked_at IS NULL`,
     [userId]
+  );
+}
+
+export async function endIneligibleHolisticMappings(
+  client: PoolClient,
+  userId: number,
+  reason: "mentor_exit" | "mentor_role_changed" | "mentor_seat_changed" | "mentor_access_revoked",
+  endAll = false
+): Promise<void> {
+  await lockHolisticMentorMappingMutation(client, userId);
+  const ended = await client.query<{ student_id: number | string }>(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings mapping
+     SET ended_at = now(), ended_by_user_id = NULL, end_source = $2,
+         end_reason = $3, updated_at = now()
+     WHERE mapping.mentor_user_id = $1
+       AND mapping.ended_at IS NULL
+       AND ($4::boolean OR NOT EXISTS (
+         SELECT 1
+         FROM teacher t
+         JOIN user_permission up
+           ON up.user_id = t.user_id AND up.revoked_at IS NULL AND up.role = 'teacher'
+         JOIN centre_positions cp
+           ON cp.user_id = t.user_id AND cp.deleted_at IS NULL
+          AND NOT (cp.role = ANY($5::text[]))
+         JOIN centres c
+           ON c.id = cp.centre_id AND c.is_active IS TRUE
+          AND c.school_id = mapping.school_id AND c.program_id = mapping.program_id
+         WHERE t.user_id = $1 AND t.is_af_teacher = true AND t.exit_date IS NULL
+       ))
+     RETURNING mapping.student_id`,
+    [userId, "af_lms_staff_management", reason, endAll, [...PM_SEAT_ROLES]]
+  );
+  await eraseDraftHolisticNotes(
+    client,
+    ended.rows.map((row) => Number(row.student_id)),
+    userId,
+    reason
   );
 }
 
@@ -1566,11 +1608,8 @@ async function syncAppRoleFromSeats(
 // program_ids consumers (quiz-session batches, ownsRecord, the users page) were
 // stale for multi-program PMs.
 //
-// Only touches the live (revoked_at IS NULL) row, and skips admins — level-3
-// admins have full program access regardless, and their program_ids is a manual
-// set we must not shrink to whatever centres they happen to sit at. No-op when
-// the person has no active seat (don't strip a person mid-offboarding to an
-// empty program set) or when the value is already correct.
+// Only touches the live (revoked_at IS NULL) row, and skips manually elevated
+// Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived.
 async function syncProgramIdsFromSeats(
   client: PoolClient,
   userId: number
@@ -1589,7 +1628,7 @@ async function syncProgramIdsFromSeats(
      SET program_ids = $2, updated_at = now()
      WHERE user_id = $1
        AND revoked_at IS NULL
-       AND role <> 'admin'
+       AND role NOT IN ('admin', 'holistic_mentorship_admin')
        AND COALESCE(program_ids, '{}') <> $2`,
     [userId, programIds]
   );
@@ -1730,6 +1769,11 @@ export async function updatePosition(params: {
     // The prior occupant just lost this seat — re-derive their app role and
     // program scope too (this may have been their last seat in a program).
     if (position.user_id !== null && position.user_id !== userId) {
+      await endIneligibleHolisticMappings(
+        client,
+        position.user_id,
+        "mentor_seat_changed"
+      );
       await syncAppRoleFromSeats(client, position.user_id);
       await syncProgramIdsFromSeats(client, position.user_id);
     }
@@ -1778,6 +1822,7 @@ export async function setUserRole(params: {
     if (updatedCount === 0) return;
     await syncTeacherSubjectFromRole(client, userId, role);
     await syncAppRoleFromSeats(client, userId);
+    await endIneligibleHolisticMappings(client, userId, "mentor_role_changed");
   });
   if (updatedCount === 0) {
     return {
@@ -1824,6 +1869,11 @@ export async function deletePosition(params: {
     // The occupant just lost this seat — re-derive their app role and program
     // scope in case it was their last PM-tier seat / last seat in a program.
     if (position.user_id !== null) {
+      await endIneligibleHolisticMappings(
+        client,
+        position.user_id,
+        "mentor_seat_changed"
+      );
       await syncAppRoleFromSeats(client, position.user_id);
       await syncProgramIdsFromSeats(client, position.user_id);
     }

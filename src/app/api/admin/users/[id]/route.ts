@@ -1,10 +1,85 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { PoolClient } from "pg";
 import { query, withTransaction } from "@/lib/db";
-import { blockIfAcademicMentorshipHistory } from "@/lib/staff-admin";
+import {
+  blockIfAcademicMentorshipHistory,
+  endIneligibleHolisticMappings,
+} from "@/lib/staff-admin";
+import { isUserRole } from "@/lib/permissions";
 import { requireAdminApiAccess } from "../../route-helpers";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
+}
+
+interface UserPatchBody {
+  level?: number;
+  role?: string;
+  school_codes?: string[];
+  regions?: string[];
+  program_ids?: number[];
+  read_only?: boolean;
+  full_name?: string | null;
+}
+
+function validatePatch(body: UserPatchBody, isHolisticAdmin: boolean) {
+  if (body.level && (body.level < 1 || body.level > 3)) {
+    return NextResponse.json(
+      { error: "Level must be between 1 and 3" },
+      { status: 400 }
+    );
+  }
+
+  if (
+    !isHolisticAdmin &&
+    body.program_ids !== undefined &&
+    (!Array.isArray(body.program_ids) || body.program_ids.length === 0)
+  ) {
+    return NextResponse.json(
+      { error: "At least one program must be assigned" },
+      { status: 400 }
+    );
+  }
+
+  return null;
+}
+
+function explicitScope(value: string[] | undefined, clear: boolean) {
+  return clear ? null : value || null;
+}
+
+function assignedPrograms(programIds: number[] | undefined, isHolisticAdmin: boolean) {
+  return isHolisticAdmin ? [1] : programIds || null;
+}
+
+async function updatePermission(
+  client: PoolClient,
+  updateParams: unknown[],
+  userRole: string | undefined,
+  targetUserId: number
+) {
+  await client.query(
+    `UPDATE user_permission
+     SET level = COALESCE($1, level),
+         role = COALESCE($2, role),
+         school_codes = $3,
+         regions = $4,
+         program_ids = COALESCE($5, program_ids),
+         read_only = COALESCE($6, read_only),
+         full_name = $7,
+         updated_at = NOW()
+     WHERE id = $8`,
+    updateParams
+  );
+
+  if (!userRole || userRole === "teacher" || !Number.isSafeInteger(targetUserId)) return;
+
+  await endIneligibleHolisticMappings(
+    client,
+    targetUserId,
+    "mentor_role_changed",
+    true
+  );
 }
 
 // DELETE /api/admin/users/[id] - Delete user
@@ -53,6 +128,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
   await withTransaction(async (client) => {
     if (targetUserId != null) {
+      await endIneligibleHolisticMappings(
+        client,
+        Number(targetUserId),
+        "mentor_access_revoked",
+        true
+      );
       await client.query(
         `UPDATE centre_positions SET deleted_at = now(), updated_at = now()
          WHERE user_id = $1 AND deleted_at IS NULL`,
@@ -72,36 +153,23 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (!access.ok) return access.response;
 
   try {
-    const body = await request.json();
-    const { level, role, school_codes, regions, program_ids, read_only, full_name } = body;
-
-    if (level && (level < 1 || level > 3)) {
-      return NextResponse.json(
-        { error: "Level must be between 1 and 3" },
-        { status: 400 }
-      );
+    const body = (await request.json()) as UserPatchBody;
+    const { role, school_codes, regions } = body;
+    if (role !== undefined && !isUserRole(role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }
-
-    // Validate program_ids if provided
-    if (program_ids !== undefined) {
-      if (!Array.isArray(program_ids) || program_ids.length === 0) {
-        return NextResponse.json(
-          { error: "At least one program must be assigned" },
-          { status: 400 }
-        );
-      }
-    }
-
-    const validRoles = ["teacher", "program_manager", "program_admin", "admin"];
-    const userRole = role && validRoles.includes(role) ? role : undefined;
+    const userRole = role;
+    const isHolisticAdmin = userRole === "holistic_mentorship_admin";
+    const validationError = validatePatch(body, isHolisticAdmin);
+    if (validationError) return validationError;
 
     // Centre seats are the source of truth for a seated user's school scope
     // (staff-admin clears school_codes/regions on assignment; resolveScope derives
     // schools from the seat). Editing explicit scope here would re-introduce the
     // over-grant / move-doesn't-revoke staleness, so it's disabled for seated
     // users: reject any attempt to set school_codes/regions, and keep both NULL.
-    const seated = await query<{ one: number }>(
-      `SELECT 1 AS one
+    const seated = await query<{ one: number; user_id: number | string }>(
+      `SELECT 1 AS one, up.user_id
        FROM centre_positions cp
        JOIN user_permission up ON up.user_id = cp.user_id
        WHERE up.id = $1 AND cp.deleted_at IS NULL
@@ -122,18 +190,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    await query(
-      `UPDATE user_permission
-       SET level = COALESCE($1, level),
-           role = COALESCE($2, role),
-           school_codes = $3,
-           regions = $4,
-           program_ids = COALESCE($5, program_ids),
-           read_only = COALESCE($6, read_only),
-           full_name = $7,
-           updated_at = NOW()
-       WHERE id = $8`,
-      [level, userRole, isSeated ? null : school_codes || null, isSeated ? null : regions || null, program_ids || null, read_only, full_name ?? null, id]
+    const clearExplicitScope = isHolisticAdmin || isSeated;
+    const updateParams = [
+      isHolisticAdmin ? 3 : body.level,
+      userRole,
+      explicitScope(school_codes, clearExplicitScope),
+      explicitScope(regions, clearExplicitScope),
+      assignedPrograms(body.program_ids, isHolisticAdmin),
+      body.read_only,
+      body.full_name ?? null,
+      id,
+    ];
+    const targetUserId = Number(seated[0]?.user_id);
+    await withTransaction((client) =>
+      updatePermission(client, updateParams, userRole, targetUserId)
     );
 
     return NextResponse.json({ success: true });

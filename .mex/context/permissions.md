@@ -31,9 +31,11 @@ Core file: `src/lib/permissions.ts`. Client-safe constants: `src/lib/constants.t
 (`PROGRAM_IDS`, `PROGRAM_ID_TO_LABEL`, `ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`).
 Auth config: `src/lib/auth.ts`.
 
-## The model — three independent axes
+`USER_ROLES` in `src/lib/permissions.ts` is the canonical server-side role list.
+Admin user create/update APIs reject unknown roles with 400 instead of silently defaulting them.
 
-1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `admin`.
+## The model — three independent axes
+1. **Role** (`UserRole`): `teacher` | `program_manager` | `program_admin` | `holistic_mentorship_admin` | `admin`.
 2. **School scope** (`AccessLevel`): `1` = specific `school_codes`, `2` = `regions`, `3` = all schools. (`isAdmin` is by **role**, not level.)
 3. **Program eligibility** (`program_ids`): COE=1, NODAL=2, NVS=64, plus non-JNV centre programs. Some features are gated to CoE/Nodal.
 
@@ -46,6 +48,9 @@ A `read_only` flag downgrades any `edit` to `view`.
 - Looks up `FEATURE_PERMISSIONS[feature][role]` (`none`/`view`/`edit`).
 - **NVS gating:** features in `NVS_GATED_FEATURES` (`visits`, `curriculum`, `pm_dashboard`, `summary_stats`, `quiz_sessions`) become `none` unless the user `hasCoEOrNodal`.
 - **Academic Mentorship:** uses the `academic_mentorship` feature key and its own Program allowlist (`ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`, v1 wildcard `*`), so NVS-only users are not blocked by the NVS-gated feature set.
+- **Holistic Mentorship:** uses the `holistic_mentorship` feature key. Teachers, Holistic Mentorship Admins, and global Admins receive base edit access; the shared action policy then enforces Program 1, School scope, Teacher-seat eligibility, and Mapping ownership. The dedicated Admin role has no other feature access.
+- **Holistic Mapping lifecycle:** Teachers may claim, confirm takeover, or remove only their own Program 1 Mappings. Teacher exit, LMS access revoke, relevant app/seat-role changes, and seat loss end affected active Mappings and erase unsubmitted draft answers in the same LMS transaction; another eligible seat at the same School/Program preserves access. Canonical User hard deletion is blocked by the Holistic schema's restrictive history foreign keys; removing `user_permission` is a revoke, not a hard delete.
+- **Holistic Notes authorship:** only the current Mentor may draft or Submit; submitted Notes are correctable only by their author while that author remains the current Mentor. Replacement Mentors can read submitted history but receive an editable blank form after an unsubmitted draft is erased; Holistic/global Admins never receive draft answers.
 - **Staff Management Academic Mentor safeguards:** deleting a Teacher-linked permission blocks on any Academic Mentor-Mentee Mapping history; Teacher exit/revoke blocks only on active Mentees. These checks use `academic_mentorship_mentor_mentee_mappings.mentor_user_id` (`user.id`), not `user_permission.id`, and blocker messages link back to `/admin/academic-mentorship` when School/year context is available.
 - **`read_only` downgrade:** `edit` → `view`.
 - **Passcode users** (`opts.isPasscodeUser`): `students` → `edit`, everything else → `none`.
@@ -64,6 +69,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
+- **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
 - **School page Mentorship tab:** visibility comes from `academic_mentorship` feature access. Teachers see only their own current-year active Mentees; PMs/Admins/Program Admins see a read-only School overview; only Admins and Program Admins get the management link.
 - **Visit routes:** use `src/lib/visits-policy.ts` instead — `requireVisitsAccess(session, "view"|"edit")` then `enforceVisit*`. See `context/visits.md`.
 - **List queries:** scope at the SQL level with `getAccessibleSchoolCodes(email)` (returns `"all"` or `string[]`) or, for visits, `buildVisitScopePredicate(actor)`.

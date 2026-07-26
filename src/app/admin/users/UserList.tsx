@@ -51,6 +51,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
   program_admin: "Program Admin",
   program_manager: "Program Manager",
+  holistic_mentorship_admin: "Holistic Mentorship Admin",
   teacher: "Teacher",
 };
 
@@ -58,6 +59,7 @@ const ROLE_COLORS: Record<string, string> = {
   admin: "bg-purple-100 text-purple-800",
   program_admin: "bg-cyan-100 text-cyan-800",
   program_manager: "bg-indigo-100 text-indigo-800",
+  holistic_mentorship_admin: "bg-emerald-100 text-emerald-800",
   teacher: "bg-gray-100 text-gray-800",
 };
 
