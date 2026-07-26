@@ -355,14 +355,22 @@ function csvCell(value: string | number | null): string {
 }
 
 export function formatHolisticProgressCsv(academicYear: string, rows: HolisticProgressRow[]): string {
+  const questionCount = rows.reduce(
+    (maximum, row) => row.answers.reduce((rowMaximum, answer) => Math.max(rowMaximum, answer.position), maximum),
+    0
+  );
   const header = [
     "Academic Year", "Program ID", "Program Name", "School", "UDISE Code", "Student Name", "Student External ID",
     "Grade", "Mentor Name", "Mentor Email", "Phase", "Phase Title", "Availability", "Progress",
-    "Completed At", "Question 1", "Answer 1", "Question 2", "Answer 2", "Question 3", "Answer 3",
-    "Question 4", "Answer 4", "Notes Author Name", "Notes Author Email", "Notes Last Edited At",
+    "Completed At",
+    ...Array.from({ length: questionCount }, (_, index) => [`Question ${index + 1}`, `Answer ${index + 1}`]).flat(),
+    "Notes Author Name", "Notes Author Email", "Notes Last Edited At",
   ];
   const body = rows.map((row) => {
-    const answers = Array.from({ length: 4 }, (_, index) => row.answers.find(({ position }) => position === index + 1));
+    const answers = Array.from(
+      { length: questionCount },
+      (_, index) => row.answers.find(({ position }) => position === index + 1)
+    );
     return [
       academicYear, PROGRAM_IDS.COE, PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE], row.schoolName, row.schoolCode,
       row.studentName, row.externalStudentId,

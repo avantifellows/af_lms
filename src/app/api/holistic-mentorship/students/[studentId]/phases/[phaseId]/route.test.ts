@@ -143,6 +143,10 @@ describe("Holistic Student Phase API", () => {
     });
     mockSave.mockResolvedValue({ ok: true, changed: true, revision: 3 });
 
+    const answers = Array.from({ length: 5 }, (_, index) => ({
+      question_id: 91 + index,
+      answer: `Answer ${index + 1}`,
+    }));
     const response = await PATCH(new Request(
       "http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027",
       {
@@ -150,7 +154,7 @@ describe("Holistic Student Phase API", () => {
         body: JSON.stringify({
           action: "draft",
           expected_revision: 2,
-          answers: [{ question_id: 91, answer: "A weekly plan" }],
+          answers,
         }),
       }
     ) as never, context);
@@ -169,7 +173,7 @@ describe("Holistic Student Phase API", () => {
       academicYear: "2026-2027",
       actorUserId: 9,
       expectedRevision: 2,
-      answers: [{ questionId: 91, answer: "A weekly plan" }],
+      answers: answers.map(({ question_id, answer }) => ({ questionId: question_id, answer })),
       expectedMappingId: undefined,
       expectedPhaseRevision: undefined,
       confirmed: false,

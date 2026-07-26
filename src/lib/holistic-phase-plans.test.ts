@@ -114,11 +114,11 @@ describe("Holistic Phase Plans", () => {
     expect(client.query.mock.calls.at(-1)?.[1]).toEqual([7, 21, "definition_updated", 9, actor.actorEmail]);
   });
 
-  it("opens a complete Phase out of sequence and records the confirmed actor transition", async () => {
+  it("opens a complete Phase with more than four Questions", async () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
-        .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "2", valid_question_count: "2" }] })
+        .mockResolvedValueOnce({ rows: [{ grade: "11", title: "Belonging", guidance_markdown: "Discuss goals", question_count: "5", valid_question_count: "5" }] })
         .mockResolvedValueOnce({ rows: [{ revision: 3 }] })
         .mockResolvedValueOnce({ rows: [] }),
     };
@@ -142,14 +142,14 @@ describe("Holistic Phase Plans", () => {
     expect(client.query).toHaveBeenCalledTimes(2);
   });
 
-  it.each([
-    ["an unsupported Grade", { grade: "10", question_count: "1", valid_question_count: "1" }],
-    ["more than four Questions", { grade: "11", question_count: "5", valid_question_count: "5" }],
-  ])("does not open a Phase with %s", async (_case, definition) => {
+  it("does not open a Phase with an unsupported Grade", async () => {
     const client = {
       query: vi.fn()
         .mockResolvedValueOnce({ rows: [{ id: "21", revision: 2, state: "locked", academic_year: "2026-2027", frozen_at: null, ever_opened: false, used: false }] })
-        .mockResolvedValueOnce({ rows: [{ title: "Belonging", guidance_markdown: "Discuss goals", ...definition }] }),
+        .mockResolvedValueOnce({ rows: [{
+          grade: "10", title: "Belonging", guidance_markdown: "Discuss goals",
+          question_count: "1", valid_question_count: "1",
+        }] }),
     };
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 

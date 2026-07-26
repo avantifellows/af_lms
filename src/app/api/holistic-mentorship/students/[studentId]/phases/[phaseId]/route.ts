@@ -62,7 +62,7 @@ function parseAnswer(value: unknown): { questionId: number; answer: string } | n
 }
 
 function parseAnswers(value: unknown): Array<{ questionId: number; answer: string }> | null {
-  if (!Array.isArray(value) || value.length > 4) return null;
+  if (!Array.isArray(value)) return null;
   const answers = value.map(parseAnswer);
   if (answers.some((answer) => !answer)) return null;
   const parsed = answers as Array<{ questionId: number; answer: string }>;

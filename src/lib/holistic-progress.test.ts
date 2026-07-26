@@ -139,6 +139,7 @@ describe("Holistic progress", () => {
         { position: 2, question: "What changed?", answer: "A comma, and a \"quote\"" },
         { position: 3, question: "Next step?", answer: "Line one\nLine two" },
         { position: 4, question: "Support?", answer: "@external" },
+        { position: 5, question: "Anything else?", answer: "Keep going" },
       ],
     };
 
@@ -155,6 +156,8 @@ describe("Holistic progress", () => {
     expect(csv).toContain("\"A comma, and a \"\"quote\"\"\"");
     expect(csv).toContain("\"Line one\nLine two\"");
     expect(csv).toContain("\"'@external\"");
+    expect(csv).toContain("Question 5,Answer 5");
+    expect(csv).toContain("Anything else?,Keep going");
     expect(csv).not.toContain("studentId");
     expect(csv).not.toContain("Student Profile");
   });

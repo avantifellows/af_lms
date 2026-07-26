@@ -163,8 +163,8 @@ function validateDefinition(
   if (![11, 12].includes(input.grade)) return "Grade must be 11 or 12";
   if (!input.title.trim()) return "Title is required";
   if (input.title.trim().length > 120) return "Title must be 120 characters or fewer";
-  if (input.questions.length < 1 || input.questions.length > 4 || input.questions.some((q) => !q.text.trim())) {
-    return "One to four non-empty Questions are required";
+  if (input.questions.length < 1 || input.questions.some((q) => !q.text.trim())) {
+    return "At least one non-empty Question is required";
   }
   return validateHolisticGuidance(input.guidanceMarkdown);
 }
@@ -493,7 +493,6 @@ function completeOpenDefinition(current: OpenDefinitionRow | undefined): current
   if (!current.guidance_markdown.trim()) return false;
   const questionCount = Number(current.question_count);
   if (questionCount < 1) return false;
-  if (questionCount > 4) return false;
   return questionCount === Number(current.valid_question_count);
 }
 
