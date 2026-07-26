@@ -471,15 +471,13 @@ function QuestionsEditor({ draft, readOnly, onChange }: {
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h4 className="text-xs font-extrabold uppercase tracking-wide text-text-secondary">Post-Session Questions</h4>
       {!readOnly && <Button type="button" variant="secondary" className="text-xs"
-        disabled={draft.questions.length === 4}
-        title={draft.questions.length === 4 ? "Maximum 4 questions" : undefined}
         onClick={() => onChange({ ...draft, questions: [...draft.questions, { text: "" }] })}>
         <Plus className="h-4 w-4" /> Add Question
       </Button>}
     </div>
     <fieldset className="space-y-2" disabled={readOnly}>
       <legend className="sr-only">Questions</legend>
-      {draft.questions.map((question, index) => <QuestionEditorRow key={question.id ?? index}
+      {draft.questions.map((question, index) => <QuestionEditorRow key={question.id ? `saved-${question.id}` : `new-${index}`}
         draft={draft} index={index} question={question} onChange={onChange} />)}
       {draft.questions.length === 0 && <InlineAlert tone="warning" icon={<TriangleAlert className="h-4 w-4" />}
         title="No Questions yet." copy="Add at least one Question before Opening this Phase." />}

@@ -360,7 +360,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Phase Guidance** has no separate Publish action: Opening the Phase exposes saved Guidance to Mentors, and saving an Open but unstarted Phase warns the Admin and updates the Mentor view immediately
 - Each **Phase Guidance** Save records mutation actor/time and rejects stale concurrent edits without discarding the second Admin's unsaved text
 - V1 does not retain or expose pre-freeze **Phase Guidance** revisions; each Save replaces current content, the first persisted Notes data freezes the final content with the historical Phase, and Copy Previous Year creates an independent editable copy
-- Each **Holistic Phase** has 1-4 ordered, stable-ID **Post-Session Questions**, all free-text in v1; Admins explicitly Save the current set, and v1 has no question-version browser
+- Each **Holistic Phase** has one or more ordered, stable-ID **Post-Session Questions**, all free-text in v1; Admins explicitly Save the current set, and v1 has no question-version browser
 - Before the Phase starts, Admins may add, edit, remove, and reorder **Post-Session Questions**; after the first non-empty Notes draft autosaves, the question set is read-only
 - Only an active Staff Management Teacher assigned to a launch School in Program 1 is eligible to be a **Holistic Mentor** in v1
 - Holistic Mentor eligibility and Mapping access are scoped independently to each launch School where the Teacher has an active Teacher seat; a Teacher with multiple eligible seats can use each School's mapping roster, including before they have any assigned Mentees

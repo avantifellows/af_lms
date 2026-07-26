@@ -72,6 +72,25 @@ describe("PhasePlanSetup", () => {
     });
   });
 
+  it("allows more than four Questions", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Saved title", state: "locked",
+        guidanceMarkdown: "Saved Guidance", revision: 2, frozen: false,
+        everOpened: false, used: false, active: false,
+        questions: [1, 2, 3, 4].map((id) => ({ id, text: `Question ${id}` })),
+      }],
+    } }) }));
+    render(<PhasePlanSetup />);
+
+    await user.click(await screen.findByRole("button", { name: /Saved title/ }));
+    await user.click(screen.getByRole("button", { name: "Add Question" }));
+
+    expect(screen.getByLabelText("Question 5")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Add Question" })).toBeEnabled();
+  });
+
   it("disables Save and Discard until the draft has unsaved changes", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: {
