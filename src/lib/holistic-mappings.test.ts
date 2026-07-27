@@ -69,6 +69,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("roster_student.program_id = $3");
     expect(sql).toContain("st.status IS DISTINCT FROM 'dropout'");
     expect(sql).toContain("roster_student.grade IN (11, 12)");
+    expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(sql).not.toContain("enrollment_record");
     expect(sql).toContain("ORDER BY phase.position DESC");
     expect(sql).toContain("mapping.school_id = $1");
@@ -117,6 +118,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("FROM centre_students roster_student");
     expect(sql).toContain("roster_centre.school_id = $1");
     expect(sql).toContain("roster_student.academic_year = $2");
+    expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(sql).not.toContain("enrollment_record");
     expect(sql).toContain("ORDER BY st.id\n         FOR UPDATE OF st");
     expect(sql).toContain("FOR UPDATE");
