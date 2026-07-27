@@ -78,8 +78,14 @@ describe("Holistic Profile regeneration", () => {
     expect(scopeSql).toContain("permission.read_only IS NOT TRUE");
     expect(scopeSql).toContain("permission.role IN ('admin', 'holistic_mentorship_admin')");
     expect(scopeSql).toContain("student.status IS DISTINCT FROM 'dropout'");
-    expect(scopeSql).toContain("batch.program_id = $3");
-    expect(scopeSql).toContain("grade.number IN (11, 12)");
+    expect(scopeSql).toContain("JOIN centre_students roster_student");
+    expect(scopeSql).toContain("roster_student.academic_year = $4");
+    expect(scopeSql).toContain("roster_student.program_id = $3");
+    expect(scopeSql).toContain("roster_student.grade IN (11, 12)");
+    expect(scopeSql).toContain("JOIN centres roster_centre");
+    expect(scopeSql).toContain("roster_centre.is_active IS TRUE");
+    expect(scopeSql).not.toContain("enrollment_record");
+    expect(client.query.mock.calls[0][1]).toEqual(["admin@example.com", 41, 1, "2026-2027"]);
     expect(scopeSql).toContain("holistic_mentorship_privacy_deletions");
     expect(mockFetch).toHaveBeenCalledWith(
       "https://etl.example.test/api/internal/holistic-profiles/regeneration-requests/d16e7d82-dc60-4b79-a064-9ed80badc119/enqueue",

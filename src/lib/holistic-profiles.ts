@@ -117,12 +117,13 @@ export async function requestHolisticProfileRegeneration(params: {
        JOIN "user" actor ON actor.id = permission.user_id OR LOWER(actor.email) = LOWER(permission.email)
        JOIN student ON student.id = $2 AND student.status IS DISTINCT FROM 'dropout'
        JOIN "user" student_user ON student_user.id = student.user_id
-       JOIN enrollment_record batch_enrollment ON batch_enrollment.user_id = student_user.id
-         AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
-       JOIN batch ON batch.id = batch_enrollment.group_id AND batch.program_id = $3
-       JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
-         AND grade_enrollment.group_type = 'grade' AND grade_enrollment.is_current IS TRUE
-       JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
+       JOIN centre_students roster_student ON roster_student.user_id = student_user.id
+         AND roster_student.academic_year = $4
+         AND roster_student.program_id = $3
+         AND roster_student.grade IN (11, 12)
+       JOIN centres roster_centre ON roster_centre.id = roster_student.centre_id
+         AND roster_centre.program_id = $3
+         AND roster_centre.is_active IS TRUE
        JOIN holistic_mentorship_prompt_configurations configuration ON configuration.state = 'active'
        WHERE LOWER(permission.email) = LOWER($1) AND permission.revoked_at IS NULL
          AND permission.read_only IS NOT TRUE
@@ -132,7 +133,7 @@ export async function requestHolisticProfileRegeneration(params: {
            WHERE deletion.student_id = student.id
          )
        LIMIT 1 FOR UPDATE OF permission, student, configuration`,
-      [params.email, params.studentId, PROGRAM_IDS.COE]
+      [params.email, params.studentId, PROGRAM_IDS.COE, CURRENT_ACADEMIC_YEAR]
     );
     const row = scope.rows[0];
     if (!row) return null;
