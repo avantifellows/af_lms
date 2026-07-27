@@ -47,6 +47,7 @@ export async function reconcileHolisticMappings(params: {
                  AND roster_student.academic_year = mapping.academic_year
                  AND roster_student.program_id = mapping.program_id
                  AND roster_student.grade IN (11, 12)
+               HAVING COUNT(DISTINCT roster_student.grade) = 1
              )
            )
          FOR UPDATE OF mapping

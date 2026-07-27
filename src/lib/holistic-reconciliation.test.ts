@@ -35,6 +35,7 @@ describe("Holistic Mapping reconciliation", () => {
     expect(sql).toContain("'student_dropout'");
     expect(sql).not.toContain("enrollment_record");
     expect(sql).not.toContain("group_user");
+    expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(sql).toContain("DELETE FROM holistic_mentorship_post_session_answers");
     expect(sql).toContain("'draft_erased_on_mapping_end'");
     expect(sql).toContain("active_mapping.academic_year > ended.academic_year");

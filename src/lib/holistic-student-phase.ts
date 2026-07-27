@@ -317,7 +317,7 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
      JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
      JOIN "user" u ON u.id = st.user_id
      LEFT JOIN LATERAL (
-       SELECT roster_student.grade
+       SELECT MIN(roster_student.grade) AS grade
        FROM centre_students roster_student
        JOIN centres roster_centre
          ON roster_centre.id = roster_student.centre_id
@@ -328,7 +328,7 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
          AND roster_student.academic_year = mapping.academic_year
          AND roster_student.program_id = mapping.program_id
          AND roster_student.grade IN (11, 12)
-       LIMIT 1
+       HAVING COUNT(DISTINCT roster_student.grade) = 1
      ) current_roster ON mapping.academic_year = $5
      LEFT JOIN LATERAL (
        SELECT historical_grade.number AS grade

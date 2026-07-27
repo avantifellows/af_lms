@@ -294,6 +294,8 @@ describe("Holistic Student Phase derivation", () => {
     const [mappingSql, mappingParams] = mockQuery.mock.calls[0];
     expect(String(mappingSql)).toContain("FROM centre_students roster_student");
     expect(String(mappingSql)).toContain("roster_centre.school_id = mapping.school_id");
+    expect(String(mappingSql)).toContain("SELECT MIN(roster_student.grade) AS grade");
+    expect(String(mappingSql)).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(String(mappingSql)).toContain("current_roster ON mapping.academic_year = $5");
     expect(String(mappingSql)).not.toContain("batch_enrollment");
     expect(mappingParams).toEqual([41, 4, 1, "2026-2027", "2026-2027"]);
