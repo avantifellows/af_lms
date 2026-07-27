@@ -114,10 +114,10 @@ export async function seedHolisticFixtures(
          FROM group_user batch_member
          JOIN "group" batch_group ON batch_group.id = batch_member.group_id AND batch_group.type = 'batch'
          JOIN batch ON batch.id = batch_group.child_id
-         WHERE batch_member.user_id = student.user_id
+         WHERE batch_member.user_id = student.user_id AND batch.program_id = $3
          ORDER BY batch.id
          LIMIT 1
-       ) roster_program ON roster_program.program_id = $3
+       ) roster_program ON TRUE
        WHERE centre.id = $1 AND student.status IS DISTINCT FROM 'dropout'
      ), ranked AS (
        SELECT candidates.*,

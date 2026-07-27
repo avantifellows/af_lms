@@ -73,6 +73,7 @@ function useProgressData(params: URLSearchParams, ready: boolean) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const load = useCallback(async (signal?: AbortSignal) => {
+    setData(EMPTY);
     setLoading(true);
     try {
       const response = await fetch(`/api/holistic-mentorship/progress?${params}`, { signal });

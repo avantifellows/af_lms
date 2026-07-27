@@ -51,6 +51,12 @@ describe("Holistic release preflight", () => {
           { source_user_id: "1002", student_id: 102, eligible: true },
           { source_user_id: "duplicate", student_id: 201, eligible: true },
           { source_user_id: "duplicate", student_id: 202, eligible: true },
+          {
+            source_user_id: "other-program",
+            student_id: 301,
+            eligible: false,
+            eligible_in_other_program: true,
+          },
         ];
       }
       if (sql.includes("preflight_historical")) {
@@ -90,7 +96,7 @@ describe("Holistic release preflight", () => {
             questions: questions.slice(0, 33),
           },
         ],
-        sourceUserIds: ["1001", "1002", "missing", "duplicate"],
+        sourceUserIds: ["1001", "1002", "missing", "duplicate", "other-program"],
       },
     });
 
@@ -232,11 +238,13 @@ describe("Holistic release preflight", () => {
 
   it("seeds deterministic fixture coverage without exposing fixture content in its report", async () => {
     let actorId = 500;
+    let fixtureStudentsQuery = "";
     const query = async (sql: string) => {
       if (sql.includes("fixture_scope")) {
         return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P1", grade_11_id: 11, grade_12_id: 12 }] };
       }
       if (sql.includes("fixture_students")) {
+        fixtureStudentsQuery = sql;
         return { rows: [
           { student_id: 101, user_id: 1001, grade: 11, batch_group_id: 801 },
           { student_id: 102, user_id: 1002, grade: 11, batch_group_id: 801 },
@@ -270,5 +278,8 @@ describe("Holistic release preflight", () => {
       submittedNotes: 1,
       phases: 6,
     });
+    expect(fixtureStudentsQuery).toContain(
+      "WHERE batch_member.user_id = student.user_id AND batch.program_id = $3"
+    );
   });
 });

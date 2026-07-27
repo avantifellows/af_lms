@@ -86,6 +86,22 @@ describe("ProgressWorkspace", () => {
     expect(screen.getByText(/Earlier academic years are read-only/)).toBeInTheDocument();
   });
 
+  it("clears the previous Program's rows while the next Program loads", async () => {
+    let finishEmrs!: (response: Response) => void;
+    const emrsResponse = new Promise<Response>((resolve) => { finishEmrs = resolve; });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+      .mockReturnValueOnce(emrsResponse));
+    const view = render(<ProgressWorkspace programId={1} />);
+    await screen.findByText("Student One");
+
+    view.rerender(<ProgressWorkspace programId={78} />);
+
+    expect(await screen.findByText("Loading mapped Students...")).toBeInTheDocument();
+    expect(screen.queryByText("Student One")).not.toBeInTheDocument();
+    finishEmrs(new Response(JSON.stringify({ ...payload, rows: [] })));
+  });
+
   it("distinguishes an Academic Year with no Mappings from filters with no matches", async () => {
     const emptyCounts = { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({

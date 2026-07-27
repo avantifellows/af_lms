@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,6 +32,50 @@ describe("PhasePlanSetup", () => {
       "/api/holistic-mentorship/phase-plans?academic_year=2025-2026&program_id=1"
     );
     expect(screen.getByText(/copy last year's definitions/)).toBeInTheDocument();
+  });
+
+  it("ignores an old Phase Plan response after switching Programs", async () => {
+    let finishJnv!: (response: unknown) => void;
+    let finishEmrs!: (response: unknown) => void;
+    const jnvResponse = new Promise((resolve) => { finishJnv = resolve; });
+    const emrsResponse = new Promise((resolve) => { finishEmrs = resolve; });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockReturnValueOnce(jnvResponse)
+      .mockReturnValueOnce(emrsResponse));
+    const plan = (title: string) => ({
+      plan: {
+        id: 7,
+        academicYear: "2026-2027",
+        editable: true,
+        phases: [{
+          id: 21,
+          number: 1,
+          grade: 11,
+          title,
+          state: "locked",
+          guidanceMarkdown: "Guidance",
+          revision: 1,
+          frozen: false,
+          everOpened: false,
+          used: false,
+          active: false,
+          questions: [{ id: 41, text: "Question" }],
+        }],
+      },
+    });
+    const view = render(<PhasePlanSetup programId={1} />);
+    view.rerender(<PhasePlanSetup programId={78} />);
+
+    await act(async () => {
+      finishEmrs({ ok: true, json: async () => plan("EMRS Plan") });
+    });
+    expect(await screen.findByRole("button", { name: /EMRS Plan/ })).toBeInTheDocument();
+
+    await act(async () => {
+      finishJnv({ ok: true, json: async () => plan("JNV Plan") });
+    });
+    expect(screen.getByRole("button", { name: /EMRS Plan/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /JNV Plan/ })).not.toBeInTheDocument();
   });
 
   it("edits and reorders questions on an opened unused Phase after confirmation", async () => {

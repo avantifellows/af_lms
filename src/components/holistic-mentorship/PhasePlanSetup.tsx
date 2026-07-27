@@ -134,10 +134,12 @@ export default function PhasePlanSetup({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const loadId = useRef(0);
   const selectedPhase = selectedDraftPhase(plan, draft);
   const definitionReadOnly = isDefinitionReadOnly(plan, selectedPhase);
 
   const load = useCallback(async (year = academicYear, selectPhaseId?: number) => {
+    const requestId = ++loadId.current;
     setPlan(undefined);
     setCanCopyPriorPlan(false);
     setDraft(null);
@@ -145,12 +147,15 @@ export default function PhasePlanSetup({
     try {
       const loaded = await fetchPhasePlan(year, programId);
       const nextPlan = loaded.plan;
+      const canCopy = await priorPlanCanBeCopied(nextPlan, year, programId);
+      if (requestId !== loadId.current) return;
       setMessage(loaded.error);
-      setCanCopyPriorPlan(await priorPlanCanBeCopied(nextPlan, year, programId));
+      setCanCopyPriorPlan(canCopy);
       setPlan(nextPlan);
       const keep = selectPhaseId ? nextPlan?.phases.find((phase) => phase.id === selectPhaseId) : undefined;
       if (keep) setDraft(draftFromPhase(keep));
     } catch {
+      if (requestId !== loadId.current) return;
       setMessage("Could not load the Plan");
       setCanCopyPriorPlan(false);
       setPlan(null);
