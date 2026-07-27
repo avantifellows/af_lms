@@ -126,6 +126,7 @@ describe("ProgressWorkspace", () => {
 
   it("restores filters, sorting, page, and scroll after drill-down navigation", async () => {
     sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope: "1:2026-2027",
       filters: {
         academicYear: "2026-2027", school: "SCH001", grade: "11", mentor: "9", phase: "70",
         progress: "completed", search: "Student", sort: "progress", direction: "desc",
@@ -146,6 +147,34 @@ describe("ProgressWorkspace", () => {
     expect(screen.getByLabelText("Filter by School")).toHaveValue("SCH001");
     expect(screen.getByLabelText("Page 2 of 2")).toBeInTheDocument();
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 420 }));
+  });
+
+  it("does not restore School, Mentor, or Phase filters from another Program", async () => {
+    sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope: "1:2026-2027",
+      filters: {
+        school: "SCH001",
+        grade: "11",
+        mentor: "9",
+        phase: "70",
+        progress: "",
+        search: "",
+        sort: "school",
+        direction: "asc",
+      },
+      page: 2,
+    }));
+
+    render(<ProgressWorkspace programId={78} />);
+
+    await screen.findByText("Student One");
+    const request = String(vi.mocked(fetch).mock.calls[0][0]);
+    expect(request).toContain("program_id=78");
+    expect(request).toContain("grade=11");
+    expect(request).toContain("page=1");
+    expect(request).not.toContain("school_code=");
+    expect(request).not.toContain("mentor_user_id=");
+    expect(request).not.toContain("phase_id=");
   });
 
   it("exports every matching row with the current filters and sort", async () => {

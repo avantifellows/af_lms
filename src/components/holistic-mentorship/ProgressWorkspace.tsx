@@ -50,17 +50,25 @@ const INITIAL_FILTERS: ProgressFilters = {
 const VIEW_STATE_KEY = "holistic-progress-view";
 const SCROLL_KEY = "holistic-progress-scroll";
 
-function storedView() {
+function storedView(scope: string) {
   try {
     const stored = JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? "null") as {
       filters?: Partial<ProgressFilters>;
       page?: number;
+      scope?: string;
     } | null;
     const filters = Object.fromEntries(Object.entries(stored?.filters ?? {})
       .filter(([, value]) => typeof value === "string"));
+    const restoredFilters = { ...INITIAL_FILTERS, ...filters };
+    if (stored?.scope !== scope) {
+      restoredFilters.school = "";
+      restoredFilters.mentor = "";
+      restoredFilters.phase = "";
+    }
     return {
-      filters: { ...INITIAL_FILTERS, ...filters },
-      page: Number.isSafeInteger(stored?.page) && stored!.page! > 0 ? stored!.page! : 1,
+      filters: restoredFilters,
+      page: stored?.scope === scope &&
+        Number.isSafeInteger(stored.page) && stored.page! > 0 ? stored.page! : 1,
     };
   } catch {
     return { filters: INITIAL_FILTERS, page: 1 };
@@ -138,7 +146,7 @@ function useProgressView(academicYear: string, programId: number) {
     setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
     setPage(1);
   }
-  return { filters, setFilters, page, setPage };
+  return { filters, setFilters, page, setPage, scope };
 }
 
 function progressParams(
@@ -178,11 +186,12 @@ export default function ProgressWorkspace({
   programId?: number;
   onAcademicYears?: (years: string[]) => void;
 }) {
-  const { filters, setFilters, page, setPage } = useProgressView(
+  const { filters, setFilters, page, setPage, scope } = useProgressView(
     academicYear,
     programId,
   );
   const [ready, setReady] = useState(false);
+  const initialScope = useRef(scope);
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
   const params = useMemo(
@@ -203,7 +212,7 @@ export default function ProgressWorkspace({
 
 
   useEffect(() => {
-    const stored = storedView();
+    const stored = storedView(initialScope.current);
     savedScroll.current = Number(sessionStorage.getItem(SCROLL_KEY)) || 0;
     queueMicrotask(() => {
       setFilters(stored.filters);
@@ -217,8 +226,8 @@ export default function ProgressWorkspace({
 
   useEffect(() => {
     if (!ready) return;
-    sessionStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ filters, page }));
-  }, [filters, page, ready]);
+    sessionStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ filters, page, scope }));
+  }, [filters, page, ready, scope]);
 
   useEffect(() => {
     if (!ready || loading || scrollRestored.current || savedScroll.current <= 0) return;
