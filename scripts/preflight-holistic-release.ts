@@ -10,6 +10,7 @@ import {
   getHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
       await client.query("SET TRANSACTION READ ONLY");
       return runHolisticReleasePreflight({
         academicYear: options.academicYear,
+        programId: options.programId,
         profileSource,
         db: async <T extends Record<string, unknown>>(sql: string, params?: unknown[]) =>
           (await client.query<T>(sql, params)).rows,
@@ -51,18 +53,27 @@ async function main(): Promise<void> {
 
 function parseOptions(args: string[]) {
   const historicalSource = getHolisticScriptArgument(args, "--historical-source");
-  if (!args.includes("--confirm-production-read-only") || !historicalSource) {
+  const programId = Number(
+    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  );
+  if (
+    !args.includes("--confirm-production-read-only") ||
+    !isHolisticMentorshipProgramId(programId) ||
+    (programId === PROGRAM_IDS.COE && !historicalSource)
+  ) {
     throw new Error(
-      "--confirm-production-read-only and --historical-source=<private-json-export> are required"
+      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
     );
   }
   return {
-    historicalSource,
+    historicalSource: historicalSource ?? null,
+    programId,
     academicYear: getHolisticScriptArgument(args, "--academic-year") ?? "2026-2027",
   };
 }
 
-async function readHistoricalBusinessStudentIds(sourcePath: string): Promise<string[]> {
+async function readHistoricalBusinessStudentIds(sourcePath: string | null): Promise<string[]> {
+  if (!sourcePath) return [];
   const parsed: unknown = JSON.parse(await readFile(sourcePath, "utf8"));
   if (!Array.isArray(parsed) || !parsed.every(hasBusinessStudentId)) {
     throw new Error("Historical source must be the grouped private JSON export");

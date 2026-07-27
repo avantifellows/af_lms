@@ -608,14 +608,17 @@ async function buildHolisticMentorshipContent({
       <HolisticMentorshipWorkspace
         mode="teacher"
         schoolCode={schoolCode}
+        programId={holisticAccess.school!.programId}
         canEdit={holisticAccess.canEdit}
       />
     );
   }
   return <AdminSchoolRoster
     schoolCode={schoolCode}
+    programId={holisticAccess.school!.programId}
     students={await listHolisticAssignmentRoster({
       schoolId: holisticAccess.school!.id,
+      programId: holisticAccess.school!.programId,
       academicYear: CURRENT_ACADEMIC_YEAR,
     })}
   />;

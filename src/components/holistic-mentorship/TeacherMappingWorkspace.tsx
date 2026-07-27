@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import StudentIdentity, { studentInitials } from "./StudentIdentity";
 
 interface Student {
@@ -197,9 +197,11 @@ async function mappingChangeError(
 
 export default function TeacherMappingWorkspace({
   schoolCode,
+  programId = PROGRAM_IDS.COE,
   canEdit = true,
 }: {
   schoolCode: string;
+  programId?: number;
   canEdit?: boolean;
 }) {
   const [filters, setFilters] = useState(() => savedFilters(schoolCode));
@@ -218,6 +220,7 @@ export default function TeacherMappingWorkspace({
     let loaded = false;
     const params = new URLSearchParams({
       school_code: schoolCode,
+      program_id: String(programId),
       academic_year: CURRENT_ACADEMIC_YEAR,
       search: "",
     });
@@ -240,7 +243,7 @@ export default function TeacherMappingWorkspace({
       if (!signal?.aborted) setLoading(false);
     }
     return loaded;
-  }, [schoolCode]);
+  }, [programId, schoolCode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -300,6 +303,7 @@ export default function TeacherMappingWorkspace({
     setBusy(true);
     const problem = await mappingChangeError("POST", {
       school_code: schoolCode,
+      program_id: programId,
       academic_year: CURRENT_ACADEMIC_YEAR,
       takeover_confirmed: takeover,
       selections: choices.map((student) => ({
@@ -323,6 +327,7 @@ export default function TeacherMappingWorkspace({
     setBusy(true);
     const problem = await mappingChangeError("DELETE", {
       school_code: schoolCode,
+      program_id: programId,
       academic_year: CURRENT_ACADEMIC_YEAR,
       confirmed: true,
       mappings: [{
@@ -357,6 +362,7 @@ export default function TeacherMappingWorkspace({
         pagedRoster={pagedRoster} rosterPage={rosterPage} rosterPageCount={rosterPageCount}
         mentees={mentees} shownMentees={shownMentees} filters={filters} canEdit={canEdit}
         selected={selected} busy={busy} assignOpen={assignOpen} schoolCode={schoolCode}
+        programId={programId}
         onOpenChange={setAssignOpen} onFilterChange={changeFilter} onToggle={toggle}
         onSelectShown={() => setSelected(pagedRoster.map((student) => student.studentId))}
         onAssign={assign} onRemove={remove} />
@@ -379,6 +385,7 @@ type MappingWorkspaceContentProps = {
   busy: boolean;
   assignOpen: boolean;
   schoolCode: string;
+  programId: number;
   onOpenChange: (open: boolean) => void;
   onFilterChange: (updates: Partial<SavedFilters>) => void;
   onToggle: (studentId: number) => void;
@@ -399,7 +406,7 @@ function MappingLoading() {
 
 function LoadedMappingWorkspace({ roster, visibleRoster, pagedRoster, rosterPage,
   rosterPageCount, mentees, shownMentees, filters, canEdit, selected, busy, assignOpen,
-  schoolCode, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign, onRemove }:
+  schoolCode, programId, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign, onRemove }:
   MappingWorkspaceContentProps) {
   return <>
     <AssignmentRoster students={pagedRoster} visibleCount={visibleRoster.length}
@@ -408,7 +415,8 @@ function LoadedMappingWorkspace({ roster, visibleRoster, pagedRoster, rosterPage
       onOpenChange={onOpenChange} onFilterChange={onFilterChange} onToggle={onToggle}
       onSelectShown={onSelectShown} onAssign={onAssign} />
     <MenteesSection mentees={mentees} shown={shownMentees} filters={filters}
-      canEdit={canEdit} busy={busy} schoolCode={schoolCode} onFilterChange={onFilterChange}
+      canEdit={canEdit} busy={busy} schoolCode={schoolCode} programId={programId}
+      onFilterChange={onFilterChange}
       onRemove={onRemove} onOpenRoster={() => onOpenChange(true)} />
   </>;
 }
@@ -551,7 +559,7 @@ function RosterTable({ students, allCount, canEdit, selected, page, visibleCount
   if (allCount === 0) {
     return <RosterEmptyState icon={Users}
       title="No eligible Students at this School"
-      body="No current Grade 11 or 12 Program 1 Students are available for Holistic Mentor assignment." />;
+      body="No current Grade 11 or 12 Students are available for Holistic Mentor assignment." />;
   }
   if (students.length === 0) {
     return <RosterEmptyState title="No Students match" body="Change the filter or search text.">
@@ -622,13 +630,14 @@ function RosterEmptyState({ icon: Icon = SearchX, title, body, children }: {
   </div>;
 }
 
-function MenteesSection({ mentees, shown, filters, canEdit, busy, schoolCode, onFilterChange, onRemove, onOpenRoster }: {
+function MenteesSection({ mentees, shown, filters, canEdit, busy, schoolCode, programId, onFilterChange, onRemove, onOpenRoster }: {
   mentees: Student[];
   shown: Student[];
   filters: SavedFilters;
   canEdit: boolean;
   busy: boolean;
   schoolCode: string;
+  programId: number;
   onFilterChange: (updates: Partial<SavedFilters>) => void;
   onRemove: (student: Student) => Promise<void>;
   onOpenRoster: () => void;
@@ -671,18 +680,20 @@ function MenteesSection({ mentees, shown, filters, canEdit, busy, schoolCode, on
         </label>
       </div>
     )}
-    <MenteeCards mentees={mentees} shown={shown} canEdit={canEdit} busy={busy} schoolCode={schoolCode}
+    <MenteeCards mentees={mentees} shown={shown} canEdit={canEdit} busy={busy}
+      schoolCode={schoolCode} programId={programId}
       onRemove={onRemove} onOpenRoster={onOpenRoster}
       onClearFilters={() => onFilterChange({ menteeSearch: "", menteeGrade: "", menteeStatus: "" })} />
   </div>;
 }
 
-function MenteeCards({ mentees, shown, canEdit, busy, schoolCode, onRemove, onOpenRoster, onClearFilters }: {
+function MenteeCards({ mentees, shown, canEdit, busy, schoolCode, programId, onRemove, onOpenRoster, onClearFilters }: {
   mentees: Student[];
   shown: Student[];
   canEdit: boolean;
   busy: boolean;
   schoolCode: string;
+  programId: number;
   onRemove: (student: Student) => Promise<void>;
   onOpenRoster: () => void;
   onClearFilters: () => void;
@@ -715,15 +726,16 @@ function MenteeCards({ mentees, shown, canEdit, busy, schoolCode, onRemove, onOp
   }
   return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
     {shown.map((student) => <MenteeCard key={student.studentId} student={student} canEdit={canEdit}
-      busy={busy} schoolCode={schoolCode} onRemove={onRemove} />)}
+      busy={busy} schoolCode={schoolCode} programId={programId} onRemove={onRemove} />)}
   </div>;
 }
 
-function MenteeCard({ student, canEdit, busy, schoolCode, onRemove }: {
+function MenteeCard({ student, canEdit, busy, schoolCode, programId, onRemove }: {
   student: Student;
   canEdit: boolean;
   busy: boolean;
   schoolCode: string;
+  programId: number;
   onRemove: (student: Student) => Promise<void>;
 }) {
   const status = menteeStatus(student);
@@ -749,7 +761,11 @@ function MenteeCard({ student, canEdit, busy, schoolCode, onRemove }: {
   return <article className="overflow-hidden rounded-md border border-border bg-bg-card shadow-sm transition-shadow hover:shadow-md">
     {student.activePhaseId ? (
       <Link
-        href={`/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${new URLSearchParams({ school_code: schoolCode, academic_year: CURRENT_ACADEMIC_YEAR })}`}
+        href={`/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${new URLSearchParams({
+          school_code: schoolCode,
+          academic_year: CURRENT_ACADEMIC_YEAR,
+          program_id: String(programId),
+        })}`}
         aria-label={`Open ${student.name}`}
         className="block min-h-[74px] p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset">
         {body}

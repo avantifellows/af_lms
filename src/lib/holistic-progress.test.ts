@@ -56,6 +56,7 @@ describe("Holistic progress", () => {
     mockQuery.mockResolvedValueOnce([databaseRow]);
 
     const result = await listHolisticProgress({
+      programId: 1,
       academicYear: "2026-2027",
       phaseId: null,
       schoolCode: null,
@@ -94,6 +95,7 @@ describe("Holistic progress", () => {
       .toBeLessThan(sql.indexOf("FROM enrollment_record grade_enrollment"));
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       schoolCode: undefined,
     });
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
@@ -148,7 +150,7 @@ describe("Holistic progress", () => {
       ],
     };
 
-    const csv = formatHolisticProgressCsv("2026-2027", [row]);
+    const csv = formatHolisticProgressCsv("2026-2027", 1, [row]);
 
     expect(csv).toContain("\"'=SUM(A1:A2)\"");
     expect(csv).toContain("\"School, One\"");
@@ -173,7 +175,7 @@ describe("Holistic progress", () => {
       .mockResolvedValueOnce([{ user_id: "9", name: "Current Mentor", email: "current@example.com" }])
       .mockResolvedValueOnce([{ id: "70", position: 2, title: "Check-in", grade: "11", state: "open" }]);
 
-    const options = await getHolisticProgressOptions("2025-2026");
+    const options = await getHolisticProgressOptions("2025-2026", 1);
 
     expect(options).toMatchObject({
       schools: [{ code: "SCH001", name: "School One" }],
@@ -194,7 +196,7 @@ describe("Holistic progress", () => {
       { academic_year: "2023-2024" },
     ]);
 
-    await expect(getHolisticProgressAcademicYears()).resolves.toEqual([
+    await expect(getHolisticProgressAcademicYears(1)).resolves.toEqual([
       "2026-2027",
       "2025-2026",
       "2023-2024",
@@ -213,6 +215,7 @@ describe("Holistic progress", () => {
     } as never]);
 
     const result = await listHolisticProgress({
+      programId: 1,
       academicYear: "2026-2027", phaseId: null, schoolCode: null, grade: null,
       mentorUserId: null, progress: null, search: "", sort: "student_name", direction: "asc", page: 3,
     });

@@ -282,6 +282,7 @@ describe("Holistic Student Phase derivation", () => {
       ]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 75,
       schoolId: 4,
@@ -323,6 +324,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     await expect(getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
@@ -358,6 +360,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
@@ -420,6 +423,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 63,
       schoolId: 4,
@@ -466,6 +470,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
@@ -498,6 +503,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,

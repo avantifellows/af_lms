@@ -12,6 +12,7 @@ import {
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
   holisticApiError,
+  holisticProgramId,
   positiveInteger,
   readJsonObject,
   validSchoolCode,
@@ -30,12 +31,13 @@ export async function GET(request: NextRequest) {
   const params = new URL(request.url).searchParams;
   const schoolCode = params.get("school_code");
   const academicYear = params.get("academic_year") ?? CURRENT_ACADEMIC_YEAR;
+  const programId = holisticProgramId(params.get("program_id"));
   const search = (params.get("search") ?? "").trim();
   const gradeValue = params.get("grade");
   const grade = gradeValue === null || gradeValue === ""
     ? null
     : Number(gradeValue);
-  if (!validSchoolCode(schoolCode) || academicYear !== CURRENT_ACADEMIC_YEAR ||
+  if (!programId || !validSchoolCode(schoolCode) || academicYear !== CURRENT_ACADEMIC_YEAR ||
       search.length > 100 || (grade !== null && grade !== 11 && grade !== 12)) {
     return holisticApiError("Invalid roster filters");
   }
@@ -43,6 +45,7 @@ export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   const access = await requireHolisticMentorshipAccess(session, "roster_view", {
     schoolCode,
+    programId,
   });
   if (!access.ok) return holisticApiError(access.error, access.status);
 
@@ -50,6 +53,7 @@ export async function GET(request: NextRequest) {
     actorUserId: access.actorUserId,
     students: await listHolisticAssignmentRoster({
       schoolId: access.school!.id,
+      programId,
       academicYear,
       search,
       grade: grade as 11 | 12 | null,
@@ -59,7 +63,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const value = await readJsonObject(request);
-  if (!value || !validSchoolCode(value.school_code) ||
+  const programId = value && holisticProgramId(value.program_id);
+  if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       typeof value.takeover_confirmed !== "boolean" || !Array.isArray(value.selections) ||
       value.selections.length < 1 || value.selections.length > 50) {
@@ -84,12 +89,14 @@ export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
   const access = await requireHolisticMentorshipAccess(session, "mapping_mutation", {
     schoolCode: value.school_code as string,
+    programId,
   });
   if (!access.ok) return holisticApiError(access.error, access.status);
 
   return mutationResponse(await assignHolisticMentees({
     actorUserId: access.actorUserId!,
     schoolId: access.school!.id,
+    programId,
     academicYear: value.academic_year,
     selections: selections as Array<{ studentId: number; expectedMappingId: number | null }>,
     takeoverConfirmed: value.takeover_confirmed,
@@ -98,7 +105,8 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const value = await readJsonObject(request);
-  if (!value || !validSchoolCode(value.school_code) ||
+  const programId = value && holisticProgramId(value.program_id);
+  if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       value.confirmed !== true || !Array.isArray(value.mappings) ||
       value.mappings.length < 1 || value.mappings.length > 50) {
@@ -119,12 +127,14 @@ export async function DELETE(request: NextRequest) {
   const session = await getServerSession(authOptions);
   const access = await requireHolisticMentorshipAccess(session, "mapping_mutation", {
     schoolCode: value.school_code,
+    programId,
   });
   if (!access.ok) return holisticApiError(access.error, access.status);
 
   return mutationResponse(await removeHolisticMentees({
     actorUserId: access.actorUserId!,
     schoolId: access.school!.id,
+    programId,
     academicYear: value.academic_year,
     mappings: mappings as Array<{ studentId: number; expectedMappingId: number }>,
     confirmed: true,

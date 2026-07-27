@@ -74,6 +74,7 @@ describe("Holistic release preflight", () => {
     const result = await runHolisticReleasePreflight({
       db,
       academicYear: "2026-2027",
+      programId: 1,
       profileSource: {
         forms: [
           {
@@ -134,6 +135,7 @@ describe("Holistic release preflight", () => {
     const result = await runHolisticReleasePreflight({
       db,
       academicYear: "2026-2027",
+      programId: 1,
       profileSource: { forms: [], sourceUserIds: [] },
     });
 
@@ -258,6 +260,7 @@ describe("Holistic release preflight", () => {
 
     await expect(seedHolisticFixtures({ query } as never)).resolves.toEqual({
       schoolCode: "E2E-P1",
+      programId: 1,
       academicYear: "2026-2027",
       students: 6,
       mappings: 5,

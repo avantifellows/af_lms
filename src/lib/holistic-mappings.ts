@@ -1,4 +1,3 @@
-import { PROGRAM_IDS } from "./constants";
 import { query, withTransaction } from "./db";
 import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
@@ -103,7 +102,8 @@ export async function eraseDraftHolisticNotes(
 async function currentOwnership(
   studentIds: number[],
   academicYear: string,
-  schoolId: number
+  schoolId: number,
+  programId: number,
 ): Promise<Array<{ studentId: number; ownership: HolisticAssignmentRosterStudent["ownership"] }>> {
   const rows = await query<ActiveMappingRow & { mentor_name: string | null }>(
     `SELECT mapping.id, mapping.student_id, mapping.mentor_user_id,
@@ -115,7 +115,7 @@ async function currentOwnership(
        AND mapping.school_id = $3
        AND mapping.program_id = $4
        AND mapping.ended_at IS NULL`,
-    [studentIds, academicYear, schoolId, PROGRAM_IDS.COE]
+    [studentIds, academicYear, schoolId, programId]
   );
   const byStudent = new Map(rows.map((row) => [Number(row.student_id), row]));
   return studentIds.map((studentId) => {
@@ -133,15 +133,30 @@ async function currentOwnership(
   });
 }
 
-async function requireEligibleActor(client: PoolClient, actorUserId: number, schoolId: number) {
-  if (!(await findEligibleHolisticMentorUserId({ client, userId: actorUserId, schoolId }))) {
+async function requireEligibleActor(
+  client: PoolClient,
+  actorUserId: number,
+  schoolId: number,
+  programId: number,
+) {
+  if (!(await findEligibleHolisticMentorUserId({
+    client,
+    userId: actorUserId,
+    schoolId,
+    programId,
+  }))) {
     throw new MappingMutationError(422, "Teacher is no longer eligible for this School");
   }
 }
 
 async function lockEligibleStudents(
   client: PoolClient,
-  params: { schoolId: number; academicYear: string; studentIds: number[] }
+  params: {
+    schoolId: number;
+    programId: number;
+    academicYear: string;
+    studentIds: number[];
+  }
 ) {
   const eligible = await client.query<{ student_id: number | string }>(
     `WITH eligible_roster AS MATERIALIZED (
@@ -165,7 +180,7 @@ async function lockEligibleStudents(
        AND st.status IS DISTINCT FROM 'dropout'
      ORDER BY st.id
          FOR UPDATE OF st`,
-    [params.schoolId, params.academicYear, PROGRAM_IDS.COE, params.studentIds]
+    [params.schoolId, params.academicYear, params.programId, params.studentIds]
   );
   const eligibleIds = new Set(eligible.rows.map((row) => Number(row.student_id)));
   if (eligibleIds.size !== params.studentIds.length ||
@@ -178,7 +193,8 @@ async function lockActiveMappings(
   client: PoolClient,
   studentIds: number[],
   academicYear: string,
-  schoolId: number
+  schoolId: number,
+  programId: number,
 ) {
   const active = await client.query<ActiveMappingRow>(
     `SELECT id, student_id, mentor_user_id
@@ -186,7 +202,7 @@ async function lockActiveMappings(
      WHERE student_id = ANY($1::bigint[]) AND academic_year = $2
        AND school_id = $3 AND program_id = $4 AND ended_at IS NULL
      FOR UPDATE`,
-    [studentIds, academicYear, schoolId, PROGRAM_IDS.COE]
+    [studentIds, academicYear, schoolId, programId]
   );
   return {
     rows: active.rows,
@@ -257,6 +273,7 @@ async function insertMappings(
     studentIds: number[];
     actorUserId: number;
     schoolId: number;
+    programId: number;
     academicYear: string;
     activeByStudent: Map<number, ActiveMappingRow>;
   }
@@ -271,7 +288,7 @@ async function insertMappings(
           started_at, assigned_by_user_id, assignment_source, inserted_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, now(), $6, $7, now(), now())
        RETURNING id`,
-      [studentId, params.actorUserId, params.schoolId, PROGRAM_IDS.COE,
+      [studentId, params.actorUserId, params.schoolId, params.programId,
         params.academicYear, params.actorUserId, source]
     );
   }
@@ -283,9 +300,15 @@ async function assignInTransaction(
   studentIds: number[]
 ): Promise<HolisticMappingMutationResult> {
   await lockHolisticMentorMappingMutation(client, params.actorUserId);
-  await requireEligibleActor(client, params.actorUserId, params.schoolId);
+  await requireEligibleActor(
+    client,
+    params.actorUserId,
+    params.schoolId,
+    params.programId,
+  );
   await lockEligibleStudents(client, {
     schoolId: params.schoolId,
+    programId: params.programId,
     academicYear: params.academicYear,
     studentIds,
   });
@@ -293,7 +316,8 @@ async function assignInTransaction(
     client,
     studentIds,
     params.academicYear,
-    params.schoolId
+    params.schoolId,
+    params.programId,
   );
   assertAssignmentsCurrent(
     params.selections,
@@ -310,7 +334,8 @@ async function mutationConflict(
   error: MappingMutationError | { code?: unknown },
   studentIds: number[],
   academicYear: string,
-  schoolId: number
+  schoolId: number,
+  programId: number,
 ): Promise<HolisticMappingMutationResult> {
   const known = error instanceof MappingMutationError;
   if (known && error.status === 422) {
@@ -320,19 +345,29 @@ async function mutationConflict(
     ok: false,
     status: known ? error.status : 409,
     error: known ? error.message : "Mapping ownership changed; review the refreshed roster",
-    ownership: await currentOwnership(studentIds, academicYear, schoolId),
+    ownership: await currentOwnership(
+      studentIds,
+      academicYear,
+      schoolId,
+      programId,
+    ),
   };
 }
 
 export async function assignHolisticMentees(params: {
   actorUserId: number;
   schoolId: number;
+  programId: number;
   academicYear: string;
   selections: Array<{ studentId: number; expectedMappingId: number | null }>;
   takeoverConfirmed: boolean;
 }): Promise<HolisticMappingMutationResult> {
   const studentIds = params.selections.map(({ studentId }) => studentId).sort((a, b) => a - b);
-  await reconcileHolisticMappings({ academicYear: params.academicYear, studentIds });
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    studentIds,
+    programId: params.programId,
+  });
   try {
     return await withTransaction((client) => assignInTransaction(client, params, studentIds));
   } catch (error) {
@@ -341,7 +376,8 @@ export async function assignHolisticMentees(params: {
         error as MappingMutationError | { code?: unknown },
         studentIds,
         params.academicYear,
-        params.schoolId
+        params.schoolId,
+        params.programId,
       );
     }
     throw error;
@@ -354,12 +390,18 @@ async function removeInTransaction(
   studentIds: number[]
 ): Promise<HolisticMappingMutationResult> {
   await lockHolisticMentorMappingMutation(client, params.actorUserId);
-  await requireEligibleActor(client, params.actorUserId, params.schoolId);
+  await requireEligibleActor(
+    client,
+    params.actorUserId,
+    params.schoolId,
+    params.programId,
+  );
   const active = await lockActiveMappings(
     client,
     studentIds,
     params.academicYear,
-    params.schoolId
+    params.schoolId,
+    params.programId,
   );
   for (const expected of params.mappings) {
     const current = active.byStudent.get(expected.studentId);
@@ -383,6 +425,7 @@ async function removeInTransaction(
 export async function removeHolisticMentees(params: {
   actorUserId: number;
   schoolId: number;
+  programId: number;
   academicYear: string;
   mappings: Array<{ studentId: number; expectedMappingId: number }>;
   confirmed: boolean;
@@ -391,12 +434,22 @@ export async function removeHolisticMentees(params: {
   if (!params.confirmed) {
     return { ok: false, status: 422, error: "Removal confirmation is required" };
   }
-  await reconcileHolisticMappings({ academicYear: params.academicYear, studentIds });
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    studentIds,
+    programId: params.programId,
+  });
   try {
     return await withTransaction((client) => removeInTransaction(client, params, studentIds));
   } catch (error) {
     if (error instanceof MappingMutationError) {
-      return mutationConflict(error, studentIds, params.academicYear, params.schoolId);
+      return mutationConflict(
+        error,
+        studentIds,
+        params.academicYear,
+        params.schoolId,
+        params.programId,
+      );
     }
     throw error;
   }
@@ -404,6 +457,7 @@ export async function removeHolisticMentees(params: {
 
 export async function listHolisticAssignmentRoster(params: {
   schoolId: number;
+  programId: number;
   academicYear: string;
   search?: string;
   grade?: 11 | 12 | null;
@@ -411,6 +465,7 @@ export async function listHolisticAssignmentRoster(params: {
   await reconcileHolisticMappings({
     academicYear: params.academicYear,
     schoolId: params.schoolId,
+    programId: params.programId,
   });
   const rows = await query<RosterRow>(
     `WITH eligible_roster AS MATERIALIZED (
@@ -467,7 +522,7 @@ export async function listHolisticAssignmentRoster(params: {
     [
       params.schoolId,
       params.academicYear,
-      PROGRAM_IDS.COE,
+      params.programId,
       `%${(params.search ?? "").trim()}%`,
       params.grade ?? null,
     ]

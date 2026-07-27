@@ -1,4 +1,8 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  isHolisticMentorshipProgramId,
+} from "./constants";
 import { query } from "./db";
 import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
@@ -33,6 +37,7 @@ export type HolisticMentorshipAccessResult =
       permission: UserPermission;
       canEdit: boolean;
       actorUserId?: number;
+      programId?: number;
       school?: HolisticMentorshipSchool;
     }
   | {
@@ -46,10 +51,13 @@ export interface HolisticMentorshipSchool {
   code: string;
   name: string;
   region: string | null;
+  programId: number;
 }
 
-interface HolisticMentorshipSchoolRow extends Omit<HolisticMentorshipSchool, "id"> {
+interface HolisticMentorshipSchoolRow
+  extends Omit<HolisticMentorshipSchool, "id" | "programId"> {
   id: number | string;
+  program_id: number | string;
 }
 
 const PROGRAM_ACTIONS = new Set<HolisticMentorshipAction>([
@@ -86,23 +94,33 @@ function denied(
 }
 
 async function findProgramSchool(
-  schoolCode: string
+  schoolCode: string,
+  programId?: number,
 ): Promise<HolisticMentorshipSchool | null> {
   const rows = await query<HolisticMentorshipSchoolRow>(
-    `SELECT school.id, school.code, school.name, school.region
+    `SELECT school.id, school.code, school.name, school.region,
+            MIN(centre.program_id) AS program_id
      FROM school
+     JOIN centres centre
+       ON centre.school_id = school.id
+      AND centre.program_id = ANY($2::bigint[])
+      AND centre.is_active IS TRUE
      WHERE school.code = $1
-       AND EXISTS (
-         SELECT 1
-         FROM centres centre
-         WHERE centre.school_id = school.id
-           AND centre.program_id = $2
-           AND centre.is_active IS TRUE
-       )
+       AND ($3::bigint IS NULL OR centre.program_id = $3)
+     GROUP BY school.id, school.code, school.name, school.region
+     HAVING COUNT(DISTINCT centre.program_id) = 1
      LIMIT 1`,
-    [schoolCode, PROGRAM_IDS.COE]
+    [schoolCode, [...HOLISTIC_MENTORSHIP_PROGRAM_IDS], programId ?? null]
   );
-  return rows[0] ? { ...rows[0], id: Number(rows[0].id) } : null;
+  return rows[0]
+    ? {
+        id: Number(rows[0].id),
+        code: rows[0].code,
+        name: rows[0].name,
+        region: rows[0].region,
+        programId: Number(rows[0].program_id),
+      }
+    : null;
 }
 
 async function ownsActiveMapping(params: {
@@ -110,6 +128,7 @@ async function ownsActiveMapping(params: {
   schoolId: number;
   studentId: number;
   academicYear: string;
+  programId: number;
 }): Promise<boolean> {
   const rows = await query<{ id: number | string }>(
     `SELECT id
@@ -141,7 +160,7 @@ async function ownsActiveMapping(params: {
       params.actorUserId,
       params.schoolId,
       params.studentId,
-      PROGRAM_IDS.COE,
+      params.programId,
       params.academicYear,
     ]
   );
@@ -159,10 +178,11 @@ function allowedActor(permission: UserPermission, action: HolisticMentorshipActi
 
 async function resolveSchool(
   permission: UserPermission,
-  schoolCode?: string
+  schoolCode?: string,
+  programId?: number,
 ): Promise<HolisticMentorshipSchool | HolisticMentorshipAccessResult | undefined> {
   if (!schoolCode) return undefined;
-  const school = await findProgramSchool(schoolCode);
+  const school = await findProgramSchool(schoolCode, programId);
   if (!school) return denied(404, "School not found");
   return canAccessSchoolSync(permission, school.code, school.region ?? undefined)
     ? school
@@ -182,6 +202,7 @@ async function teacherAccess(params: {
   const actorUserId = await findEligibleHolisticMentorUserId({
     email: params.email,
     schoolId: params.school.id,
+    programId: params.school.programId,
   });
   if (actorUserId === null) return denied(403, "Forbidden");
   if (MAPPING_REQUIRED_ACTIONS.has(params.action)) {
@@ -189,12 +210,14 @@ async function teacherAccess(params: {
       academicYear: params.academicYear ?? CURRENT_ACADEMIC_YEAR,
       schoolId: params.school.id,
       studentIds: params.studentId ? [params.studentId] : undefined,
+      programId: params.school.programId,
     });
     const ownsMapping = params.studentId && await ownsActiveMapping({
       actorUserId,
       schoolId: params.school.id,
       studentId: params.studentId,
       academicYear: params.academicYear ?? CURRENT_ACADEMIC_YEAR,
+      programId: params.school.programId,
     });
     if (!ownsMapping) return denied(404, "Not found");
   }
@@ -204,6 +227,7 @@ async function teacherAccess(params: {
     permission: params.permission,
     canEdit: params.canEdit,
     actorUserId,
+    programId: params.school.programId,
     school: params.school,
   };
 }
@@ -213,6 +237,7 @@ function programAccess(params: {
   permission: UserPermission;
   canEdit: boolean;
   action: HolisticMentorshipAction;
+  programId?: number;
   school?: HolisticMentorshipSchool;
 }): HolisticMentorshipAccessResult {
   const actorUserId = params.permission.user_id == null
@@ -230,6 +255,7 @@ function programAccess(params: {
     permission: params.permission,
     canEdit: params.canEdit,
     actorUserId,
+    programId: params.school?.programId ?? params.programId,
     school: params.school,
   };
 }
@@ -237,7 +263,12 @@ function programAccess(params: {
 export async function requireHolisticMentorshipAccess(
   session: HolisticMentorshipSession,
   action: HolisticMentorshipAction,
-  options: { schoolCode?: string; studentId?: number; academicYear?: string } = {}
+  options: {
+    schoolCode?: string;
+    studentId?: number;
+    academicYear?: string;
+    programId?: number;
+  } = {}
 ): Promise<HolisticMentorshipAccessResult> {
   const email = session?.user?.email;
   if (!email) return denied(401, "Unauthorized");
@@ -252,9 +283,21 @@ export async function requireHolisticMentorshipAccess(
     return denied(403, "Forbidden");
   }
 
-  const resolvedSchool = await resolveSchool(permission, options.schoolCode);
+  const requestedProgramId = options.programId;
+  if (requestedProgramId !== undefined && !isHolisticMentorshipProgramId(requestedProgramId)) {
+    return denied(404, "Not found");
+  }
+  const resolvedSchool = await resolveSchool(
+    permission,
+    options.schoolCode,
+    requestedProgramId,
+  );
   if (resolvedSchool && "ok" in resolvedSchool) return resolvedSchool;
   const school = resolvedSchool as HolisticMentorshipSchool | undefined;
+  const programId = school?.programId ?? requestedProgramId;
+  if (action !== "program_read" && action !== "privacy_delete" && programId === undefined) {
+    return denied(404, "Not found");
+  }
 
   if (allowed.teacher) {
     return teacherAccess({
@@ -273,6 +316,7 @@ export async function requireHolisticMentorshipAccess(
       academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
       schoolId: school?.id,
       studentIds: [options.studentId],
+      programId: programId!,
     });
   }
 
@@ -281,6 +325,7 @@ export async function requireHolisticMentorshipAccess(
     permission,
     canEdit: access.canEdit,
     action,
+    programId,
     school,
   });
 }

@@ -6,6 +6,7 @@ import {
   getHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -30,25 +31,30 @@ function parseOptions(args: string[]) {
   const fromAcademicYear = getHolisticScriptArgument(args, "--from");
   const toAcademicYear = getHolisticScriptArgument(args, "--to");
   const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
+  const programId = Number(
+    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  );
   if (!fromAcademicYear || !toAcademicYear) throw invalidOptionsError();
-  validateOptions(fromAcademicYear, toAcademicYear, actorUserId);
-  return { mode, fromAcademicYear, toAcademicYear, actorUserId };
+  validateOptions(fromAcademicYear, toAcademicYear, actorUserId, programId);
+  return { mode, fromAcademicYear, toAcademicYear, actorUserId, programId };
 }
 
 function validateOptions(
   fromAcademicYear: string,
   toAcademicYear: string,
-  actorUserId: number
+  actorUserId: number,
+  programId: number
 ): void {
   if (!isAcademicYear(fromAcademicYear) ||
       !isAcademicYear(toAcademicYear) ||
-      !isPositiveSafeInteger(actorUserId)) {
+      !isPositiveSafeInteger(actorUserId) ||
+      !isHolisticMentorshipProgramId(programId)) {
     throw invalidOptionsError();
   }
 }
 
 function invalidOptionsError(): Error {
-  return new Error("--from, --to, and --actor-user-id are required");
+  return new Error("--from, --to, --actor-user-id, and a supported --program-id are required");
 }
 
 function isAcademicYear(value: string): boolean {

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { Badge, Input, Select } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import type { HolisticAssignmentRosterStudent as Student } from "@/lib/holistic-mappings";
 import StudentIdentity from "./StudentIdentity";
 
@@ -36,11 +36,12 @@ function progress(student: Student): Progress {
   return "pending";
 }
 
-function studentHref(student: Student, schoolCode: string) {
+function studentHref(student: Student, schoolCode: string, programId: number) {
   if (!student.ownership || !student.activePhaseId) return null;
   const params = new URLSearchParams({
     school_code: schoolCode,
     academic_year: CURRENT_ACADEMIC_YEAR,
+    program_id: String(programId),
     source: "school",
   });
   return `/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${params}`;
@@ -66,7 +67,11 @@ function Summary({ students }: { students: Student[] }) {
   </div>;
 }
 
-function CoverageTable({ students, schoolCode }: { students: Student[]; schoolCode: string }) {
+function CoverageTable({ students, schoolCode, programId }: {
+  students: Student[];
+  schoolCode: string;
+  programId: number;
+}) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
     <div role="region" aria-label="School mentorship coverage" tabIndex={0}
       className="max-h-[36rem] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
@@ -77,7 +82,7 @@ function CoverageTable({ students, schoolCode }: { students: Student[]; schoolCo
             <th className="w-16 px-4 py-3"><span className="sr-only">Open</span></th></tr>
         </thead>
         <tbody className="divide-y divide-border">{students.map((student) => {
-          const href = studentHref(student, schoolCode);
+          const href = studentHref(student, schoolCode, programId);
           const state = progress(student);
           return <tr key={student.studentId} className="hover:bg-hover-bg">
             <td className="px-4 py-3"><StudentIdentity student={student} /></td>
@@ -133,9 +138,14 @@ function matchesStudentQuery(student: Student, query: string) {
     (student.externalStudentId ?? "").toLowerCase().includes(query);
 }
 
-export default function AdminSchoolRoster({ students, schoolCode }: {
+export default function AdminSchoolRoster({
+  students,
+  schoolCode,
+  programId = PROGRAM_IDS.COE,
+}: {
   students: Student[];
   schoolCode: string;
+  programId?: number;
 }) {
   const [search, setSearch] = useState("");
   const [grade, setGrade] = useState("");
@@ -178,7 +188,11 @@ export default function AdminSchoolRoster({ students, schoolCode }: {
         </Select>
       </label>
     </div>
-    {shown.length ? <CoverageTable students={shown} schoolCode={schoolCode} />
+    {shown.length ? <CoverageTable
+      students={shown}
+      schoolCode={schoolCode}
+      programId={programId}
+    />
       : <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-bg-card p-8 text-center">
         <div><Users aria-hidden="true" className="mx-auto h-9 w-9 text-text-muted" />
           <p className="mt-2 text-sm font-bold text-text-primary">No Students match</p>

@@ -209,6 +209,7 @@ describe("Holistic Mapping rollover entrypoint", () => {
   it("rejects a target that is not the next Academic Year before data access", async () => {
     const db = { candidates: vi.fn(), apply: vi.fn() };
     await expect(runHolisticMappingRollover({
+      programId: 1,
       fromAcademicYear: "2026-2027",
       toAcademicYear: "2028-2029",
       actorUserId: 7,
@@ -220,6 +221,7 @@ describe("Holistic Mapping rollover entrypoint", () => {
   it("rejects an invalid actor before data access", async () => {
     const db = { candidates: vi.fn(), apply: vi.fn() };
     await expect(runHolisticMappingRollover({
+      programId: 1,
       fromAcademicYear: "2026-2027",
       toAcademicYear: "2027-2028",
       actorUserId: 0,
@@ -232,6 +234,7 @@ describe("Holistic Mapping rollover entrypoint", () => {
   it("defaults to dry-run and reports carried, skipped, and ineligible aggregates without writes", async () => {
     const apply = vi.fn();
     const report = await runHolisticMappingRollover({
+      programId: 1,
       fromAcademicYear: "2026-2027",
       toAcademicYear: "2027-2028",
       actorUserId: 7,

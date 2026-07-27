@@ -56,7 +56,7 @@ describe("ProgressWorkspace", () => {
     );
     expect(screen.getByText(/Last refreshed/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open Student One/ })).toHaveAttribute(
-      "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027"
+      "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1"
     );
   });
 
@@ -80,7 +80,7 @@ describe("ProgressWorkspace", () => {
     view.rerender(<ProgressWorkspace academicYear="2025-2026" />);
 
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
-      "/api/holistic-mentorship/progress?academic_year=2025-2026&page=1&sort=school&direction=asc",
+      "/api/holistic-mentorship/progress?academic_year=2025-2026&program_id=1&page=1&sort=school&direction=asc",
       expect.anything()
     ));
     expect(screen.getByText(/Earlier academic years are read-only/)).toBeInTheDocument();
@@ -124,7 +124,7 @@ describe("ProgressWorkspace", () => {
 
     expect(await screen.findByText("Student One")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls).toEqual([[
-      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=2&sort=progress&direction=desc&school_code=SCH001&grade=11&mentor_user_id=9&phase_id=70&progress=completed&search=Student",
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=2&sort=progress&direction=desc&school_code=SCH001&grade=11&mentor_user_id=9&phase_id=70&progress=completed&search=Student",
       expect.anything(),
     ]]);
     expect(screen.getByLabelText("Filter by School")).toHaveValue("SCH001");

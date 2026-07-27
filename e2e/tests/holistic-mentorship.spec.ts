@@ -248,7 +248,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     await backToProgress.focus();
     await expect(backToProgress).toBeFocused();
     await backToProgress.press("Enter");
-    await expect(holisticAdminPage).toHaveURL("/admin/holistic-mentorship");
+    await expect(holisticAdminPage).toHaveURL("/admin/holistic-mentorship?program_id=1");
 
     await holisticAdminPage.setViewportSize(RESPONSIVE_VIEWPORTS[1]);
     await phaseSetupTab.click();
@@ -377,19 +377,36 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticAdminPage.goto("/admin/holistic-mentorship");
 
     const program = holisticAdminPage.getByLabel("Program");
-    await expect(program).toBeDisabled();
+    await expect(program).toBeEnabled();
     await expect(program).toHaveValue("1");
+    await expect(program.locator("option")).toHaveText(["1 - JNV CoE", "78 - EMRS CoE"]);
+
+    const emrsProgress = holisticAdminPage.waitForResponse((response) =>
+      response.url().includes("/api/holistic-mentorship/progress") &&
+      response.url().includes("program_id=78")
+    );
+    await program.selectOption("78");
+    await expect((await emrsProgress).status()).toBe(200);
+    await expect(program).toHaveValue("78");
+
+    const jnvProgress = holisticAdminPage.waitForResponse((response) =>
+      response.url().includes("/api/holistic-mentorship/progress") &&
+      response.url().includes("program_id=1")
+    );
+    await program.selectOption("1");
+    await expect((await jnvProgress).status()).toBe(200);
+    await expect(holisticAdminPage.getByRole("table", { name: "Student progress results" })).toBeVisible();
     await expect(holisticAdminPage.getByRole("columnheader", { name: "Phase" })).toBeVisible();
     await expect(holisticAdminPage.getByRole("columnheader", { name: "Completed on" })).toBeVisible();
 
     const progress = await holisticAdminPage.request.get(
-      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=school&direction=asc"
+      "/api/holistic-mentorship/progress?program_id=1&academic_year=2026-2027&page=1&sort=school&direction=asc"
     );
     expect(progress.status()).toBe(200);
     const progressBody = await progress.json();
     expect(progressBody.rows.some((row: { studentId: number }) => row.studentId === fixture.unassignedStudentId)).toBe(true);
     const completedProgress = await holisticAdminPage.request.get(
-      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=school&direction=asc" +
+      "/api/holistic-mentorship/progress?program_id=1&academic_year=2026-2027&page=1&sort=school&direction=asc" +
       `&phase_id=${fixture.firstGrade11PhaseId}`
     );
     expect(completedProgress.status()).toBe(200);
@@ -408,7 +425,7 @@ test.describe("Holistic Mentorship release workflows", () => {
     });
 
     const csv = await holisticAdminPage.request.get(
-      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=1&sort=student_name&direction=asc&format=csv"
+      "/api/holistic-mentorship/progress?program_id=1&academic_year=2026-2027&page=1&sort=student_name&direction=asc&format=csv"
     );
     expect(csv.status()).toBe(200);
     expect(csv.headers()["content-type"]).toContain("text/csv");
@@ -509,7 +526,7 @@ async function openTeacherWorkspace(page: Page) {
   await expect(tab).toBeVisible();
   await tab.click();
   const summary = assignmentSummary(page);
-  await expect(summary).toBeVisible();
+  await expect(summary).toBeVisible({ timeout: 15_000 });
   const searchStudents = page.getByRole("textbox", { name: "Search Students" });
   if (!(await searchStudents.isVisible())) await summary.click();
   await expect(searchStudents).toBeVisible();
@@ -526,7 +543,7 @@ async function openAdminProgress(page: Page) {
 
 function studentPhaseUrl(studentId: number, phaseId: number) {
   return `/holistic-mentorship/students/${studentId}/phases/${phaseId}` +
-    `?school_code=${fixture.schoolCode}&academic_year=2026-2027`;
+    `?school_code=${fixture.schoolCode}&program_id=1&academic_year=2026-2027`;
 }
 
 async function apiStatus(page: Page, url: string, method: string, body: unknown) {

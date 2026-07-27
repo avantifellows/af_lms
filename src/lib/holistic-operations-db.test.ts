@@ -170,7 +170,7 @@ describe("Holistic operator database adapter", () => {
       withTransaction: vi.fn() as never,
     });
 
-    await expect(operations.rollover.candidates("2026-2027", "2027-2028"))
+    await expect(operations.rollover.candidates("2026-2027", "2027-2028", 1))
       .resolves.toEqual([{
         studentId: 41,
         mentorUserId: 91,
@@ -215,14 +215,14 @@ describe("Holistic operator database adapter", () => {
     });
     const { operations, withTransaction } = operationsWithClientQuery(clientQuery);
 
-    await expect(operations.rollover.apply("2026-2027", "2027-2028", 7))
+    await expect(operations.rollover.apply("2026-2027", "2027-2028", 7, 1))
       .resolves.toEqual({ carried: 0, skipped: 1, ineligible: 0 });
 
     expect(withTransaction).toHaveBeenCalledOnce();
     expect(String(clientQuery.mock.calls[0][0])).toBe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
     expect(String(clientQuery.mock.calls[1][0])).toContain("pg_advisory_xact_lock");
     expect(clientQuery.mock.calls[1][1]).toEqual([
-      "holistic_mentorship_rollover:2026-2027:2027-2028",
+      "holistic_mentorship_rollover:1:2026-2027:2027-2028",
     ]);
     expect(String(clientQuery.mock.calls[2][0])).toContain('SELECT id FROM "user"');
     const insert = clientQuery.mock.calls.find(([sql]) =>
@@ -236,7 +236,7 @@ describe("Holistic operator database adapter", () => {
     const clientQuery = vi.fn().mockResolvedValue({ rows: [] });
     const { operations } = operationsWithClientQuery(clientQuery);
 
-    await expect(operations.rollover.apply("2026-2027", "2027-2028", 999999))
+    await expect(operations.rollover.apply("2026-2027", "2027-2028", 999999, 1))
       .rejects.toThrow("Rollover actor does not exist");
     expect(clientQuery.mock.calls.some(([sql]) =>
       String(sql).includes("FROM holistic_mentorship_mentor_mentee_mappings mapping")
@@ -257,7 +257,7 @@ describe("Holistic operator database adapter", () => {
       withTransaction: withTransaction as never,
     });
 
-    await expect(operations.rollover.apply("2026-2027", "2027-2028", 7))
+    await expect(operations.rollover.apply("2026-2027", "2027-2028", 7, 1))
       .resolves.toEqual({ carried: 0, skipped: 0, ineligible: 0 });
     expect(withTransaction).toHaveBeenCalledTimes(2);
   });

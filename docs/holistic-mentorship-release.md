@@ -1,4 +1,4 @@
-# Holistic Mentorship Program 1 Release
+# Holistic Mentorship Release
 
 This is a coordinated release, not a dark launch. The operator must stop if a
 preflight blocker or smoke-test failure is unresolved. AFK automation must not
@@ -29,6 +29,7 @@ an explicit local database:
 ```bash
 npm run holistic:setup-local -- \
   --confirm-synthetic-database \
+  --program-id=<1-or-78> \
   --env-file=.env.local \
   --db-service-path=../db-service_holistic_mentorship
 ```
@@ -55,13 +56,17 @@ queries only the two approved BigQuery Form/Session pairs.
 ```bash
 npm run holistic:preflight -- \
   --confirm-production-read-only \
+  --program-id=<1-or-78> \
   --env-file=.env.production \
   --academic-year=2026-2027 \
   --historical-source=/secure/path/historical-grouped.json
 ```
 
+`--historical-source` is required only for Program 1. Historical Notes are not
+imported for Program 78.
+
 Save the aggregate JSON report with the release record. It must reconcile
-dynamic Program 1 Schools; eligible Grade 11/12 Students; Teacher seats;
+dynamic Schools in the selected Program; eligible Grade 11/12 Students; Teacher seats;
 Holistic and global Admin accounts; exact BigQuery User-to-Student identity;
 approved Form, Session, 34-question position, and five-set structure; the
 Historical cohort; and every excluded row. Missing, ambiguous, wrong-scope, or
@@ -96,14 +101,16 @@ apply with a canonical operator User ID and verify an immediate no-op rerun:
 ```bash
 npm run holistic:rollover -- \
   --from=2026-2027 --to=2027-2028 \
+  --program-id=<1-or-78> \
   --actor-user-id=<operator-user-id> --env-file=.env.production
 
 npm run holistic:rollover -- \
   --from=2026-2027 --to=2027-2028 --apply \
+  --program-id=<1-or-78> \
   --actor-user-id=<operator-user-id> --env-file=.env.production
 ```
 
-The script carries only still-eligible same-School Program 1 pairs. Any Mapping
+The script carries only still-eligible same-School pairs in the selected Program. Any Mapping
 history already present in the target year is skipped, including a carried
 Mapping that a Teacher later removed, so a rerun cannot undo Teacher action.
 Keep the prior-year rows unchanged and do not commit Student-level output.
@@ -113,7 +120,7 @@ Keep the prior-year rows unchanged and do not commit Student-level output.
 Keep the shared-preview deployment paused while Engineering and Product run and
 record this checklist:
 
-- Teacher: open an eligible Program 1 School on desktop and mobile, assign an
+- Teacher: open an eligible School in each supported Program on desktop and mobile, assign an
   unowned Student, Submit Notes, correct the submitted Notes, and confirm a
   former Mentor's stale link returns `404`.
 - Holistic Admin: configure Phase state, inspect progress and read-only Student

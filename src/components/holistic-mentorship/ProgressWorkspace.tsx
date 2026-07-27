@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import type { HolisticProgressRow } from "@/types/holistic-progress";
 
 type Row = HolisticProgressRow;
@@ -97,7 +97,7 @@ function useProgressData(params: URLSearchParams, ready: boolean) {
   return { data, loading, error, reload: () => setRefresh((value) => value + 1) };
 }
 
-function useProgressExport(params: URLSearchParams, academicYear: string) {
+function useProgressExport(params: URLSearchParams, academicYear: string, programId: number) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const exportProgress = async () => {
@@ -115,7 +115,7 @@ function useProgressExport(params: URLSearchParams, academicYear: string) {
       const downloadUrl = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = downloadUrl;
-      anchor.download = `holistic-progress-${academicYear}.csv`;
+      anchor.download = `holistic-progress-${programId}-${academicYear}.csv`;
       anchor.click();
       URL.revokeObjectURL(downloadUrl);
     } catch (problem) {
@@ -127,21 +127,28 @@ function useProgressExport(params: URLSearchParams, academicYear: string) {
   return { exporting, exportError, exportProgress };
 }
 
-function useProgressView(academicYear: string) {
+function useProgressView(academicYear: string, programId: number) {
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [page, setPage] = useState(1);
-  const [seenAcademicYear, setSeenAcademicYear] = useState(academicYear);
-  if (seenAcademicYear !== academicYear) {
-    setSeenAcademicYear(academicYear);
+  const scope = `${programId}:${academicYear}`;
+  const [seenScope, setSeenScope] = useState(scope);
+  if (seenScope !== scope) {
+    setSeenScope(scope);
     setFilters((current) => ({ ...current, school: "", mentor: "", phase: "" }));
     setPage(1);
   }
   return { filters, setFilters, page, setPage };
 }
 
-function progressParams(academicYear: string, filters: ProgressFilters, page: number) {
+function progressParams(
+  academicYear: string,
+  programId: number,
+  filters: ProgressFilters,
+  page: number,
+) {
   const params = new URLSearchParams({
     academic_year: academicYear,
+    program_id: String(programId),
     page: String(page),
     sort: filters.sort,
     direction: filters.direction,
@@ -163,22 +170,31 @@ function progressIsFiltered(filters: ProgressFilters) {
 
 export default function ProgressWorkspace({
   academicYear = CURRENT_ACADEMIC_YEAR,
+  programId = PROGRAM_IDS.COE,
   onAcademicYears,
 }: {
   academicYear?: string;
+  programId?: number;
   onAcademicYears?: (years: string[]) => void;
 }) {
-  const { filters, setFilters, page, setPage } = useProgressView(academicYear);
+  const { filters, setFilters, page, setPage } = useProgressView(
+    academicYear,
+    programId,
+  );
   const [ready, setReady] = useState(false);
   const savedScroll = useRef(0);
   const scrollRestored = useRef(false);
   const params = useMemo(
-    () => progressParams(academicYear, filters, page),
-    [academicYear, filters, page]
+    () => progressParams(academicYear, programId, filters, page),
+    [academicYear, filters, page, programId]
   );
 
   const { data, loading, error, reload } = useProgressData(params, ready);
-  const { exporting, exportError, exportProgress } = useProgressExport(params, academicYear);
+  const { exporting, exportError, exportProgress } = useProgressExport(
+    params,
+    academicYear,
+    programId,
+  );
 
   useEffect(() => {
     if (data.academicYears.length > 0) onAcademicYears?.(data.academicYears);
@@ -253,6 +269,7 @@ export default function ProgressWorkspace({
         rows={data.rows}
         loading={loading}
         academicYear={academicYear}
+        programId={programId}
         hasMappings={data.options.schools.length > 0}
         filtered={filtered}
         sort={filters.sort}
@@ -370,6 +387,7 @@ function ProgressResults({
   rows,
   loading,
   academicYear,
+  programId,
   hasMappings,
   filtered,
   sort,
@@ -380,6 +398,7 @@ function ProgressResults({
   rows: Row[];
   loading: boolean;
   academicYear: string;
+  programId: number;
   hasMappings: boolean;
   filtered: boolean;
   sort: string;
@@ -409,7 +428,12 @@ function ProgressResults({
         <th className="relative px-3 py-3"><span className="sr-only">Actions</span></th>
       </tr></thead>
       <tbody className="divide-y divide-border">
-        <ProgressRows rows={rows} loading={loading} academicYear={academicYear} />
+        <ProgressRows
+          rows={rows}
+          loading={loading}
+          academicYear={academicYear}
+          programId={programId}
+        />
       </tbody>
     </table>
   </div>;
@@ -436,20 +460,29 @@ function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear }: {
+function ProgressRows({ rows, loading, academicYear, programId }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
+  programId: number;
 }) {
   if (loading && rows.length === 0) {
     return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
   }
-  return rows.map((row) => <ProgressRow key={row.studentId} row={row} academicYear={academicYear} />);
+  return rows.map((row) => (
+    <ProgressRow
+      key={row.studentId}
+      row={row}
+      academicYear={academicYear}
+      programId={programId}
+    />
+  ));
 }
 
-function ProgressRow({ row, academicYear }: {
+function ProgressRow({ row, academicYear, programId }: {
   row: Row;
   academicYear: string;
+  programId: number;
 }) {
   return <tr className="hover:bg-hover-bg/50">
     <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
@@ -459,7 +492,11 @@ function ProgressRow({ row, academicYear }: {
     <td className="px-3 py-3"><PhaseCell row={row} /></td>
     <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
     <td className="px-3 py-3 font-mono"><CompletionTime value={row.completedAt} /></td>
-    <td className="px-3 py-3"><ProgressActions row={row} academicYear={academicYear} /></td>
+    <td className="px-3 py-3"><ProgressActions
+      row={row}
+      academicYear={academicYear}
+      programId={programId}
+    /></td>
   </tr>;
 }
 
@@ -489,15 +526,20 @@ function CompletionTime({ value }: { value: string | null }) {
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeZone: "Asia/Kolkata" }).format(new Date(value));
 }
 
-function ProgressActions({ row, academicYear }: {
+function ProgressActions({ row, academicYear, programId }: {
   row: Row;
   academicYear: string;
+  programId: number;
 }) {
   const openable = row.phaseId && row.phaseState !== "locked";
   return <div className="flex items-center justify-end">
     {openable ? <Link aria-label={`Open ${row.studentName}`}
       className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs font-medium text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-      href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({ school_code: row.schoolCode, academic_year: academicYear })}`}>
+      href={`/holistic-mentorship/students/${row.studentId}/phases/${row.phaseId}?${new URLSearchParams({
+        school_code: row.schoolCode,
+        academic_year: academicYear,
+        program_id: String(programId),
+      })}`}>
       Open Student
     </Link> : <Button type="button" variant="secondary" className="text-xs" disabled title="Phase is locked">Open Student</Button>}
   </div>;

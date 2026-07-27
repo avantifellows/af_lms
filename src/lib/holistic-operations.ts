@@ -190,8 +190,17 @@ export interface HolisticRolloverCandidate {
 }
 
 export interface HolisticRolloverDb {
-  candidates(fromAcademicYear: string, toAcademicYear: string): Promise<HolisticRolloverCandidate[]>;
-  apply(fromAcademicYear: string, toAcademicYear: string, actorUserId: number): Promise<HolisticRolloverCounts>;
+  candidates(
+    fromAcademicYear: string,
+    toAcademicYear: string,
+    programId: number
+  ): Promise<HolisticRolloverCandidate[]>;
+  apply(
+    fromAcademicYear: string,
+    toAcademicYear: string,
+    actorUserId: number,
+    programId: number
+  ): Promise<HolisticRolloverCounts>;
 }
 
 export type HolisticRolloverCounts = { carried: number; skipped: number; ineligible: number };
@@ -201,6 +210,7 @@ export async function runHolisticMappingRollover(params: {
   fromAcademicYear: string;
   toAcademicYear: string;
   actorUserId: number;
+  programId: number;
   db: HolisticRolloverDb;
 }): Promise<{
   ok: true;
@@ -220,10 +230,19 @@ export async function runHolisticMappingRollover(params: {
     return {
       ok: true,
       mode,
-      counts: await params.db.apply(params.fromAcademicYear, params.toAcademicYear, params.actorUserId),
+      counts: await params.db.apply(
+        params.fromAcademicYear,
+        params.toAcademicYear,
+        params.actorUserId,
+        params.programId
+      ),
     };
   }
-  const candidates = await params.db.candidates(params.fromAcademicYear, params.toAcademicYear);
+  const candidates = await params.db.candidates(
+    params.fromAcademicYear,
+    params.toAcademicYear,
+    params.programId
+  );
   const carried = candidates.filter((candidate) => candidate.eligible && !candidate.alreadyMapped);
   const counts = {
     carried: carried.length,

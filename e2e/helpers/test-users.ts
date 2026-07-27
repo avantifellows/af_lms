@@ -51,7 +51,7 @@ export const TEST_USERS = {
     email: "e2e-holistic-admin@test.local",
     level: 3,
     role: "holistic_mentorship_admin",
-    program_ids: [1],
+    program_ids: [1, 78],
     school_codes: null,
     regions: null,
     read_only: false,

@@ -103,7 +103,7 @@ describe("StudentPhaseWorkspace", () => {
     const priorTab = screen.getByRole("tab", { name: /Phase 4/ });
     expect(priorTab).toHaveAttribute(
       "href",
-      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027"
+      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1"
     );
     const inactivePanel = document.getElementById(priorTab.getAttribute("aria-controls")!);
     expect(inactivePanel).toHaveAttribute("role", "tabpanel");
@@ -141,7 +141,7 @@ describe("StudentPhaseWorkspace", () => {
 
     expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute(
       "href",
-      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&source=school"
+      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
     );
   });
 
@@ -204,7 +204,7 @@ describe("StudentPhaseWorkspace", () => {
     await screen.findByText("Regeneration queued.");
     expect(window.confirm).toHaveBeenCalledWith("Request Profile regeneration?");
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
-    expect(post[0]).toBe("/api/holistic-mentorship/profiles/41");
+    expect(post[0]).toBe("/api/holistic-mentorship/profiles/41?program_id=1");
     expect(JSON.parse(String(post[1].body))).toMatchObject({ force: true });
   });
 
@@ -233,7 +233,7 @@ describe("StudentPhaseWorkspace", () => {
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027",
+      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1",
       { cache: "no-store" }
     );
     expect(screen.getByText("failed")).toBeInTheDocument();
@@ -609,7 +609,7 @@ describe("StudentPhaseWorkspace", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith(
-      "/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027"
+      "/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1"
     ));
   });
 

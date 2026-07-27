@@ -149,19 +149,22 @@ async function insertHistoricalRecord(
 function createHolisticRolloverDb(database: Database): HolisticRolloverDb {
   const { query, withTransaction } = database;
   return {
-    async candidates(fromAcademicYear, toAcademicYear) {
+    async candidates(fromAcademicYear, toAcademicYear, programId) {
       return loadRolloverCandidates(
-        (sql, params) => query<RolloverRow>(sql, params), fromAcademicYear, toAcademicYear
+        (sql, params) => query<RolloverRow>(sql, params),
+        fromAcademicYear,
+        toAcademicYear,
+        programId
       );
     },
-    async apply(fromAcademicYear, toAcademicYear, actorUserId) {
+    async apply(fromAcademicYear, toAcademicYear, actorUserId, programId) {
       for (let attempt = 0; ; attempt += 1) {
         try {
           return await withTransaction(async (client) => {
             await client.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
             await client.query(
               "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-              [`holistic_mentorship_rollover:${fromAcademicYear}:${toAcademicYear}`]
+              [`holistic_mentorship_rollover:${programId}:${fromAcademicYear}:${toAcademicYear}`]
             );
             const actor = await client.query(
               `SELECT id FROM "user" WHERE id = $1 FOR SHARE`,
@@ -171,7 +174,8 @@ function createHolisticRolloverDb(database: Database): HolisticRolloverDb {
             const candidates = await loadRolloverCandidates(
               async (sql, params) => (await client.query<RolloverRow>(sql, params)).rows,
               fromAcademicYear,
-              toAcademicYear
+              toAcademicYear,
+              programId
             );
             const counts = rolloverCounts(candidates);
             for (const candidate of candidates.filter(({ eligible, alreadyMapped }) =>
@@ -183,7 +187,7 @@ function createHolisticRolloverDb(database: Database): HolisticRolloverDb {
                VALUES ($1, $2, $3, $4, $5, now(), $6, 'academic_year_rollover', now(), now())
                ON CONFLICT (student_id, academic_year) WHERE ended_at IS NULL DO NOTHING
                RETURNING id`,
-                [candidate.studentId, candidate.mentorUserId, candidate.schoolId, PROGRAM_IDS.COE,
+                [candidate.studentId, candidate.mentorUserId, candidate.schoolId, programId,
                   toAcademicYear, actorUserId]
               );
               if (!inserted.rows[0]) {
@@ -212,7 +216,8 @@ type RolloverRow = {
 async function loadRolloverCandidates(
   execute: (sql: string, params: unknown[]) => Promise<RolloverRow[]>,
   fromAcademicYear: string,
-  toAcademicYear: string
+  toAcademicYear: string,
+  programId: number
 ): Promise<HolisticRolloverCandidate[]> {
   const rows = await execute(
     `SELECT mapping.student_id, mapping.mentor_user_id, mapping.school_id,
@@ -245,7 +250,7 @@ async function loadRolloverCandidates(
        WHERE mapping.academic_year = $1 AND mapping.program_id = $3
          AND mapping.ended_at IS NULL
        ORDER BY mapping.student_id`,
-    [fromAcademicYear, toAcademicYear, PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
+    [fromAcademicYear, toAcademicYear, programId, [...PM_SEAT_ROLES]]
   );
   return rows.map((row): HolisticRolloverCandidate => ({
     studentId: Number(row.student_id), mentorUserId: Number(row.mentor_user_id),

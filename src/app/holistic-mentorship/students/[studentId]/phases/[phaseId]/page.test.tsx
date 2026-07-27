@@ -131,11 +131,13 @@ describe("StudentPhasePage", () => {
     const { container } = render(await StudentPhasePage(priorYearProps));
 
     expect(screen.getByRole("heading", { name: "Asha Rao" })).toBeInTheDocument();
-    expect(container.querySelector('a[href="/admin/holistic-mentorship"]')).toBeInTheDocument();
+    expect(container.querySelector(
+      'a[href="/admin/holistic-mentorship?program_id=1"]'
+    )).toBeInTheDocument();
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "holistic@example.com" } },
       "mapped_student_read",
-      { schoolCode: "SCH001", studentId: 41, academicYear: "2025-2026" }
+      { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2025-2026" }
     );
     expect(mockDetail).toHaveBeenCalledWith(expect.objectContaining({
       studentId: 41,
@@ -166,7 +168,7 @@ describe("StudentPhasePage", () => {
     });
 
     await expect(StudentPhasePage(props)).rejects.toThrow(
-      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027"
+      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1"
     );
   });
 });

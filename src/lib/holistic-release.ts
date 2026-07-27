@@ -64,6 +64,7 @@ interface PreflightEvidence {
 interface PreflightParams {
   db: Query;
   academicYear: string;
+  programId: number;
   profileSource: HolisticProfileSourceEvidence;
 }
 
@@ -150,7 +151,7 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
        SELECT DISTINCT school_id
        FROM centres
        WHERE program_id = $1 AND is_active IS TRUE AND school_id IS NOT NULL`,
-      [PROGRAM_IDS.COE]
+      [params.programId]
     ),
     params.db<PreflightRosterRow>(
       `/* preflight_roster */
@@ -170,7 +171,7 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
          AND centre_students.academic_year = $2
          AND centre_students.grade IN (11, 12)
          AND student.status IS DISTINCT FROM 'dropout'`,
-      [PROGRAM_IDS.COE, params.academicYear]
+      [params.programId, params.academicYear]
     ),
     params.db<PreflightActorRow>(
       `/* preflight_actors */
@@ -193,7 +194,7 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
        UNION ALL
        SELECT 'global_admin', COUNT(*) FROM user_permission
         WHERE role = 'admin' AND level = 3 AND revoked_at IS NULL`,
-      [PROGRAM_IDS.COE, [...PM_SEAT_ROLES]]
+      [params.programId, [...PM_SEAT_ROLES]]
     ),
     params.db<PreflightIdentityRow>(
       `/* preflight_identity */
@@ -208,7 +209,7 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
               ) AND student.status IS DISTINCT FROM 'dropout' AS eligible
        FROM source_user
        JOIN student ON student.user_id::text = source_user.source_user_id`,
-      [params.profileSource.sourceUserIds, PROGRAM_IDS.COE, params.academicYear]
+      [params.profileSource.sourceUserIds, params.programId, params.academicYear]
     ),
     params.db<PreflightHistoryRow>(
       `/* preflight_historical */
@@ -226,7 +227,13 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
        SELECT COUNT(*) FILTER (WHERE match_count = 1 AND eligible) AS safe_candidates,
               COUNT(*) FILTER (WHERE match_count <> 1 OR NOT COALESCE(eligible, FALSE)) AS excluded_rows
        FROM matches`,
-      [params.profileSource.historicalBusinessStudentIds ?? [], PROGRAM_IDS.COE, params.academicYear]
+      [
+        params.programId === PROGRAM_IDS.COE
+          ? params.profileSource.historicalBusinessStudentIds ?? []
+          : [],
+        PROGRAM_IDS.COE,
+        params.academicYear,
+      ]
     ),
   ]);
   return { schools, roster, actors, identities, historical };
@@ -307,7 +314,7 @@ function getIdentityBlockers(
     wrongScope,
     "is",
     "are",
-    "outside the Program 1 Grade 11/12 roster"
+    "outside the selected Program's Grade 11/12 roster"
   );
   return blockers;
 }

@@ -29,7 +29,7 @@ describe("PhasePlanSetup", () => {
     expect(await screen.findByRole("button", { name: "Copy previous year" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/holistic-mentorship/phase-plans?academic_year=2025-2026"
+      "/api/holistic-mentorship/phase-plans?academic_year=2025-2026&program_id=1"
     );
     expect(screen.getByText(/copy last year's definitions/)).toBeInTheDocument();
   });
