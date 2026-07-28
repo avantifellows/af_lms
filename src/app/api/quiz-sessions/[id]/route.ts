@@ -8,6 +8,7 @@ import {
 import { query } from "@/lib/db";
 import {
   dbIstTimestampToUtcIso,
+  istWallClockWindowEnd,
   utcToISTDate,
 } from "@/lib/quiz-session-time";
 
@@ -76,21 +77,6 @@ function storedSessionTimeToUtcIso(value: string | null | undefined): string | n
 function isLiveWindow(start: Date | null, end: Date | null, now: Date): boolean {
   if (!start || !end) return false;
   return start.getTime() <= now.getTime() && now.getTime() < end.getTime();
-}
-
-// The quiz doc stores metadata.session_end_time as IST wall-clock in the format
-// "%Y-%m-%d %I:%M:%S %p" (12-hour). `utcToISTDate` yields the IST wall-clock encoded
-// as an ISO string with a Z suffix, so read the components via the UTC getters.
-function istIsoToQuizDocEndTime(istIsoZ: string): string {
-  const date = new Date(istIsoZ);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const rawHours = date.getUTCHours();
-  const period = rawHours >= 12 ? "PM" : "AM";
-  const hours12 = rawHours % 12 || 12;
-  return (
-    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ` +
-    `${pad(hours12)}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} ${period}`
-  );
 }
 
 export async function PATCH(
@@ -219,6 +205,12 @@ export async function PATCH(
       ...(nextGurukulFormatType || nextShuffle
         ? { gurukul_format_type: nextShuffle ? "qa" : nextGurukulFormatType }
         : {}),
+      // Edit audit trail. etl-data-flow only ever READS these (sheet round-trip and
+      // log_session_action's actor lookup) — the actor is whoever performs the action, so
+      // with the SNS hop gone the LMS is now the only writer. Field names match
+      // sessionCreator's ACTION_ACTOR_FIELDS.
+      last_edited_by: session.user.email,
+      last_edited_at: utcToISTDate(new Date().toISOString()),
     },
   };
 
@@ -248,8 +240,10 @@ export async function PATCH(
     body.startTime || body.endTime || body.action === "end_now"
   );
   if (timingChanged && currentSession.session_id) {
-    const occStart = utcToISTDate(nextStartTime as string);
-    const occEnd = utcToISTDate(nextEndTime as string);
+    // Derive from the validated Date objects, not the raw nullable strings: both are proven
+    // non-null and parseable by the window validation above, so there's no cast needed.
+    const occStart = utcToISTDate(start.toISOString());
+    const occEnd = utcToISTDate(end.toISOString());
 
     const occListResponse = await fetch(
       `${DB_SERVICE_URL}/session-occurrence?session_id=${encodeURIComponent(
@@ -271,28 +265,50 @@ export async function PATCH(
 
     const occurrences = (await occListResponse.json()) as Array<{ id: number }>;
     const occurrence = Array.isArray(occurrences) ? occurrences[0] : undefined;
-    if (occurrence?.id) {
-      const occPatchResponse = await fetch(
-        `${DB_SERVICE_URL}/session-occurrence/${occurrence.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ start_time: occStart, end_time: occEnd }),
-        }
+
+    // No occurrence means portal has nothing to re-gate on and would keep enforcing the old
+    // window — exactly the failure this sync exists to prevent. Fail loudly: silently
+    // returning 200 here would show the operator a new window that isn't in force.
+    if (!occurrence?.id) {
+      console.error(
+        `No session_occurrence found for session_id ${currentSession.session_id} ` +
+          `(session ${sessionId}); timing change is not in force for students`
       );
-      if (!occPatchResponse.ok) {
-        console.error(
-          "Failed to patch session occurrence:",
-          await occPatchResponse.text()
-        );
-        return NextResponse.json(
-          { error: "Session updated but failed to update its schedule" },
-          { status: 502 }
-        );
+      return NextResponse.json(
+        { error: "Session updated but its schedule could not be found to update" },
+        { status: 502 }
+      );
+    }
+
+    if (occurrences.length > 1) {
+      // Quiz sessions are continuous → exactly one occurrence. More than one means the
+      // invariant broke; patching only the first would leave a stale window behind.
+      console.warn(
+        `Session ${sessionId} has ${occurrences.length} occurrences; expected 1 ` +
+          `(continuous quiz session). Patching only the first.`
+      );
+    }
+
+    const occPatchResponse = await fetch(
+      `${DB_SERVICE_URL}/session-occurrence/${occurrence.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ start_time: occStart, end_time: occEnd }),
       }
+    );
+    if (!occPatchResponse.ok) {
+      console.error(
+        "Failed to patch session occurrence:",
+        await occPatchResponse.text()
+      );
+      return NextResponse.json(
+        { error: "Session updated but failed to update its schedule" },
+        { status: 502 }
+      );
     }
   }
 
@@ -312,8 +328,10 @@ export async function PATCH(
       ...(typeof body.showAnswers === "boolean"
         ? { review_immediate: body.showAnswers }
         : {}),
-      ...(timingChanged && nextEndTime
-        ? { session_end_time: istIsoToQuizDocEndTime(utcToISTDate(nextEndTime)) }
+      // Raw IST window end — quiz-backend adds the quiz duration to derive the stored
+      // answer-visibility time, so it must NOT be pre-offset here or the offset doubles.
+      ...(timingChanged
+        ? { session_end_time: istWallClockWindowEnd(end.toISOString()) }
         : {}),
     };
 

@@ -6,7 +6,7 @@ import {
   requireQuizSessionAccess,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
-import { utcToISTDate } from "@/lib/quiz-session-time";
+import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
 import {
   EXAM_TRACKS,
   curriculumIdForExamTrack,
@@ -226,6 +226,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Session display/scoring settings. These live on BOTH the session meta_data (below, for
+  // the LMS's own listing/edit UI) and the quiz doc (here) — the quiz-taking frontend reads
+  // shuffle/show_scores/review_immediate off the quiz doc, so omitting them from the quiz
+  // build silently discards whatever the PM ticked in the form.
+  const shuffle = body.shuffle ?? false;
+  const showScores = body.showScores ?? true;
+  // The form's "show answers" is the quiz doc's `review_immediate` ("review answers
+  // immediately after submission") — same mapping the legacy sessionCreator used.
+  const showAnswers = body.showAnswers ?? true;
+  const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
+
   // 1. Build the quiz in quiz-backend from the CMS test (this writes to quiz Mongo).
   let quizId: string;
   let warnings: string[] = [];
@@ -238,6 +249,13 @@ export async function POST(request: NextRequest) {
         curriculum_id: curriculumId,
         grade_id: gradeId,
         quiz_type: "assessment",
+        shuffle,
+        show_scores: showScores,
+        review_immediate: showAnswers,
+        // Raw IST window end; quiz-backend adds the quiz duration to derive the
+        // answer-visibility moment (metadata.session_end_time). Without it the frontend has
+        // no gate, so review_immediate=false would still show answers immediately.
+        session_end_time: istWallClockWindowEnd(body.endTime),
       }),
     });
     if (!quizRes.ok) {
@@ -271,8 +289,6 @@ export async function POST(request: NextRequest) {
   const startIst = utcToISTDate(body.startTime);
   const endIst = utcToISTDate(body.endTime);
   const sessionName = body.name?.trim() || (body.testName ?? "").trim() || sessionIdStr;
-  const shuffle = body.shuffle ?? false;
-  const gurukulFormatType = shuffle ? "qa" : body.gurukulFormatType || "both";
 
   // Admin Q&A testing links: quiz player as the whitelisted test_admin user (legacy
   // sessionCreator parity). Blank when the frontend URL / api key aren't configured.
@@ -357,8 +373,8 @@ export async function POST(request: NextRequest) {
       shortened_omr_link: shortenedOmrLink,
       admin_testing_link: adminTestingLink,
       admin_testing_omr_link: adminTestingOmrLink,
-      show_answers: body.showAnswers ?? true,
-      show_scores: body.showScores ?? true,
+      show_answers: showAnswers,
+      show_scores: showScores,
       shuffle,
       single_page_mode: false,
       test_takers_count: 100,

@@ -490,7 +490,13 @@ export default function QuizSessionsTab({
       console.error(err);
       setFeedbackToast({
         variant: "error",
-        message: "Failed to request regeneration.",
+        // Surface the server's reason: a CMS regenerate can be refused for a specific,
+        // actionable cause (the corrected test's structure no longer matches), and a generic
+        // "failed" would hide what the operator has to do about it.
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Failed to request regeneration.",
       });
     } finally {
       setSavingAction(null);
@@ -843,9 +849,6 @@ export default function QuizSessionsTab({
             const busy = savingAction?.id === menuState.id;
             const enabled = currentSession?.is_active !== false;
             const endNowAvailable = canEndNow(currentSession, currentTimeMs);
-            // Regenerate fires the legacy SNS -> etl-data-flow path, which cannot rebuild a
-            // new-CMS quiz. Hide it for CMS sessions until the CMS regenerate path ships;
-            // clicking it would flip the session to a stuck "pending" and brick its actions.
             const isCmsSession =
               getMetaString(currentSession?.meta_data, "cms_source") === CMS_SOURCE;
 
@@ -895,19 +898,34 @@ export default function QuizSessionsTab({
                     </span>
                   </button>
                 ) : null}
-                {!isCmsSession ? (
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleRegenerate(menuState.id);
-                      setMenuState(null);
-                    }}
-                    disabled={sessionProcessing || busy}
-                    className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
-                  >
-                    Regenerate
-                  </button>
-                ) : null}
+                {/* Regenerate now works for CMS sessions too: it re-ingests the corrected CMS
+                    test into the same quiz id via quiz-backend, instead of the legacy SNS
+                    path that could only rebuild from a Google Sheet row. */}
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    // A CMS regenerate rewrites the answer key in place while already-
+                    // submitted attempts keep their original scores (there is no re-scoring
+                    // path yet), so make that consequence explicit before proceeding.
+                    if (
+                      isCmsSession &&
+                      !window.confirm(
+                        "Regenerate this quiz from the corrected CMS test?\n\n" +
+                          "Question content and the answer key will be refreshed in place. " +
+                          "Students who have already submitted keep their original scores — " +
+                          "their attempts are NOT re-graded against the new answer key."
+                      )
+                    ) {
+                      return;
+                    }
+                    handleRegenerate(menuState.id);
+                    setMenuState(null);
+                  }}
+                  disabled={sessionProcessing || busy}
+                  className="block w-full px-4 py-2 text-left text-sm font-medium text-text-primary hover:bg-hover-bg disabled:text-text-muted"
+                >
+                  Regenerate
+                </button>
               </>
             );
           })()}

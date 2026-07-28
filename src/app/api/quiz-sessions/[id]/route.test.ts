@@ -285,13 +285,22 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     });
 
     // 3. Quiz doc → quiz-backend PATCH /quiz/{quizId} (quiz-frontend reads these)
+    //
+    // On session_end_time: the RAW IST window end as a bare wall-clock, with NO duration
+    // offset applied here — quiz-backend adds time_limit.max itself to derive the
+    // answer-visibility moment, so pre-offsetting would double it and open answers late.
+    // Time convention: the request's endTime "2026-04-15T08:30:00.000Z" is a true UTC
+    // instant; utcToISTDate shifts it +5:30 to the IST wall-clock 14:00 and re-stamps a
+    // (meaningless) Z. The session row and occurrence keep that Z — IST wearing a UTC
+    // suffix, as everything downstream expects — and only the quiz-doc value strips it,
+    // since quiz-backend parses a naive datetime.
     expect(fetchCall("http://quiz-backend.local/quiz/quiz-abc123")).toBeDefined();
     expect(fetchBody("/quiz/quiz-abc123")).toEqual({
       title: "Updated session",
       shuffle: true,
       show_scores: false,
       review_immediate: true,
-      session_end_time: "2026-04-15 02:00:00 PM",
+      session_end_time: "2026-04-15T14:00:00",
     });
   });
 
@@ -321,8 +330,81 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     expect(fetchBody("/session-occurrence/555").end_time).toBe(
       "2026-04-15T11:30:00.000Z"
     );
+    // Raw IST wall-clock of the new end (06:00 UTC + 5:30), no duration offset — see the
+    // convention note above.
     expect(fetchBody("/quiz/quiz-abc123").session_end_time).toBe(
-      "2026-04-15 11:30:00 AM"
+      "2026-04-15T11:30:00"
     );
+  });
+
+  it("fails loudly when the session has no occurrence to re-gate", async () => {
+    // Portal gates quiz entry on the occurrence, not the session row. If there's no
+    // occurrence the new window is not in force for students, so returning 200 here would
+    // show the operator a window that silently isn't real.
+    const { PATCH } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockQuery.mockResolvedValue([sessionRow()]);
+    mocks.mockFetch.mockImplementation((input: unknown) => {
+      const url = String(input);
+      if (url.includes("/session-occurrence?")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse({ id: 42 }));
+    });
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/quiz-sessions/42", {
+        method: "PATCH",
+        body: { startTime: "2026-04-15T04:30:00.000Z", endTime: "2026-04-15T08:30:00.000Z" },
+      }) as never,
+      routeParams({ id: "42" })
+    );
+
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toEqual({
+      error: "Session updated but its schedule could not be found to update",
+    });
+    // never proceeds to the quiz doc once the schedule is known to be stale
+    expect(fetchCall("/quiz/quiz-abc123")).toBeUndefined();
+  });
+
+  it("stamps the edit audit fields (the LMS is the only writer now)", async () => {
+    const { PATCH } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockQuery.mockResolvedValue([sessionRow()]);
+    vi.setSystemTime(new Date("2026-04-15T06:00:00.000Z"));
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/quiz-sessions/42", {
+        method: "PATCH",
+        body: { name: "Renamed" },
+      }) as never,
+      routeParams({ id: "42" })
+    );
+
+    expect(res.status).toBe(200);
+    const meta = fetchBody("/session/42").meta_data;
+    expect(meta.last_edited_by).toBe(ADMIN_SESSION.user.email);
+    // IST wall-clock, Z-stamped per this codebase's convention (06:00 UTC + 5:30)
+    expect(meta.last_edited_at).toBe("2026-04-15T11:30:00.000Z");
+  });
+
+  it("does not touch the quiz doc when no quiz-doc field changed", async () => {
+    // gurukul_format_type lives only on the session meta_data — it has no quiz-doc home, so
+    // editing it alone must not fire a no-op PATCH at quiz-backend.
+    const { PATCH } = await loadRouteModule();
+    mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.mockQuery.mockResolvedValue([sessionRow()]);
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/quiz-sessions/42", {
+        method: "PATCH",
+        body: { gurukulFormatType: "both" },
+      }) as never,
+      routeParams({ id: "42" })
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchCall("/quiz/quiz-abc123")).toBeUndefined();
   });
 });
