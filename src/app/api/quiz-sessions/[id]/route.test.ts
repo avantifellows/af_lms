@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   mockRequireQuizSessionAccess: vi.fn(),
   mockCanAccessQuizSessionBatches: vi.fn(),
   mockQuery: vi.fn(),
-  mockPublishMessage: vi.fn(),
   mockFetch: vi.fn(),
 }));
 
@@ -28,9 +27,6 @@ vi.mock("@/lib/quiz-session-access", () => ({
   requireQuizSessionAccess: mocks.mockRequireQuizSessionAccess,
   canAccessQuizSessionBatches: mocks.mockCanAccessQuizSessionBatches,
 }));
-vi.mock("@/lib/sns", () => ({
-  publishMessage: mocks.mockPublishMessage,
-}));
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -39,13 +35,48 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// Route the downstream HTTP calls (db-service session PATCH, occurrence GET/PATCH,
+// quiz-backend PATCH) to sane success defaults. Order the checks so the more
+// specific occurrence paths win over the plain /session/ path.
+function defaultFetchRouting() {
+  mocks.mockFetch.mockImplementation((input: unknown) => {
+    const url = String(input);
+    if (url.includes("/session-occurrence?")) {
+      return Promise.resolve(jsonResponse([{ id: 555 }]));
+    }
+    if (url.includes("/session-occurrence/")) {
+      return Promise.resolve(jsonResponse({ id: 555 }));
+    }
+    if (url.includes("/quiz/")) {
+      return Promise.resolve(jsonResponse({ id: "quiz-abc123", updated: [] }));
+    }
+    if (url.includes("/session/")) {
+      return Promise.resolve(jsonResponse({ id: 42 }));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+}
+
+function fetchCall(urlSubstr: string) {
+  return mocks.mockFetch.mock.calls.find((call) =>
+    String(call[0]).includes(urlSubstr)
+  );
+}
+
+function fetchBody(urlSubstr: string) {
+  const call = fetchCall(urlSubstr);
+  return JSON.parse(String((call?.[1] as RequestInit)?.body));
+}
+
 async function loadRouteModule(env?: {
   dbServiceUrl?: string;
   dbServiceToken?: string;
+  quizBackendUrl?: string;
 }) {
   vi.resetModules();
   process.env.DB_SERVICE_URL = env?.dbServiceUrl ?? "http://db-service.local";
   process.env.DB_SERVICE_TOKEN = env?.dbServiceToken ?? "test-token";
+  process.env.QUIZ_BACKEND_URL = env?.quizBackendUrl ?? "http://quiz-backend.local";
   return import("./route");
 }
 
@@ -54,10 +85,10 @@ beforeEach(() => {
   mocks.mockRequireQuizSessionAccess.mockReset();
   mocks.mockCanAccessQuizSessionBatches.mockReset();
   mocks.mockQuery.mockReset();
-  mocks.mockPublishMessage.mockReset();
   mocks.mockFetch.mockReset();
   vi.stubGlobal("fetch", mocks.mockFetch);
   vi.useRealTimers();
+  defaultFetchRouting();
   mocks.mockRequireQuizSessionAccess.mockResolvedValue({
     ok: true,
     permission: { program_ids: [1, 64] },
@@ -70,7 +101,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.DB_SERVICE_URL;
   delete process.env.DB_SERVICE_TOKEN;
+  delete process.env.QUIZ_BACKEND_URL;
 });
+
+function sessionRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 42,
+    name: "Existing session",
+    platform_id: "quiz-abc123",
+    session_id: "EnableStudents_quiz-abc123",
+    start_time: "2026-04-15T05:00:00.000Z",
+    end_time: "2026-04-15T09:00:00.000Z",
+    is_active: true,
+    meta_data: { show_scores: true },
+    ...overrides,
+  };
+}
 
 describe("PATCH /api/quiz-sessions/[id]", () => {
   it("returns 401 when not authenticated", async () => {
@@ -132,14 +178,7 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     const { PATCH } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mocks.mockQuery.mockResolvedValue([
-      {
-        id: 42,
-        name: "Existing session",
-        start_time: "2026-04-15T05:00:00.000Z",
-        end_time: "2026-04-15T09:00:00.000Z",
-        is_active: true,
-        meta_data: { batch_id: "EnableStudents_11_Engg_A" },
-      },
+      sessionRow({ meta_data: { batch_id: "EnableStudents_11_Engg_A" } }),
     ]);
     mocks.mockCanAccessQuizSessionBatches.mockResolvedValue(false);
 
@@ -160,14 +199,11 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     const { PATCH } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mocks.mockQuery.mockResolvedValue([
-      {
-        id: 42,
+      sessionRow({
         name: "Future session",
         start_time: "2026-04-15T09:00:00.000Z",
         end_time: "2026-04-15T11:00:00.000Z",
-        is_active: true,
-        meta_data: { show_scores: true },
-      },
+      }),
     ]);
     vi.setSystemTime(new Date("2026-04-15T06:00:00.000Z"));
 
@@ -184,19 +220,13 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
       error: "Only live sessions can be ended now",
     });
     expect(mocks.mockFetch).not.toHaveBeenCalled();
-    expect(mocks.mockPublishMessage).not.toHaveBeenCalled();
   });
 
-  it("patches editable fields and publishes a patch event", async () => {
+  it("patches the session row, syncs the occurrence and the quiz doc", async () => {
     const { PATCH } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mocks.mockQuery.mockResolvedValue([
-      {
-        id: 42,
-        name: "Existing session",
-        start_time: "2026-04-15T05:00:00.000Z",
-        end_time: "2026-04-15T09:00:00.000Z",
-        is_active: true,
+      sessionRow({
         meta_data: JSON.stringify({
           show_scores: true,
           show_answers: false,
@@ -204,9 +234,8 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
           gurukul_format_type: "both",
           untouched: "keep-me",
         }),
-      },
+      }),
     ]);
-    mocks.mockFetch.mockResolvedValueOnce(jsonResponse({ id: 42 }));
 
     const res = await PATCH(
       jsonRequest("http://localhost/api/quiz-sessions/42", {
@@ -228,11 +257,9 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ id: 42 });
 
-    const patchBody = JSON.parse(
-      String((mocks.mockFetch.mock.calls[0]?.[1] as RequestInit).body)
-    );
-    expect(mocks.mockFetch.mock.calls[0]?.[0]).toBe("http://db-service.local/session/42");
-    expect(patchBody).toMatchObject({
+    // 1. Session row → db-service PATCH /session/{id}
+    expect(fetchCall("http://db-service.local/session/42")).toBeDefined();
+    expect(fetchBody("/session/42")).toMatchObject({
       name: "Updated session",
       is_active: false,
       start_time: "2026-04-15T10:00:00.000Z",
@@ -245,30 +272,39 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
         untouched: "keep-me",
       },
     });
-    expect(mocks.mockPublishMessage).toHaveBeenCalledWith({
-      action: "patch",
-      id: 42,
-      patch_session: expect.objectContaining({
-        name: "Updated session",
-        is_active: false,
-      }),
+
+    // 2. Occurrence lookup + PATCH with the new IST window (portal gates on this)
+    expect(
+      fetchCall(
+        "/session-occurrence?session_id=EnableStudents_quiz-abc123"
+      )
+    ).toBeDefined();
+    expect(fetchBody("/session-occurrence/555")).toEqual({
+      start_time: "2026-04-15T10:00:00.000Z",
+      end_time: "2026-04-15T14:00:00.000Z",
+    });
+
+    // 3. Quiz doc → quiz-backend PATCH /quiz/{quizId} (quiz-frontend reads these)
+    expect(fetchCall("http://quiz-backend.local/quiz/quiz-abc123")).toBeDefined();
+    expect(fetchBody("/quiz/quiz-abc123")).toEqual({
+      title: "Updated session",
+      shuffle: true,
+      show_scores: false,
+      review_immediate: true,
+      session_end_time: "2026-04-15 02:00:00 PM",
     });
   });
 
-  it("ends a live session immediately", async () => {
+  it("ends a live session immediately and mirrors the new end time", async () => {
     const { PATCH } = await loadRouteModule();
     mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mocks.mockQuery.mockResolvedValue([
-      {
-        id: 42,
+      sessionRow({
         name: "Live session",
-        start_time: "2026-04-15T05:00:00.000Z",
         end_time: "2026-04-15T07:00:00.000Z",
-        is_active: true,
         meta_data: {},
-      },
+      }),
     ]);
-    mocks.mockFetch.mockResolvedValueOnce(jsonResponse({ id: 42 }));
     vi.setSystemTime(new Date("2026-04-15T06:00:00.000Z"));
 
     const res = await PATCH(
@@ -280,9 +316,13 @@ describe("PATCH /api/quiz-sessions/[id]", () => {
     );
 
     expect(res.status).toBe(200);
-    const patchBody = JSON.parse(
-      String((mocks.mockFetch.mock.calls[0]?.[1] as RequestInit).body)
+    expect(fetchBody("/session/42").end_time).toBe("2026-04-15T11:30:00.000Z");
+    // occurrence + quiz doc end time follow the shortened window
+    expect(fetchBody("/session-occurrence/555").end_time).toBe(
+      "2026-04-15T11:30:00.000Z"
     );
-    expect(patchBody.end_time).toBe("2026-04-15T11:30:00.000Z");
+    expect(fetchBody("/quiz/quiz-abc123").session_end_time).toBe(
+      "2026-04-15 11:30:00 AM"
+    );
   });
 });

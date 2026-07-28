@@ -10,10 +10,10 @@ import {
   dbIstTimestampToUtcIso,
   utcToISTDate,
 } from "@/lib/quiz-session-time";
-import { publishMessage } from "@/lib/sns";
 
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL;
 const DB_SERVICE_TOKEN = process.env.DB_SERVICE_TOKEN;
+const QUIZ_BACKEND_URL = process.env.QUIZ_BACKEND_URL;
 
 interface PatchQuizSessionBody {
   action?: "end_now";
@@ -40,6 +40,8 @@ interface DbServiceSession {
 interface SessionRow {
   id: number;
   name: string | null;
+  platform_id: string | null;
+  session_id: string | null;
   start_time: string | null;
   end_time: string | null;
   is_active: boolean | null;
@@ -76,6 +78,21 @@ function isLiveWindow(start: Date | null, end: Date | null, now: Date): boolean 
   return start.getTime() <= now.getTime() && now.getTime() < end.getTime();
 }
 
+// The quiz doc stores metadata.session_end_time as IST wall-clock in the format
+// "%Y-%m-%d %I:%M:%S %p" (12-hour). `utcToISTDate` yields the IST wall-clock encoded
+// as an ISO string with a Z suffix, so read the components via the UTC getters.
+function istIsoToQuizDocEndTime(istIsoZ: string): string {
+  const date = new Date(istIsoZ);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const rawHours = date.getUTCHours();
+  const period = rawHours >= 12 ? "PM" : "AM";
+  const hours12 = rawHours % 12 || 12;
+  return (
+    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ` +
+    `${pad(hours12)}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} ${period}`
+  );
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -91,9 +108,9 @@ export async function PATCH(
     return access.response;
   }
 
-  if (!DB_SERVICE_URL || !DB_SERVICE_TOKEN) {
+  if (!DB_SERVICE_URL || !DB_SERVICE_TOKEN || !QUIZ_BACKEND_URL) {
     return NextResponse.json(
-      { error: "DB service is not configured" },
+      { error: "Session services are not configured" },
       { status: 500 }
     );
   }
@@ -108,7 +125,9 @@ export async function PATCH(
 
   const currentSessionRows = await query<SessionRow>(
     `
-    SELECT id, name, start_time::text AS start_time, end_time::text AS end_time, is_active, meta_data
+    SELECT id, name, platform_id, session_id,
+           start_time::text AS start_time, end_time::text AS end_time,
+           is_active, meta_data
     FROM session
     WHERE id = $1
     LIMIT 1
@@ -221,7 +240,101 @@ export async function PATCH(
     );
   }
 
-  await publishMessage({ action: "patch", id: sessionId, patch_session: payload });
+  // The portal gates quiz entry on the session_occurrence window (not the session
+  // row), so a timing change must be mirrored onto the occurrence or the quiz would
+  // keep opening/closing at the old time. Quiz sessions are continuous → a single
+  // occurrence spanning the window.
+  const timingChanged = Boolean(
+    body.startTime || body.endTime || body.action === "end_now"
+  );
+  if (timingChanged && currentSession.session_id) {
+    const occStart = utcToISTDate(nextStartTime as string);
+    const occEnd = utcToISTDate(nextEndTime as string);
+
+    const occListResponse = await fetch(
+      `${DB_SERVICE_URL}/session-occurrence?session_id=${encodeURIComponent(
+        currentSession.session_id
+      )}`,
+      { headers: { Authorization: `Bearer ${DB_SERVICE_TOKEN}` } }
+    );
+
+    if (!occListResponse.ok) {
+      console.error(
+        "Failed to load session occurrence:",
+        await occListResponse.text()
+      );
+      return NextResponse.json(
+        { error: "Session updated but failed to update its schedule" },
+        { status: 502 }
+      );
+    }
+
+    const occurrences = (await occListResponse.json()) as Array<{ id: number }>;
+    const occurrence = Array.isArray(occurrences) ? occurrences[0] : undefined;
+    if (occurrence?.id) {
+      const occPatchResponse = await fetch(
+        `${DB_SERVICE_URL}/session-occurrence/${occurrence.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${DB_SERVICE_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ start_time: occStart, end_time: occEnd }),
+        }
+      );
+      if (!occPatchResponse.ok) {
+        console.error(
+          "Failed to patch session occurrence:",
+          await occPatchResponse.text()
+        );
+        return NextResponse.json(
+          { error: "Session updated but failed to update its schedule" },
+          { status: 502 }
+        );
+      }
+    }
+  }
+
+  // The quiz-taking frontend reads display/scoring settings from the quiz doc, not
+  // the session, so sync the editable fields onto the quiz in place (same quizId).
+  const quizId = currentSession.platform_id;
+  if (quizId) {
+    const quizPatch: Record<string, unknown> = {
+      ...(typeof body.name === "string" && body.name.trim()
+        ? { title: body.name.trim() }
+        : {}),
+      ...(typeof body.shuffle === "boolean" ? { shuffle: body.shuffle } : {}),
+      ...(typeof body.showScores === "boolean"
+        ? { show_scores: body.showScores }
+        : {}),
+      // "show answers immediately after submission"
+      ...(typeof body.showAnswers === "boolean"
+        ? { review_immediate: body.showAnswers }
+        : {}),
+      ...(timingChanged && nextEndTime
+        ? { session_end_time: istIsoToQuizDocEndTime(utcToISTDate(nextEndTime)) }
+        : {}),
+    };
+
+    if (Object.keys(quizPatch).length > 0) {
+      const quizPatchResponse = await fetch(`${QUIZ_BACKEND_URL}/quiz/${quizId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(quizPatch),
+      });
+      if (!quizPatchResponse.ok) {
+        console.error(
+          "Failed to sync quiz doc:",
+          await quizPatchResponse.text()
+        );
+        return NextResponse.json(
+          { error: "Session updated but failed to sync quiz settings" },
+          { status: 502 }
+        );
+      }
+    }
+  }
 
   return NextResponse.json({ id: sessionId });
 }
