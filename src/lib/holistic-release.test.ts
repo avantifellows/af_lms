@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PROGRAM_IDS } from "./constants";
 import {
   buildHolisticProfileSourceEvidence,
   buildHolisticProfileSourceQuery,
@@ -122,6 +123,37 @@ describe("Holistic release preflight", () => {
     expect(calls.every((sql) => /^\s*(?:\/\*[\s\S]*?\*\/\s*)?(?:WITH\b|SELECT\b)/i.test(sql))).toBe(true);
     expect(calls.every((sql) => !/\b(?:insert|update|delete|alter|drop|create)\b/i.test(sql))).toBe(true);
     expect(calls.find((sql) => sql.includes("preflight_historical"))).toContain("COUNT(DISTINCT student.id)");
+  });
+
+  it("checks the supplied EMRS historical cohort against Program 78", async () => {
+    let historicalParams: unknown[] | undefined;
+    const db = async (sql: string, params?: unknown[]) => {
+      if (sql.includes("preflight_profile_tables")) {
+        return [{ profile_tables_ready: false }];
+      }
+      if (sql.includes("preflight_historical")) {
+        historicalParams = params;
+        return [{ safe_candidates: 1, excluded_rows: 0 }];
+      }
+      return [];
+    };
+
+    await runHolisticReleasePreflight({
+      db,
+      academicYear: "2026-2027",
+      programId: PROGRAM_IDS.EMRS_COE,
+      profileSource: {
+        forms: [],
+        sourceUserIds: [],
+        historicalBusinessStudentIds: ["EMRS-1"],
+      },
+    });
+
+    expect(historicalParams).toEqual([
+      ["EMRS-1"],
+      PROGRAM_IDS.EMRS_COE,
+      "2026-2027",
+    ]);
   });
 
   it("runs before the Profile migrations exist", async () => {

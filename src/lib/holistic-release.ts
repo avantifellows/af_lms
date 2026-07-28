@@ -1,4 +1,4 @@
-import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, PROGRAM_IDS } from "./constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "./constants";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
 const APPROVED_PROFILE_FORMS = {
@@ -246,10 +246,8 @@ async function loadPreflightEvidence(params: PreflightParams): Promise<Preflight
               COUNT(*) FILTER (WHERE match_count <> 1 OR NOT COALESCE(eligible, FALSE)) AS excluded_rows
        FROM matches`,
       [
-        params.programId === PROGRAM_IDS.COE
-          ? params.profileSource.historicalBusinessStudentIds ?? []
-          : [],
-        PROGRAM_IDS.COE,
+        params.profileSource.historicalBusinessStudentIds ?? [],
+        params.programId,
         params.academicYear,
       ]
     ),

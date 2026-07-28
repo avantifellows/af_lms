@@ -1,4 +1,7 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isHolisticMentorshipProgramId,
+} from "./constants";
 import { query } from "./db";
 
 export type HolisticPhaseProgress = "pending" | "skipped" | "completed";
@@ -439,7 +442,7 @@ async function loadPhaseRelations(
        ORDER BY summary.position`,
       [params.studentId]
     ),
-    (params.programId === PROGRAM_IDS.COE || params.programId === PROGRAM_IDS.EMRS_COE) ? query<HistoricalRow>(
+    isHolisticMentorshipProgramId(params.programId) ? query<HistoricalRow>(
       `SELECT answer.question, answer.answer, answer.position
        FROM holistic_mentorship_historical_notes notes
        JOIN holistic_mentorship_historical_note_answers answer ON answer.historical_note_id = notes.id
