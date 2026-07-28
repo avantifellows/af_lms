@@ -54,6 +54,21 @@ class MappingMutationError extends Error {
   }
 }
 
+const ELIGIBLE_ROSTER_CTE_SQL = `eligible_roster AS MATERIALIZED (
+  SELECT roster_student.user_id, MIN(roster_student.grade) AS grade
+  FROM centre_students roster_student
+  JOIN centres roster_centre
+    ON roster_centre.id = roster_student.centre_id
+   AND roster_centre.school_id = $1
+   AND roster_centre.program_id = $3
+   AND roster_centre.is_active IS TRUE
+  WHERE roster_student.academic_year = $2
+    AND roster_student.program_id = $3
+    AND roster_student.grade IN (11, 12)
+  GROUP BY roster_student.user_id
+  HAVING COUNT(DISTINCT roster_student.grade) = 1
+)`;
+
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "23505";
 }
@@ -144,19 +159,12 @@ async function lockEligibleStudents(
   params: { schoolId: number; academicYear: string; studentIds: number[] }
 ) {
   const eligible = await client.query<{ student_id: number | string }>(
-    `SELECT st.id AS student_id
-     FROM centre_students roster_student
-     JOIN centres roster_centre
-       ON roster_centre.id = roster_student.centre_id
-      AND roster_centre.school_id = $1
-      AND roster_centre.program_id = $3
-      AND roster_centre.is_active IS TRUE
-     JOIN student st ON st.user_id = roster_student.user_id
-     WHERE roster_student.academic_year = $2
-       AND roster_student.program_id = $3
-       AND st.id = ANY($4::bigint[])
+    `WITH ${ELIGIBLE_ROSTER_CTE_SQL}
+     SELECT st.id AS student_id
+     FROM eligible_roster
+     JOIN student st ON st.user_id = eligible_roster.user_id
+     WHERE st.id = ANY($4::bigint[])
        AND st.status IS DISTINCT FROM 'dropout'
-       AND roster_student.grade IN (11, 12)
      ORDER BY st.id
          FOR UPDATE OF st`,
     [params.schoolId, params.academicYear, PROGRAM_IDS.COE, params.studentIds]
@@ -407,7 +415,8 @@ export async function listHolisticAssignmentRoster(params: {
     schoolId: params.schoolId,
   });
   const rows = await query<RosterRow>(
-    `SELECT st.id AS student_id,
+    `WITH ${ELIGIBLE_ROSTER_CTE_SQL}
+     SELECT st.id AS student_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
             st.student_id AS external_student_id,
             roster_student.grade,
@@ -416,12 +425,7 @@ export async function listHolisticAssignmentRoster(params: {
             mapping.id AS mapping_id,
             mapping.mentor_user_id,
             NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name
-     FROM centre_students roster_student
-     JOIN centres roster_centre
-       ON roster_centre.id = roster_student.centre_id
-      AND roster_centre.school_id = $1
-      AND roster_centre.program_id = $3
-      AND roster_centre.is_active IS TRUE
+     FROM eligible_roster roster_student
      JOIN "user" u ON u.id = roster_student.user_id
      JOIN student st ON st.user_id = u.id
      LEFT JOIN LATERAL (
@@ -444,10 +448,7 @@ export async function listHolisticAssignmentRoster(params: {
       AND mapping.program_id = $3
       AND mapping.ended_at IS NULL
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
-     WHERE roster_student.academic_year = $2
-       AND roster_student.program_id = $3
-       AND st.status IS DISTINCT FROM 'dropout'
-       AND roster_student.grade IN (11, 12)
+     WHERE st.status IS DISTINCT FROM 'dropout'
        AND ($4 = '%%' OR st.student_id ILIKE $4 OR
             TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $4)
        AND ($5::int IS NULL OR roster_student.grade = $5)

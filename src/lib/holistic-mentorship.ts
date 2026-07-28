@@ -134,6 +134,7 @@ async function ownsActiveMapping(params: {
            AND roster_student.academic_year = $5
            AND roster_student.program_id = $4
            AND roster_student.grade IN (11, 12)
+         HAVING COUNT(DISTINCT roster_student.grade) = 1
        )
      LIMIT 1`,
     [
