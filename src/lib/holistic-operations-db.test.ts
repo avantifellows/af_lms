@@ -30,7 +30,7 @@ function operationsWithClientQuery(clientQuery: ReturnType<typeof vi.fn>) {
 }
 
 describe("Holistic operator database adapter", () => {
-  it("resolves launch scope from active Centres and safely scopes legacy Mentors", async () => {
+  it("resolves the selected Program from active Centres and safely scopes legacy Mentors", async () => {
     const query = vi.fn().mockResolvedValueOnce([{
       business_student_id: "AF-100",
       student_id: "41",
@@ -42,7 +42,7 @@ describe("Holistic operator database adapter", () => {
       withTransaction: vi.fn() as never,
     });
 
-    await expect(operations.historicalImport.resolve(source)).resolves.toEqual([{
+    await expect(operations.historicalImport.resolve(source, 78)).resolves.toEqual([{
       businessStudentId: "AF-100",
       studentId: 41,
       mentorUserId: 91,
@@ -53,6 +53,7 @@ describe("Holistic operator database adapter", () => {
     const text = String(sql);
     expect(text).toContain("FROM centre_students roster_student");
     expect(text).toContain("JOIN centres centre ON centre.id = roster_student.centre_id");
+    expect(text).toContain("centre.is_active IS TRUE");
     expect(text).toContain("roster_student.program_id = $4");
     expect(text).toContain("roster_student.academic_year = $3");
     expect(text).toContain("roster_student.grade = 12");
@@ -70,7 +71,7 @@ describe("Holistic operator database adapter", () => {
       ["AF-100"],
       ["TEACHER-100"],
       "2026-2027",
-      1,
+      78,
       ["apm", "pm", "spm", "ph"],
     ]);
   });

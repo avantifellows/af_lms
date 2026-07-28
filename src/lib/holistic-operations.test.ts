@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { PROGRAM_IDS } from "./constants";
 import {
   runHistoricalHolisticNotesImport,
   runHolisticMappingRollover,
@@ -100,6 +101,94 @@ describe("Historical Holistic Notes import entrypoint", () => {
     });
     expect(report.blockers).toEqual([]);
     expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("dry-runs Program 78 and requires its reviewed counts before apply", async () => {
+    const records = approvedHistoricalRecords();
+    const resolve = vi.fn(async () => resolveApprovedRecords(records));
+    const insert = vi.fn();
+    const input = {
+      programId: PROGRAM_IDS.EMRS_COE,
+      source: { read: async () => records },
+      db: {
+        resolve,
+        existing: async () => new Map<number, string>(),
+        insert,
+      },
+    };
+
+    const dryRun = await runHistoricalHolisticNotesImport(input);
+    expect(dryRun.ok).toBe(true);
+    expect(dryRun.counts).toMatchObject({
+      safeCandidates: 42,
+      writes: 39,
+      emptySkips: 3,
+      nullableMentors: 10,
+      quarantinedUnmatched: 11,
+    });
+    expect(resolve).toHaveBeenCalledWith(records, PROGRAM_IDS.EMRS_COE);
+
+    const blockedApply = await runHistoricalHolisticNotesImport({
+      ...input,
+      mode: "apply",
+      actorUserId: 7,
+      sourceSnapshot: "approved-emrs-snapshot",
+    });
+    expect(blockedApply.blockers).toContain(
+      "Apply requires approved reconciliation counts for Program 78"
+    );
+    expect(insert).not.toHaveBeenCalled();
+
+    const applied = await runHistoricalHolisticNotesImport({
+      ...input,
+      mode: "apply",
+      actorUserId: 7,
+      sourceSnapshot: "approved-emrs-snapshot",
+      approvedBaseline: {
+        safeCandidates: 42,
+        substantive: 39,
+        emptySkips: 3,
+        nullableMentors: 10,
+        quarantinedUnmatched: 11,
+      },
+    });
+    expect(applied.ok).toBe(true);
+    expect(insert).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unsupported Historical import Programs before reading source data", async () => {
+    const read = vi.fn();
+    await expect(runHistoricalHolisticNotesImport({
+      programId: 999,
+      source: { read },
+      db: {
+        resolve: vi.fn(),
+        existing: vi.fn(),
+        insert: vi.fn(),
+      },
+    })).rejects.toThrow("Historical import requires Program 1 or 78");
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty Program 78 approved counts before reading source data", async () => {
+    const read = vi.fn();
+    await expect(runHistoricalHolisticNotesImport({
+      programId: PROGRAM_IDS.EMRS_COE,
+      approvedBaseline: {
+        safeCandidates: 0,
+        substantive: 0,
+        emptySkips: 0,
+        nullableMentors: 0,
+        quarantinedUnmatched: 0,
+      },
+      source: { read },
+      db: {
+        resolve: vi.fn(),
+        existing: vi.fn(),
+        insert: vi.fn(),
+      },
+    })).rejects.toThrow("Historical import approved counts are invalid");
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("blocks apply when a source record does not contain the original four Question positions", async () => {

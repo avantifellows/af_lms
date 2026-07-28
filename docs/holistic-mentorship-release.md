@@ -62,9 +62,8 @@ npm run holistic:preflight -- \
   --historical-source=/secure/path/historical-grouped.json
 ```
 
-`--historical-source` is required only for Program 1. The guarded baseline import
-remains Program 1-only; EMRS history must be migrated separately before Program
-78 Student Context can display it.
+`--historical-source` is required only for Program 1 preflight. The Historical
+Notes importer supports Program 1 and Program 78 as separate guarded runs.
 
 Save the aggregate JSON report with the release record. It must reconcile
 dynamic Schools in the selected Program; eligible Grade 11/12 Students; Teacher seats;
@@ -78,6 +77,41 @@ For Historical import, reconcile the approved worked counts before execution:
 42 safe candidates, 39 written records, 3 empty-answer skips, 10 nullable Mentor
 attributions, and 11 unmatched source IDs quarantined. Record the current source
 fingerprint and verify that a no-op rerun changes zero rows.
+
+Program 1 keeps that fixed baseline. For Program 78, first prepare the reviewed
+11-Student EMRS cohort from the same approved private CSV snapshot:
+
+```bash
+npm run holistic:prepare-history -- \
+  --source-csv=/secure/path/mentorship-form-responses.csv \
+  --reviewed-student-ids=/secure/path/approved-emrs-student-ids.json \
+  --program-id=78 \
+  --output=/secure/path/emrs-historical-grouped.json
+```
+
+Then run the filtered EMRS export in dry-run mode:
+
+```bash
+npm run holistic:import-history -- \
+  --source=/secure/path/emrs-historical-grouped.json \
+  --program-id=78 \
+  --env-file=.env.production \
+  --dry-run
+```
+
+After the Program 78 counts are reviewed, provide them in
+`safe/substantive/empty/nullable/unmatched` order for apply:
+
+```bash
+npm run holistic:import-history -- \
+  --source=/secure/path/emrs-historical-grouped.json \
+  --program-id=78 \
+  --approved-counts=<safe/substantive/empty/nullable/unmatched> \
+  --actor-user-id=<admin-user-id> \
+  --source-snapshot=<approved-snapshot-id> \
+  --env-file=.env.production \
+  --apply
+```
 
 Prepare the private grouped input deterministically from the reviewed CSV snapshot
 and private 53-ID JSON allowlist before dry-run/apply. The preparer validates the

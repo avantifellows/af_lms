@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
 
 export type HolisticOperationMode = "dry-run" | "apply";
@@ -30,7 +31,10 @@ export interface HistoricalImportSource {
 }
 
 export interface HistoricalImportDb {
-  resolve(source: HistoricalHolisticNoteSource[]): Promise<ResolvedHistoricalStudent[]>;
+  resolve(
+    source: HistoricalHolisticNoteSource[],
+    programId: number
+  ): Promise<ResolvedHistoricalStudent[]>;
   existing(studentIds: number[], sourceSystem: string): Promise<Map<number, string>>;
   insert(records: HistoricalImportWrite[]): Promise<void>;
 }
@@ -61,8 +65,27 @@ export interface HistoricalImportReport {
   };
 }
 
+export interface HistoricalImportBaseline {
+  safeCandidates: number;
+  substantive: number;
+  emptySkips: number;
+  nullableMentors: number;
+  quarantinedUnmatched: number;
+}
+
+export function isValidHistoricalImportBaseline(
+  baseline: HistoricalImportBaseline
+): boolean {
+  const values = Object.values(baseline);
+  return values.every((value) => Number.isSafeInteger(value) && value >= 0) &&
+    baseline.safeCandidates > 0 &&
+    baseline.substantive > 0 &&
+    baseline.safeCandidates === baseline.substantive + baseline.emptySkips &&
+    baseline.nullableMentors <= baseline.safeCandidates;
+}
+
 const HISTORICAL_SOURCE_SYSTEM = "approved_2025_holistic_export";
-const APPROVED_BASELINE = {
+const PROGRAM_1_APPROVED_BASELINE: HistoricalImportBaseline = {
   safeCandidates: 42,
   substantive: 39,
   emptySkips: 3,
@@ -76,10 +99,20 @@ export async function runHistoricalHolisticNotesImport(params: {
   db: HistoricalImportDb;
   actorUserId?: number;
   sourceSnapshot?: string;
+  programId?: number;
+  approvedBaseline?: HistoricalImportBaseline;
 }): Promise<HistoricalImportReport> {
   const mode = params.mode ?? "dry-run";
+  const programId = params.programId ?? PROGRAM_IDS.COE;
+  if (!isHolisticMentorshipProgramId(programId)) {
+    throw new Error("Historical import requires Program 1 or 78");
+  }
+  if (params.approvedBaseline &&
+      !isValidHistoricalImportBaseline(params.approvedBaseline)) {
+    throw new Error("Historical import approved counts are invalid");
+  }
   const source = await params.source.read();
-  const resolvedRows = await params.db.resolve(source);
+  const resolvedRows = await params.db.resolve(source, programId);
   const byBusinessId = new Map<string, ResolvedHistoricalStudent[]>();
   for (const row of resolvedRows) {
     const matches = byBusinessId.get(row.businessStudentId) ?? [];
@@ -120,14 +153,23 @@ export async function runHistoricalHolisticNotesImport(params: {
     nullableMentors,
     quarantinedUnmatched: unmatched,
   };
-  if (
-    counts.safeCandidates !== APPROVED_BASELINE.safeCandidates ||
-    substantive.length !== APPROVED_BASELINE.substantive ||
-    counts.emptySkips !== APPROVED_BASELINE.emptySkips ||
-    counts.nullableMentors !== APPROVED_BASELINE.nullableMentors ||
-    counts.quarantinedUnmatched !== APPROVED_BASELINE.quarantinedUnmatched
-  ) {
-    blockers.push("Reconciliation counts differ from the approved 42/39/3/10/11 baseline");
+  const baseline = programId === PROGRAM_IDS.COE
+    ? PROGRAM_1_APPROVED_BASELINE
+    : params.approvedBaseline;
+  if (!baseline && mode === "apply") {
+    blockers.push(`Apply requires approved reconciliation counts for Program ${programId}`);
+  } else if (baseline && (
+    counts.safeCandidates !== baseline.safeCandidates ||
+    substantive.length !== baseline.substantive ||
+    counts.emptySkips !== baseline.emptySkips ||
+    counts.nullableMentors !== baseline.nullableMentors ||
+    counts.quarantinedUnmatched !== baseline.quarantinedUnmatched
+  )) {
+    blockers.push(
+      `Reconciliation counts differ from the approved ` +
+      `${baseline.safeCandidates}/${baseline.substantive}/${baseline.emptySkips}/` +
+      `${baseline.nullableMentors}/${baseline.quarantinedUnmatched} baseline`
+    );
   }
   if (mode === "apply" &&
       (!Number.isSafeInteger(params.actorUserId) || (params.actorUserId ?? 0) < 1 ||

@@ -1,7 +1,9 @@
 import * as dotenv from "dotenv";
 
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
+import { isValidHistoricalImportBaseline } from "./holistic-operations";
 import type {
+  HistoricalImportBaseline,
   HistoricalHolisticNoteSource,
   HolisticOperationMode,
 } from "./holistic-operations";
@@ -29,6 +31,29 @@ export function getHolisticOperationMode(args: string[]): HolisticOperationMode 
     throw new Error("Use either --apply or --dry-run, not both");
   }
   return apply ? "apply" : "dry-run";
+}
+
+export function getHistoricalImportBaseline(
+  args: string[]
+): HistoricalImportBaseline | undefined {
+  const raw = getHolisticScriptArgument(args, "--approved-counts");
+  if (raw === undefined) return undefined;
+  const segments = raw.split("/");
+  const values = segments.map(Number);
+  const baseline = {
+    safeCandidates: values[0],
+    substantive: values[1],
+    emptySkips: values[2],
+    nullableMentors: values[3],
+    quarantinedUnmatched: values[4],
+  };
+  if (segments.length !== 5 || segments.some((value) => !/^\d+$/.test(value)) ||
+      !isValidHistoricalImportBaseline(baseline)) {
+    throw new Error(
+      "--approved-counts must be safe/substantive/empty/nullable/unmatched"
+    );
+  }
+  return baseline;
 }
 
 export function isHistoricalHolisticNotesSource(

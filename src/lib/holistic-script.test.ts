@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getHistoricalImportBaseline,
   getHolisticOperationMode,
   getHolisticScriptArgument,
   isHistoricalHolisticNotesSource,
@@ -28,6 +29,34 @@ describe("Holistic operator script helpers", () => {
     expect(getHolisticOperationMode(["--apply"])).toBe("apply");
     expect(() => getHolisticOperationMode(["--apply", "--dry-run"]))
       .toThrow("Use either --apply or --dry-run, not both");
+  });
+
+  it("parses reviewed Historical import counts and rejects malformed values", () => {
+    expect(getHistoricalImportBaseline([
+      "--approved-counts=11/10/1/2/0",
+    ])).toEqual({
+      safeCandidates: 11,
+      substantive: 10,
+      emptySkips: 1,
+      nullableMentors: 2,
+      quarantinedUnmatched: 0,
+    });
+    expect(getHistoricalImportBaseline([])).toBeUndefined();
+    expect(() => getHistoricalImportBaseline([
+      "--approved-counts=11/10/2/2/0",
+    ])).toThrow(
+      "--approved-counts must be safe/substantive/empty/nullable/unmatched"
+    );
+    expect(() => getHistoricalImportBaseline([
+      "--approved-counts=////",
+    ])).toThrow(
+      "--approved-counts must be safe/substantive/empty/nullable/unmatched"
+    );
+    expect(() => getHistoricalImportBaseline([
+      "--approved-counts=0/0/0/0/0",
+    ])).toThrow(
+      "--approved-counts must be safe/substantive/empty/nullable/unmatched"
+    );
   });
 
   it("accepts only grouped Historical Notes records with valid Question fields", () => {

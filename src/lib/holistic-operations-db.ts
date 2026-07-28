@@ -1,4 +1,3 @@
-import { PROGRAM_IDS } from "./constants";
 import type {
   HistoricalImportDb,
   HistoricalImportWrite,
@@ -25,7 +24,7 @@ export function createHolisticOperationsDb(database: Database): {
 function createHistoricalImportDb(database: Database): HistoricalImportDb {
   const { query, withTransaction } = database;
   return {
-    async resolve(source) {
+    async resolve(source, programId) {
       if (!source.length) return [];
       return query<{
         business_student_id: string;
@@ -50,6 +49,7 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
          SELECT DISTINCT centre.school_id
          FROM centre_students roster_student
          JOIN centres centre ON centre.id = roster_student.centre_id
+           AND centre.is_active IS TRUE
          WHERE roster_student.user_id = student_user.id
            AND roster_student.academic_year = $3
            AND roster_student.grade = 12
@@ -75,7 +75,7 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
           source.map(({ businessStudentId }) => businessStudentId),
           source.map(({ sourceMentorId }) => sourceMentorId),
           "2026-2027",
-          PROGRAM_IDS.COE,
+          programId,
           [...PM_SEAT_ROLES],
         ]
       ).then((rows): ResolvedHistoricalStudent[] => rows.map((row) => ({

@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import { createHolisticOperationsDb } from "../src/lib/holistic-operations-db";
 import { runHistoricalHolisticNotesImport } from "../src/lib/holistic-operations";
 import type { HistoricalHolisticNoteSource } from "../src/lib/holistic-operations";
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
 import {
   configureHolisticScriptEnvironment,
+  getHistoricalImportBaseline,
   getHolisticOperationMode,
   getHolisticScriptArgument,
   isHistoricalHolisticNotesSource,
@@ -24,6 +26,8 @@ async function main(): Promise<void> {
       mode: options.mode,
       actorUserId: options.actorUserId,
       sourceSnapshot: options.sourceSnapshot,
+      programId: options.programId,
+      approvedBaseline: options.approvedBaseline,
       source: { read: async () => source },
       db: operationsDb.historicalImport,
     });
@@ -41,16 +45,37 @@ function parseOptions(args: string[]) {
 
   const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
   const sourceSnapshot = getHolisticScriptArgument(args, "--source-snapshot");
-  if (mode === "apply") validateApplyOptions(actorUserId, sourceSnapshot);
-  return { mode, actorUserId, sourceSnapshot, sourcePath };
+  const programId = Number(
+    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  );
+  if (!isHolisticMentorshipProgramId(programId)) {
+    throw new Error("--program-id must be 1 or 78");
+  }
+  const approvedBaseline = getHistoricalImportBaseline(args);
+  if (mode === "apply") {
+    validateApplyOptions(actorUserId, sourceSnapshot, programId, approvedBaseline);
+  }
+  return {
+    mode,
+    actorUserId,
+    sourceSnapshot,
+    sourcePath,
+    programId,
+    approvedBaseline,
+  };
 }
 
 function validateApplyOptions(
   actorUserId: number,
-  sourceSnapshot: string | undefined
+  sourceSnapshot: string | undefined,
+  programId: number,
+  approvedBaseline: ReturnType<typeof getHistoricalImportBaseline>
 ): void {
   if (!Number.isSafeInteger(actorUserId) || actorUserId < 1 || !sourceSnapshot) {
     throw new Error("Apply requires --actor-user-id and --source-snapshot");
+  }
+  if (programId === PROGRAM_IDS.EMRS_COE && !approvedBaseline) {
+    throw new Error("Program 78 apply requires --approved-counts from its reviewed dry-run");
   }
 }
 
