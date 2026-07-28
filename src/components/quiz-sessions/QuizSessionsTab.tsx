@@ -1244,17 +1244,30 @@ function QuizSessionCreateModal({
     };
   }, [cmsTestsReady, testSource, cmsTestType, cmsExamTrack, cmsGrade, cmsChapterId]);
 
+  // Prefill Session Name from whichever test is selected. Both sources are handled: the
+  // legacy path selects a template, the CMS path selects a chapter/major test — they live in
+  // separate state, so keying this off `selectedTemplate` alone left the field blank for
+  // every CMS session.
+  const selectedTestName = useMemo(() => {
+    if (testSource === "cms") {
+      return (
+        cmsTests.find((test) => test.id === selectedCmsTestId)?.name ?? null
+      );
+    }
+    return selectedTemplate?.name ?? null;
+  }, [cmsTests, selectedCmsTestId, selectedTemplate, testSource]);
+
   useEffect(() => {
-    if (!selectedTemplate) {
+    if (!selectedTestName) {
       if (!nameEdited) {
         setName("");
       }
       return;
     }
     if (!nameEdited || !name.trim()) {
-      setName(getDefaultSessionName(selectedTemplate.name));
+      setName(getDefaultSessionName(selectedTestName));
     }
-  }, [name, nameEdited, selectedTemplate]);
+  }, [name, nameEdited, selectedTestName]);
 
   const toggleBatch = (batchId: string) => {
     setClassBatchIds((previous) =>
@@ -1844,11 +1857,6 @@ function QuizSessionCreateModal({
                           })}
                         </div>
                       )}
-
-                      <div className="rounded-lg border border-border bg-bg-card-alt px-3 py-2 text-xs text-text-secondary">
-                        The quiz is built and the session is created in one step when you
-                        click Create Session — this may take a few seconds.
-                      </div>
                     </div>
                   )}
                 </div>
