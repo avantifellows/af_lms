@@ -1246,6 +1246,35 @@ describe("positions", () => {
     ).toBe(false);
   });
 
+  it("createSeatedUser preserves a dormant subject for a subject-less APC", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none — was deleted)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 605 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [{ id: 246196 }] }) // SELECT user (exists by email)
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE user_permission user_id
+      .mockResolvedValueOnce({ rows: [{ id: 3099 }] }); // dormant teacher row exists
+
+    expect(
+      await createSeatedUser({
+        body: { email: "dormant-apc@x.org", kind: "apc", centre_id: 8 },
+      })
+    ).toEqual({ ok: true });
+
+    const teacherUpdate = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("UPDATE teacher SET")
+    );
+    expect(teacherUpdate![0]).toContain(
+      "subject_id = COALESCE($1, subject_id)"
+    );
+    expect(teacherUpdate![1]).toEqual([null, null, 3099]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "apc", 246196]);
+  });
+
   it("createSeatedUser blocks a centre with no program", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: null }]); // no program
