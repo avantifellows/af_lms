@@ -7,9 +7,11 @@ import {
 } from "../src/lib/holistic-release";
 import {
   configureHolisticScriptEnvironment,
+  getHolisticMentorshipProgramId,
   getHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
+import { PROGRAM_IDS } from "../src/lib/constants";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -37,6 +39,7 @@ async function main(): Promise<void> {
       await client.query("SET TRANSACTION READ ONLY");
       return runHolisticReleasePreflight({
         academicYear: options.academicYear,
+        programId: options.programId,
         profileSource,
         db: async <T extends Record<string, unknown>>(sql: string, params?: unknown[]) =>
           (await client.query<T>(sql, params)).rows,
@@ -50,19 +53,35 @@ async function main(): Promise<void> {
 }
 
 function parseOptions(args: string[]) {
+  requireReadOnlyConfirmation(args);
+  const programId = getHolisticMentorshipProgramId(args);
   const historicalSource = getHolisticScriptArgument(args, "--historical-source");
-  if (!args.includes("--confirm-production-read-only") || !historicalSource) {
-    throw new Error(
-      "--confirm-production-read-only and --historical-source=<private-json-export> are required"
-    );
-  }
+  requireProgramOneHistory(programId, historicalSource);
   return {
-    historicalSource,
+    historicalSource: historicalSource ?? null,
+    programId,
     academicYear: getHolisticScriptArgument(args, "--academic-year") ?? "2026-2027",
   };
 }
 
-async function readHistoricalBusinessStudentIds(sourcePath: string): Promise<string[]> {
+function requireReadOnlyConfirmation(args: string[]) {
+  if (!args.includes("--confirm-production-read-only")) {
+    throw new Error(
+      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
+    );
+  }
+}
+
+function requireProgramOneHistory(programId: number, historicalSource?: string) {
+  if (programId === PROGRAM_IDS.COE && !historicalSource) {
+    throw new Error(
+      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
+    );
+  }
+}
+
+async function readHistoricalBusinessStudentIds(sourcePath: string | null): Promise<string[]> {
+  if (!sourcePath) return [];
   const parsed: unknown = JSON.parse(await readFile(sourcePath, "utf8"));
   if (!Array.isArray(parsed) || !parsed.every(hasBusinessStudentId)) {
     throw new Error("Historical source must be the grouped private JSON export");

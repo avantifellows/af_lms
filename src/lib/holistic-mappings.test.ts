@@ -45,6 +45,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       listHolisticAssignmentRoster({
+      programId: 1,
         schoolId: 4,
         academicYear: "2026-2027",
         search: "asha",
@@ -79,6 +80,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       schoolId: 4,
     });
   });
@@ -99,6 +101,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       assignHolisticMentees({
+      programId: 1,
         actorUserId: 9,
         schoolId: 4,
         academicYear: "2026-2027",
@@ -133,6 +136,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(mappingLock?.[1]).toEqual([[41, 42], "2026-2027", 4, 1]);
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       studentIds: [41, 42],
     });
   });
@@ -154,6 +158,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       removeHolisticMentees({
+      programId: 1,
         actorUserId: 9,
         schoolId: 4,
         academicYear: "2026-2027",
@@ -191,6 +196,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     });
 
     await expect(assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -229,6 +235,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ]);
 
     await expect(assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -257,6 +264,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     mockQuery.mockResolvedValueOnce([]);
 
     await expect(removeHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -287,6 +295,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     mockQuery.mockResolvedValue([]);
 
     const result = await assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -312,6 +321,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ]);
 
     await expect(assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",

@@ -17,6 +17,7 @@ import {
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
   holisticApiError,
+  holisticProgramId,
   positiveInteger,
   readJsonObject,
 } from "../route-helpers";
@@ -39,22 +40,26 @@ function auditActor(access: { email: string; actorUserId?: number }): AuditActor
   };
 }
 
-async function sessionAccess(action: "program_read" | "phase_configure") {
+async function sessionAccess(
+  action: "program_read" | "phase_configure",
+  programId: number,
+) {
   const session = await getServerSession(authOptions);
-  const access = await requireHolisticMentorshipAccess(session, action);
+  const access = await requireHolisticMentorshipAccess(session, action, { programId });
   return { session, access };
 }
 
 async function configurationAction(request: NextRequest) {
-  const { access } = await sessionAccess("phase_configure");
+  const value = await readJsonObject(request);
+  const programId = value && holisticProgramId(value.program_id);
+  if (!value || !programId || typeof value.action !== "string") {
+    return { ok: false as const, response: holisticApiError("Invalid request body") };
+  }
+  const { access } = await sessionAccess("phase_configure", programId);
   if (!access.ok) {
     return { ok: false as const, response: holisticApiError(access.error, access.status) };
   }
-  const value = await readJsonObject(request);
-  if (!value || typeof value.action !== "string") {
-    return { ok: false as const, response: holisticApiError("Invalid request body") };
-  }
-  return { ok: true as const, access, value };
+  return { ok: true as const, access, value, programId };
 }
 
 function definition(value: Record<string, unknown>): {
@@ -82,7 +87,11 @@ function definition(value: Record<string, unknown>): {
   };
 }
 
-async function createOrAddPhase(value: Record<string, unknown>, actor: AuditActor) {
+async function createOrAddPhase(
+  value: Record<string, unknown>,
+  actor: AuditActor,
+  programId: number,
+) {
   if (value.action === "create") {
     const academicYear = value.academic_year;
     const copyFrom = value.copy_from_academic_year;
@@ -91,6 +100,7 @@ async function createOrAddPhase(value: Record<string, unknown>, actor: AuditActo
     }
     return response(await createHolisticPhasePlan({
       academicYear,
+      programId,
       copyFromAcademicYear: copyFrom as string | undefined,
       ...actor,
     }));
@@ -102,6 +112,7 @@ async function createOrAddPhase(value: Record<string, unknown>, actor: AuditActo
     }
     return response(await addHolisticPhase({
       academicYear: value.academic_year,
+      programId,
       ...actor,
       ...parsed,
     }));
@@ -109,7 +120,11 @@ async function createOrAddPhase(value: Record<string, unknown>, actor: AuditActo
   return holisticApiError("Unknown action");
 }
 
-async function updatePhase(value: Record<string, unknown>, actor: AuditActor) {
+async function updatePhase(
+  value: Record<string, unknown>,
+  actor: AuditActor,
+  programId: number,
+) {
   const parsed = definition(value);
   const phaseId = positiveInteger(value.phase_id);
   const expectedRevision = positiveInteger(value.expected_revision);
@@ -118,6 +133,7 @@ async function updatePhase(value: Record<string, unknown>, actor: AuditActor) {
   }
   return response(await updateHolisticPhase({
     phaseId,
+    programId,
     expectedRevision,
     ...actor,
     confirmed: value.confirmed,
@@ -125,7 +141,11 @@ async function updatePhase(value: Record<string, unknown>, actor: AuditActor) {
   }));
 }
 
-async function changePhaseState(value: Record<string, unknown>, actor: AuditActor) {
+async function changePhaseState(
+  value: Record<string, unknown>,
+  actor: AuditActor,
+  programId: number,
+) {
   const phaseId = positiveInteger(value.phase_id);
   const expectedRevision = positiveInteger(value.expected_revision);
   const state = value.state === "open" || value.state === "locked" ? value.state : null;
@@ -134,6 +154,7 @@ async function changePhaseState(value: Record<string, unknown>, actor: AuditActo
   }
   return response(await setHolisticPhaseState({
     phaseId,
+    programId,
     expectedRevision,
     state,
     ...actor,
@@ -155,30 +176,41 @@ function parsePhaseOrder(value: unknown): { id: number; expectedRevision: number
     : phases as { id: number; expectedRevision: number }[];
 }
 
-async function reorderPhases(value: Record<string, unknown>, actor: AuditActor) {
+async function reorderPhases(
+  value: Record<string, unknown>,
+  actor: AuditActor,
+  programId: number,
+) {
   const phases = parsePhaseOrder(value.phases);
   if (typeof value.academic_year !== "string" || !phases) {
     return holisticApiError("Invalid Phase order");
   }
   return response(await reorderHolisticPhases({
     academicYear: value.academic_year,
+    programId,
     phases,
     ...actor,
   }));
 }
 
 export async function GET(request: NextRequest) {
-  const { access } = await sessionAccess("program_read");
+  const programId = holisticProgramId(request.nextUrl.searchParams.get("program_id"));
+  if (!programId) return holisticApiError("Invalid Program");
+  const { access } = await sessionAccess("program_read", programId);
   if (!access.ok) return holisticApiError(access.error, access.status);
   const academicYear = request.nextUrl.searchParams.get("academic_year") ?? CURRENT_ACADEMIC_YEAR;
   if (!validateAcademicYear(academicYear)) return holisticApiError("Invalid Academic Year");
-  return NextResponse.json({ plan: await getHolisticPhasePlan(academicYear) });
+  return NextResponse.json({ plan: await getHolisticPhasePlan(academicYear, programId) });
 }
 
 export async function POST(request: NextRequest) {
   const parsed = await configurationAction(request);
   if (!parsed.ok) return parsed.response;
-  return createOrAddPhase(parsed.value, auditActor(parsed.access));
+  return createOrAddPhase(
+    parsed.value,
+    auditActor(parsed.access),
+    parsed.programId,
+  );
 }
 
 export async function PATCH(request: NextRequest) {
@@ -186,21 +218,24 @@ export async function PATCH(request: NextRequest) {
   if (!parsed.ok) return parsed.response;
   const { access, value } = parsed;
   const actor = auditActor(access);
-  if (value.action === "update") return updatePhase(value, actor);
-  if (value.action === "state") return changePhaseState(value, actor);
-  if (value.action === "reorder") return reorderPhases(value, actor);
+  if (value.action === "update") return updatePhase(value, actor, parsed.programId);
+  if (value.action === "state") return changePhaseState(value, actor, parsed.programId);
+  if (value.action === "reorder") return reorderPhases(value, actor, parsed.programId);
   return holisticApiError("Unknown action");
 }
 
 export async function DELETE(request: NextRequest) {
-  const { access } = await sessionAccess("phase_configure");
-  if (!access.ok) return holisticApiError(access.error, access.status);
   const value = await readJsonObject(request);
+  const programId = value && holisticProgramId(value.program_id);
+  if (!programId) return holisticApiError("Invalid Program");
+  const { access } = await sessionAccess("phase_configure", programId);
+  if (!access.ok) return holisticApiError(access.error, access.status);
   const phaseId = value && positiveInteger(value.phase_id);
   const expectedRevision = value && positiveInteger(value.expected_revision);
   if (!phaseId || !expectedRevision) return holisticApiError("Invalid Phase");
   return response(await deleteHolisticPhase({
     phaseId,
+    programId,
     expectedRevision,
     ...auditActor(access),
   }));

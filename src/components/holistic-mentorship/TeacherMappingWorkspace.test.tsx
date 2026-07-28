@@ -45,6 +45,7 @@ describe("TeacherMappingWorkspace", () => {
     expect(JSON.parse(request.body)).toEqual({
       school_code: "SCH001",
       academic_year: "2026-2027",
+      program_id: 1,
       takeover_confirmed: false,
       selections: [{ student_id: 41, expected_mapping_id: null }],
     });
@@ -227,7 +228,7 @@ describe("TeacherMappingWorkspace", () => {
 
     expect(await screen.findByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
       "href",
-      "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027"
+      "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1"
     );
   });
 

@@ -21,6 +21,7 @@ describe("Holistic Mapping reconciliation", () => {
     mockClientQuery.mockResolvedValue({ rows: [{ ended_count: "2" }] });
 
     await expect(reconcileHolisticMappings({
+      programId: 1,
       academicYear: "2026-2027",
       schoolId: 4,
       studentIds: [41, 41, 42],
@@ -45,6 +46,7 @@ describe("Holistic Mapping reconciliation", () => {
 
   it("does not reconcile an older Academic Year", async () => {
     await expect(reconcileHolisticMappings({
+      programId: 1,
       academicYear: "2025-2026",
       studentIds: [41],
     })).resolves.toBe(0);
@@ -57,15 +59,15 @@ describe("Holistic Mapping reconciliation", () => {
       .mockResolvedValueOnce({ rows: [{ ended_count: "1" }] })
       .mockResolvedValueOnce({ rows: [{ ended_count: "0" }] });
 
-    await expect(reconcileHolisticMappings({ studentIds: [41] })).resolves.toBe(1);
-    await expect(reconcileHolisticMappings({ studentIds: [41] })).resolves.toBe(0);
+    await expect(reconcileHolisticMappings({ programId: 1, studentIds: [41] })).resolves.toBe(1);
+    await expect(reconcileHolisticMappings({ programId: 1, studentIds: [41] })).resolves.toBe(0);
 
     expect(mockClientQuery).toHaveBeenCalledTimes(2);
     expect(mockClientQuery.mock.calls[1][1]).toEqual([1, "2026-2027", null, null, [41]]);
   });
 
   it("rejects an unbounded reconciliation", async () => {
-    await expect(reconcileHolisticMappings({})).rejects.toThrow("bounded scope");
+    await expect(reconcileHolisticMappings({ programId: 1 })).rejects.toThrow("bounded scope");
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 });

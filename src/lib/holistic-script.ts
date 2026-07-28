@@ -1,7 +1,10 @@
 import * as dotenv from "dotenv";
 
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
+import { isValidHistoricalImportBaseline } from "./holistic-operations";
 import type {
+  HistoricalImportBaseline,
   HistoricalHolisticNoteSource,
   HolisticOperationMode,
 } from "./holistic-operations";
@@ -11,6 +14,26 @@ export function getHolisticScriptArgument(
   name: string
 ): string | undefined {
   return args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
+export function requireHolisticScriptArgument(
+  args: string[],
+  name: string,
+  errorMessage: string,
+): string {
+  const value = getHolisticScriptArgument(args, name);
+  if (!value) throw new Error(errorMessage);
+  return value;
+}
+
+export function getHolisticMentorshipProgramId(args: string[]): number {
+  const programId = Number(
+    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  );
+  if (!isHolisticMentorshipProgramId(programId)) {
+    throw new Error("--program-id must be 1 or 78");
+  }
+  return programId;
 }
 
 export function configureHolisticScriptEnvironment(
@@ -29,6 +52,29 @@ export function getHolisticOperationMode(args: string[]): HolisticOperationMode 
     throw new Error("Use either --apply or --dry-run, not both");
   }
   return apply ? "apply" : "dry-run";
+}
+
+export function getHistoricalImportBaseline(
+  args: string[]
+): HistoricalImportBaseline | undefined {
+  const raw = getHolisticScriptArgument(args, "--approved-counts");
+  if (raw === undefined) return undefined;
+  const segments = raw.split("/");
+  const values = segments.map(Number);
+  const baseline = {
+    safeCandidates: values[0],
+    substantive: values[1],
+    emptySkips: values[2],
+    nullableMentors: values[3],
+    quarantinedUnmatched: values[4],
+  };
+  if (segments.length !== 5 || segments.some((value) => !/^\d+$/.test(value)) ||
+      !isValidHistoricalImportBaseline(baseline)) {
+    throw new Error(
+      "--approved-counts must be safe/substantive/empty/nullable/unmatched"
+    );
+  }
+  return baseline;
 }
 
 export function isHistoricalHolisticNotesSource(

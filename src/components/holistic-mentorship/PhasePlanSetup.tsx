@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, History, Lock, Milestone, MoreVe
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Input } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import GuidanceEditor from "./GuidanceEditor";
 
 type Question = { id?: number; text: string };
@@ -99,8 +99,12 @@ function draftFromPhase(phase: Phase): Draft {
   };
 }
 
-async function fetchPhasePlan(year: string) {
-  const response = await fetch(`/api/holistic-mentorship/phase-plans?academic_year=${year}`);
+async function fetchPhasePlan(year: string, programId: number) {
+  const params = new URLSearchParams({
+    academic_year: year,
+    program_id: String(programId),
+  });
+  const response = await fetch(`/api/holistic-mentorship/phase-plans?${params}`);
   const body = await response.json();
   return {
     plan: (body.plan ?? null) as Plan | null,
@@ -108,40 +112,55 @@ async function fetchPhasePlan(year: string) {
   };
 }
 
-async function priorPlanCanBeCopied(plan: Plan | null, year: string) {
+async function priorPlanCanBeCopied(
+  plan: Plan | null,
+  year: string,
+  programId: number,
+) {
   if (plan || year !== CURRENT_ACADEMIC_YEAR) return false;
-  const prior = await fetchPhasePlan(PRIOR_ACADEMIC_YEAR);
+  const prior = await fetchPhasePlan(PRIOR_ACADEMIC_YEAR, programId);
   return !prior.error && prior.plan !== null;
 }
 
-export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }: { academicYear?: string }) {
+export default function PhasePlanSetup({
+  academicYear = CURRENT_ACADEMIC_YEAR,
+  programId = PROGRAM_IDS.COE,
+}: {
+  academicYear?: string;
+  programId?: number;
+}) {
   const [plan, setPlan] = useState<Plan | null | undefined>();
   const [canCopyPriorPlan, setCanCopyPriorPlan] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const loadId = useRef(0);
   const selectedPhase = selectedDraftPhase(plan, draft);
   const definitionReadOnly = isDefinitionReadOnly(plan, selectedPhase);
 
   const load = useCallback(async (year = academicYear, selectPhaseId?: number) => {
+    const requestId = ++loadId.current;
     setPlan(undefined);
     setCanCopyPriorPlan(false);
     setDraft(null);
     setMessage("");
     try {
-      const loaded = await fetchPhasePlan(year);
+      const loaded = await fetchPhasePlan(year, programId);
       const nextPlan = loaded.plan;
+      const canCopy = await priorPlanCanBeCopied(nextPlan, year, programId);
+      if (requestId !== loadId.current) return;
       setMessage(loaded.error);
-      setCanCopyPriorPlan(await priorPlanCanBeCopied(nextPlan, year));
+      setCanCopyPriorPlan(canCopy);
       setPlan(nextPlan);
       const keep = selectPhaseId ? nextPlan?.phases.find((phase) => phase.id === selectPhaseId) : undefined;
       if (keep) setDraft(draftFromPhase(keep));
     } catch {
+      if (requestId !== loadId.current) return;
       setMessage("Could not load the Plan");
       setCanCopyPriorPlan(false);
       setPlan(null);
     }
-  }, [academicYear]);
+  }, [academicYear, programId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -157,7 +176,7 @@ export default function PhasePlanSetup({ academicYear = CURRENT_ACADEMIC_YEAR }:
       const result = await fetch("/api/holistic-mentorship/phase-plans", {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, program_id: programId }),
       });
       const data = await result.json();
       if (!result.ok) {
@@ -431,7 +450,7 @@ function PhaseEditorAlerts({ phase, editable }: { phase: Phase | undefined; edit
     {!editable && <InlineAlert tone="info" icon={<History className="h-4 w-4" />} title="Historical Phase Plan."
       copy="Prior Academic Year definitions and state are read-only." />}
     {editable && phase?.state === "open" && !phase.used && <InlineAlert tone="warning" icon={<Eye className="h-4 w-4" />}
-      title="Mentors can see this Phase." copy="Saved Guidance and Question changes are visible immediately across Program 1." />}
+      title="Mentors can see this Phase." copy="Saved Guidance and Question changes are visible immediately in the selected Program." />}
   </>;
 }
 

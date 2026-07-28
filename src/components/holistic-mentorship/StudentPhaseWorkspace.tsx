@@ -9,6 +9,8 @@ import {
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
+import { PROGRAM_IDS } from "@/lib/constants";
+import { holisticStudentPhaseHref } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -22,6 +24,7 @@ type NotesEditorProps = {
   notesRevision: number;
   schoolCode: string;
   academicYear: string;
+  programId: number;
   editable: boolean;
   questions: Array<{ questionId: number; text: string }>;
   notes: null | {
@@ -177,6 +180,7 @@ function notesApiUrl(props: NotesEditorProps) {
   return `/api/holistic-mentorship/students/${props.studentId}/phases/${props.phaseId}?${new URLSearchParams({
     school_code: props.schoolCode,
     academic_year: props.academicYear,
+    program_id: String(props.programId),
   })}`;
 }
 
@@ -842,19 +846,22 @@ export default function StudentPhaseWorkspace({
   detail,
   schoolCode,
   academicYear,
+  programId = PROGRAM_IDS.COE,
   source,
   backHref,
 }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
+  programId?: number;
   source?: "school";
   backHref?: string;
 }) {
   const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<number>>(() => new Set());
   if (detail.readOnly) {
     return <AdminReadOnlyWorkspace detail={detail} schoolCode={schoolCode}
-      academicYear={academicYear} source={source} backHref={backHref} />;
+      academicYear={academicYear} programId={programId}
+      source={source} backHref={backHref} />;
   }
   const phases = detail.phases.map((phase) =>
     phase.phaseId !== null && "locked" in phase && !phase.locked && completedPhaseIds.has(phase.phaseId)
@@ -870,21 +877,23 @@ export default function StudentPhaseWorkspace({
       <StudentIdentity student={detail.student} backHref={backHref} />
       <PhaseNavigation studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
-        academicYear={academicYear} source={source} />
+        academicYear={academicYear} programId={programId} source={source} />
       <InactivePhasePanels studentId={detail.student.id} phases={phases}
         selectedPhaseId={detail.selectedPhase.phaseId} />
       <SelectedPhaseContent phase={visibleSelected} studentId={detail.student.id}
         selectedPhase={detail.selectedPhase}
-        readOnly={detail.readOnly} schoolCode={schoolCode} academicYear={academicYear}
+        readOnly={detail.readOnly} schoolCode={schoolCode}
+        academicYear={academicYear} programId={programId}
         onSubmitted={(phaseId) => setCompletedPhaseIds((current) => new Set(current).add(phaseId))} />
     </div>
   );
 }
 
-function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, source, backHref }: {
+function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, source, backHref }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
+  programId: number;
   source?: "school";
   backHref?: string;
 }) {
@@ -896,9 +905,9 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, source, back
       <Card elevation="sm" className="overflow-hidden">
         <PhaseNavigation readOnly studentId={detail.student.id} phases={detail.phases}
           selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
-          academicYear={academicYear} source={source} />
+          academicYear={academicYear} programId={programId} source={source} />
         <AdminSelectedPhase phase={selectedOpenPhase(detail)} selectedPhase={detail.selectedPhase}
-          studentId={detail.student.id} academicYear={academicYear} />
+          studentId={detail.student.id} academicYear={academicYear} programId={programId} />
       </Card>
     </div>
   );
@@ -941,12 +950,6 @@ function AdminStudentHeader({ student, backHref }: {
   </header>;
 }
 
-function studentPhaseHref(studentId: number, phaseId: number, schoolCode: string, academicYear: string, source?: "school") {
-  const query = new URLSearchParams({ school_code: schoolCode, academic_year: academicYear });
-  if (source) query.set("source", source);
-  return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
-}
-
 function phaseTabId(studentId: number, phase: Pick<PhaseNavigationItem, "phaseId" | "number">) {
   return `holistic-phase-tab-${studentId}-${phase.phaseId ?? `placeholder-${phase.number}`}`;
 }
@@ -966,12 +969,13 @@ function InactivePhasePanels({ studentId, phases, selectedPhaseId }: {
     aria-labelledby={phaseTabId(studentId, phase)} hidden />)}</>;
 }
 
-function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, source, readOnly = false }: {
+function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, academicYear, programId, source, readOnly = false }: {
   studentId: number;
   phases: HolisticStudentPhaseDetail["phases"];
   selectedPhaseId: number | null;
   schoolCode: string;
   academicYear: string;
+  programId: number;
   source?: "school";
   readOnly?: boolean;
 }) {
@@ -995,7 +999,7 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
     className="flex overflow-x-auto border-b border-border">
     {phases.map((phase) => <PhaseTab key={`${phase.number}-${phase.title}`} phase={phase}
       current={phase.phaseId === selectedPhaseId} studentId={studentId} schoolCode={schoolCode}
-      academicYear={academicYear} source={source} admin={readOnly} />)}
+      academicYear={academicYear} programId={programId} source={source} admin={readOnly} />)}
   </nav>;
 }
 
@@ -1012,6 +1016,7 @@ type PhaseTabProps = {
   studentId: number;
   schoolCode: string;
   academicYear: string;
+  programId: number;
   source?: "school";
   admin: boolean;
 };
@@ -1040,7 +1045,7 @@ function LockedPhaseTab({ phase, studentId, admin }: PhaseTabProps) {
   </button>;
 }
 
-function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, source, admin }:
+function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, programId, source, admin }:
   PhaseTabProps & { phase: PhaseNavigationItem & { phaseId: number } }) {
   const stage = phaseStage(phase);
   const className = admin
@@ -1048,7 +1053,14 @@ function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, sou
     : `border-b-[3px] ${current
       ? "border-accent bg-bg-card text-text-primary"
       : "border-transparent text-text-muted hover:bg-accent/5"}`;
-  return <Link href={studentPhaseHref(studentId, phase.phaseId, schoolCode, academicYear, source)}
+  return <Link href={holisticStudentPhaseHref({
+    studentId,
+    phaseId: phase.phaseId,
+    schoolCode,
+    academicYear,
+    programId,
+    source,
+  })}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${stage}`}
@@ -1074,13 +1086,14 @@ function LockedPhasePanel({ studentId, selectedPhase, bordered = false }: {
   </p>;
 }
 
-function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
+function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoolCode, academicYear, programId, onSubmitted }: {
   phase: OpenSelectedPhase | null;
   selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
   studentId: number;
   readOnly: boolean;
   schoolCode: string;
   academicYear: string;
+  programId: number;
   onSubmitted: (phaseId: number) => void;
 }) {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
@@ -1119,7 +1132,8 @@ function SelectedPhaseContent({ phase, selectedPhase, studentId, readOnly, schoo
     </div>
     <PostSessionNotes key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
       phase={phase} studentId={studentId} readOnly={readOnly}
-      schoolCode={schoolCode} academicYear={academicYear} onSubmitted={() => onSubmitted(phase.phaseId)} />
+      schoolCode={schoolCode} academicYear={academicYear} programId={programId}
+      onSubmitted={() => onSubmitted(phase.phaseId)} />
   </section>;
 }
 
@@ -1138,11 +1152,12 @@ function PreparationSwitch({ mobilePanel, onSelect }: {
   </div>;
 }
 
-function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear }: {
+function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear, programId }: {
   phase: OpenSelectedPhase | null;
   selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
   studentId: number;
   academicYear: string;
+  programId: number;
 }) {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
   const tabId = phaseTabId(studentId, selectedPhase);
@@ -1160,7 +1175,8 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear }: {
           <AdminContextSourceBadge context={phase.context} />
         </div>
         {contextSourceIsProfile(phase.context) && <AdminProfileRegeneration
-          studentId={studentId} academicYear={academicYear} initial={phase.context.regeneration ?? null}
+          studentId={studentId} academicYear={academicYear} programId={programId}
+          initial={phase.context.regeneration ?? null}
         />}
         <AdminContextBlocks context={phase.context} />
       </Card>
@@ -1288,13 +1304,20 @@ function acceptedRegeneration(body: QueueRegenerationBody, requestKey: string): 
   };
 }
 
-async function queueProfileRegeneration(studentId: number, requestKey: string): Promise<QueueRegenerationResult> {
+async function queueProfileRegeneration(
+  studentId: number,
+  programId: number,
+  requestKey: string,
+): Promise<QueueRegenerationResult> {
   try {
-    const response = await fetch(`/api/holistic-mentorship/profiles/${studentId}`, {
+    const response = await fetch(
+      `/api/holistic-mentorship/profiles/${studentId}?program_id=${programId}`,
+      {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request_key: requestKey, force: true }),
-    });
+      },
+    );
     const body = await response.json().catch(() => null) as QueueRegenerationBody;
     return response.ok
       ? acceptedRegeneration(body, requestKey)
@@ -1308,9 +1331,10 @@ async function queueProfileRegeneration(studentId: number, requestKey: string): 
   }
 }
 
-function AdminProfileRegeneration({ studentId, academicYear, initial }: {
+function AdminProfileRegeneration({ studentId, academicYear, programId, initial }: {
   studentId: number;
   academicYear: string;
+  programId: number;
   initial: HolisticProfileRegeneration | null;
 }) {
   const router = useRouter();
@@ -1320,6 +1344,7 @@ function AdminProfileRegeneration({ studentId, academicYear, initial }: {
   const [pollRetry, setPollRetry] = useState(0);
   const apiUrl = `/api/holistic-mentorship/profiles/${studentId}?${new URLSearchParams({
     academic_year: academicYear,
+    program_id: String(programId),
   })}`;
 
   const loadStatus = useCallback(async () => {
@@ -1358,7 +1383,11 @@ function AdminProfileRegeneration({ studentId, academicYear, initial }: {
       ? regeneration.requestKey
       : crypto.randomUUID();
     try {
-      const result = await queueProfileRegeneration(studentId, requestKey);
+      const result = await queueProfileRegeneration(
+        studentId,
+        programId,
+        requestKey,
+      );
       setMessage(result.message);
       if (result.regeneration) setRegeneration(result.regeneration);
       if (result.refresh) await loadStatus().catch(() => undefined);
@@ -1512,12 +1541,13 @@ function StudentContextBody({ context }: { context: OpenSelectedPhase["context"]
   </div>;
 }
 
-function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, onSubmitted }: {
+function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear, programId, onSubmitted }: {
   phase: OpenSelectedPhase;
   studentId: number;
   readOnly: boolean;
   schoolCode: string;
   academicYear: string;
+  programId: number;
   onSubmitted: () => void;
 }) {
   const [visibleNotesOverride, setVisibleNotes] = useState<OpenSelectedPhase["notes"] | undefined>();
@@ -1525,6 +1555,7 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
   const apiUrl = `/api/holistic-mentorship/students/${studentId}/phases/${phase.phaseId}?${new URLSearchParams({
     school_code: schoolCode,
     academic_year: academicYear,
+    program_id: String(programId),
   })}`;
 
   const refreshNotesMetadata = useCallback((submitted: boolean) => {
@@ -1544,7 +1575,8 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
       <PostSessionNotesEditor key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
         studentId={studentId} phaseId={phase.phaseId} phaseRevision={phase.revision}
         mappingId={phase.mappingId} notesRevision={phase.notesRevision} schoolCode={schoolCode}
-        academicYear={academicYear} editable={!readOnly && phase.canEditNotes}
+        academicYear={academicYear} programId={programId}
+        editable={!readOnly && phase.canEditNotes}
         questions={phase.questions} notes={phase.notes} timestampNotes={visibleNotes}
         onNotesSaved={refreshNotesMetadata} />
     </Card>

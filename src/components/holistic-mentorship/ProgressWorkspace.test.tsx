@@ -56,7 +56,7 @@ describe("ProgressWorkspace", () => {
     );
     expect(screen.getByText(/Last refreshed/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open Student One/ })).toHaveAttribute(
-      "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027"
+      "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1"
     );
   });
 
@@ -80,10 +80,26 @@ describe("ProgressWorkspace", () => {
     view.rerender(<ProgressWorkspace academicYear="2025-2026" />);
 
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(
-      "/api/holistic-mentorship/progress?academic_year=2025-2026&page=1&sort=school&direction=asc",
+      "/api/holistic-mentorship/progress?academic_year=2025-2026&program_id=1&page=1&sort=school&direction=asc",
       expect.anything()
     ));
     expect(screen.getByText(/Earlier academic years are read-only/)).toBeInTheDocument();
+  });
+
+  it("clears the previous Program's rows while the next Program loads", async () => {
+    let finishEmrs!: (response: Response) => void;
+    const emrsResponse = new Promise<Response>((resolve) => { finishEmrs = resolve; });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+      .mockReturnValueOnce(emrsResponse));
+    const view = render(<ProgressWorkspace programId={1} />);
+    await screen.findByText("Student One");
+
+    view.rerender(<ProgressWorkspace programId={78} />);
+
+    expect(await screen.findByText("Loading mapped Students...")).toBeInTheDocument();
+    expect(screen.queryByText("Student One")).not.toBeInTheDocument();
+    finishEmrs(new Response(JSON.stringify({ ...payload, rows: [] })));
   });
 
   it("distinguishes an Academic Year with no Mappings from filters with no matches", async () => {
@@ -110,6 +126,7 @@ describe("ProgressWorkspace", () => {
 
   it("restores filters, sorting, page, and scroll after drill-down navigation", async () => {
     sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope: "1:2026-2027",
       filters: {
         academicYear: "2026-2027", school: "SCH001", grade: "11", mentor: "9", phase: "70",
         progress: "completed", search: "Student", sort: "progress", direction: "desc",
@@ -124,12 +141,40 @@ describe("ProgressWorkspace", () => {
 
     expect(await screen.findByText("Student One")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls).toEqual([[
-      "/api/holistic-mentorship/progress?academic_year=2026-2027&page=2&sort=progress&direction=desc&school_code=SCH001&grade=11&mentor_user_id=9&phase_id=70&progress=completed&search=Student",
+      "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=2&sort=progress&direction=desc&school_code=SCH001&grade=11&mentor_user_id=9&phase_id=70&progress=completed&search=Student",
       expect.anything(),
     ]]);
     expect(screen.getByLabelText("Filter by School")).toHaveValue("SCH001");
     expect(screen.getByLabelText("Page 2 of 2")).toBeInTheDocument();
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 420 }));
+  });
+
+  it("does not restore School, Mentor, or Phase filters from another Program", async () => {
+    sessionStorage.setItem("holistic-progress-view", JSON.stringify({
+      scope: "1:2026-2027",
+      filters: {
+        school: "SCH001",
+        grade: "11",
+        mentor: "9",
+        phase: "70",
+        progress: "",
+        search: "",
+        sort: "school",
+        direction: "asc",
+      },
+      page: 2,
+    }));
+
+    render(<ProgressWorkspace programId={78} />);
+
+    await screen.findByText("Student One");
+    const request = String(vi.mocked(fetch).mock.calls[0][0]);
+    expect(request).toContain("program_id=78");
+    expect(request).toContain("grade=11");
+    expect(request).toContain("page=1");
+    expect(request).not.toContain("school_code=");
+    expect(request).not.toContain("mentor_user_id=");
+    expect(request).not.toContain("phase_id=");
   });
 
   it("exports every matching row with the current filters and sort", async () => {

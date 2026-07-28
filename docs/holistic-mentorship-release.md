@@ -1,4 +1,4 @@
-# Holistic Mentorship Program 1 Release
+# Holistic Mentorship Release
 
 This is a coordinated release, not a dark launch. The operator must stop if a
 preflight blocker or smoke-test failure is unresolved. AFK automation must not
@@ -29,6 +29,7 @@ an explicit local database:
 ```bash
 npm run holistic:setup-local -- \
   --confirm-synthetic-database \
+  --program-id=<1-or-78> \
   --env-file=.env.local \
   --db-service-path=../db-service_holistic_mentorship
 ```
@@ -55,13 +56,17 @@ queries only the two approved BigQuery Form/Session pairs.
 ```bash
 npm run holistic:preflight -- \
   --confirm-production-read-only \
+  --program-id=<1-or-78> \
   --env-file=.env.production \
   --academic-year=2026-2027 \
   --historical-source=/secure/path/historical-grouped.json
 ```
 
+`--historical-source` is required only for Program 1 preflight. The Historical
+Notes importer supports Program 1 and Program 78 as separate guarded runs.
+
 Save the aggregate JSON report with the release record. It must reconcile
-dynamic Program 1 Schools; eligible Grade 11/12 Students; Teacher seats;
+dynamic Schools in the selected Program; eligible Grade 11/12 Students; Teacher seats;
 Holistic and global Admin accounts; exact BigQuery User-to-Student identity;
 approved Form, Session, 34-question position, and five-set structure; the
 Historical cohort; and every excluded row. Missing, ambiguous, wrong-scope, or
@@ -72,6 +77,41 @@ For Historical import, reconcile the approved worked counts before execution:
 42 safe candidates, 39 written records, 3 empty-answer skips, 10 nullable Mentor
 attributions, and 11 unmatched source IDs quarantined. Record the current source
 fingerprint and verify that a no-op rerun changes zero rows.
+
+Program 1 keeps that fixed baseline. For Program 78, first prepare the reviewed
+11-Student EMRS cohort from the same approved private CSV snapshot:
+
+```bash
+npm run holistic:prepare-history -- \
+  --source-csv=/secure/path/mentorship-form-responses.csv \
+  --reviewed-student-ids=/secure/path/approved-emrs-student-ids.json \
+  --program-id=78 \
+  --output=/secure/path/emrs-historical-grouped.json
+```
+
+Then run the filtered EMRS export in dry-run mode:
+
+```bash
+npm run holistic:import-history -- \
+  --source=/secure/path/emrs-historical-grouped.json \
+  --program-id=78 \
+  --env-file=.env.production \
+  --dry-run
+```
+
+After the Program 78 counts are reviewed, provide them in
+`safe/substantive/empty/nullable/unmatched` order for apply:
+
+```bash
+npm run holistic:import-history -- \
+  --source=/secure/path/emrs-historical-grouped.json \
+  --program-id=78 \
+  --approved-counts=<safe/substantive/empty/nullable/unmatched> \
+  --actor-user-id=<admin-user-id> \
+  --source-snapshot=<approved-snapshot-id> \
+  --env-file=.env.production \
+  --apply
+```
 
 Prepare the private grouped input deterministically from the reviewed CSV snapshot
 and private 53-ID JSON allowlist before dry-run/apply. The preparer validates the
@@ -96,14 +136,16 @@ apply with a canonical operator User ID and verify an immediate no-op rerun:
 ```bash
 npm run holistic:rollover -- \
   --from=2026-2027 --to=2027-2028 \
+  --program-id=<1-or-78> \
   --actor-user-id=<operator-user-id> --env-file=.env.production
 
 npm run holistic:rollover -- \
   --from=2026-2027 --to=2027-2028 --apply \
+  --program-id=<1-or-78> \
   --actor-user-id=<operator-user-id> --env-file=.env.production
 ```
 
-The script carries only still-eligible same-School Program 1 pairs. Any Mapping
+The script carries only still-eligible same-School pairs in the selected Program. Any Mapping
 history already present in the target year is skipped, including a carried
 Mapping that a Teacher later removed, so a rerun cannot undo Teacher action.
 Keep the prior-year rows unchanged and do not commit Student-level output.
@@ -113,7 +155,7 @@ Keep the prior-year rows unchanged and do not commit Student-level output.
 Keep the shared-preview deployment paused while Engineering and Product run and
 record this checklist:
 
-- Teacher: open an eligible Program 1 School on desktop and mobile, assign an
+- Teacher: open an eligible School in each supported Program on desktop and mobile, assign an
   unowned Student, Submit Notes, correct the submitted Notes, and confirm a
   former Mentor's stale link returns `404`.
 - Holistic Admin: configure Phase state, inspect progress and read-only Student

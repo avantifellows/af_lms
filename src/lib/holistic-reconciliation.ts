@@ -1,7 +1,8 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { withTransaction } from "./db";
 
 export async function reconcileHolisticMappings(params: {
+  programId: number;
   academicYear?: string;
   schoolCode?: string;
   schoolId?: number;
@@ -93,7 +94,7 @@ export async function reconcileHolisticMappings(params: {
        )
        SELECT COUNT(*) AS ended_count FROM ended`,
       [
-        PROGRAM_IDS.COE,
+        params.programId,
         CURRENT_ACADEMIC_YEAR,
         params.schoolId ?? null,
         params.schoolCode ?? null,

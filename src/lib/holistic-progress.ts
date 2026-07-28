@@ -1,4 +1,4 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "./constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ID_TO_LABEL } from "./constants";
 import { query } from "./db";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
@@ -9,6 +9,7 @@ export type HolisticProgressDirection = "asc" | "desc";
 export const DEFAULT_HOLISTIC_PROGRESS_SORT: HolisticProgressSort = "school";
 
 export type HolisticProgressFilters = {
+  programId: number;
   academicYear: string;
   phaseId: number | null;
   schoolCode: string | null;
@@ -94,6 +95,7 @@ export async function listHolisticProgress(
   await reconcileHolisticMappings({
     academicYear: filters.academicYear,
     schoolCode: filters.schoolCode ?? undefined,
+    programId: filters.programId,
   });
   const direction = filters.direction === "desc" ? "DESC" : "ASC";
   const order = progressOrder(filters.sort, direction);
@@ -251,7 +253,7 @@ export async function listHolisticProgress(
      )
      SELECT paged.*, counts.* FROM counts LEFT JOIN paged ON true ORDER BY ${order}`,
     [
-      PROGRAM_IDS.COE,
+      filters.programId,
       filters.academicYear,
       filters.phaseId,
       filters.schoolCode,
@@ -296,7 +298,10 @@ export async function listHolisticProgress(
   };
 }
 
-export async function getHolisticProgressOptions(academicYear: string): Promise<HolisticProgressOptions> {
+export async function getHolisticProgressOptions(
+  academicYear: string,
+  programId: number,
+): Promise<HolisticProgressOptions> {
   const latestMappings = `WITH mapping_history AS (
          SELECT mapping.*
          FROM holistic_mentorship_mentor_mentee_mappings mapping
@@ -314,7 +319,7 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
        FROM latest_mapping mapping
        JOIN school ON school.id = mapping.school_id
        ORDER BY school.name, school.code`,
-      [PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
+      [programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ user_id: number | string; name: string | null; email: string }>(
       `${latestMappings}
@@ -324,7 +329,7 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
        FROM latest_mapping mapping
        JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
        ORDER BY name NULLS LAST, mentor.email`,
-      [PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
+      [programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ id: number | string; position: number; title: string; grade: number | string; state: "open" | "locked" }>(
       `SELECT phase.id, phase.position, phase.title, grade.number AS grade, phase.state
@@ -333,7 +338,7 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
        JOIN grade ON grade.id = phase.grade_id
        WHERE plan.program_id = $1 AND plan.academic_year = $2
        ORDER BY phase.position, phase.id`,
-      [PROGRAM_IDS.COE, academicYear]
+      [programId, academicYear]
     ),
   ]);
   return {
@@ -346,7 +351,9 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
   };
 }
 
-export async function getHolisticProgressAcademicYears(): Promise<string[]> {
+export async function getHolisticProgressAcademicYears(
+  programId: number,
+): Promise<string[]> {
   const rows = await query<{ academic_year: string }>(
     `SELECT available.academic_year
      FROM (
@@ -362,7 +369,7 @@ export async function getHolisticProgressAcademicYears(): Promise<string[]> {
      ) available
      ORDER BY CASE WHEN available.academic_year = $2 THEN 0 ELSE 1 END,
               available.academic_year DESC`,
-    [PROGRAM_IDS.COE, CURRENT_ACADEMIC_YEAR]
+    [programId, CURRENT_ACADEMIC_YEAR]
   );
   return rows.map(({ academic_year }) => academic_year);
 }
@@ -375,7 +382,11 @@ function csvCell(value: string | number | null): string {
     : safe;
 }
 
-export function formatHolisticProgressCsv(academicYear: string, rows: HolisticProgressRow[]): string {
+export function formatHolisticProgressCsv(
+  academicYear: string,
+  programId: number,
+  rows: HolisticProgressRow[],
+): string {
   const questionCount = rows.reduce(
     (maximum, row) => row.answers.reduce((rowMaximum, answer) => Math.max(rowMaximum, answer.position), maximum),
     0
@@ -393,7 +404,7 @@ export function formatHolisticProgressCsv(academicYear: string, rows: HolisticPr
       (_, index) => row.answers.find(({ position }) => position === index + 1)
     );
     return [
-      academicYear, PROGRAM_IDS.COE, PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE], row.schoolName, row.schoolCode,
+      academicYear, programId, PROGRAM_ID_TO_LABEL[programId], row.schoolName, row.schoolCode,
       row.studentName, row.externalStudentId,
       row.grade, row.mentorName, row.mentorEmail, row.phaseNumber === null ? "" : `Phase ${row.phaseNumber}`,
       row.phaseTitle, row.phaseState, row.progress, row.completedAt,

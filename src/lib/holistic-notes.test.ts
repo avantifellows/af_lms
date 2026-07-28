@@ -17,6 +17,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -37,6 +38,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -60,6 +62,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 70,
@@ -89,6 +92,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -108,6 +112,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "submit",
       studentId: 41,
       phaseId: 73,
@@ -135,6 +140,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "submit",
       studentId: 41,
       phaseId: 73,
@@ -160,6 +166,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "edit",
       studentId: 41,
       phaseId: 73,
@@ -184,6 +191,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -205,6 +213,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "edit",
       studentId: 41,
       phaseId: 73,
@@ -227,6 +236,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -249,6 +259,7 @@ describe("Holistic Post-Session Notes", () => {
     mockQuery.mockResolvedValueOnce([{ revision: 1 }]);
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,

@@ -7,6 +7,7 @@ import { saveHolisticNotes } from "@/lib/holistic-notes";
 import { getHolisticStudentPhase } from "@/lib/holistic-student-phase";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
+  holisticProgramId,
   positiveInteger,
   positiveIntegerString,
   readJsonObject,
@@ -22,8 +23,10 @@ async function targetFrom(request: NextRequest, params: RouteParams) {
   const searchParams = new URL(request.url).searchParams;
   const schoolCode = searchParams.get("school_code") ?? "";
   const academicYear = searchParams.get("academic_year") ?? "";
-  return studentId && phaseId && schoolCode && validateAcademicYear(academicYear)
-    ? { studentId, phaseId, schoolCode, academicYear }
+  const programId = holisticProgramId(searchParams.get("program_id"));
+  return studentId && phaseId && schoolCode && programId &&
+    validateAcademicYear(academicYear)
+    ? { studentId, phaseId, schoolCode, academicYear, programId }
     : null;
 }
 
@@ -100,6 +103,7 @@ export async function GET(
     schoolCode: target.schoolCode,
     studentId: target.studentId,
     academicYear: target.academicYear,
+    programId: target.programId,
   });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
@@ -109,6 +113,7 @@ export async function GET(
     studentId: target.studentId,
     phaseId: target.phaseId,
     schoolId: access.school!.id,
+    programId: target.programId,
     academicYear: target.academicYear,
     actorUserId: access.actorUserId,
     role: access.permission.role,
@@ -137,6 +142,7 @@ export async function PATCH(
     schoolCode: target.schoolCode,
     studentId: target.studentId,
     academicYear: target.academicYear,
+    programId: target.programId,
   });
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
 
@@ -155,6 +161,7 @@ export async function PATCH(
     studentId: target.studentId,
     phaseId: target.phaseId,
     schoolId: access.school!.id,
+    programId: target.programId,
     academicYear: target.academicYear,
     actorUserId: access.actorUserId!,
     expectedRevision,

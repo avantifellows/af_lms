@@ -6,6 +6,7 @@ import {
   endIneligibleHolisticMappings,
 } from "@/lib/staff-admin";
 import { isUserRole } from "@/lib/permissions";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "@/lib/constants";
 import { requireAdminApiAccess } from "../../route-helpers";
 
 interface RouteParams {
@@ -49,7 +50,7 @@ function explicitScope(value: string[] | undefined, clear: boolean) {
 }
 
 function assignedPrograms(programIds: number[] | undefined, isHolisticAdmin: boolean) {
-  return isHolisticAdmin ? [1] : programIds || null;
+  return isHolisticAdmin ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS] : programIds || null;
 }
 
 async function updatePermission(

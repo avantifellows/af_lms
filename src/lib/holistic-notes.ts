@@ -1,5 +1,4 @@
 import { query, withTransaction } from "./db";
-import { PROGRAM_IDS } from "./constants";
 import type { PoolClient } from "pg";
 
 type NotesInput = {
@@ -7,6 +6,7 @@ type NotesInput = {
   studentId: number;
   phaseId: number;
   schoolId: number;
+  programId: number;
   academicYear: string;
   actorUserId: number;
   expectedRevision: number;
@@ -94,7 +94,7 @@ async function loadScope(
              AND COALESCE(journey.entry_grade, 11) = 11)
          )
        FOR UPDATE OF mapping, phase`,
-      [input.phaseId, input.studentId, input.schoolId, PROGRAM_IDS.COE,
+      [input.phaseId, input.studentId, input.schoolId, input.programId,
         input.academicYear, priorAcademicYear]
   );
   return scope.rows[0] ?? null;
