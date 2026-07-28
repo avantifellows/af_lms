@@ -62,8 +62,9 @@ npm run holistic:preflight -- \
   --historical-source=/secure/path/historical-grouped.json
 ```
 
-`--historical-source` is required only for Program 1. Historical Notes are not
-imported for Program 78.
+`--historical-source` is required only for Program 1. The guarded baseline import
+remains Program 1-only; EMRS history must be migrated separately before Program
+78 Student Context can display it.
 
 Save the aggregate JSON report with the release record. It must reconcile
 dynamic Schools in the selected Program; eligible Grade 11/12 Students; Teacher seats;

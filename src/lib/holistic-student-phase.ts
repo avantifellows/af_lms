@@ -439,7 +439,7 @@ async function loadPhaseRelations(
        ORDER BY summary.position`,
       [params.studentId]
     ),
-    params.programId === PROGRAM_IDS.COE ? query<HistoricalRow>(
+    (params.programId === PROGRAM_IDS.COE || params.programId === PROGRAM_IDS.EMRS_COE) ? query<HistoricalRow>(
       `SELECT answer.question, answer.answer, answer.position
        FROM holistic_mentorship_historical_notes notes
        JOIN holistic_mentorship_historical_note_answers answer ON answer.historical_note_id = notes.id
