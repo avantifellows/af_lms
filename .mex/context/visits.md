@@ -18,7 +18,7 @@ edges:
     condition: when adding a new visit action type
   - target: context/data-access.md
     condition: when writing visit rows (direct Postgres, not the DB Service)
-last_updated: 2026-07-15
+last_updated: 2026-07-28
 ---
 
 # PM School Visits
@@ -54,6 +54,12 @@ Role semantics: **PM owner** = read/write own; **admin** = scoped read/write; **
 
 ## GPS — `src/lib/geo-validation.ts`
 `validateGpsReading(body, "start"|"end")` reads `${prefix}_lat/_lng/_accuracy`. Rejects (422) accuracy > 500m or out-of-range lat/lng; warns (still accepts) between 100–500m. **Never log lat/lng.** Routes that need GPS: create visit, action start, action end, complete visit.
+
+Client-side GPS capture lives in `src/lib/geolocation.ts`. Add `?debugGps=1` to a
+Visit page URL to enable structured `[GPS diagnostics]` browser-console events
+for permission state, browser/device context, network hints, readings, errors,
+timeouts, and cleanup. Diagnostics include accuracy but never latitude or
+longitude.
 
 ## The action-type registry (7 types)
 Types: `principal_interaction`, `classroom_observation`, `group_student_discussion`,

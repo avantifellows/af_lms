@@ -41,14 +41,22 @@ describe("getAccurateLocation", () => {
     vi.useRealTimers();
   });
 
-  function setSecureOrigin(secure: boolean) {
+  function setSecureOrigin(secure: boolean, search = "") {
     if (secure) {
       vi.stubGlobal("window", {
-        location: { protocol: "https:", hostname: "app.example.com" },
+        location: {
+          protocol: "https:",
+          hostname: "app.example.com",
+          search,
+        },
       });
     } else {
       vi.stubGlobal("window", {
-        location: { protocol: "http:", hostname: "app.example.com" },
+        location: {
+          protocol: "http:",
+          hostname: "app.example.com",
+          search,
+        },
       });
     }
   }
@@ -134,6 +142,115 @@ describe("getAccurateLocation", () => {
 
     const { promise } = getAccurateLocation();
     await expect(promise).rejects.toMatchObject({ code: "POSITION_UNAVAILABLE" });
+  });
+
+  it("logs opt-in diagnostics for unavailable positions", async () => {
+    setSecureOrigin(true, "?debugGps=1");
+    const permissionStatus = {
+      state: "granted",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("navigator", {
+      userAgent: "Chrome test",
+      platform: "MacIntel",
+      language: "en-IN",
+      onLine: true,
+      cookieEnabled: true,
+      geolocation: {
+        watchPosition: mockWatchPosition,
+        clearWatch: mockClearWatch,
+      },
+      permissions: {
+        query: vi.fn().mockResolvedValue(permissionStatus),
+      },
+      connection: {
+        effectiveType: "4g",
+        downlink: 10,
+        rtt: 50,
+        saveData: false,
+      },
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockWatchPosition.mockImplementation(
+      (_success: PositionCallback, onError: PositionErrorCallback) => {
+        onError({
+          code: 2,
+          PERMISSION_DENIED: 1,
+          POSITION_UNAVAILABLE: 2,
+          TIMEOUT: 3,
+          message: "Core Location unavailable",
+        } as GeolocationPositionError);
+        return 7;
+      }
+    );
+
+    const { promise } = getAccurateLocation();
+    await expect(promise).rejects.toMatchObject({
+      code: "POSITION_UNAVAILABLE",
+    });
+    await Promise.resolve();
+
+    const logs = [...info.mock.calls, ...warn.mock.calls, ...error.mock.calls]
+      .filter(([prefix]) => prefix === "[GPS diagnostics]")
+      .map(([, details]) => details as Record<string, unknown>);
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "attempt-started",
+          platform: "MacIntel",
+          permissionsApiSupported: true,
+        }),
+        expect.objectContaining({
+          event: "position-error",
+          errorName: "POSITION_UNAVAILABLE",
+          browserMessage: "Core Location unavailable",
+        }),
+        expect.objectContaining({
+          event: "settled",
+          outcome: "reject",
+          code: "POSITION_UNAVAILABLE",
+        }),
+        expect.objectContaining({
+          event: "permission-state",
+          state: "granted",
+        }),
+      ])
+    );
+  });
+
+  it("never includes coordinates in opt-in diagnostics", async () => {
+    setSecureOrigin(true, "?debugGps=1");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    mockWatchPosition.mockImplementation((success: PositionCallback) => {
+      success({
+        coords: { latitude: 23.0, longitude: 72.5, accuracy: 50 },
+      } as GeolocationPosition);
+      return 8;
+    });
+
+    const { promise } = getAccurateLocation();
+    await expect(promise).resolves.toEqual({
+      lat: 23.0,
+      lng: 72.5,
+      accuracy: 50,
+    });
+
+    const positionLog = info.mock.calls
+      .filter(([prefix]) => prefix === "[GPS diagnostics]")
+      .map(([, details]) => details as Record<string, unknown>)
+      .find((details) => details.event === "position-received");
+    expect(positionLog).toBeDefined();
+    expect(positionLog).not.toHaveProperty("lat");
+    expect(positionLog).not.toHaveProperty("lng");
+    expect(positionLog).not.toHaveProperty("latitude");
+    expect(positionLog).not.toHaveProperty("longitude");
+    expect(positionLog).toMatchObject({
+      coordinatesFinite: true,
+      accuracyMeters: 50,
+    });
   });
 
   it("resolves with best reading on timeout when accuracy <= 500m", async () => {
