@@ -81,16 +81,20 @@ function rowKey(row: StaffRosterRow): string {
 
 // In the centre-grouped view a staff member's role is the tier of the seat they
 // hold AT THAT centre (PH/SPM/APM/PM) — not the coarse roster kind, which
-// collapses every staff tier to "PM". Teachers keep "Teacher" (their subject is
-// shown in its own column, so the seat role would just duplicate it). Falls back
-// to the kind label when there's no seat for the centre (e.g. "No Centre").
+// collapses every staff tier to "PM". Teachers seated as APC show "APC" — it is
+// not a subject, so nothing else on the card would reveal it. Teachers on a
+// subject seat keep "Teacher" (the subject has its own column, so the seat role
+// would just duplicate it). Falls back to the kind label when there's no seat
+// for the centre (e.g. "No Centre").
 function roleLabelForCentre(
   row: StaffRosterRow,
   centreId: number | null
 ): string {
-  if (row.kind === "staff" && centreId !== null) {
+  if (centreId !== null) {
     const seat = row.seats.find((s) => s.centreId === centreId);
-    if (seat) return SEAT_ROLE_LABELS[seat.role];
+    if (seat && (row.kind === "staff" || seat.role === "apc")) {
+      return SEAT_ROLE_LABELS[seat.role];
+    }
   }
   return ROLE_LABELS[row.kind];
 }
@@ -172,7 +176,9 @@ export default function StaffGrid({
   const [addError, setAddError] = useState("");
   const [addName, setAddName] = useState("");
   const [addEmail, setAddEmail] = useState("");
-  const [addKind, setAddKind] = useState<"teacher" | "staff">("teacher");
+  const [addKind, setAddKind] = useState<"teacher" | "apc" | "staff">(
+    "teacher"
+  );
   const [addSubject, setAddSubject] = useState("");
   const [addSeatRole, setAddSeatRole] = useState<SeatRole>("pm");
   const [addCentre, setAddCentre] = useState("");
@@ -452,7 +458,11 @@ export default function StaffGrid({
           full_name: addName.trim() || undefined,
           kind: addKind,
           centre_id: Number(addCentre),
-          subject_id: addKind === "teacher" ? Number(addSubject) : undefined,
+          // Required for a teacher, optional for an APC, unused for PM/Staff.
+          subject_id:
+            addKind === "staff" || !addSubject
+              ? undefined
+              : Number(addSubject),
           role: addKind === "staff" ? addSeatRole : undefined,
           af_id: addCode.trim() || undefined,
         }),
@@ -1141,25 +1151,28 @@ export default function StaffGrid({
               <Select
                 value={addKind}
                 onChange={(event) =>
-                  setAddKind(event.target.value as "teacher" | "staff")
+                  setAddKind(event.target.value as "teacher" | "apc" | "staff")
                 }
                 aria-label="Type"
               >
                 <option value="teacher">Teacher</option>
+                <option value="apc">APC</option>
                 <option value="staff">PM / Staff</option>
               </Select>
             </label>
-            {addKind === "teacher" ? (
+            {addKind !== "staff" ? (
               <label>
                 <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                  Subject
+                  {addKind === "apc" ? "Subject (optional)" : "Subject"}
                 </span>
                 <Select
                   value={addSubject}
                   onChange={(event) => setAddSubject(event.target.value)}
                   aria-label="Subject"
                 >
-                  <option value="">Select Subject…</option>
+                  <option value="">
+                    {addKind === "apc" ? "No subject" : "Select Subject…"}
+                  </option>
                   {subjects.map((subject) => (
                     <option key={subject.id} value={subject.id}>
                       {subject.name}
