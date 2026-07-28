@@ -1151,6 +1151,62 @@ describe("positions", () => {
     expect(seatInsert![1]).toEqual([8, "spm", 701]);
   });
 
+  it("createSeatedUser creates an APC: teacher record, 'apc' seat, no subject", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 603 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 702 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: {
+          email: "apc@x.org",
+          full_name: "Apc Person",
+          kind: "apc",
+          centre_id: 8,
+        },
+      })
+    ).toEqual({ ok: true });
+    // An APC is a teacher record with role 'teacher' on the permission.
+    const permInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO user_permission")
+    );
+    expect(permInsert![1]).toEqual(["apc@x.org", "teacher", [2], "Apc Person"]);
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([702, null, null]); // subject + AF both blank
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "apc", 702]);
+  });
+
+  it("createSeatedUser keeps a subject on an APC when one is chosen", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 604 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 703 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: { email: "apc2@x.org", kind: "apc", centre_id: 8, subject_id: 2 },
+      })
+    ).toEqual({ ok: true });
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([703, 2, null]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "apc", 703]); // still an APC seat
+  });
+
   it("createSeatedUser refuses an email that already exists", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre

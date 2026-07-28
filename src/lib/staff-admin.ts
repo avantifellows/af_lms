@@ -1117,11 +1117,20 @@ export async function createTeacher(params: {
 export interface CreateSeatedUserBody {
   email?: unknown;
   full_name?: unknown;
-  kind?: unknown; // "teacher" | "staff"
+  kind?: unknown; // "teacher" | "apc" | "staff"
   centre_id?: unknown;
-  subject_id?: unknown; // teacher only (required)
+  subject_id?: unknown; // required for "teacher", optional for "apc"
   role?: unknown; // staff only: PM tier (apm/pm/spm/ph)
   af_id?: unknown; // optional AF code
+}
+
+// "apc" is a teacher-record kind, not a separate table: an APC gets the same
+// teacher row as a subject teacher (AF id lives on `teacher.teacher_id`) but is
+// seated with role 'apc'. APC is not a subject, so the subject is optional.
+const TEACHER_RECORD_KINDS = ["teacher", "apc"] as const;
+
+function makesTeacherRecord(kind: unknown): boolean {
+  return (TEACHER_RECORD_KINDS as readonly unknown[]).includes(kind);
 }
 
 function isPmSeatRole(value: unknown): value is SeatRole {
@@ -1151,8 +1160,8 @@ export async function createSeatedUser(params: {
     fields.email = "A valid email is required";
   }
   const kind = params.body.kind;
-  if (kind !== "teacher" && kind !== "staff") {
-    fields.kind = "kind must be 'teacher' or 'staff'";
+  if (kind !== "teacher" && kind !== "apc" && kind !== "staff") {
+    fields.kind = "kind must be 'teacher', 'apc' or 'staff'";
   }
   const centreId = Number(params.body.centre_id);
   if (!Number.isInteger(centreId) || centreId <= 0) {
@@ -1166,6 +1175,16 @@ export async function createSeatedUser(params: {
       fields.subject_id = "Subject is required";
     }
     seatRole = "subject_tbd";
+  } else if (kind === "apc") {
+    seatRole = "apc";
+    // Optional: an APC may also teach a subject, but usually doesn't.
+    const raw = params.body.subject_id;
+    if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+      subjectId = Number(raw);
+      if (!Number.isInteger(subjectId) || subjectId <= 0) {
+        fields.subject_id = "Subject must be a valid option";
+      }
+    }
   } else if (kind === "staff") {
     if (!isPmSeatRole(params.body.role)) {
       fields.role = `Role must be one of: ${PM_SEAT_ROLES.join(", ")}`;
@@ -1228,7 +1247,7 @@ export async function createSeatedUser(params: {
 
   if (code) {
     const codeClash = await query<{ id: number }>(
-      kind === "teacher"
+      makesTeacherRecord(kind)
         ? `SELECT id FROM teacher WHERE teacher_id = $1`
         : `SELECT id FROM staff WHERE employee_code = $1`,
       [code]
@@ -1242,7 +1261,7 @@ export async function createSeatedUser(params: {
     }
   }
 
-  const role = kind === "teacher" ? "teacher" : "program_manager";
+  const role = makesTeacherRecord(kind) ? "teacher" : "program_manager";
 
   await withTransaction(async (client) => {
     const permIns = await client.query(
@@ -1280,14 +1299,17 @@ export async function createSeatedUser(params: {
     // Reuse a dormant teacher/staff record if one exists (e.g. left behind when
     // this person was previously removed) rather than inserting a duplicate —
     // this is what makes remove → re-add seamless and dup-free.
-    if (kind === "teacher") {
+    if (makesTeacherRecord(kind)) {
       const existing = await client.query<{ id: number }>(
         `SELECT id FROM teacher WHERE user_id = $1 AND is_af_teacher = true ORDER BY id LIMIT 1`,
         [userId]
       );
       if (existing.rows.length > 0) {
+        // COALESCE on subject: an APC added without a subject must not wipe the
+        // subject on a reused (previously removed) teacher record.
         await client.query(
-          `UPDATE teacher SET subject_id = $1, teacher_id = COALESCE($2, teacher_id),
+          `UPDATE teacher SET subject_id = COALESCE($1, subject_id),
+             teacher_id = COALESCE($2, teacher_id),
              is_af_teacher = true, exit_date = NULL, updated_at = now()
            WHERE id = $3`,
           [subjectId, code, existing.rows[0].id]
