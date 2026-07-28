@@ -9,9 +9,12 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 
 const DEV_PERSONAS = [
   { key: "admin", label: "Admin", description: "Level 3, all schools" },
-  { key: "program_manager", label: "Program Manager", description: "Level 1, 2 schools" },
+  { key: "program_manager", label: "Program Manager", description: "Excluded from mentorship" },
+  { key: "program_admin", label: "Program Admin", description: "Excluded from mentorship" },
   { key: "teacher", label: "Teacher", description: "Level 1, 1 school" },
-  { key: "read_only", label: "Read-Only", description: "Level 3, read-only flag" },
+  { key: "former_mentor", label: "Former Mentor", description: "No active mentees" },
+  { key: "holistic_admin", label: "Holistic Admin", description: "Program 1, mentorship only" },
+  { key: "read_only", label: "Read-Only", description: "Teacher view without edits" },
 ] as const;
 
 export default function LoginPage() {

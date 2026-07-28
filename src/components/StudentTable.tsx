@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EditStudentModal, { Batch } from "./EditStudentModal";
 import {
@@ -568,12 +568,21 @@ export default function StudentTable({
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const dropoutRequested = searchParams.get("students") === "dropout";
   const [activeTab, setActiveTabState] = useState<"active" | "dropout">(
-    searchParams.get("students") === "dropout" ? "dropout" : "active",
+    dropoutRequested && dropoutStudents.length > 0 ? "dropout" : "active",
   );
   const effectiveProgramId =
     selectedProgramId ??
     (students[0]?.program_id == null ? null : Number(students[0].program_id));
+
+  useEffect(() => {
+    if (!dropoutRequested || dropoutStudents.length > 0) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("students");
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  }, [dropoutRequested, dropoutStudents.length, router, searchParams]);
 
   // Per-row edit gate: feature-level student edit (the permission matrix) plus
   // ownership of the selected program. Admins edit any student in the program;
@@ -588,7 +597,17 @@ export default function StudentTable({
   };
 
   const canDropoutFromSelectedProgram = (student: Student): boolean => {
-    if (!canDropoutStudent || effectiveProgramId == null) return false;
+    if (effectiveProgramId == null) return false;
+    // NVS dropout stays admin/PM/PA (canDropoutStudent). Centre-program dropout
+    // follows the general students=edit gate (canEditStudentEntry), so a teacher
+    // can drop a student from a centre they manage — matching the server's
+    // requireStudentProgramDropoutAccess. Per-program ownership is enforced by
+    // userCanManageProgram below.
+    const allowed =
+      effectiveProgramId === PROGRAM_IDS.NVS
+        ? canDropoutStudent
+        : canEditStudentEntry;
+    if (!allowed) return false;
     if (dropoutProgramIds && !dropoutProgramIds.includes(effectiveProgramId))
       return false;
     if (isPasscodeUser || !student.student_pk_id) return false;
@@ -798,7 +817,10 @@ export default function StudentTable({
           student={undoStudent}
           isOpen
           onClose={() => setUndoStudent(null)}
-          onConfirm={handleSave}
+          onConfirm={() => {
+            handleSave();
+            if (dropoutStudents.length === 1) handleTabChange("active");
+          }}
         />
       )}
     </>

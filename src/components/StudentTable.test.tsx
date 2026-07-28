@@ -1,20 +1,25 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import StudentTable, { Grade } from "./StudentTable";
 import { PROGRAM_IDS } from "@/lib/constants";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
-const mockRefresh = vi.fn();
-const mockPush = vi.fn();
-const mockReplace = vi.fn();
+const { mockRefresh, mockPush, mockReplace, mockUseSearchParams } = vi.hoisted(
+  () => ({
+    mockRefresh: vi.fn(),
+    mockPush: vi.fn(),
+    mockReplace: vi.fn(),
+    mockUseSearchParams: vi.fn(() => new URLSearchParams()),
+  }),
+);
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({
     push: mockPush,
     refresh: mockRefresh,
     replace: mockReplace,
   })),
-  useSearchParams: vi.fn(() => new URLSearchParams()),
+  useSearchParams: mockUseSearchParams,
 }));
 
 vi.mock("./EditStudentModal", () => ({
@@ -130,6 +135,7 @@ const defaultGrades: Grade[] = [
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  mockUseSearchParams.mockReturnValue(new URLSearchParams());
 });
 
 // ─── 1. Renders student cards with correct info ──────────────────────────────
@@ -343,6 +349,27 @@ describe("StudentTable - tab switching", () => {
 
     expect(screen.getByText("ActiveKid Sharma")).toBeInTheDocument();
     expect(screen.queryByText("DroppedKid Sharma")).not.toBeInTheDocument();
+  });
+
+  it("opens an empty dropout URL on the active list and cleans the URL", async () => {
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams("tab=enrollment&students=dropout"),
+    );
+
+    render(
+      <StudentTable
+        students={[active]}
+        dropoutStudents={[]}
+        grades={defaultGrades}
+      />,
+    );
+
+    expect(screen.getByText("ActiveKid Sharma")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith("?tab=enrollment", {
+        scroll: false,
+      });
+    });
   });
 });
 
@@ -572,6 +599,50 @@ describe("StudentTable - Dropout button", () => {
     );
 
     expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
+  });
+
+  it("shows centre-program Dropout for a teacher (canDropoutStudent off, students=edit on)", () => {
+    render(
+      <StudentTable
+        students={[
+          makeStudent({
+            program_id: PROGRAM_IDS.COE,
+            student_program_ids: [PROGRAM_IDS.COE],
+          }),
+        ]}
+        selectedProgramId={PROGRAM_IDS.COE}
+        grades={defaultGrades}
+        canEditStudent
+        canDropoutStudent={false}
+        isAdmin={false}
+        userProgramIds={[PROGRAM_IDS.COE]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Dropout" })).toBeInTheDocument();
+  });
+
+  it("keeps NVS Dropout hidden for a teacher even when they manage NVS", () => {
+    render(
+      <StudentTable
+        students={[
+          makeStudent({
+            program_id: PROGRAM_IDS.NVS,
+            student_program_ids: [PROGRAM_IDS.NVS],
+          }),
+        ]}
+        selectedProgramId={PROGRAM_IDS.NVS}
+        grades={defaultGrades}
+        canEditStudent
+        canDropoutStudent={false}
+        isAdmin={false}
+        userProgramIds={[PROGRAM_IDS.NVS]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Dropout" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows Dropout button for active editable student", () => {
@@ -1083,6 +1154,8 @@ describe("StudentTable - Dropout modal", () => {
       body: JSON.stringify({ student_pk_id: "spk-2" }),
     });
     expect(mockRefresh).toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith("?", { scroll: false });
+    expect(screen.getByText("Aarav Sharma")).toBeInTheDocument();
   });
 
   it("does not offer undo for legacy dropouts without a restorable audit", async () => {

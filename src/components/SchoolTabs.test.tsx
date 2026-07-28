@@ -62,6 +62,30 @@ describe("SchoolTabs", () => {
     expect(screen.queryByText("Students Content")).not.toBeInTheDocument();
   });
 
+  it("supports one-stop keyboard tabs linked to their panel", async () => {
+    const user = userEvent.setup();
+    render(<SchoolTabs tabs={tabs} />);
+
+    const students = screen.getByRole("tab", { name: "Students" });
+    const visits = screen.getByRole("tab", { name: "Visits" });
+    students.focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(visits).toHaveFocus();
+    expect(visits).toHaveAttribute("aria-selected", "true");
+    expect(visits).toHaveAttribute("tabindex", "0");
+    expect(students).toHaveAttribute("tabindex", "-1");
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveAttribute("aria-labelledby", visits.id);
+    expect(visits).toHaveAttribute("aria-controls", panel.id);
+    expect(students).toHaveAttribute("aria-controls", panel.id);
+
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Info" })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(students).toHaveFocus();
+  });
+
   it("seeds active tab from ?tab= query param when present and valid", () => {
     mockSearchParams = new URLSearchParams("tab=info");
     render(<SchoolTabs tabs={tabs} />);

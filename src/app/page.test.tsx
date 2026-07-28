@@ -195,7 +195,10 @@ describe("LoginPage", () => {
     expect(screen.getByText("dev login")).toBeInTheDocument();
     expect(screen.getByText("Admin")).toBeInTheDocument();
     expect(screen.getByText("Program Manager")).toBeInTheDocument();
+    expect(screen.getByText("Program Admin")).toBeInTheDocument();
     expect(screen.getByText("Teacher")).toBeInTheDocument();
+    expect(screen.getByText("Former Mentor")).toBeInTheDocument();
+    expect(screen.getByText("Holistic Admin")).toBeInTheDocument();
     expect(screen.getByText("Read-Only")).toBeInTheDocument();
   });
 

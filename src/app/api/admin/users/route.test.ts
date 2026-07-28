@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: vi.fn() }));
+vi.mock("@/lib/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/permissions")>()),
+  isAdmin: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
@@ -131,21 +134,45 @@ describe("POST /api/admin/users", () => {
     expect(json).toEqual({ id: 10, success: true });
   });
 
-  it("defaults to teacher for unknown role", async () => {
+  it("creates a Program 1-wide Holistic Mentorship Admin without a Centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);
-    mockQuery.mockResolvedValue([{ id: 11 }]);
+    mockQuery.mockResolvedValue([{ id: 12 }]);
+    const req = jsonRequest("http://localhost/api/admin/users", {
+      method: "POST",
+      body: {
+        email: "holistic@example.com",
+        level: 1,
+        role: "holistic_mentorship_admin",
+        program_ids: [64],
+        school_codes: ["SCH001"],
+      },
+    });
+
+    expect((await POST(req as never)).status).toBe(200);
+    expect(mockQuery).toHaveBeenCalledWith(expect.any(String), [
+      "holistic@example.com",
+      3,
+      "holistic_mentorship_admin",
+      null,
+      null,
+      [1],
+      false,
+      null,
+    ]);
+  });
+
+  it("rejects an unknown role", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
       body: { email: "u@test.com", level: 1, role: "unknown", program_ids: [1] },
     });
     const res = await POST(req as never);
-    expect(res.status).toBe(200);
-    // Verify teacher was passed to query
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining(["teacher"]),
-    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid role" });
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 500 on query error", async () => {

@@ -211,7 +211,13 @@ export async function requireStudentProgramDropoutAccess(
   studentPkId: number | string,
   programId: number,
 ): Promise<StudentProgramDropoutAccessResult> {
-  const actor = await requireStudentWriteActor(session);
+  // Centre-program dropout follows the general students=edit gate (teachers
+  // included), NOT the stricter admin/PM/PA student-addition actor. Teachers
+  // may drop a student from a centre program they manage — per-program
+  // ownership is still enforced below via actorHasProgramAccess. NVS dropout is
+  // unaffected: it routes through requireStudentAdditionStudentAccess, which
+  // keeps the admin/PM/PA-only requireStudentWriteActor.
+  const actor = await requireStudentEditActor(session);
   if (!actor.ok) return actor;
 
   const { email, permission } = actor;

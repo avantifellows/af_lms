@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
+import { type ReactNode } from "react";
 import { query } from "@/lib/db";
 import {
   getAcademicMentorshipActorUserId,
@@ -38,6 +40,14 @@ import {
 } from "@/lib/enrollment-stats";
 import EnrollmentTabContent from "@/components/enrollment/EnrollmentTabContent";
 import { getStudentAdditionAccessFromPermission } from "@/lib/student-addition-access";
+import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
+import AdminSchoolRoster from "@/components/holistic-mentorship/AdminSchoolRoster";
+import {
+  requireHolisticMentorshipAccess,
+  type HolisticMentorshipSession,
+} from "@/lib/holistic-mentorship";
+import { listHolisticAssignmentRoster } from "@/lib/holistic-mappings";
+import type { FeatureAccessResult, UserPermission } from "@/lib/permissions";
 
 export interface RosterSchool {
   id: string;
@@ -267,6 +277,70 @@ function AcademicMentorshipSchoolTab({
   );
 }
 
+// The holistic-mentorship admin has no roster scope at all — their whole
+// surface is the admin console, so bounce them there off any roster page.
+function redirectHolisticMentorshipAdmin(permission: UserPermission | null): void {
+  if (permission?.role === "holistic_mentorship_admin") {
+    redirect("/admin/holistic-mentorship");
+  }
+}
+
+/**
+ * Holistic Mentorship tab content, or null when the tab shouldn't render.
+ *
+ * This tab MUST be reachable on centre pages: holistic's users are Program-1
+ * (CoE) subject teachers, and those teachers hold centre seats — which this
+ * page confines away from the school roster. School-page-only holistic would
+ * lock them out of their own workspace.
+ *
+ * It stays CoE-scoped though: a centre page shows only its own program's
+ * surfaces, so a Nodal centre at a school that *also* has a CoE centre must
+ * not surface CoE holistic data.
+ */
+async function buildHolisticMentorshipContent({
+  session,
+  permission,
+  schoolCode,
+  access,
+  isCentre,
+  centreProgramId,
+}: {
+  session: HolisticMentorshipSession;
+  permission: UserPermission | null;
+  schoolCode: string;
+  access: FeatureAccessResult;
+  isCentre: boolean;
+  centreProgramId?: number;
+}): Promise<ReactNode | null> {
+  if (!access.canView) return null;
+  if (isCentre && Number(centreProgramId) !== PROGRAM_IDS.COE) return null;
+  const isTeacher = permission?.role === "teacher";
+  const holisticAccess = await requireHolisticMentorshipAccess(
+    session,
+    isTeacher ? "roster_view" : "program_read",
+    { schoolCode }
+  );
+  if (!holisticAccess.ok) return null;
+  if (isTeacher) {
+    return (
+      <HolisticMentorshipWorkspace
+        mode="teacher"
+        schoolCode={schoolCode}
+        canEdit={holisticAccess.canEdit}
+      />
+    );
+  }
+  return (
+    <AdminSchoolRoster
+      schoolCode={schoolCode}
+      students={await listHolisticAssignmentRoster({
+        schoolId: holisticAccess.school!.id,
+        academicYear: CURRENT_ACADEMIC_YEAR,
+      })}
+    />
+  );
+}
+
 function AccessDenied({
   message,
   link,
@@ -337,6 +411,8 @@ export default async function RosterPage({
       return <AccessDenied message="You don't have permission to view this page." />;
     }
 
+    redirectHolisticMentorshipAdmin(permission);
+
     // Centre-seated staff are confined to their centre(s): the whole-school
     // roster page isn't theirs to open (their seat grants school access only so
     // school-linked actions like visits work). Point them at their centre — the
@@ -398,6 +474,7 @@ export default async function RosterPage({
   const curriculumAccess = getFeatureAccess(permission, "curriculum", opts);
   const performanceAccess = getFeatureAccess(permission, "performance", opts);
   const mentorshipAccess = getFeatureAccess(permission, "academic_mentorship", opts);
+  const holisticMentorshipAccess = getFeatureAccess(permission, "holistic_mentorship", opts);
   const visitsAccess = getFeatureAccess(permission, "visits", opts);
   const quizSessionsAccess = getFeatureAccess(permission, "quiz_sessions", opts);
   // Student addition is an NVS school-page feature; a centre roster is scoped
@@ -618,6 +695,15 @@ export default async function RosterPage({
     />
   );
 
+  const holisticContent = await buildHolisticMentorshipContent({
+    session,
+    permission,
+    schoolCode: school.code,
+    access: holisticMentorshipAccess,
+    isCentre,
+    centreProgramId,
+  });
+
   // Tab visibility driven by feature permission matrix. Visits are school-linked
   // (a PM visits all of a school's centres in one trip), so the label stays
   // "School Visits" even on a centre page.
@@ -626,7 +712,8 @@ export default async function RosterPage({
     ...(curriculumAccess.canView ? [{ id: "curriculum", label: "Curriculum", content: curriculumContent }] : []),
     ...(performanceAccess.canView ? [{ id: "performance", label: "Performance", content: performanceContent }] : []),
     ...(quizSessionsAccess.canView ? [{ id: "quiz_sessions", label: "Quiz Sessions", content: quizSessionsContent }] : []),
-    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Mentorship", content: mentorshipContent }] : []),
+    ...(mentorshipAccess.canView ? [{ id: "mentorship", label: "Academic Mentorship", content: mentorshipContent }] : []),
+    ...(holisticContent ? [{ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticContent }] : []),
     ...(visitsAccess.canView ? [{ id: "visits", label: "School Visits", content: visitsContent }] : []),
   ];
 

@@ -663,4 +663,58 @@ describe("requireStudentProgramDropoutAccess", () => {
       await requireStudentProgramDropoutAccess(session, "100", nonJnvProgramId),
     ).toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
+
+  it("allows a teacher to drop from a centre program they manage", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "teacher", program_ids: [nonJnvProgramId] }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [nonJnvProgramId],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+
+    expect(
+      (await requireStudentProgramDropoutAccess(session, "100", nonJnvProgramId))
+        .ok,
+    ).toBe(true);
+  });
+
+  it("denies a teacher who does not manage the target centre program", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "teacher", program_ids: [PROGRAM_IDS.NVS] }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.NVS],
+      isNVSOnly: true,
+      hasCoEOrNodal: false,
+    });
+
+    expect(
+      await requireStudentProgramDropoutAccess(session, "100", nonJnvProgramId),
+    ).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+
+  it("denies a read-only teacher (no students edit) from centre dropout", async () => {
+    mockGetResolvedPermission.mockResolvedValue(
+      permission({ role: "teacher", program_ids: [nonJnvProgramId] }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [nonJnvProgramId],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockGetFeatureAccess.mockReturnValue({
+      access: "view",
+      canView: true,
+      canEdit: false,
+    });
+
+    expect(
+      await requireStudentProgramDropoutAccess(session, "100", nonJnvProgramId),
+    ).toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
 });

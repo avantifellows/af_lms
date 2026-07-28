@@ -122,6 +122,33 @@ describe("Dev login provider", () => {
     });
   });
 
+  it("returns user for valid program_admin persona", async () => {
+    const result = await devAuthorize({ persona: "program_admin" });
+    expect(result).toEqual({
+      id: "dev-program_admin",
+      email: DEV_LOGIN_PERSONAS.program_admin.email,
+      name: "Dev Program Admin",
+    });
+  });
+
+  it("returns user for valid former_mentor persona", async () => {
+    const result = await devAuthorize({ persona: "former_mentor" });
+    expect(result).toEqual({
+      id: "dev-former_mentor",
+      email: DEV_LOGIN_PERSONAS.former_mentor.email,
+      name: "Dev Former Mentor",
+    });
+  });
+
+  it("returns user for valid holistic_admin persona", async () => {
+    const result = await devAuthorize({ persona: "holistic_admin" });
+    expect(result).toEqual({
+      id: "dev-holistic_admin",
+      email: DEV_LOGIN_PERSONAS.holistic_admin.email,
+      name: "Dev Holistic Admin",
+    });
+  });
+
   it("returns user for valid read_only persona", async () => {
     const result = await devAuthorize({ persona: "read_only" });
     expect(result).toEqual({

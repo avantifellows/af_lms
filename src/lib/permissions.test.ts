@@ -278,6 +278,28 @@ describe("getFeatureAccess", () => {
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
     });
+
+    it.each([
+      ["teacher", "edit"],
+      ["holistic_mentorship_admin", "edit"],
+      ["admin", "edit"],
+      ["program_manager", "none"],
+      ["program_admin", "none"],
+    ] as const)("gives %s %s access to holistic mentorship", (role, access) => {
+      const permission = makePermission({ role, program_ids: [PROGRAM_IDS.COE] });
+      expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe(access);
+    });
+
+    it("grants the dedicated role no other feature access", () => {
+      const permission = makePermission({
+        role: "holistic_mentorship_admin",
+        level: 3,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe("edit");
+      expect(getFeatureAccess(permission, "students").access).toBe("none");
+      expect(getFeatureAccess(permission, "academic_mentorship").access).toBe("none");
+    });
   });
 
   describe("NVS-only gating", () => {
@@ -366,6 +388,19 @@ describe("getFeatureAccess", () => {
       });
     });
 
+    it("downgrades holistic mentorship writes to view", () => {
+      const permission = makePermission({
+        role: "holistic_mentorship_admin",
+        read_only: true,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(permission, "holistic_mentorship")).toEqual({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
+    });
+
     it("does not affect view-only features", () => {
       const perm = makePermission({ role: "teacher", read_only: true, program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "performance");
@@ -406,6 +441,20 @@ describe("ownsRecord", () => {
   it("returns false for empty program_ids", () => {
     const perm = makePermission({ program_ids: [] });
     expect(ownsRecord(perm, PROGRAM_IDS.NVS)).toBe(false);
+  });
+
+  // Regression: pg returns bigint columns (batch.program_id) as strings.
+  // Before the coercion fix, [1].includes("1") was false and every non-admin
+  // got 403 Forbidden on document upload/delete once getStudentSchool started
+  // resolving real program ids (post-#162 batch join).
+  it("owns the record when programId arrives as a bigint string", () => {
+    const perm = makePermission({ program_ids: [PROGRAM_IDS.COE] });
+    expect(ownsRecord(perm, String(PROGRAM_IDS.COE))).toBe(true);
+  });
+
+  it("still rejects a non-owned program passed as a string", () => {
+    const perm = makePermission({ program_ids: [PROGRAM_IDS.COE] });
+    expect(ownsRecord(perm, String(PROGRAM_IDS.NVS))).toBe(false);
   });
 });
 
@@ -921,6 +970,15 @@ describe("getStudentSchool", () => {
     mockQuery.mockResolvedValueOnce([]);
     const result = await getStudentSchool(999);
     expect(result).toBeNull();
+  });
+
+  // batch.program_id is a Postgres bigint, which pg returns as a string
+  // unless cast. The ::int cast keeps program_id a number so ownsRecord's
+  // includes() check matches. Regression pin for the post-#162 403s.
+  it("casts program_id to int in the SQL", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await getStudentSchool(42);
+    expect(mockQuery.mock.calls[0][0]).toContain("b.program_id::int");
   });
 });
 

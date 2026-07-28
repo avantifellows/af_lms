@@ -16,6 +16,10 @@
 import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
 import {
+  eraseDraftHolisticNotes,
+  lockHolisticMentorMappingMutation,
+} from "./holistic-mappings";
+import {
   type AdminGuardResult,
   type AdminSession,
   makeSchemaChecker,
@@ -35,18 +39,18 @@ export async function requireStaffAdmin(
 
 // --- Schema readiness ---
 
-export interface StaffSchemaReady {
+interface StaffSchemaReady {
   ok: true;
 }
 
-export interface StaffSchemaUnavailable {
+interface StaffSchemaUnavailable {
   ok: false;
   status: 503;
   error: "Staff management schema unavailable";
   details: string[];
 }
 
-export type StaffSchemaStatus = StaffSchemaReady | StaffSchemaUnavailable;
+type StaffSchemaStatus = StaffSchemaReady | StaffSchemaUnavailable;
 
 export const STAFF_REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "staff", column: "id" },
@@ -100,7 +104,7 @@ async function loadStaffSchemaStatus(): Promise<StaffSchemaStatus> {
 
 const staffSchemaChecker = makeSchemaChecker(loadStaffSchemaStatus);
 
-export function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
+function checkStaffManagementSchema(): Promise<StaffSchemaStatus> {
   return staffSchemaChecker.check();
 }
 
@@ -648,6 +652,7 @@ async function vacateSeatsAndRevoke(
   client: PoolClient,
   userId: number
 ): Promise<void> {
+  await endIneligibleHolisticMappings(client, userId, "mentor_exit", true);
   await client.query(
     `UPDATE centre_positions SET user_id = NULL, updated_at = now()
      WHERE user_id = $1 AND deleted_at IS NULL`,
@@ -657,6 +662,43 @@ async function vacateSeatsAndRevoke(
     `UPDATE user_permission SET revoked_at = now(), updated_at = now()
      WHERE user_id = $1 AND revoked_at IS NULL`,
     [userId]
+  );
+}
+
+export async function endIneligibleHolisticMappings(
+  client: PoolClient,
+  userId: number,
+  reason: "mentor_exit" | "mentor_role_changed" | "mentor_seat_changed" | "mentor_access_revoked",
+  endAll = false
+): Promise<void> {
+  await lockHolisticMentorMappingMutation(client, userId);
+  const ended = await client.query<{ student_id: number | string }>(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings mapping
+     SET ended_at = now(), ended_by_user_id = NULL, end_source = $2,
+         end_reason = $3, updated_at = now()
+     WHERE mapping.mentor_user_id = $1
+       AND mapping.ended_at IS NULL
+       AND ($4::boolean OR NOT EXISTS (
+         SELECT 1
+         FROM teacher t
+         JOIN user_permission up
+           ON up.user_id = t.user_id AND up.revoked_at IS NULL AND up.role = 'teacher'
+         JOIN centre_positions cp
+           ON cp.user_id = t.user_id AND cp.deleted_at IS NULL
+          AND NOT (cp.role = ANY($5::text[]))
+         JOIN centres c
+           ON c.id = cp.centre_id AND c.is_active IS TRUE
+          AND c.school_id = mapping.school_id AND c.program_id = mapping.program_id
+         WHERE t.user_id = $1 AND t.is_af_teacher = true AND t.exit_date IS NULL
+       ))
+     RETURNING mapping.student_id`,
+    [userId, "af_lms_staff_management", reason, endAll, [...PM_SEAT_ROLES]]
+  );
+  await eraseDraftHolisticNotes(
+    client,
+    ended.rows.map((row) => Number(row.student_id)),
+    userId,
+    reason
   );
 }
 
@@ -1075,11 +1117,20 @@ export async function createTeacher(params: {
 export interface CreateSeatedUserBody {
   email?: unknown;
   full_name?: unknown;
-  kind?: unknown; // "teacher" | "staff"
+  kind?: unknown; // "teacher" | "apc" | "staff"
   centre_id?: unknown;
-  subject_id?: unknown; // teacher only (required)
+  subject_id?: unknown; // required for "teacher", optional for "apc"
   role?: unknown; // staff only: PM tier (apm/pm/spm/ph)
   af_id?: unknown; // optional AF code
+}
+
+// "apc" is a teacher-record kind, not a separate table: an APC gets the same
+// teacher row as a subject teacher (AF id lives on `teacher.teacher_id`) but is
+// seated with role 'apc'. APC is not a subject, so the subject is optional.
+const TEACHER_RECORD_KINDS = ["teacher", "apc"] as const;
+
+function makesTeacherRecord(kind: unknown): boolean {
+  return (TEACHER_RECORD_KINDS as readonly unknown[]).includes(kind);
 }
 
 function isPmSeatRole(value: unknown): value is SeatRole {
@@ -1087,6 +1138,137 @@ function isPmSeatRole(value: unknown): value is SeatRole {
     typeof value === "string" &&
     (PM_SEAT_ROLES as readonly string[]).includes(value)
   );
+}
+
+const SEATED_USER_KINDS = ["teacher", "apc", "staff"] as const;
+
+type SeatedUserKind = (typeof SEATED_USER_KINDS)[number];
+
+function isSeatedUserKind(value: unknown): value is SeatedUserKind {
+  return (SEATED_USER_KINDS as readonly unknown[]).includes(value);
+}
+
+interface SeatedUserInput {
+  email: string;
+  fullName: string;
+  kind: SeatedUserKind;
+  centreId: number;
+  subjectId: number | null;
+  seatRole: SeatRole;
+  code: string | null;
+}
+
+function isBlank(raw: unknown): boolean {
+  return raw === undefined || raw === null || String(raw).trim() === "";
+}
+
+function isPositiveId(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
+}
+
+// An optional numeric id: absent/blank means "not given" (null), anything else
+// must be a positive integer.
+function optionalPositiveId(
+  raw: unknown,
+  fields: Record<string, string>,
+  field: string,
+  message: string
+): number | null {
+  if (isBlank(raw)) return null;
+  const value = Number(raw);
+  if (!isPositiveId(value)) {
+    fields[field] = message;
+    return null;
+  }
+  return value;
+}
+
+// An AF employee code, when supplied, must normalize to the AF123 shape.
+function validateOptionalAfCode(
+  raw: unknown,
+  fields: Record<string, string>
+): string | null {
+  if (isBlank(raw)) return null;
+  const code = normalizeEmployeeCode(raw);
+  if (!code) {
+    fields.af_id = "AF id must look like AF123";
+  }
+  return code;
+}
+
+// What each kind gets seated as. Teacher: subject required, but seated
+// `subject_tbd` — the seat role is the subject and Ops confirms it later.
+// APC: subject optional (APC is not a subject), seated 'apc'. Staff: the PM
+// tier from the request, no subject.
+function resolveSeatAndSubject(
+  kind: unknown,
+  body: CreateSeatedUserBody,
+  fields: Record<string, string>
+): { subjectId: number | null; seatRole: SeatRole } {
+  if (kind === "teacher") {
+    const subjectId = Number(body.subject_id);
+    if (!isPositiveId(subjectId)) {
+      fields.subject_id = "Subject is required";
+    }
+    return { subjectId, seatRole: "subject_tbd" };
+  }
+  if (kind === "apc") {
+    return {
+      subjectId: optionalPositiveId(
+        body.subject_id,
+        fields,
+        "subject_id",
+        "Subject must be a valid option"
+      ),
+      seatRole: "apc",
+    };
+  }
+  if (kind === "staff" && isPmSeatRole(body.role)) {
+    return { subjectId: null, seatRole: body.role };
+  }
+  if (kind === "staff") {
+    fields.role = `Role must be one of: ${PM_SEAT_ROLES.join(", ")}`;
+  }
+  return { subjectId: null, seatRole: "subject_tbd" };
+}
+
+// Decides *what* to create; createSeatedUser does the creating. Split out to
+// keep the transaction below readable.
+function validateSeatedUserBody(
+  body: CreateSeatedUserBody
+): { ok: true; input: SeatedUserInput } | StaffValidationFailure {
+  const fields: Record<string, string> = {};
+
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  if (!email.includes("@")) {
+    fields.email = "A valid email is required";
+  }
+  const kind = body.kind;
+  if (!isSeatedUserKind(kind)) {
+    fields.kind = `kind must be one of: ${SEATED_USER_KINDS.join(", ")}`;
+  }
+  const centreId = Number(body.centre_id);
+  if (!isPositiveId(centreId)) {
+    fields.centre_id = "Centre is required";
+  }
+  const { subjectId, seatRole } = resolveSeatAndSubject(kind, body, fields);
+  const code = validateOptionalAfCode(body.af_id, fields);
+
+  if (Object.keys(fields).length > 0) {
+    return { ok: false, status: 422, error: "Validation failed", fields };
+  }
+  return {
+    ok: true,
+    input: {
+      email,
+      fullName: typeof body.full_name === "string" ? body.full_name.trim() : "",
+      kind: kind as SeatedUserKind,
+      centreId,
+      subjectId,
+      seatRole,
+      code,
+    },
+  };
 }
 
 // Create a brand-new centre-staff person and seat them in ONE transaction —
@@ -1102,51 +1284,10 @@ export async function createSeatedUser(params: {
   const schema = await checkStaffManagementSchema();
   if (!schema.ok) return schema;
 
-  const fields: Record<string, string> = {};
-  const email =
-    typeof params.body.email === "string" ? params.body.email.trim() : "";
-  if (!email || !email.includes("@")) {
-    fields.email = "A valid email is required";
-  }
-  const kind = params.body.kind;
-  if (kind !== "teacher" && kind !== "staff") {
-    fields.kind = "kind must be 'teacher' or 'staff'";
-  }
-  const centreId = Number(params.body.centre_id);
-  if (!Number.isInteger(centreId) || centreId <= 0) {
-    fields.centre_id = "Centre is required";
-  }
-  let subjectId: number | null = null;
-  let seatRole: SeatRole = "subject_tbd";
-  if (kind === "teacher") {
-    subjectId = Number(params.body.subject_id);
-    if (!Number.isInteger(subjectId) || subjectId <= 0) {
-      fields.subject_id = "Subject is required";
-    }
-    seatRole = "subject_tbd";
-  } else if (kind === "staff") {
-    if (!isPmSeatRole(params.body.role)) {
-      fields.role = `Role must be one of: ${PM_SEAT_ROLES.join(", ")}`;
-    } else {
-      seatRole = params.body.role as SeatRole;
-    }
-  }
-  let code: string | null = null;
-  const rawCode = params.body.af_id;
-  if (rawCode !== undefined && rawCode !== null && String(rawCode).trim() !== "") {
-    code = normalizeEmployeeCode(rawCode);
-    if (!code) {
-      fields.af_id = "AF id must look like AF123";
-    }
-  }
-  if (Object.keys(fields).length > 0) {
-    return { ok: false, status: 422, error: "Validation failed", fields };
-  }
-
-  const fullName =
-    typeof params.body.full_name === "string"
-      ? params.body.full_name.trim()
-      : "";
+  const validated = validateSeatedUserBody(params.body);
+  if (!validated.ok) return validated;
+  const { email, fullName, kind, centreId, subjectId, seatRole, code } =
+    validated.input;
 
   // The centre supplies the program scope (level-1 centre staff see students by
   // program ∩ school). A centre with no program can't seed program_ids.
@@ -1186,7 +1327,7 @@ export async function createSeatedUser(params: {
 
   if (code) {
     const codeClash = await query<{ id: number }>(
-      kind === "teacher"
+      makesTeacherRecord(kind)
         ? `SELECT id FROM teacher WHERE teacher_id = $1`
         : `SELECT id FROM staff WHERE employee_code = $1`,
       [code]
@@ -1200,7 +1341,7 @@ export async function createSeatedUser(params: {
     }
   }
 
-  const role = kind === "teacher" ? "teacher" : "program_manager";
+  const role = makesTeacherRecord(kind) ? "teacher" : "program_manager";
 
   await withTransaction(async (client) => {
     const permIns = await client.query(
@@ -1238,14 +1379,17 @@ export async function createSeatedUser(params: {
     // Reuse a dormant teacher/staff record if one exists (e.g. left behind when
     // this person was previously removed) rather than inserting a duplicate —
     // this is what makes remove → re-add seamless and dup-free.
-    if (kind === "teacher") {
+    if (makesTeacherRecord(kind)) {
       const existing = await client.query<{ id: number }>(
         `SELECT id FROM teacher WHERE user_id = $1 AND is_af_teacher = true ORDER BY id LIMIT 1`,
         [userId]
       );
       if (existing.rows.length > 0) {
+        // COALESCE on subject: an APC added without a subject must not wipe the
+        // subject on a reused (previously removed) teacher record.
         await client.query(
-          `UPDATE teacher SET subject_id = $1, teacher_id = COALESCE($2, teacher_id),
+          `UPDATE teacher SET subject_id = COALESCE($1, subject_id),
+             teacher_id = COALESCE($2, teacher_id),
              is_af_teacher = true, exit_date = NULL, updated_at = now()
            WHERE id = $3`,
           [subjectId, code, existing.rows[0].id]
@@ -1566,11 +1710,8 @@ async function syncAppRoleFromSeats(
 // program_ids consumers (quiz-session batches, ownsRecord, the users page) were
 // stale for multi-program PMs.
 //
-// Only touches the live (revoked_at IS NULL) row, and skips admins — level-3
-// admins have full program access regardless, and their program_ids is a manual
-// set we must not shrink to whatever centres they happen to sit at. No-op when
-// the person has no active seat (don't strip a person mid-offboarding to an
-// empty program set) or when the value is already correct.
+// Only touches the live (revoked_at IS NULL) row, and skips manually elevated
+// Admin and Holistic Mentorship Admin roles whose Program scope is not seat-derived.
 async function syncProgramIdsFromSeats(
   client: PoolClient,
   userId: number
@@ -1589,7 +1730,7 @@ async function syncProgramIdsFromSeats(
      SET program_ids = $2, updated_at = now()
      WHERE user_id = $1
        AND revoked_at IS NULL
-       AND role <> 'admin'
+       AND role NOT IN ('admin', 'holistic_mentorship_admin')
        AND COALESCE(program_ids, '{}') <> $2`,
     [userId, programIds]
   );
@@ -1730,6 +1871,11 @@ export async function updatePosition(params: {
     // The prior occupant just lost this seat — re-derive their app role and
     // program scope too (this may have been their last seat in a program).
     if (position.user_id !== null && position.user_id !== userId) {
+      await endIneligibleHolisticMappings(
+        client,
+        position.user_id,
+        "mentor_seat_changed"
+      );
       await syncAppRoleFromSeats(client, position.user_id);
       await syncProgramIdsFromSeats(client, position.user_id);
     }
@@ -1778,6 +1924,7 @@ export async function setUserRole(params: {
     if (updatedCount === 0) return;
     await syncTeacherSubjectFromRole(client, userId, role);
     await syncAppRoleFromSeats(client, userId);
+    await endIneligibleHolisticMappings(client, userId, "mentor_role_changed");
   });
   if (updatedCount === 0) {
     return {
@@ -1824,6 +1971,11 @@ export async function deletePosition(params: {
     // The occupant just lost this seat — re-derive their app role and program
     // scope in case it was their last PM-tier seat / last seat in a program.
     if (position.user_id !== null) {
+      await endIneligibleHolisticMappings(
+        client,
+        position.user_id,
+        "mentor_seat_changed"
+      );
       await syncAppRoleFromSeats(client, position.user_id);
       await syncProgramIdsFromSeats(client, position.user_id);
     }

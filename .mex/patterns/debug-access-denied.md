@@ -17,7 +17,7 @@ edges:
     condition: when the denied resource is a visit
   - target: patterns/add-api-route.md
     condition: when the bug is in a route's gate ordering
-last_updated: 2026-06-25
+last_updated: 2026-07-23
 ---
 
 # Debug Access Denied (401/403/empty)
@@ -34,6 +34,7 @@ likelihood, are below — check them top-down.
 4. **Scope level.** Level 1 = `school_codes`, level 2 = `regions` (region resolved via a `school` lookup when not passed), level 3 = all. Confirm the `user_permission` row's level/codes/regions match expectation.
 5. **Feature matrix + gating.** `getFeatureAccess`: is the role's matrix cell `none`? Is it an `NVS_GATED_FEATURES` feature and the user lacks CoE/Nodal (`hasCoEOrNodal=false`)? Is `read_only` downgrading `edit`→`view` on a write path?
 6. **Write paths.** A write returning 403 may be missing — or correctly enforcing — `requireEdit` + `ownsRecord` (per-program ownership in mixed schools).
+   - **Type mismatch trap:** pg returns `bigint` columns as strings. If a program/id comparison feeds `includes()`/`===`, confirm the SQL casts (`::int`) or the check coerces (`Number()`). Jul 2026: this 403'd every non-admin document upload in prod (`[1].includes("1")`).
 7. **`revoked_at`.** A revoked user resolves to no permission everywhere — check `revoked_at IS NULL`.
 8. **List came back empty (not 403)?** The scope predicate filtered it: `getAccessibleSchoolCodes` returned `[]`, or `buildVisitScopePredicate` produced `1 = 0`. Trace the resolved scope set.
 
