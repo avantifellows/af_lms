@@ -156,6 +156,25 @@ describe("Historical Holistic Notes import entrypoint", () => {
     expect(insert).toHaveBeenCalledOnce();
   });
 
+  it("allows a reviewed Program 1 pilot to override the full-cohort counts", async () => {
+    const records = approvedHistoricalRecords().slice(0, 1);
+    const insert = vi.fn();
+    const report = await runHistoricalHolisticNotesImport({
+      ...approvedImportInput(records, insert),
+      approvedBaseline: {
+        safeCandidates: 1,
+        substantive: 1,
+        emptySkips: 0,
+        nullableMentors: 0,
+        quarantinedUnmatched: 0,
+      },
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.counts).toMatchObject({ safeCandidates: 1, writes: 1 });
+    expect(insert).toHaveBeenCalledOnce();
+  });
+
   it("rejects unsupported Historical import Programs before reading source data", async () => {
     const read = vi.fn();
     await expect(runHistoricalHolisticNotesImport({
