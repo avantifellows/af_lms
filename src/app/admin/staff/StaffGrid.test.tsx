@@ -176,6 +176,40 @@ describe("StaffGrid", () => {
     expect(screen.queryByText("PM")).toBeNull();
   });
 
+  it("shows APC in the Role field for a teacher seated as APC", () => {
+    const apcRows: StaffRosterRow[] = [
+      {
+        kind: "teacher",
+        recordId: 30,
+        userId: 90,
+        name: "Yogita Yadav",
+        email: "yogita@avantifellows.org",
+        employeeCode: "AF201",
+        // Leftover from an earlier subject seat — APC is not a subject, so the
+        // Subject column can't be relied on to reveal the role.
+        subjectName: "Chemistry",
+        staffType: null,
+        designation: null,
+        exitDate: null,
+        seats: [
+          { id: 77, centreId: 8, centreName: "JNV Adilabad - CoE", role: "apc" },
+        ],
+      },
+    ];
+    stubFetch();
+    render(
+      <StaffGrid
+        initialRows={apcRows}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    expect(screen.getByText("APC")).toBeTruthy();
+    expect(screen.queryByText("Teacher")).toBeNull();
+    // The subject still shows in its own column.
+    expect(screen.getByText("Chemistry")).toBeTruthy();
+  });
+
   it("offers a Centre filter fed by the centres API", async () => {
     stubFetch();
     renderGrid();
@@ -402,6 +436,49 @@ describe("StaffGrid", () => {
             kind: "teacher",
             centre_id: 8,
             subject_id: 4,
+          }),
+        })
+      );
+    });
+  });
+
+  it("adds an APC from scratch — subject omitted, kind 'apc'", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Add user"));
+
+    // Centre options arrive from the mount fetch — wait before selecting one.
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Centre") as HTMLSelectElement).querySelectorAll(
+          "option"
+        ).length
+      ).toBe(3); // placeholder + 2 centres
+    });
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "apc" } });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "apc@avantifellows.org" },
+    });
+    fireEvent.change(screen.getByLabelText("Centre"), { target: { value: "8" } });
+    // Subject stays available but optional — submit is enabled without it.
+    expect(screen.getByLabelText("Subject")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            email: "apc@avantifellows.org",
+            kind: "apc",
+            centre_id: 8,
           }),
         })
       );
