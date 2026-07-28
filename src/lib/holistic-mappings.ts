@@ -54,6 +54,21 @@ class MappingMutationError extends Error {
   }
 }
 
+const ELIGIBLE_ROSTER_CTE_SQL = `eligible_roster AS MATERIALIZED (
+  SELECT roster_student.user_id, MIN(roster_student.grade) AS grade
+  FROM centre_students roster_student
+  JOIN centres roster_centre
+    ON roster_centre.id = roster_student.centre_id
+   AND roster_centre.school_id = $1
+   AND roster_centre.program_id = $3
+   AND roster_centre.is_active IS TRUE
+  WHERE roster_student.academic_year = $2
+    AND roster_student.program_id = $3
+    AND roster_student.grade IN (11, 12)
+  GROUP BY roster_student.user_id
+  HAVING COUNT(DISTINCT roster_student.grade) = 1
+)`;
+
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "23505";
 }
@@ -144,20 +159,7 @@ async function lockEligibleStudents(
   params: { schoolId: number; academicYear: string; studentIds: number[] }
 ) {
   const eligible = await client.query<{ student_id: number | string }>(
-    `WITH eligible_roster AS MATERIALIZED (
-       SELECT roster_student.user_id
-       FROM centre_students roster_student
-       JOIN centres roster_centre
-         ON roster_centre.id = roster_student.centre_id
-        AND roster_centre.school_id = $1
-        AND roster_centre.program_id = $3
-        AND roster_centre.is_active IS TRUE
-       WHERE roster_student.academic_year = $2
-         AND roster_student.program_id = $3
-         AND roster_student.grade IN (11, 12)
-       GROUP BY roster_student.user_id
-       HAVING COUNT(DISTINCT roster_student.grade) = 1
-     )
+    `WITH ${ELIGIBLE_ROSTER_CTE_SQL}
      SELECT st.id AS student_id
      FROM eligible_roster
      JOIN student st ON st.user_id = eligible_roster.user_id
@@ -413,20 +415,7 @@ export async function listHolisticAssignmentRoster(params: {
     schoolId: params.schoolId,
   });
   const rows = await query<RosterRow>(
-    `WITH eligible_roster AS MATERIALIZED (
-       SELECT roster_student.user_id, MIN(roster_student.grade) AS grade
-       FROM centre_students roster_student
-       JOIN centres roster_centre
-         ON roster_centre.id = roster_student.centre_id
-        AND roster_centre.school_id = $1
-        AND roster_centre.program_id = $3
-        AND roster_centre.is_active IS TRUE
-       WHERE roster_student.academic_year = $2
-         AND roster_student.program_id = $3
-         AND roster_student.grade IN (11, 12)
-       GROUP BY roster_student.user_id
-       HAVING COUNT(DISTINCT roster_student.grade) = 1
-     )
+    `WITH ${ELIGIBLE_ROSTER_CTE_SQL}
      SELECT st.id AS student_id,
             NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
             st.student_id AS external_student_id,
