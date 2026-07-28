@@ -45,6 +45,7 @@ export type HolisticMentorshipAccessResult =
       status: 401 | 403 | 404;
       error: "Unauthorized" | "Forbidden" | "School not found" | "Not found";
     };
+type HolisticMentorshipAccessDenied = Extract<HolisticMentorshipAccessResult, { ok: false }>;
 
 export interface HolisticMentorshipSchool {
   id: number;
@@ -89,7 +90,7 @@ const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
 function denied(
   status: 401 | 403 | 404,
   error: "Unauthorized" | "Forbidden" | "School not found" | "Not found"
-): HolisticMentorshipAccessResult {
+): HolisticMentorshipAccessDenied {
   return { ok: false, status, error };
 }
 
@@ -260,6 +261,44 @@ function programAccess(params: {
   };
 }
 
+type AuthenticatedHolisticActor = {
+  email: string;
+  permission: UserPermission;
+  canEdit: boolean;
+};
+
+async function resolveAuthenticatedActor(
+  session: HolisticMentorshipSession,
+): Promise<HolisticMentorshipAccessDenied | AuthenticatedHolisticActor> {
+  const email = session?.user?.email;
+  if (!email) return denied(401, "Unauthorized");
+  if (session.isPasscodeUser) return denied(403, "Forbidden");
+  const permission = await getResolvedPermission(email);
+  const access = getFeatureAccess(permission, "holistic_mentorship");
+  if (!permission || !access.canView) return denied(403, "Forbidden");
+  return { email, permission, canEdit: access.canEdit };
+}
+
+async function resolveActorAccess(
+  session: HolisticMentorshipSession,
+  action: HolisticMentorshipAction,
+): Promise<HolisticMentorshipAccessDenied | AuthenticatedHolisticActor & {
+  allowed: ReturnType<typeof allowedActor>;
+}> {
+  const actor = await resolveAuthenticatedActor(session);
+  if (accessDenied(actor)) return actor;
+  const allowed = allowedActor(actor.permission, action);
+  if (!allowed.program && !allowed.teacher) return denied(403, "Forbidden");
+  if (!READ_ONLY_ACTIONS.has(action) && !actor.canEdit) return denied(403, "Forbidden");
+  return { ...actor, allowed };
+}
+
+function accessDenied(
+  value: HolisticMentorshipAccessDenied | object,
+): value is HolisticMentorshipAccessDenied {
+  return "ok" in value;
+}
+
 export async function requireHolisticMentorshipAccess(
   session: HolisticMentorshipSession,
   action: HolisticMentorshipAction,
@@ -270,25 +309,15 @@ export async function requireHolisticMentorshipAccess(
     programId?: number;
   } = {}
 ): Promise<HolisticMentorshipAccessResult> {
-  const email = session?.user?.email;
-  if (!email) return denied(401, "Unauthorized");
-  if (session.isPasscodeUser) return denied(403, "Forbidden");
-
-  const permission = await getResolvedPermission(email);
-  const access = getFeatureAccess(permission, "holistic_mentorship");
-  if (!permission || !access.canView) return denied(403, "Forbidden");
-
-  const allowed = allowedActor(permission, action);
-  if ((!allowed.program && !allowed.teacher) || (!READ_ONLY_ACTIONS.has(action) && !access.canEdit)) {
-    return denied(403, "Forbidden");
-  }
+  const actor = await resolveActorAccess(session, action);
+  if (accessDenied(actor)) return actor;
 
   const requestedProgramId = options.programId;
   if (requestedProgramId !== undefined && !isHolisticMentorshipProgramId(requestedProgramId)) {
     return denied(404, "Not found");
   }
   const resolvedSchool = await resolveSchool(
-    permission,
+    actor.permission,
     options.schoolCode,
     requestedProgramId,
   );
@@ -299,11 +328,11 @@ export async function requireHolisticMentorshipAccess(
     return denied(404, "Not found");
   }
 
-  if (allowed.teacher) {
+  if (actor.allowed.teacher) {
     return teacherAccess({
-      email,
-      permission,
-      canEdit: access.canEdit,
+      email: actor.email,
+      permission: actor.permission,
+      canEdit: actor.canEdit,
       action,
       school,
       studentId: options.studentId,
@@ -321,9 +350,9 @@ export async function requireHolisticMentorshipAccess(
   }
 
   return programAccess({
-    email,
-    permission,
-    canEdit: access.canEdit,
+    email: actor.email,
+    permission: actor.permission,
+    canEdit: actor.canEdit,
     action,
     programId,
     school,

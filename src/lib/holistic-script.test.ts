@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   getHistoricalImportBaseline,
+  getHolisticMentorshipProgramId,
   getHolisticOperationMode,
   getHolisticScriptArgument,
   isHistoricalHolisticNotesSource,
+  requireHolisticScriptArgument,
 } from "./holistic-script";
 
 const validSource = [{
@@ -22,6 +24,20 @@ describe("Holistic operator script helpers", () => {
     expect(getHolisticScriptArgument(["--source=first", "--source=second"], "--source"))
       .toBe("first");
     expect(getHolisticScriptArgument(["--source", "separate"], "--source")).toBeUndefined();
+    expect(requireHolisticScriptArgument(
+      ["--source=history.json"],
+      "--source",
+      "source required",
+    )).toBe("history.json");
+    expect(() => requireHolisticScriptArgument([], "--source", "source required"))
+      .toThrow("source required");
+  });
+
+  it("accepts only supported Holistic Mentorship Programs", () => {
+    expect(getHolisticMentorshipProgramId([])).toBe(1);
+    expect(getHolisticMentorshipProgramId(["--program-id=78"])).toBe(78);
+    expect(() => getHolisticMentorshipProgramId(["--program-id=64"]))
+      .toThrow("--program-id must be 1 or 78");
   });
 
   it("defaults to dry-run and rejects conflicting execution modes", () => {

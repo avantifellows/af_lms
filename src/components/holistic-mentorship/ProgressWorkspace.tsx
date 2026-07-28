@@ -31,6 +31,11 @@ type ProgressFilters = {
 };
 type ProgressFilterName = Exclude<keyof ProgressFilters, "direction">;
 type FilterChangeHandler = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
+type StoredProgressView = {
+  filters?: Partial<ProgressFilters>;
+  page?: number;
+  scope?: string;
+};
 
 const EMPTY: Payload = {
   rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
@@ -50,29 +55,31 @@ const INITIAL_FILTERS: ProgressFilters = {
 const VIEW_STATE_KEY = "holistic-progress-view";
 const SCROLL_KEY = "holistic-progress-scroll";
 
-function storedView(scope: string) {
+function readStoredView(): StoredProgressView | null {
   try {
-    const stored = JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? "null") as {
-      filters?: Partial<ProgressFilters>;
-      page?: number;
-      scope?: string;
-    } | null;
-    const filters = Object.fromEntries(Object.entries(stored?.filters ?? {})
-      .filter(([, value]) => typeof value === "string"));
-    const restoredFilters = { ...INITIAL_FILTERS, ...filters };
-    if (stored?.scope !== scope) {
-      restoredFilters.school = "";
-      restoredFilters.mentor = "";
-      restoredFilters.phase = "";
-    }
-    return {
-      filters: restoredFilters,
-      page: stored?.scope === scope &&
-        Number.isSafeInteger(stored.page) && stored.page! > 0 ? stored.page! : 1,
-    };
+    return JSON.parse(sessionStorage.getItem(VIEW_STATE_KEY) ?? "null");
   } catch {
-    return { filters: INITIAL_FILTERS, page: 1 };
+    return null;
   }
+}
+
+function restoredFilters(stored: StoredProgressView | null, scope: string) {
+  const strings = Object.fromEntries(Object.entries(stored?.filters ?? {})
+    .filter(([, value]) => typeof value === "string"));
+  const filters = { ...INITIAL_FILTERS, ...strings };
+  if (stored?.scope === scope) return filters;
+  return { ...filters, school: "", mentor: "", phase: "" };
+}
+
+function restoredPage(stored: StoredProgressView | null, scope: string) {
+  if (stored?.scope !== scope) return 1;
+  if (!Number.isSafeInteger(stored.page)) return 1;
+  return stored.page! > 0 ? stored.page! : 1;
+}
+
+function storedView(scope: string) {
+  const stored = readStoredView();
+  return { filters: restoredFilters(stored, scope), page: restoredPage(stored, scope) };
 }
 
 function useProgressData(params: URLSearchParams, ready: boolean) {

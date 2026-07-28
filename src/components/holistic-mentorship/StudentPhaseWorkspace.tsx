@@ -10,6 +10,7 @@ import { type ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, 
 
 import type { HolisticProfileRegeneration, HolisticStudentPhaseDetail } from "@/lib/holistic-student-phase";
 import { PROGRAM_IDS } from "@/lib/constants";
+import { holisticStudentPhaseHref } from "@/lib/holistic-links";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -949,23 +950,6 @@ function AdminStudentHeader({ student, backHref }: {
   </header>;
 }
 
-function studentPhaseHref(
-  studentId: number,
-  phaseId: number,
-  schoolCode: string,
-  academicYear: string,
-  programId: number,
-  source?: "school",
-) {
-  const query = new URLSearchParams({
-    school_code: schoolCode,
-    academic_year: academicYear,
-    program_id: String(programId),
-  });
-  if (source) query.set("source", source);
-  return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
-}
-
 function phaseTabId(studentId: number, phase: Pick<PhaseNavigationItem, "phaseId" | "number">) {
   return `holistic-phase-tab-${studentId}-${phase.phaseId ?? `placeholder-${phase.number}`}`;
 }
@@ -1069,14 +1053,14 @@ function OpenPhaseTab({ phase, current, studentId, schoolCode, academicYear, pro
     : `border-b-[3px] ${current
       ? "border-accent bg-bg-card text-text-primary"
       : "border-transparent text-text-muted hover:bg-accent/5"}`;
-  return <Link href={studentPhaseHref(
+  return <Link href={holisticStudentPhaseHref({
     studentId,
-    phase.phaseId,
+    phaseId: phase.phaseId,
     schoolCode,
     academicYear,
     programId,
     source,
-  )}
+  })}
     id={phaseTabId(studentId, phase)} role="tab" aria-selected={current} tabIndex={current ? 0 : -1}
     aria-controls={phasePanelId(studentId, phase)}
     aria-label={`Phase ${phase.number} - ${phase.title} - ${stage}`}

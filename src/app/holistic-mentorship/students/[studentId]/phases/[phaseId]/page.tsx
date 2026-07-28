@@ -5,6 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import StudentPhaseWorkspace from "@/components/holistic-mentorship/StudentPhaseWorkspace";
 import { authOptions } from "@/lib/auth";
 import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
+import { holisticStudentPhaseHref } from "@/lib/holistic-links";
 import { validateAcademicYear } from "@/lib/holistic-phase-plans";
 import {
   getHolisticStudentPhase,
@@ -30,22 +31,29 @@ function positiveInteger(value: string) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function requiredPositiveInteger(value: string) {
+  const parsed = positiveInteger(value);
+  if (parsed === null) notFound();
+  return parsed;
+}
+
 async function studentPhaseRequest({ params, searchParams }: StudentPhasePageProps) {
   const [{ studentId: rawStudentId, phaseId: rawPhaseId }, queryParams] = await Promise.all([
     params,
     searchParams,
   ]);
-  const studentId = positiveInteger(rawStudentId);
-  const phaseId = positiveInteger(rawPhaseId);
+  const studentId = requiredPositiveInteger(rawStudentId);
+  const phaseId = requiredPositiveInteger(rawPhaseId);
   const schoolCode = queryParams.school_code ?? "";
   const academicYear = queryParams.academic_year ?? "";
-  const programId = queryParams.program_id === undefined
-    ? PROGRAM_IDS.COE
-    : Number(queryParams.program_id);
+  const programId = Number(queryParams.program_id ?? PROGRAM_IDS.COE);
   const source = queryParams.source === "school" ? "school" as const : undefined;
-  if (studentId === null || phaseId === null || !schoolCode ||
-      !isHolisticMentorshipProgramId(programId) ||
-      !validateAcademicYear(academicYear)) notFound();
+  const valid = [
+    Boolean(schoolCode),
+    isHolisticMentorshipProgramId(programId),
+    validateAcademicYear(academicYear),
+  ].every(Boolean);
+  if (!valid) notFound();
   return { studentId, phaseId, schoolCode, academicYear, programId, source };
 }
 
@@ -79,23 +87,6 @@ function studentPhaseBackHref(
     : `/school/${schoolCode}?tab=holistic_mentorship`;
 }
 
-function studentPhaseHref(
-  studentId: number,
-  phaseId: number,
-  schoolCode: string,
-  academicYear: string,
-  programId: number,
-  source?: "school",
-) {
-  const query = new URLSearchParams({
-    school_code: schoolCode,
-    academic_year: academicYear,
-    program_id: String(programId),
-  });
-  if (source) query.set("source", source);
-  return `/holistic-mentorship/students/${studentId}/phases/${phaseId}?${query}`;
-}
-
 type PhaseNavigationItem = HolisticStudentPhaseDetail["phases"][number];
 
 function unlockedPhase(phase: PhaseNavigationItem) {
@@ -127,14 +118,14 @@ function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
   const source = role === "admin" ? request.source : undefined;
   const phaseId = fallbackPhaseId(detail, request.academicYear);
   if (phaseId) {
-    redirect(studentPhaseHref(
-      request.studentId,
+    redirect(holisticStudentPhaseHref({
+      studentId: request.studentId,
       phaseId,
-      request.schoolCode,
-      request.academicYear,
-      request.programId,
+      schoolCode: request.schoolCode,
+      academicYear: request.academicYear,
+      programId: request.programId,
       source,
-    ));
+    }));
   }
   redirect(studentPhaseBackHref(role, request.schoolCode, request.programId, source));
 }

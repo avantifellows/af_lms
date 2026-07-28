@@ -1,5 +1,6 @@
 import * as dotenv from "dotenv";
 
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
 import { isValidHistoricalImportBaseline } from "./holistic-operations";
 import type {
@@ -13,6 +14,26 @@ export function getHolisticScriptArgument(
   name: string
 ): string | undefined {
   return args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
+export function requireHolisticScriptArgument(
+  args: string[],
+  name: string,
+  errorMessage: string,
+): string {
+  const value = getHolisticScriptArgument(args, name);
+  if (!value) throw new Error(errorMessage);
+  return value;
+}
+
+export function getHolisticMentorshipProgramId(args: string[]): number {
+  const programId = Number(
+    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  );
+  if (!isHolisticMentorshipProgramId(programId)) {
+    throw new Error("--program-id must be 1 or 78");
+  }
+  return programId;
 }
 
 export function configureHolisticScriptEnvironment(

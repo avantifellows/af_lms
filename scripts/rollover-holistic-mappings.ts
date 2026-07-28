@@ -2,11 +2,12 @@ import { createHolisticOperationsDb } from "../src/lib/holistic-operations-db";
 import { runHolisticMappingRollover } from "../src/lib/holistic-operations";
 import {
   configureHolisticScriptEnvironment,
+  getHolisticMentorshipProgramId,
   getHolisticOperationMode,
   getHolisticScriptArgument,
+  requireHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -28,14 +29,15 @@ async function main(): Promise<void> {
 
 function parseOptions(args: string[]) {
   const mode = getHolisticOperationMode(args);
-  const fromAcademicYear = getHolisticScriptArgument(args, "--from");
-  const toAcademicYear = getHolisticScriptArgument(args, "--to");
-  const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
-  const programId = Number(
-    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  const fromAcademicYear = requireHolisticScriptArgument(
+    args, "--from", invalidOptionsMessage()
   );
-  if (!fromAcademicYear || !toAcademicYear) throw invalidOptionsError();
-  validateOptions(fromAcademicYear, toAcademicYear, actorUserId, programId);
+  const toAcademicYear = requireHolisticScriptArgument(
+    args, "--to", invalidOptionsMessage()
+  );
+  const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
+  const programId = getHolisticMentorshipProgramId(args);
+  validateOptions(fromAcademicYear, toAcademicYear, actorUserId);
   return { mode, fromAcademicYear, toAcademicYear, actorUserId, programId };
 }
 
@@ -43,18 +45,23 @@ function validateOptions(
   fromAcademicYear: string,
   toAcademicYear: string,
   actorUserId: number,
-  programId: number
 ): void {
-  if (!isAcademicYear(fromAcademicYear) ||
-      !isAcademicYear(toAcademicYear) ||
-      !isPositiveSafeInteger(actorUserId) ||
-      !isHolisticMentorshipProgramId(programId)) {
+  const valid = [
+    isAcademicYear(fromAcademicYear),
+    isAcademicYear(toAcademicYear),
+    isPositiveSafeInteger(actorUserId),
+  ].every(Boolean);
+  if (!valid) {
     throw invalidOptionsError();
   }
 }
 
 function invalidOptionsError(): Error {
-  return new Error("--from, --to, --actor-user-id, and a supported --program-id are required");
+  return new Error(invalidOptionsMessage());
+}
+
+function invalidOptionsMessage() {
+  return "--from, --to, --actor-user-id, and a supported --program-id are required";
 }
 
 function isAcademicYear(value: string): boolean {

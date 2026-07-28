@@ -7,10 +7,11 @@ import {
 } from "../src/lib/holistic-release";
 import {
   configureHolisticScriptEnvironment,
+  getHolisticMentorshipProgramId,
   getHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
+import { PROGRAM_IDS } from "../src/lib/constants";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -52,24 +53,31 @@ async function main(): Promise<void> {
 }
 
 function parseOptions(args: string[]) {
+  requireReadOnlyConfirmation(args);
+  const programId = getHolisticMentorshipProgramId(args);
   const historicalSource = getHolisticScriptArgument(args, "--historical-source");
-  const programId = Number(
-    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
-  );
-  if (
-    !args.includes("--confirm-production-read-only") ||
-    !isHolisticMentorshipProgramId(programId) ||
-    (programId === PROGRAM_IDS.COE && !historicalSource)
-  ) {
-    throw new Error(
-      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
-    );
-  }
+  requireProgramOneHistory(programId, historicalSource);
   return {
     historicalSource: historicalSource ?? null,
     programId,
     academicYear: getHolisticScriptArgument(args, "--academic-year") ?? "2026-2027",
   };
+}
+
+function requireReadOnlyConfirmation(args: string[]) {
+  if (!args.includes("--confirm-production-read-only")) {
+    throw new Error(
+      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
+    );
+  }
+}
+
+function requireProgramOneHistory(programId: number, historicalSource?: string) {
+  if (programId === PROGRAM_IDS.COE && !historicalSource) {
+    throw new Error(
+      "--confirm-production-read-only, a supported --program-id, and Program 1's --historical-source are required"
+    );
+  }
 }
 
 async function readHistoricalBusinessStudentIds(sourcePath: string | null): Promise<string[]> {

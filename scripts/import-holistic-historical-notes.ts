@@ -3,13 +3,15 @@ import { readFile } from "node:fs/promises";
 import { createHolisticOperationsDb } from "../src/lib/holistic-operations-db";
 import { runHistoricalHolisticNotesImport } from "../src/lib/holistic-operations";
 import type { HistoricalHolisticNoteSource } from "../src/lib/holistic-operations";
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
+import { PROGRAM_IDS } from "../src/lib/constants";
 import {
   configureHolisticScriptEnvironment,
   getHistoricalImportBaseline,
+  getHolisticMentorshipProgramId,
   getHolisticOperationMode,
   getHolisticScriptArgument,
   isHistoricalHolisticNotesSource,
+  requireHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
 
@@ -40,17 +42,14 @@ async function main(): Promise<void> {
 
 function parseOptions(args: string[]) {
   const mode = getHolisticOperationMode(args);
-  const sourcePath = getHolisticScriptArgument(args, "--source");
-  if (!sourcePath) throw new Error("--source=<private-json-export> is required");
-
+  const sourcePath = requireHolisticScriptArgument(
+    args,
+    "--source",
+    "--source=<private-json-export> is required",
+  );
   const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
   const sourceSnapshot = getHolisticScriptArgument(args, "--source-snapshot");
-  const programId = Number(
-    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
-  );
-  if (!isHolisticMentorshipProgramId(programId)) {
-    throw new Error("--program-id must be 1 or 78");
-  }
+  const programId = getHolisticMentorshipProgramId(args);
   const approvedBaseline = getHistoricalImportBaseline(args);
   if (mode === "apply") {
     validateApplyOptions(actorUserId, sourceSnapshot, programId, approvedBaseline);
@@ -71,12 +70,24 @@ function validateApplyOptions(
   programId: number,
   approvedBaseline: ReturnType<typeof getHistoricalImportBaseline>
 ): void {
-  if (!Number.isSafeInteger(actorUserId) || actorUserId < 1 || !sourceSnapshot) {
+  const validMetadata = [
+    Number.isSafeInteger(actorUserId),
+    actorUserId >= 1,
+    Boolean(sourceSnapshot),
+  ].every(Boolean);
+  if (!validMetadata) {
     throw new Error("Apply requires --actor-user-id and --source-snapshot");
   }
-  if (programId === PROGRAM_IDS.EMRS_COE && !approvedBaseline) {
+  if (missingEmrsBaseline(programId, approvedBaseline)) {
     throw new Error("Program 78 apply requires --approved-counts from its reviewed dry-run");
   }
+}
+
+function missingEmrsBaseline(
+  programId: number,
+  approvedBaseline: ReturnType<typeof getHistoricalImportBaseline>,
+) {
+  return programId === PROGRAM_IDS.EMRS_COE && !approvedBaseline;
 }
 
 async function readSource(sourcePath: string): Promise<HistoricalHolisticNoteSource[]> {

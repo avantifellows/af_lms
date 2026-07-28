@@ -404,21 +404,29 @@ function MappingLoading() {
   </p>;
 }
 
-function LoadedMappingWorkspace({ roster, visibleRoster, pagedRoster, rosterPage,
-  rosterPageCount, mentees, shownMentees, filters, canEdit, selected, busy, assignOpen,
-  schoolCode, programId, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign, onRemove }:
-  MappingWorkspaceContentProps) {
+function LoadedMappingWorkspace(props: MappingWorkspaceContentProps) {
   return <>
-    <AssignmentRoster students={pagedRoster} visibleCount={visibleRoster.length}
-      page={rosterPage} pageCount={rosterPageCount} allCount={roster.length} filters={filters}
-      canEdit={canEdit} selected={selected} busy={busy} open={assignOpen}
-      onOpenChange={onOpenChange} onFilterChange={onFilterChange} onToggle={onToggle}
-      onSelectShown={onSelectShown} onAssign={onAssign} />
-    <MenteesSection mentees={mentees} shown={shownMentees} filters={filters}
-      canEdit={canEdit} busy={busy} schoolCode={schoolCode} programId={programId}
-      onFilterChange={onFilterChange}
-      onRemove={onRemove} onOpenRoster={() => onOpenChange(true)} />
+    <LoadedAssignmentRoster {...props} />
+    <LoadedMentees {...props} />
   </>;
+}
+
+function LoadedAssignmentRoster({ roster, visibleRoster, pagedRoster, rosterPage,
+  rosterPageCount, filters, canEdit, selected, busy, assignOpen, onOpenChange,
+  onFilterChange, onToggle, onSelectShown, onAssign }: MappingWorkspaceContentProps) {
+  return <AssignmentRoster students={pagedRoster} visibleCount={visibleRoster.length}
+    page={rosterPage} pageCount={rosterPageCount} allCount={roster.length} filters={filters}
+    canEdit={canEdit} selected={selected} busy={busy} open={assignOpen}
+    onOpenChange={onOpenChange} onFilterChange={onFilterChange} onToggle={onToggle}
+    onSelectShown={onSelectShown} onAssign={onAssign} />;
+}
+
+function LoadedMentees({ mentees, shownMentees, filters, canEdit, busy, schoolCode,
+  programId, onFilterChange, onRemove, onOpenChange }: MappingWorkspaceContentProps) {
+  return <MenteesSection mentees={mentees} shown={shownMentees} filters={filters}
+    canEdit={canEdit} busy={busy} schoolCode={schoolCode} programId={programId}
+    onFilterChange={onFilterChange} onRemove={onRemove}
+    onOpenRoster={() => onOpenChange(true)} />;
 }
 
 function AssignmentRoster({ students, visibleCount, page, pageCount, allCount, filters, canEdit, selected, busy, open, onOpenChange, onFilterChange, onToggle, onSelectShown, onAssign }: {
