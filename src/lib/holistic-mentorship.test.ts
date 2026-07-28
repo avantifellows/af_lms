@@ -256,6 +256,9 @@ describe("requireHolisticMentorshipAccess", () => {
     expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
       "JOIN centre_students roster_student"
     );
+    expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
+      "HAVING COUNT(DISTINCT roster_student.grade) = 1"
+    );
   });
 
   it.each(["admin", "holistic_mentorship_admin"] as const)(
