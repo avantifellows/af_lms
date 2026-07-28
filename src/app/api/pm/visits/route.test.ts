@@ -266,17 +266,43 @@ describe("POST /api/pm/visits", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 403 for program admin (read-only role)", async () => {
+  it("creates an in-scope visit owned by the program admin", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockValidateGps.mockReturnValue({
+      valid: true,
+      reading: { lat: 28.6, lng: 77.2, accuracy: 10 },
+    });
+    mockQuery
+      .mockResolvedValueOnce([{ region: "North" }])
+      .mockResolvedValueOnce([{ id: 46, visit_date: "2026-02-15" }]);
+
+    const res = await POST(nextReq("/api/pm/visits", {
+      method: "POST",
+      body: JSON.stringify(visitBody),
+    }));
+    expect(res.status).toBe(201);
+    expect((mockQuery.mock.calls[1] as [string, unknown[]])[1]).toEqual([
+      "70705",
+      "pa@avantifellows.org",
+      28.6,
+      77.2,
+      10,
+    ]);
+  });
+
+  it("rejects a read-only program admin before data changes", async () => {
+    mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
+    mockGetPermission.mockResolvedValue({ ...PROGRAM_ADMIN_PERM, read_only: true } as never);
     mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
 
     const res = await POST(nextReq("/api/pm/visits", {
       method: "POST",
       body: JSON.stringify(visitBody),
     }));
+
     expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
     expect(mockQuery).not.toHaveBeenCalled();
   });
 

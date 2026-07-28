@@ -47,6 +47,15 @@ export const TEST_USERS = {
     regions: null,
     read_only: false,
   },
+  holisticAdmin: {
+    email: "e2e-holistic-admin@test.local",
+    level: 3,
+    role: "holistic_mentorship_admin",
+    program_ids: [1],
+    school_codes: null,
+    regions: null,
+    read_only: false,
+  },
 } as const satisfies Record<string, TestUser>;
 
 export type TestUserRole = keyof typeof TEST_USERS;

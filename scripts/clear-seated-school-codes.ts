@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-15 (bd4e374). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * One-time migration: clear explicit user_permission.school_codes/regions for
  * everyone holding a centre seat, so seats become the sole source of school
  * scope (strict per-user exclusivity). See src/lib/clear-seated-scope.ts.

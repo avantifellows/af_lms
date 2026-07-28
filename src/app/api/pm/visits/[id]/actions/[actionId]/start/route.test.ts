@@ -129,10 +129,14 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/start", () => {
     });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("allows a program admin to start an action on their own visit", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "pa@avantifellows.org" }])
+      .mockResolvedValueOnce([PENDING_ACTION])
+      .mockResolvedValueOnce([STARTED_ACTION]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101/start", {
       method: "POST",
@@ -141,9 +145,8 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/start", () => {
     });
     const res = await POST(req as never, params);
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ action: STARTED_ACTION });
   });
 
   it("returns 404 when parent visit does not exist or is soft-deleted", async () => {

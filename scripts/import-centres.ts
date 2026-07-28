@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-07 (579a960). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * One-time import for centres-for-crud-ui/centres.csv.
  *
  * Usage:

@@ -1,3 +1,5 @@
+// Last updated: 2026-01-05 (bd85c9e). One-off script — if the schema or app has
+// moved on since this date, review/update it before running.
 const { Pool } = require('pg');
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.local' });
 

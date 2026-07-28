@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-08 (018b648). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Seed dummy LMS Curriculum data for summary-page testing.
  *
  * Usage:

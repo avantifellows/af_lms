@@ -7,6 +7,7 @@ import {
   canAccessVisitSchoolScope,
   canEditCompletedActionData,
   canEditVisit,
+  requiresVisitActionsForCompletion,
   canViewVisit,
   enforceVisitWriteLock,
   isScopedVisitsRole,
@@ -26,6 +27,15 @@ function makePermission(overrides: Partial<UserPermission> = {}): UserPermission
 }
 
 describe("visits-policy", () => {
+  it("requires completed actions only for program managers", () => {
+    const actor = (role: "program_manager" | "program_admin" | "admin") =>
+      buildVisitsActor(`${role}@avantifellows.org`, makePermission({ role }));
+
+    expect(requiresVisitActionsForCompletion(actor("program_manager"))).toBe(true);
+    expect(requiresVisitActionsForCompletion(actor("program_admin"))).toBe(false);
+    expect(requiresVisitActionsForCompletion(actor("admin"))).toBe(false);
+  });
+
   it("allows owner PM to view and edit own visit", () => {
     const permission = makePermission({
       email: "pm@avantifellows.org",
@@ -81,6 +91,39 @@ describe("visits-policy", () => {
     expect(isScopedVisitsRole(programAdmin)).toBe(true);
     expect(canAccessVisitSchoolScope(admin, "70705", "North")).toBe(true);
     expect(canAccessVisitSchoolScope(admin, "70705", "South")).toBe(false);
+  });
+
+  it("allows program_admin to edit only their own in-scope visit", () => {
+    const actor = buildVisitsActor(
+      " PA@AvantiFellows.org ",
+      makePermission({
+        role: "program_admin",
+        level: 2,
+        regions: ["North"],
+      })
+    );
+
+    expect(
+      canEditVisit(actor, {
+        pmEmail: "pa@avantifellows.org",
+        schoolCode: "70705",
+        schoolRegion: "North",
+      })
+    ).toBe(true);
+    expect(
+      canEditVisit(actor, {
+        pmEmail: "other@avantifellows.org",
+        schoolCode: "70705",
+        schoolRegion: "North",
+      })
+    ).toBe(false);
+    expect(
+      canEditVisit(actor, {
+        pmEmail: "pa@avantifellows.org",
+        schoolCode: "70705",
+        schoolRegion: "South",
+      })
+    ).toBe(false);
   });
 
   it("does not mark PM as scoped-role reader", () => {

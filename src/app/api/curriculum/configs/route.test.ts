@@ -18,6 +18,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/permissions", () => ({
   getUserPermission: mockGetUserPermission,
   PROGRAM_IDS: { COE: 1, NODAL: 2 },
+  PHYSICAL_CENTRE_PROGRAM_IDS: [1, 2, 74, 94, 78, 88],
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
 vi.mock("@/lib/curriculum-schema", () => ({

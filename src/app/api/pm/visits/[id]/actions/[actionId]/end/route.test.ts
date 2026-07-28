@@ -253,10 +253,13 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     });
   });
 
-  it("returns 403 for program admin write attempt", async () => {
+  it("keeps action completion validation for a program admin's own visit", async () => {
     mockSession.mockResolvedValue(PROGRAM_ADMIN_SESSION as never);
     mockGetPermission.mockResolvedValue(PROGRAM_ADMIN_PERM as never);
-    mockFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockFeatureAccess.mockReturnValue({ access: "edit", canView: true, canEdit: true });
+    mockQuery
+      .mockResolvedValueOnce([{ ...VISIT_ROW, pm_email: "pa@avantifellows.org" }])
+      .mockResolvedValueOnce([{ ...IN_PROGRESS_ACTION, data: {} }]);
 
     const req = new Request("http://localhost/api/pm/visits/10/actions/101/end", {
       method: "POST",
@@ -265,9 +268,10 @@ describe("POST /api/pm/visits/[id]/actions/[actionId]/end", () => {
     });
     const res = await POST(req as never, params);
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "Forbidden" });
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Invalid principal interaction data",
+    });
   });
 
   it("returns 404 when parent visit does not exist or is soft-deleted", async () => {

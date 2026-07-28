@@ -14,6 +14,10 @@ import { GROUP_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/group-student-dis
 import { INDIVIDUAL_STUDENT_DISCUSSION_CONFIG } from "../../src/lib/individual-student-discussion";
 import { SCHOOL_STAFF_INTERACTION_CONFIG } from "../../src/lib/school-staff-interaction";
 import { CURRENT_ACADEMIC_YEAR } from "../../src/lib/constants";
+import {
+  applyHolisticDbServiceSchema,
+  seedHolisticFixtures,
+} from "../../src/lib/holistic-fixtures";
 
 const TEST_DB = "af_lms_test";
 const DUMP_FILE = path.resolve(__dirname, "../fixtures/db-dump.sql");
@@ -132,7 +136,22 @@ export async function resetDatabase(): Promise<void> {
   const testPool = getTestPool();
   try {
     await applyE2eMigrations(testPool);
+    applyHolisticDbServiceSchema({
+      dbServicePath: path.resolve(__dirname, "../../../db-service_holistic_mentorship"),
+      databaseUrl: `ecto://${encodeURIComponent(getDbUser())}:${encodeURIComponent(getDbPassword())}@localhost:5432/${TEST_DB}`,
+    });
     await insertTestUsers(testPool);
+    const client = await testPool.connect();
+    try {
+      await client.query("BEGIN");
+      await seedHolisticFixtures(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   } finally {
     await testPool.end();
   }
