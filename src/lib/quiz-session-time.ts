@@ -14,6 +14,24 @@ export function utcToISTDate(utcDate: string): string {
   return addMinutes(parsedDate, IST_OFFSET_MINUTES).toISOString();
 }
 
+/**
+ * The session window end as a bare IST wall-clock string ("YYYY-MM-DDTHH:mm:ss"), which is
+ * what quiz-backend's CMS create / regenerate / patch endpoints expect for
+ * `session_end_time`.
+ *
+ * Two things this deliberately does NOT do:
+ *  - It does not apply the quiz-duration offset. quiz-backend derives the answer-visibility
+ *    moment itself (window end + `time_limit.max`); pre-offsetting here would double it.
+ *  - It does not keep the `Z`. `utcToISTDate` shifts a true-UTC instant into IST wall-clock
+ *    and re-stamps a `Z` that no longer means UTC — a convention the session row and
+ *    session_occurrence rely on, but a lie to send a service that parses naive datetimes.
+ */
+export function istWallClockWindowEnd(utcIso: string): string {
+  return utcToISTDate(utcIso)
+    .replace(/\.\d{3}Z$/, "")
+    .replace(/Z$/, "");
+}
+
 export function istToUTCDate(istDate: string): string {
   if (!istDate) return "";
   const parsedDate = new Date(istDate);
