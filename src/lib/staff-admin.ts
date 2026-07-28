@@ -1140,6 +1140,137 @@ function isPmSeatRole(value: unknown): value is SeatRole {
   );
 }
 
+const SEATED_USER_KINDS = ["teacher", "apc", "staff"] as const;
+
+type SeatedUserKind = (typeof SEATED_USER_KINDS)[number];
+
+function isSeatedUserKind(value: unknown): value is SeatedUserKind {
+  return (SEATED_USER_KINDS as readonly unknown[]).includes(value);
+}
+
+interface SeatedUserInput {
+  email: string;
+  fullName: string;
+  kind: SeatedUserKind;
+  centreId: number;
+  subjectId: number | null;
+  seatRole: SeatRole;
+  code: string | null;
+}
+
+function isBlank(raw: unknown): boolean {
+  return raw === undefined || raw === null || String(raw).trim() === "";
+}
+
+function isPositiveId(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
+}
+
+// An optional numeric id: absent/blank means "not given" (null), anything else
+// must be a positive integer.
+function optionalPositiveId(
+  raw: unknown,
+  fields: Record<string, string>,
+  field: string,
+  message: string
+): number | null {
+  if (isBlank(raw)) return null;
+  const value = Number(raw);
+  if (!isPositiveId(value)) {
+    fields[field] = message;
+    return null;
+  }
+  return value;
+}
+
+// An AF employee code, when supplied, must normalize to the AF123 shape.
+function validateOptionalAfCode(
+  raw: unknown,
+  fields: Record<string, string>
+): string | null {
+  if (isBlank(raw)) return null;
+  const code = normalizeEmployeeCode(raw);
+  if (!code) {
+    fields.af_id = "AF id must look like AF123";
+  }
+  return code;
+}
+
+// What each kind gets seated as. Teacher: subject required, but seated
+// `subject_tbd` — the seat role is the subject and Ops confirms it later.
+// APC: subject optional (APC is not a subject), seated 'apc'. Staff: the PM
+// tier from the request, no subject.
+function resolveSeatAndSubject(
+  kind: unknown,
+  body: CreateSeatedUserBody,
+  fields: Record<string, string>
+): { subjectId: number | null; seatRole: SeatRole } {
+  if (kind === "teacher") {
+    const subjectId = Number(body.subject_id);
+    if (!isPositiveId(subjectId)) {
+      fields.subject_id = "Subject is required";
+    }
+    return { subjectId, seatRole: "subject_tbd" };
+  }
+  if (kind === "apc") {
+    return {
+      subjectId: optionalPositiveId(
+        body.subject_id,
+        fields,
+        "subject_id",
+        "Subject must be a valid option"
+      ),
+      seatRole: "apc",
+    };
+  }
+  if (kind === "staff" && isPmSeatRole(body.role)) {
+    return { subjectId: null, seatRole: body.role };
+  }
+  if (kind === "staff") {
+    fields.role = `Role must be one of: ${PM_SEAT_ROLES.join(", ")}`;
+  }
+  return { subjectId: null, seatRole: "subject_tbd" };
+}
+
+// Decides *what* to create; createSeatedUser does the creating. Split out to
+// keep the transaction below readable.
+function validateSeatedUserBody(
+  body: CreateSeatedUserBody
+): { ok: true; input: SeatedUserInput } | StaffValidationFailure {
+  const fields: Record<string, string> = {};
+
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  if (!email.includes("@")) {
+    fields.email = "A valid email is required";
+  }
+  const kind = body.kind;
+  if (!isSeatedUserKind(kind)) {
+    fields.kind = `kind must be one of: ${SEATED_USER_KINDS.join(", ")}`;
+  }
+  const centreId = Number(body.centre_id);
+  if (!isPositiveId(centreId)) {
+    fields.centre_id = "Centre is required";
+  }
+  const { subjectId, seatRole } = resolveSeatAndSubject(kind, body, fields);
+  const code = validateOptionalAfCode(body.af_id, fields);
+
+  if (Object.keys(fields).length > 0) {
+    return { ok: false, status: 422, error: "Validation failed", fields };
+  }
+  return {
+    ok: true,
+    input: {
+      email,
+      fullName: typeof body.full_name === "string" ? body.full_name.trim() : "",
+      kind: kind as SeatedUserKind,
+      centreId,
+      subjectId,
+      seatRole,
+      code,
+    },
+  };
+}
+
 // Create a brand-new centre-staff person and seat them in ONE transaction —
 // permission + user + teacher/staff record + centre seat — so the Staff
 // Management page is self-contained (no separate Add User on /admin/users).
@@ -1153,61 +1284,10 @@ export async function createSeatedUser(params: {
   const schema = await checkStaffManagementSchema();
   if (!schema.ok) return schema;
 
-  const fields: Record<string, string> = {};
-  const email =
-    typeof params.body.email === "string" ? params.body.email.trim() : "";
-  if (!email || !email.includes("@")) {
-    fields.email = "A valid email is required";
-  }
-  const kind = params.body.kind;
-  if (kind !== "teacher" && kind !== "apc" && kind !== "staff") {
-    fields.kind = "kind must be 'teacher', 'apc' or 'staff'";
-  }
-  const centreId = Number(params.body.centre_id);
-  if (!Number.isInteger(centreId) || centreId <= 0) {
-    fields.centre_id = "Centre is required";
-  }
-  let subjectId: number | null = null;
-  let seatRole: SeatRole = "subject_tbd";
-  if (kind === "teacher") {
-    subjectId = Number(params.body.subject_id);
-    if (!Number.isInteger(subjectId) || subjectId <= 0) {
-      fields.subject_id = "Subject is required";
-    }
-    seatRole = "subject_tbd";
-  } else if (kind === "apc") {
-    seatRole = "apc";
-    // Optional: an APC may also teach a subject, but usually doesn't.
-    const raw = params.body.subject_id;
-    if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
-      subjectId = Number(raw);
-      if (!Number.isInteger(subjectId) || subjectId <= 0) {
-        fields.subject_id = "Subject must be a valid option";
-      }
-    }
-  } else if (kind === "staff") {
-    if (!isPmSeatRole(params.body.role)) {
-      fields.role = `Role must be one of: ${PM_SEAT_ROLES.join(", ")}`;
-    } else {
-      seatRole = params.body.role as SeatRole;
-    }
-  }
-  let code: string | null = null;
-  const rawCode = params.body.af_id;
-  if (rawCode !== undefined && rawCode !== null && String(rawCode).trim() !== "") {
-    code = normalizeEmployeeCode(rawCode);
-    if (!code) {
-      fields.af_id = "AF id must look like AF123";
-    }
-  }
-  if (Object.keys(fields).length > 0) {
-    return { ok: false, status: 422, error: "Validation failed", fields };
-  }
-
-  const fullName =
-    typeof params.body.full_name === "string"
-      ? params.body.full_name.trim()
-      : "";
+  const validated = validateSeatedUserBody(params.body);
+  if (!validated.ok) return validated;
+  const { email, fullName, kind, centreId, subjectId, seatRole, code } =
+    validated.input;
 
   // The centre supplies the program scope (level-1 centre staff see students by
   // program ∩ school). A centre with no program can't seed program_ids.
