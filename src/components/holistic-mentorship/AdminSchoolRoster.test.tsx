@@ -35,7 +35,7 @@ describe("AdminSchoolRoster", () => {
     expect(table.getByText("Not assigned")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
       "href",
-      "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&source=school"
+      "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
     );
     expect(screen.queryByRole("link", { name: "Open Ravi Shah" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();

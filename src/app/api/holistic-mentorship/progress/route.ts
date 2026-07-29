@@ -12,7 +12,7 @@ import {
   type HolisticProgressSort,
 } from "@/lib/holistic-progress";
 import { validateAcademicYear } from "@/lib/holistic-phase-plans";
-import { holisticRouteAccess } from "../route-helpers";
+import { holisticProgramId, holisticRouteAccess } from "../route-helpers";
 
 const SORTS = new Set<HolisticProgressSort>(["student_name", "school", "grade", "mentor", "phase", "progress"]);
 const PROGRESS = new Set<HolisticProgress>(["pending", "completed", "skipped", "no_active_phase"]);
@@ -68,6 +68,7 @@ function optionalFormat(value: string | null): Parsed<"csv" | null> {
 function filtersFrom(request: Request): { filters: HolisticProgressFilters; csv: boolean } | null {
   const params = new URL(request.url).searchParams;
   const academicYear = params.get("academic_year") ?? "";
+  const programId = holisticProgramId(params.get("program_id"));
   const page = positiveInteger(params.get("page"), 1);
   const phaseId = positiveInteger(params.get("phase_id"));
   const mentorUserId = positiveInteger(params.get("mentor_user_id"));
@@ -80,11 +81,13 @@ function filtersFrom(request: Request): { filters: HolisticProgressFilters; csv:
   const schoolCode = optionalSchool(params.get("school_code"));
   const search = (params.get("search") ?? "").trim();
   const values = [page, phaseId, mentorUserId, grade, progress, sort, direction, format, schoolCode];
-  if (!validateAcademicYear(academicYear) || search.length > 100 || values.some(({ valid }) => !valid)) {
+  if (!programId || !validateAcademicYear(academicYear) ||
+      search.length > 100 || values.some(({ valid }) => !valid)) {
     return null;
   }
   return {
     filters: {
+      programId,
       academicYear,
       phaseId: phaseId.value,
       schoolCode: schoolCode.value,
@@ -101,17 +104,20 @@ function filtersFrom(request: Request): { filters: HolisticProgressFilters; csv:
 }
 
 export async function GET(request: Request) {
-  const access = await holisticRouteAccess("program_read");
-  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
-
   const parsedRequest = filtersFrom(request);
   if (!parsedRequest) return NextResponse.json({ error: "Invalid progress filters" }, { status: 422 });
   const { filters, csv } = parsedRequest;
+  const access = await holisticRouteAccess("program_read", {
+    programId: filters.programId,
+  });
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
   const result = csv
     ? await listHolisticProgress(filters, { all: true })
     : await listHolisticProgress(filters);
   if (csv) {
-    const content = new TextEncoder().encode(formatHolisticProgressCsv(filters.academicYear, result.rows));
+    const content = new TextEncoder().encode(
+      formatHolisticProgressCsv(filters.academicYear, filters.programId, result.rows),
+    );
     const stream = new ReadableStream({ start(controller) { controller.enqueue(content); controller.close(); } });
     return new NextResponse(stream, {
       headers: {
@@ -121,8 +127,8 @@ export async function GET(request: Request) {
     });
   }
   const [options, academicYears] = await Promise.all([
-    getHolisticProgressOptions(filters.academicYear),
-    getHolisticProgressAcademicYears(),
+    getHolisticProgressOptions(filters.academicYear, filters.programId),
+    getHolisticProgressAcademicYears(filters.programId),
   ]);
   return NextResponse.json({
     ...result,

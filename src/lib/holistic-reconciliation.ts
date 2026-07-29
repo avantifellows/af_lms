@@ -1,13 +1,15 @@
-import { PROGRAM_IDS } from "./constants";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { withTransaction } from "./db";
 
 export async function reconcileHolisticMappings(params: {
+  programId: number;
   academicYear?: string;
   schoolCode?: string;
   schoolId?: number;
   studentIds?: number[];
 }): Promise<number> {
   const studentIds = params.studentIds?.length ? [...new Set(params.studentIds)] : null;
+  if (params.academicYear && params.academicYear !== CURRENT_ACADEMIC_YEAR) return 0;
   if (!params.academicYear && !studentIds) {
     throw new Error("Holistic Mapping reconciliation requires a bounded scope");
   }
@@ -19,33 +21,13 @@ export async function reconcileHolisticMappings(params: {
                 mapping.academic_year,
                 CASE
                   WHEN student.status = 'dropout' THEN 'student_dropout'
-                  WHEN NOT EXISTS (
-                    SELECT 1
-                    FROM enrollment_record grade_enrollment
-                    JOIN grade ON grade.id = grade_enrollment.group_id
-                      AND grade.number IN (11, 12)
-                    WHERE grade_enrollment.user_id = student.user_id
-                      AND grade_enrollment.group_type = 'grade'
-                      AND grade_enrollment.academic_year = mapping.academic_year
-                      AND grade_enrollment.is_current IS TRUE
-                  ) THEN 'student_grade_changed'
-                  WHEN NOT EXISTS (
-                    SELECT 1
-                    FROM group_user batch_member
-                    JOIN "group" batch_group
-                      ON batch_group.id = batch_member.group_id
-                     AND batch_group.type = 'batch'
-                    JOIN batch ON batch.id = batch_group.child_id
-                    WHERE batch_member.user_id = student.user_id
-                      AND batch.program_id = mapping.program_id
-                  ) THEN 'student_program_changed'
-                  ELSE 'student_school_changed'
+                  ELSE 'student_roster_changed'
                 END AS reason
          FROM holistic_mentorship_mentor_mentee_mappings mapping
          JOIN student ON student.id = mapping.student_id
          WHERE mapping.program_id = $1
            AND mapping.ended_at IS NULL
-           AND ($2::text IS NULL OR mapping.academic_year = $2)
+           AND mapping.academic_year = $2
            AND ($3::bigint IS NULL OR mapping.school_id = $3)
            AND ($4::text IS NULL OR EXISTS (
              SELECT 1 FROM school
@@ -66,6 +48,7 @@ export async function reconcileHolisticMappings(params: {
                  AND roster_student.academic_year = mapping.academic_year
                  AND roster_student.program_id = mapping.program_id
                  AND roster_student.grade IN (11, 12)
+               HAVING COUNT(DISTINCT roster_student.grade) = 1
              )
            )
          FOR UPDATE OF mapping
@@ -111,8 +94,8 @@ export async function reconcileHolisticMappings(params: {
        )
        SELECT COUNT(*) AS ended_count FROM ended`,
       [
-        PROGRAM_IDS.COE,
-        params.academicYear ?? null,
+        params.programId,
+        CURRENT_ACADEMIC_YEAR,
         params.schoolId ?? null,
         params.schoolCode ?? null,
         studentIds,

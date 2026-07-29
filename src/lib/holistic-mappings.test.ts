@@ -45,6 +45,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       listHolisticAssignmentRoster({
+      programId: 1,
         schoolId: 4,
         academicYear: "2026-2027",
         search: "asha",
@@ -69,6 +70,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("roster_student.program_id = $3");
     expect(sql).toContain("st.status IS DISTINCT FROM 'dropout'");
     expect(sql).toContain("roster_student.grade IN (11, 12)");
+    expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(sql).not.toContain("enrollment_record");
     expect(sql).toContain("ORDER BY phase.position DESC");
     expect(sql).toContain("mapping.school_id = $1");
@@ -78,6 +80,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       schoolId: 4,
     });
   });
@@ -98,6 +101,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       assignHolisticMentees({
+      programId: 1,
         actorUserId: 9,
         schoolId: 4,
         academicYear: "2026-2027",
@@ -117,6 +121,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("FROM centre_students roster_student");
     expect(sql).toContain("roster_centre.school_id = $1");
     expect(sql).toContain("roster_student.academic_year = $2");
+    expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(sql).not.toContain("enrollment_record");
     expect(sql).toContain("ORDER BY st.id\n         FOR UPDATE OF st");
     expect(sql).toContain("FOR UPDATE");
@@ -131,6 +136,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(mappingLock?.[1]).toEqual([[41, 42], "2026-2027", 4, 1]);
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       studentIds: [41, 42],
     });
   });
@@ -152,6 +158,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       removeHolisticMentees({
+      programId: 1,
         actorUserId: 9,
         schoolId: 4,
         academicYear: "2026-2027",
@@ -189,6 +196,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     });
 
     await expect(assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -227,6 +235,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ]);
 
     await expect(assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -255,6 +264,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     mockQuery.mockResolvedValueOnce([]);
 
     await expect(removeHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -285,6 +295,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     mockQuery.mockResolvedValue([]);
 
     const result = await assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",
@@ -310,6 +321,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ]);
 
     await expect(assignHolisticMentees({
+      programId: 1,
       actorUserId: 9,
       schoolId: 4,
       academicYear: "2026-2027",

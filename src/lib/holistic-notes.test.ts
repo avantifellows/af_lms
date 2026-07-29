@@ -17,6 +17,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -37,6 +38,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -60,6 +62,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 70,
@@ -71,9 +74,12 @@ describe("Holistic Post-Session Notes", () => {
     });
 
     expect(client.query.mock.calls[0][1]).toEqual([70, 41, 4, 1, "2026-2027", "2025-2026"]);
-    expect(String(client.query.mock.calls[0][0])).toContain("phase_grade.number = current_grade.number");
-    expect(String(client.query.mock.calls[0][0])).toContain("FROM centre_students roster_student");
-    expect(String(client.query.mock.calls[0][0])).toContain("holistic_mentorship_privacy_deletions");
+    const sql = String(client.query.mock.calls[0][0]);
+    expect(sql).toContain("phase_grade.number = current_roster.grade");
+    expect(sql).toContain("FROM centre_students roster_student");
+    expect(sql).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
+    expect(sql).not.toContain("enrollment_record");
+    expect(sql).toContain("holistic_mentorship_privacy_deletions");
   });
 
   it("creates and freezes the first non-empty draft atomically", async () => {
@@ -86,6 +92,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -105,6 +112,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "submit",
       studentId: 41,
       phaseId: 73,
@@ -132,6 +140,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "submit",
       studentId: 41,
       phaseId: 73,
@@ -157,6 +166,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "edit",
       studentId: 41,
       phaseId: 73,
@@ -181,6 +191,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -202,6 +213,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "edit",
       studentId: 41,
       phaseId: 73,
@@ -224,6 +236,7 @@ describe("Holistic Post-Session Notes", () => {
     mockWithTransaction.mockImplementation(async (work) => work(client as never));
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,
@@ -246,6 +259,7 @@ describe("Holistic Post-Session Notes", () => {
     mockQuery.mockResolvedValueOnce([{ revision: 1 }]);
 
     await expect(saveHolisticNotes({
+      programId: 1,
       mode: "draft",
       studentId: 41,
       phaseId: 73,

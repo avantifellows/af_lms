@@ -4,14 +4,23 @@ import { redirect } from "next/navigation";
 import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
 import PageHeader from "@/components/PageHeader";
 import { authOptions } from "@/lib/auth";
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 
-export default async function HolisticMentorshipAdminPage() {
+export default async function HolisticMentorshipAdminPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ program_id?: string }>;
+} = {}) {
   const session = await getServerSession(authOptions);
   const access = await requireHolisticMentorshipAccess(session, "program_read");
   if (!access.ok) {
     redirect(access.status === 401 ? "/" : "/dashboard");
   }
+  const requestedProgramId = Number((await searchParams)?.program_id);
+  const initialProgramId = isHolisticMentorshipProgramId(requestedProgramId)
+    ? requestedProgramId
+    : PROGRAM_IDS.COE;
 
   return (
     <div className="min-h-screen overflow-x-clip bg-bg">
@@ -27,7 +36,10 @@ export default async function HolisticMentorshipAdminPage() {
         }
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <HolisticMentorshipWorkspace mode="admin" />
+        <HolisticMentorshipWorkspace
+          mode="admin"
+          initialProgramId={initialProgramId}
+        />
       </main>
     </div>
   );

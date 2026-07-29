@@ -5,12 +5,14 @@ import {
   getHolisticScriptArgument,
   runHolisticScript,
 } from "../src/lib/holistic-script";
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "../src/lib/constants";
 
 const LOCAL_DATABASE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dbServicePath = parseDbServicePath(args);
+  const programId = parseProgramId(args);
   configureHolisticScriptEnvironment(args, ".env.local");
   const databaseUrl = getLocalDatabaseUrl();
   const fixtures = await import("../src/lib/holistic-fixtures");
@@ -18,11 +20,23 @@ async function main(): Promise<void> {
 
   const db = await import("../src/lib/db");
   try {
-    const report = await db.withTransaction((client) => fixtures.seedHolisticFixtures(client));
+    const report = await db.withTransaction(
+      (client) => fixtures.seedHolisticFixtures(client, programId)
+    );
     console.log(JSON.stringify({ ...report, manifest: fixtures.HOLISTIC_FIXTURE_MANIFEST }, null, 2));
   } finally {
     await db.default.end();
   }
+}
+
+function parseProgramId(args: string[]): number {
+  const programId = Number(
+    getHolisticScriptArgument(args, "--program-id") ?? PROGRAM_IDS.COE
+  );
+  if (!isHolisticMentorshipProgramId(programId)) {
+    throw new Error("--program-id must be 1 or 78");
+  }
+  return programId;
 }
 
 function parseDbServicePath(args: string[]): string {

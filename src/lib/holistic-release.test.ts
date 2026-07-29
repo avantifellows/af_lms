@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PROGRAM_IDS } from "./constants";
 import {
   buildHolisticProfileSourceEvidence,
   buildHolisticProfileSourceQuery,
@@ -51,6 +52,12 @@ describe("Holistic release preflight", () => {
           { source_user_id: "1002", student_id: 102, eligible: true },
           { source_user_id: "duplicate", student_id: 201, eligible: true },
           { source_user_id: "duplicate", student_id: 202, eligible: true },
+          {
+            source_user_id: "other-program",
+            student_id: 301,
+            eligible: false,
+            eligible_in_other_program: true,
+          },
         ];
       }
       if (sql.includes("preflight_historical")) {
@@ -74,6 +81,7 @@ describe("Holistic release preflight", () => {
     const result = await runHolisticReleasePreflight({
       db,
       academicYear: "2026-2027",
+      programId: 1,
       profileSource: {
         forms: [
           {
@@ -89,7 +97,7 @@ describe("Holistic release preflight", () => {
             questions: questions.slice(0, 33),
           },
         ],
-        sourceUserIds: ["1001", "1002", "missing", "duplicate"],
+        sourceUserIds: ["1001", "1002", "missing", "duplicate", "other-program"],
       },
     });
 
@@ -117,6 +125,37 @@ describe("Holistic release preflight", () => {
     expect(calls.find((sql) => sql.includes("preflight_historical"))).toContain("COUNT(DISTINCT student.id)");
   });
 
+  it("checks the supplied EMRS historical cohort against Program 78", async () => {
+    let historicalParams: unknown[] | undefined;
+    const db = async (sql: string, params?: unknown[]) => {
+      if (sql.includes("preflight_profile_tables")) {
+        return [{ profile_tables_ready: false }];
+      }
+      if (sql.includes("preflight_historical")) {
+        historicalParams = params;
+        return [{ safe_candidates: 1, excluded_rows: 0 }];
+      }
+      return [];
+    };
+
+    await runHolisticReleasePreflight({
+      db,
+      academicYear: "2026-2027",
+      programId: PROGRAM_IDS.EMRS_COE,
+      profileSource: {
+        forms: [],
+        sourceUserIds: [],
+        historicalBusinessStudentIds: ["EMRS-1"],
+      },
+    });
+
+    expect(historicalParams).toEqual([
+      ["EMRS-1"],
+      PROGRAM_IDS.EMRS_COE,
+      "2026-2027",
+    ]);
+  });
+
   it("runs before the Profile migrations exist", async () => {
     let rosterQuery = "";
     const db = async (sql: string) => {
@@ -134,6 +173,7 @@ describe("Holistic release preflight", () => {
     const result = await runHolisticReleasePreflight({
       db,
       academicYear: "2026-2027",
+      programId: 1,
       profileSource: { forms: [], sourceUserIds: [] },
     });
 
@@ -230,11 +270,13 @@ describe("Holistic release preflight", () => {
 
   it("seeds deterministic fixture coverage without exposing fixture content in its report", async () => {
     let actorId = 500;
+    let fixtureStudentsQuery = "";
     const query = async (sql: string) => {
       if (sql.includes("fixture_scope")) {
         return { rows: [{ centre_id: 9, school_id: 10, school_code: "E2E-P1", grade_11_id: 11, grade_12_id: 12 }] };
       }
       if (sql.includes("fixture_students")) {
+        fixtureStudentsQuery = sql;
         return { rows: [
           { student_id: 101, user_id: 1001, grade: 11, batch_group_id: 801 },
           { student_id: 102, user_id: 1002, grade: 11, batch_group_id: 801 },
@@ -258,6 +300,7 @@ describe("Holistic release preflight", () => {
 
     await expect(seedHolisticFixtures({ query } as never)).resolves.toEqual({
       schoolCode: "E2E-P1",
+      programId: 1,
       academicYear: "2026-2027",
       students: 6,
       mappings: 5,
@@ -267,5 +310,8 @@ describe("Holistic release preflight", () => {
       submittedNotes: 1,
       phases: 6,
     });
+    expect(fixtureStudentsQuery).toContain(
+      "WHERE batch_member.user_id = student.user_id AND batch.program_id = $3"
+    );
   });
 });

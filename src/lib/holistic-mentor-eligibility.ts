@@ -1,11 +1,10 @@
 import type { PoolClient } from "pg";
-import { PROGRAM_IDS } from "./constants";
 import { query } from "./db";
 import { PM_SEAT_ROLES } from "./staff-shared";
 
 type EligibilityLookup =
-  | { email: string; userId?: never; schoolId: number; client?: PoolClient }
-  | { userId: number; email?: never; schoolId: number; client: PoolClient };
+  | { email: string; userId?: never; schoolId: number; programId: number; client?: PoolClient }
+  | { userId: number; email?: never; schoolId: number; programId: number; client: PoolClient };
 
 export async function findEligibleHolisticMentorUserId(
   lookup: EligibilityLookup
@@ -14,7 +13,7 @@ export async function findEligibleHolisticMentorUserId(
     "userId" in lookup ? lookup.userId : null,
     "email" in lookup ? lookup.email : null,
     lookup.schoolId,
-    PROGRAM_IDS.COE,
+    lookup.programId,
     [...PM_SEAT_ROLES],
   ];
   const sql = `SELECT DISTINCT u.id AS user_id

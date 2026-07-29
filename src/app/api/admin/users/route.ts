@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CENTRE_ASSIGNMENTS_SUBQUERY } from "@/lib/centres";
 import { query } from "@/lib/db";
 import { isUserRole, type UserRole } from "@/lib/permissions";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "@/lib/constants";
 import { requireAdminApiAccess } from "../route-helpers";
 
 // Disable Next.js caching for this route
@@ -38,7 +39,12 @@ function userWriteParams(value: UserWrite) {
   const role = userRole(value);
   const holisticAdmin = role === "holistic_mentorship_admin";
   const scope = holisticAdmin
-    ? { level: 3, schoolCodes: null, regions: null, programIds: [1] }
+    ? {
+        level: 3,
+        schoolCodes: null,
+        regions: null,
+        programIds: [...HOLISTIC_MENTORSHIP_PROGRAM_IDS],
+      }
     : {
         level: value.level,
         schoolCodes: value.school_codes || null,

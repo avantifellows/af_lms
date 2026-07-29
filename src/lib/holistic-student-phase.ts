@@ -1,4 +1,7 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isHolisticMentorshipProgramId,
+} from "./constants";
 import { query } from "./db";
 
 export type HolisticPhaseProgress = "pending" | "skipped" | "completed";
@@ -255,6 +258,7 @@ type StudentPhaseParams = {
   studentId: number;
   phaseId: number;
   schoolId: number;
+  programId: number;
   academicYear: string;
   actorUserId?: number;
   role: string;
@@ -317,7 +321,7 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
      JOIN student st ON st.id = mapping.student_id AND st.status IS DISTINCT FROM 'dropout'
      JOIN "user" u ON u.id = st.user_id
      LEFT JOIN LATERAL (
-       SELECT roster_student.grade
+       SELECT MIN(roster_student.grade) AS grade
        FROM centre_students roster_student
        JOIN centres roster_centre
          ON roster_centre.id = roster_student.centre_id
@@ -328,7 +332,7 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
          AND roster_student.academic_year = mapping.academic_year
          AND roster_student.program_id = mapping.program_id
          AND roster_student.grade IN (11, 12)
-       LIMIT 1
+       HAVING COUNT(DISTINCT roster_student.grade) = 1
      ) current_roster ON mapping.academic_year = $5
      LEFT JOIN LATERAL (
        SELECT historical_grade.number AS grade
@@ -352,7 +356,7 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
     [
       params.studentId,
       params.schoolId,
-      PROGRAM_IDS.COE,
+      params.programId,
       params.academicYear,
       CURRENT_ACADEMIC_YEAR,
     ]
@@ -360,7 +364,10 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
   return students[0] ?? null;
 }
 
-async function loadPhaseRows(academicYears: string[]): Promise<PhaseRow[]> {
+async function loadPhaseRows(
+  academicYears: string[],
+  programId: number,
+): Promise<PhaseRow[]> {
   return query<PhaseRow>(
     `SELECT phase.id, plan.academic_year, grade.number AS grade, phase.title,
             phase.position, phase.state, phase.guidance_markdown, phase.revision
@@ -369,7 +376,7 @@ async function loadPhaseRows(academicYears: string[]): Promise<PhaseRow[]> {
      JOIN grade ON grade.id = phase.grade_id
      WHERE plan.program_id = $1 AND plan.academic_year = ANY($2::text[])
      ORDER BY plan.academic_year, phase.position`,
-    [PROGRAM_IDS.COE, academicYears]
+    [programId, academicYears]
   );
 }
 
@@ -394,7 +401,7 @@ async function loadPhaseRelations(
        FROM holistic_mentorship_mentor_mentee_mappings
        WHERE student_id = $1 AND program_id = $2 AND academic_year = ANY($3::text[])
        GROUP BY academic_year`,
-      [params.studentId, PROGRAM_IDS.COE, academicYears]
+      [params.studentId, params.programId, academicYears]
     ),
     query<NotesRow>(
       `SELECT notes.id AS notes_id, notes.phase_id, notes.author_user_id,
@@ -435,7 +442,7 @@ async function loadPhaseRelations(
        ORDER BY summary.position`,
       [params.studentId]
     ),
-    query<HistoricalRow>(
+    isHolisticMentorshipProgramId(params.programId) ? query<HistoricalRow>(
       `SELECT answer.question, answer.answer, answer.position
        FROM holistic_mentorship_historical_notes notes
        JOIN holistic_mentorship_historical_note_answers answer ON answer.historical_note_id = notes.id
@@ -449,7 +456,7 @@ async function loadPhaseRelations(
        )
        ORDER BY answer.position`,
       [params.studentId]
-    ),
+    ) : Promise.resolve([]),
   ]);
   return { questionRows, transitionRows, mappingRows, notesRows, profileRows, historicalRows };
 }
@@ -696,6 +703,7 @@ export async function getHolisticStudentPhase(params: {
   studentId: number;
   phaseId: number;
   schoolId: number;
+  programId: number;
   academicYear: string;
   actorUserId?: number;
   role: string;
@@ -706,7 +714,7 @@ export async function getHolisticStudentPhase(params: {
 
   const priorYear = previousAcademicYear(params.academicYear);
   const academicYears = [priorYear, params.academicYear];
-  const phaseRows = await loadPhaseRows(academicYears);
+  const phaseRows = await loadPhaseRows(academicYears, params.programId);
   if (!phaseRows.some(({ id }) => Number(id) === params.phaseId)) return null;
 
   const relations = await loadPhaseRelations(

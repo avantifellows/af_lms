@@ -42,12 +42,13 @@ describe("Holistic Student Phase API", () => {
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "mentor@example.com" } },
       "mapped_student_read",
-      { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+      { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2026-2027" }
     );
     expect(mockDetail).toHaveBeenCalledWith({
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
+      programId: 1,
       academicYear: "2026-2027",
       actorUserId: 9,
       role: "teacher",
@@ -82,12 +83,13 @@ describe("Holistic Student Phase API", () => {
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "holistic@example.com" } },
       "mapped_student_read",
-      { schoolCode: "SCH001", studentId: 41, academicYear: "2025-2026" }
+      { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2025-2026" }
     );
     expect(mockDetail).toHaveBeenCalledWith({
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
+      programId: 1,
       academicYear: "2025-2026",
       actorUserId: undefined,
       role: "holistic_mentorship_admin",
@@ -163,13 +165,14 @@ describe("Holistic Student Phase API", () => {
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "mentor@example.com" } },
       "notes_draft",
-      { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+      { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2026-2027" }
     );
     expect(mockSave).toHaveBeenCalledWith({
       mode: "draft",
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
+      programId: 1,
       academicYear: "2026-2027",
       actorUserId: 9,
       expectedRevision: 2,

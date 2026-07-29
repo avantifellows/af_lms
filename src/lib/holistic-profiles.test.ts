@@ -14,6 +14,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 const requestKey = "d16e7d82-dc60-4b79-a064-9ed80badc119";
 const regenerationRequest = {
+  programId: 1,
   email: "admin@example.com",
   studentId: 41,
   requestKey,
@@ -44,7 +45,7 @@ describe("Holistic Profile regeneration", () => {
   it("parameterizes the current-year active-Mapping rule for Profile reads", async () => {
     mockQuery.mockResolvedValue([]);
 
-    await getHolisticProfileAdmin(41, "2026-2027");
+    await getHolisticProfileAdmin(41, "2026-2027", 1);
 
     expect(mockQuery).toHaveBeenCalledTimes(2);
     expect(mockQuery.mock.calls[0][1]).toEqual([41, 1, "2026-2027", "2026-2027"]);
@@ -54,6 +55,7 @@ describe("Holistic Profile regeneration", () => {
     expect(mockQuery.mock.calls[0][0]).toContain("FROM student live_student");
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       studentIds: [41],
     });
   });
@@ -78,7 +80,7 @@ describe("Holistic Profile regeneration", () => {
     expect(scopeSql).toContain("permission.read_only IS NOT TRUE");
     expect(scopeSql).toContain("permission.role IN ('admin', 'holistic_mentorship_admin')");
     expect(scopeSql).toContain("student.status IS DISTINCT FROM 'dropout'");
-    expect(scopeSql).toContain("JOIN centre_students roster_student");
+    expect(scopeSql).toContain("FROM centre_students roster_student");
     expect(scopeSql).toContain("roster_student.academic_year = $4");
     expect(scopeSql).toContain("roster_student.program_id = $3");
     expect(scopeSql).toContain("roster_student.grade IN (11, 12)");

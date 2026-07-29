@@ -1,4 +1,4 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "./constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_ID_TO_LABEL } from "./constants";
 import { query } from "./db";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
@@ -9,6 +9,7 @@ export type HolisticProgressDirection = "asc" | "desc";
 export const DEFAULT_HOLISTIC_PROGRESS_SORT: HolisticProgressSort = "school";
 
 export type HolisticProgressFilters = {
+  programId: number;
   academicYear: string;
   phaseId: number | null;
   schoolCode: string | null;
@@ -94,6 +95,7 @@ export async function listHolisticProgress(
   await reconcileHolisticMappings({
     academicYear: filters.academicYear,
     schoolCode: filters.schoolCode ?? undefined,
+    programId: filters.programId,
   });
   const direction = filters.direction === "desc" ? "DESC" : "ASC";
   const order = progressOrder(filters.sort, direction);
@@ -134,7 +136,7 @@ export async function listHolisticProgress(
        SELECT mapped.*, school.name AS school_name, school.code AS school_code,
               st.student_id AS external_student_id,
               NULLIF(TRIM(COALESCE(student_user.first_name, '') || ' ' || COALESCE(student_user.last_name, '')), '') AS student_name,
-              grade.number AS grade,
+              COALESCE(current_roster.grade, historical_grade.grade) AS grade,
               NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name,
               mentor.email AS mentor_email,
               selected_phase.id AS phase_id, selected_phase.position AS phase_number,
@@ -146,14 +148,32 @@ export async function listHolisticProgress(
        JOIN student st ON st.id = mapped.student_id
        JOIN "user" student_user ON student_user.id = st.user_id
        JOIN "user" mentor ON mentor.id = mapped.mentor_user_id
-       JOIN LATERAL (
-         SELECT grade.number
+       LEFT JOIN LATERAL (
+         SELECT MIN(roster_student.grade) AS grade
+         FROM centre_students roster_student
+         JOIN centres roster_centre
+           ON roster_centre.id = roster_student.centre_id
+          AND roster_centre.school_id = mapped.school_id
+          AND roster_centre.program_id = $1
+          AND roster_centre.is_active IS TRUE
+         WHERE $2 = $11
+           AND roster_student.user_id = student_user.id
+           AND roster_student.academic_year = $2
+           AND roster_student.program_id = $1
+           AND roster_student.grade IN (11, 12)
+         HAVING COUNT(DISTINCT roster_student.grade) = 1
+       ) current_roster ON true
+       LEFT JOIN LATERAL (
+         SELECT grade.number AS grade
          FROM enrollment_record grade_enrollment
          JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
-         WHERE grade_enrollment.user_id = student_user.id
-           AND grade_enrollment.group_type = 'grade' AND grade_enrollment.academic_year = $2
-         ORDER BY grade_enrollment.is_current DESC, grade_enrollment.id DESC LIMIT 1
-       ) grade ON true
+         WHERE $2 <> $11
+           AND grade_enrollment.user_id = student_user.id
+           AND grade_enrollment.group_type = 'grade'
+           AND grade_enrollment.academic_year = $2
+         ORDER BY grade_enrollment.is_current DESC, grade_enrollment.id DESC
+         LIMIT 1
+       ) historical_grade ON true
        LEFT JOIN LATERAL (
          SELECT phase.id, phase.position, phase.title,
                 CASE WHEN phase.state = 'locked' THEN 'locked'
@@ -167,7 +187,8 @@ export async function listHolisticProgress(
                      ELSE 'open' END AS phase_availability
          FROM holistic_mentorship_phase_plans plan
          JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
-         JOIN grade phase_grade ON phase_grade.id = phase.grade_id AND phase_grade.number = grade.number
+         JOIN grade phase_grade ON phase_grade.id = phase.grade_id
+           AND phase_grade.number = COALESCE(current_roster.grade, historical_grade.grade)
          WHERE plan.program_id = $1 AND plan.academic_year = $2
            AND (($3::bigint IS NULL AND phase.state = 'open') OR phase.id = $3)
          ORDER BY CASE WHEN phase.id = $3 THEN 0 ELSE 1 END, phase.position DESC
@@ -177,7 +198,8 @@ export async function listHolisticProgress(
          SELECT phase.position
          FROM holistic_mentorship_phase_plans plan
          JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
-         JOIN grade phase_grade ON phase_grade.id = phase.grade_id AND phase_grade.number = grade.number
+         JOIN grade phase_grade ON phase_grade.id = phase.grade_id
+           AND phase_grade.number = COALESCE(current_roster.grade, historical_grade.grade)
          JOIN LATERAL (
            SELECT transition.to_state
            FROM holistic_mentorship_phase_state_transitions transition
@@ -187,9 +209,10 @@ export async function listHolisticProgress(
          WHERE plan.program_id = $1 AND plan.academic_year = $2
          ORDER BY phase.position DESC LIMIT 1
        ) initial_active ON true
-       WHERE ($4::text IS NULL OR school.code = $4)
+       WHERE COALESCE(current_roster.grade, historical_grade.grade) IS NOT NULL
+         AND ($4::text IS NULL OR school.code = $4)
          AND ($3::bigint IS NULL OR selected_phase.id IS NOT NULL)
-         AND ($5::int IS NULL OR grade.number = $5)
+         AND ($5::int IS NULL OR COALESCE(current_roster.grade, historical_grade.grade) = $5)
          AND ($6::bigint IS NULL OR mapped.mentor_user_id = $6)
          AND ($8 = '%%' OR st.student_id ILIKE $8 OR
               TRIM(COALESCE(student_user.first_name, '') || ' ' || COALESCE(student_user.last_name, '')) ILIKE $8)
@@ -230,7 +253,7 @@ export async function listHolisticProgress(
      )
      SELECT paged.*, counts.* FROM counts LEFT JOIN paged ON true ORDER BY ${order}`,
     [
-      PROGRAM_IDS.COE,
+      filters.programId,
       filters.academicYear,
       filters.phaseId,
       filters.schoolCode,
@@ -275,7 +298,10 @@ export async function listHolisticProgress(
   };
 }
 
-export async function getHolisticProgressOptions(academicYear: string): Promise<HolisticProgressOptions> {
+export async function getHolisticProgressOptions(
+  academicYear: string,
+  programId: number,
+): Promise<HolisticProgressOptions> {
   const latestMappings = `WITH mapping_history AS (
          SELECT mapping.*
          FROM holistic_mentorship_mentor_mentee_mappings mapping
@@ -293,7 +319,7 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
        FROM latest_mapping mapping
        JOIN school ON school.id = mapping.school_id
        ORDER BY school.name, school.code`,
-      [PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
+      [programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ user_id: number | string; name: string | null; email: string }>(
       `${latestMappings}
@@ -303,7 +329,7 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
        FROM latest_mapping mapping
        JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
        ORDER BY name NULLS LAST, mentor.email`,
-      [PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
+      [programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ id: number | string; position: number; title: string; grade: number | string; state: "open" | "locked" }>(
       `SELECT phase.id, phase.position, phase.title, grade.number AS grade, phase.state
@@ -312,7 +338,7 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
        JOIN grade ON grade.id = phase.grade_id
        WHERE plan.program_id = $1 AND plan.academic_year = $2
        ORDER BY phase.position, phase.id`,
-      [PROGRAM_IDS.COE, academicYear]
+      [programId, academicYear]
     ),
   ]);
   return {
@@ -325,7 +351,9 @@ export async function getHolisticProgressOptions(academicYear: string): Promise<
   };
 }
 
-export async function getHolisticProgressAcademicYears(): Promise<string[]> {
+export async function getHolisticProgressAcademicYears(
+  programId: number,
+): Promise<string[]> {
   const rows = await query<{ academic_year: string }>(
     `SELECT available.academic_year
      FROM (
@@ -341,7 +369,7 @@ export async function getHolisticProgressAcademicYears(): Promise<string[]> {
      ) available
      ORDER BY CASE WHEN available.academic_year = $2 THEN 0 ELSE 1 END,
               available.academic_year DESC`,
-    [PROGRAM_IDS.COE, CURRENT_ACADEMIC_YEAR]
+    [programId, CURRENT_ACADEMIC_YEAR]
   );
   return rows.map(({ academic_year }) => academic_year);
 }
@@ -354,7 +382,11 @@ function csvCell(value: string | number | null): string {
     : safe;
 }
 
-export function formatHolisticProgressCsv(academicYear: string, rows: HolisticProgressRow[]): string {
+export function formatHolisticProgressCsv(
+  academicYear: string,
+  programId: number,
+  rows: HolisticProgressRow[],
+): string {
   const questionCount = rows.reduce(
     (maximum, row) => row.answers.reduce((rowMaximum, answer) => Math.max(rowMaximum, answer.position), maximum),
     0
@@ -372,7 +404,7 @@ export function formatHolisticProgressCsv(academicYear: string, rows: HolisticPr
       (_, index) => row.answers.find(({ position }) => position === index + 1)
     );
     return [
-      academicYear, PROGRAM_IDS.COE, PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE], row.schoolName, row.schoolCode,
+      academicYear, programId, PROGRAM_ID_TO_LABEL[programId], row.schoolName, row.schoolCode,
       row.studentName, row.externalStudentId,
       row.grade, row.mentorName, row.mentorEmail, row.phaseNumber === null ? "" : `Phase ${row.phaseNumber}`,
       row.phaseTitle, row.phaseState, row.progress, row.completedAt,

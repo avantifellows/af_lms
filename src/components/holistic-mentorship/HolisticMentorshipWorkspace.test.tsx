@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -23,7 +23,7 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(await screen.findByText("No eligible Students at this School")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&search=",
+      "/api/holistic-mentorship/mappings?school_code=SCH001&program_id=1&academic_year=2026-2027&search=",
       { signal: expect.any(AbortSignal) }
     );
 
@@ -92,7 +92,33 @@ describe("HolisticMentorshipWorkspace", () => {
 
     await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
     expect(await screen.findByRole("button", { name: "Start blank" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Program")).toBeDisabled();
+    expect(screen.getByLabelText("Program")).toBeEnabled();
+    expect(screen.getByLabelText("Program")).toHaveValue("1");
     expect(screen.getByLabelText("Academic Year")).toHaveValue("2026-2027");
+  });
+
+  it("loads EMRS data after the Admin selects Program 78", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rows: [],
+        counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] },
+        pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<HolisticMentorshipWorkspace mode="admin" />);
+
+    await user.selectOptions(screen.getByLabelText("Program"), "78");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("program_id=78"),
+      expect.anything()
+    ));
+    expect(screen.getByLabelText("Program")).toHaveValue("78");
   });
 });

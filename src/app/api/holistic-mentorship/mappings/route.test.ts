@@ -48,10 +48,11 @@ describe("Holistic Mentorship Mapping API", () => {
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "teacher@example.com" } },
       "roster_view",
-      { schoolCode: "SCH001" }
+      { schoolCode: "SCH001", programId: 1 }
     );
     expect(mockRoster).toHaveBeenCalledWith({
       schoolId: 4,
+      programId: 1,
       academicYear: "2026-2027",
       grade: 11,
       search: "asha",
@@ -79,11 +80,12 @@ describe("Holistic Mentorship Mapping API", () => {
     expect(mockAccess).toHaveBeenCalledWith(
       { user: { email: "teacher@example.com" } },
       "mapping_mutation",
-      { schoolCode: "SCH001" }
+      { schoolCode: "SCH001", programId: 1 }
     );
     expect(mockAssign).toHaveBeenCalledWith({
       actorUserId: 9,
       schoolId: 4,
+      programId: 1,
       academicYear: "2026-2027",
       takeoverConfirmed: true,
       selections: [
@@ -111,6 +113,7 @@ describe("Holistic Mentorship Mapping API", () => {
     expect(mockRemove).toHaveBeenCalledWith({
       actorUserId: 9,
       schoolId: 4,
+      programId: 1,
       academicYear: "2026-2027",
       confirmed: true,
       mappings: [{ studentId: 41, expectedMappingId: 73 }],

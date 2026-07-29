@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Modal, Input, Select, Button } from "@/components/ui";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS } from "@/lib/constants";
 
 interface UserPermission {
   id: number;
@@ -48,7 +49,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   program_manager: "Program Managers can conduct school visits and view their assigned schools",
   program_admin: "Program Admins can oversee scoped schools and manage their own school visits",
   teacher: "Teachers can view and manage students in their assigned schools",
-  holistic_mentorship_admin: "Holistic Mentorship Admins can manage Holistic Mentorship for Program 1",
+  holistic_mentorship_admin: "Holistic Mentorship Admins can manage JNV CoE and EMRS CoE mentorship",
   admin: "Admins have full access to all features, all schools, and all programs",
 };
 
@@ -98,7 +99,9 @@ function toggledSelection<T>(selection: T[], value: T) {
 
 function programIdsFor(role: string, selectedPrograms: number[]) {
   if (role === "admin") return PROGRAMS.map((program) => program.id);
-  if (role === "holistic_mentorship_admin") return [1];
+  if (role === "holistic_mentorship_admin") {
+    return [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
+  }
   return selectedPrograms;
 }
 
@@ -300,7 +303,7 @@ function RoleField({ role, onChange }: { role: string; onChange: (role: string) 
       <option value="teacher">Teacher - Student management view</option>
       <option value="program_manager">Program Manager - School visits + student management</option>
       <option value="program_admin">Program Admin - Scoped oversight + own school visits</option>
-      <option value="holistic_mentorship_admin">Holistic Mentorship Admin - Program 1 mentorship</option>
+      <option value="holistic_mentorship_admin">Holistic Mentorship Admin - JNV CoE + EMRS CoE</option>
       <option value="admin">Admin - Full access + user management</option>
     </Select>
     <p className="mt-1 text-xs text-gray-500">{ROLE_DESCRIPTIONS[role]}</p>
@@ -336,7 +339,7 @@ function AccessFields({ role, ...props }: AccessFieldsProps) {
   if (role === "holistic_mentorship_admin") {
     return <>
       <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
-        Access includes all Program 1 Schools and only Holistic Mentorship.
+        Access includes all JNV CoE and EMRS CoE Schools and only Holistic Mentorship.
       </div>
       <ReadOnlyField value={props.readOnly} onChange={props.onReadOnlyChange} label="Read-only access" />
     </>;

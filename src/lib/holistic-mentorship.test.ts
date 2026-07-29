@@ -108,7 +108,8 @@ describe("requireHolisticMentorshipAccess", () => {
 
     const result = await requireHolisticMentorshipAccess(
       { user: { email: `${role}@example.com` } },
-      "profile_regenerate"
+      "profile_regenerate",
+      { programId: 1 }
     );
 
     expect(result.ok).toBe(allowed);
@@ -120,7 +121,8 @@ describe("requireHolisticMentorshipAccess", () => {
     await expect(
       requireHolisticMentorshipAccess(
         { user: { email: "holistic_mentorship_admin@example.com" } },
-        "mapped_student_read"
+        "mapped_student_read",
+        { programId: 1 }
       )
     ).resolves.toMatchObject({ ok: true });
 
@@ -137,7 +139,7 @@ describe("requireHolisticMentorshipAccess", () => {
     mockTeacherScope();
     mockQuery
       .mockResolvedValueOnce([
-        { id: 20, code: "SCH001", name: "School One", region: "North" },
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
       ])
       .mockResolvedValueOnce([{ user_id: 10 }]);
 
@@ -156,11 +158,11 @@ describe("requireHolisticMentorshipAccess", () => {
     const schoolLookup = mockQuery.mock.calls.find(([sql]) =>
       String(sql).includes("FROM school")
     );
-    expect(String(schoolLookup?.[0])).toContain("FROM centres centre");
+    expect(String(schoolLookup?.[0])).toContain("JOIN centres centre");
     expect(String(schoolLookup?.[0])).toContain("centre.school_id = school.id");
-    expect(String(schoolLookup?.[0])).toContain("centre.program_id = $2");
+    expect(String(schoolLookup?.[0])).toContain("centre.program_id = ANY($2::bigint[])");
     expect(String(schoolLookup?.[0])).not.toContain("school.program_ids");
-    expect(schoolLookup?.[1]).toEqual(["SCH001", 1]);
+    expect(schoolLookup?.[1]).toEqual(["SCH001", [1, 78], null]);
   });
 
   it("returns a safe 404 before checking Teacher eligibility", async () => {
@@ -181,7 +183,7 @@ describe("requireHolisticMentorshipAccess", () => {
     mockTeacherScope();
     mockQuery
       .mockResolvedValueOnce([
-        { id: 20, code: "SCH001", name: "School One", region: "North" },
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
       ])
       .mockResolvedValueOnce([]);
 
@@ -212,7 +214,7 @@ describe("requireHolisticMentorshipAccess", () => {
     mockTeacherScope();
     mockQuery
       .mockResolvedValueOnce([
-        { id: 20, code: "SCH001", name: "School One", region: "North" },
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
       ])
       .mockResolvedValueOnce([{ user_id: 10 }])
       .mockResolvedValueOnce([]);
@@ -233,7 +235,7 @@ describe("requireHolisticMentorshipAccess", () => {
     mockTeacherScope();
     mockQuery
       .mockResolvedValueOnce([
-        { id: 20, code: "SCH001", name: "School One", region: "North" },
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
       ])
       .mockResolvedValueOnce([{ user_id: 10 }])
       .mockResolvedValueOnce([{ id: 73 }]);
@@ -242,11 +244,17 @@ describe("requireHolisticMentorshipAccess", () => {
       requireHolisticMentorshipAccess(
         { user: { email: "teacher@example.com" } },
         "mapped_student_read",
-        { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+        {
+          schoolCode: "SCH001",
+          studentId: 41,
+          programId: 1,
+          academicYear: "2026-2027",
+        }
       )
     ).resolves.toMatchObject({ ok: true, actorUserId: 10 });
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
+      programId: 1,
       schoolId: 20,
       studentIds: [41],
     });
@@ -256,6 +264,9 @@ describe("requireHolisticMentorshipAccess", () => {
     expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
       "JOIN centre_students roster_student"
     );
+    expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
+      "HAVING COUNT(DISTINCT roster_student.grade) = 1"
+    );
   });
 
   it.each(["admin", "holistic_mentorship_admin"] as const)(
@@ -264,7 +275,7 @@ describe("requireHolisticMentorshipAccess", () => {
       mockQuery
         .mockResolvedValueOnce([permissionRow(role)])
         .mockResolvedValueOnce([
-          { id: 20, code: "SCH001", name: "School One", region: "North" },
+          { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
         ]);
 
       await expect(
@@ -283,7 +294,7 @@ describe("requireHolisticMentorshipAccess", () => {
       mockQuery
         .mockResolvedValueOnce([permissionRow(role)])
         .mockResolvedValueOnce([
-          { id: 20, code: "SCH001", name: "School One", region: "North" },
+          { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
         ]);
 
       await expect(

@@ -47,8 +47,16 @@ describe("Holistic Profile admin API", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(mockAccess).toHaveBeenCalledWith(expect.anything(), "profile_regenerate");
-    expect(requestHolisticProfileRegeneration).toHaveBeenCalledWith(expect.objectContaining({ email: "admin@example.com", studentId: 41 }));
+    expect(mockAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "profile_regenerate",
+      { programId: 1 }
+    );
+    expect(requestHolisticProfileRegeneration).toHaveBeenCalledWith(expect.objectContaining({
+      email: "admin@example.com",
+      studentId: 41,
+      programId: 1,
+    }));
   });
 
   it("returns policy denial before reading or regenerating a Profile", async () => {
