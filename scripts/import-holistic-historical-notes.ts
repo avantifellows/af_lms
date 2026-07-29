@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createHolisticOperationsDb } from "../src/lib/holistic-operations-db";
 import { runHistoricalHolisticNotesImport } from "../src/lib/holistic-operations";
 import type { HistoricalHolisticNoteSource } from "../src/lib/holistic-operations";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "../src/lib/constants";
+import { PROGRAM_IDS } from "../src/lib/constants";
 import {
   configureHolisticScriptEnvironment,
   getHistoricalImportBaseline,
@@ -29,7 +29,6 @@ async function main(): Promise<void> {
       actorUserId: options.actorUserId,
       sourceSnapshot: options.sourceSnapshot,
       programId: options.programId,
-      academicYear: options.academicYear,
       approvedBaseline: options.approvedBaseline,
       source: { read: async () => source },
       db: operationsDb.historicalImport,
@@ -51,8 +50,6 @@ function parseOptions(args: string[]) {
   const actorUserId = Number(getHolisticScriptArgument(args, "--actor-user-id"));
   const sourceSnapshot = getHolisticScriptArgument(args, "--source-snapshot");
   const programId = getHolisticMentorshipProgramId(args);
-  const academicYear =
-    getHolisticScriptArgument(args, "--academic-year") ?? CURRENT_ACADEMIC_YEAR;
   const approvedBaseline = getHistoricalImportBaseline(args);
   if (mode === "apply") {
     validateApplyOptions(actorUserId, sourceSnapshot, programId, approvedBaseline);
@@ -63,7 +60,6 @@ function parseOptions(args: string[]) {
     sourceSnapshot,
     sourcePath,
     programId,
-    academicYear,
     approvedBaseline,
   };
 }

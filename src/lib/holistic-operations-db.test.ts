@@ -42,9 +42,7 @@ describe("Holistic operator database adapter", () => {
       withTransaction: vi.fn() as never,
     });
 
-    await expect(
-      operations.historicalImport.resolve(source, 78, "2025-2026")
-    ).resolves.toEqual([{
+    await expect(operations.historicalImport.resolve(source, 78)).resolves.toEqual([{
       businessStudentId: "AF-100",
       studentId: 41,
       mentorUserId: 91,
@@ -72,7 +70,7 @@ describe("Holistic operator database adapter", () => {
     expect(params).toEqual([
       ["AF-100"],
       ["TEACHER-100"],
-      "2025-2026",
+      "2026-2027",
       78,
       ["apm", "pm", "spm", "ph"],
     ]);
