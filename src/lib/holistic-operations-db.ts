@@ -24,7 +24,7 @@ export function createHolisticOperationsDb(database: Database): {
 function createHistoricalImportDb(database: Database): HistoricalImportDb {
   const { query, withTransaction } = database;
   return {
-    async resolve(source, programId) {
+    async resolve(source, programId, academicYear) {
       if (!source.length) return [];
       return query<{
         business_student_id: string;
@@ -74,7 +74,7 @@ function createHistoricalImportDb(database: Database): HistoricalImportDb {
         [
           source.map(({ businessStudentId }) => businessStudentId),
           source.map(({ sourceMentorId }) => sourceMentorId),
-          "2026-2027",
+          academicYear,
           programId,
           [...PM_SEAT_ROLES],
         ]

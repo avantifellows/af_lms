@@ -125,6 +125,11 @@ npm run holistic:prepare-history -- \
   --reviewed-student-ids=/secure/path/approved-student-ids.json \
   --output=/secure/path/historical-grouped.json
 ```
+
+The import checks the current Academic Year by default. For a reviewed past cohort,
+pass `--academic-year=2025-2026`; this only selects the roster used for identity
+checks and does not change Student enrollment data.
+
 For Profiles, compare eligible Student IDs, exact BigQuery identities, approved
 Form structure, successful active-configuration Profiles, and failed/skipped
 generation counts. Investigate every difference; do not fill gaps manually.

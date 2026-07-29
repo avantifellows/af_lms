@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isHolisticMentorshipProgramId,
+  PROGRAM_IDS,
+} from "./constants";
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
 
 export type HolisticOperationMode = "dry-run" | "apply";
@@ -33,7 +37,8 @@ interface HistoricalImportSource {
 export interface HistoricalImportDb {
   resolve(
     source: HistoricalHolisticNoteSource[],
-    programId: number
+    programId: number,
+    academicYear: string,
   ): Promise<ResolvedHistoricalStudent[]>;
   existing(studentIds: number[], sourceSystem: string): Promise<Map<number, string>>;
   insert(records: HistoricalImportWrite[]): Promise<void>;
@@ -100,6 +105,7 @@ type HistoricalImportParams = {
   actorUserId?: number;
   sourceSnapshot?: string;
   programId?: number;
+  academicYear?: string;
   approvedBaseline?: HistoricalImportBaseline;
 };
 
@@ -109,6 +115,9 @@ function validateHistoricalImportParams(
 ) {
   if (!isHolisticMentorshipProgramId(programId)) {
     throw new Error("Historical import requires Program 1 or 78");
+  }
+  if (academicYearStart(params.academicYear ?? CURRENT_ACADEMIC_YEAR) === null) {
+    throw new Error("Historical import requires a valid Academic Year");
   }
   if (params.approvedBaseline &&
       !isValidHistoricalImportBaseline(params.approvedBaseline)) {
@@ -161,7 +170,7 @@ function sourceScopeBlockers(scope: ReturnType<typeof classifyHistoricalSource>)
   const blockers: string[] = [];
   if (scope.ambiguous) blockers.push(`${scope.ambiguous} source Student IDs are ambiguous`);
   if (scope.wrongScope) {
-    blockers.push(`${scope.wrongScope} source Students are outside the approved current roster`);
+    blockers.push(`${scope.wrongScope} source Students are outside the approved roster`);
   }
   return blockers;
 }
@@ -230,7 +239,11 @@ export async function runHistoricalHolisticNotesImport(
   const programId = params.programId ?? PROGRAM_IDS.COE;
   validateHistoricalImportParams(params, programId);
   const source = await params.source.read();
-  const resolvedRows = await params.db.resolve(source, programId);
+  const resolvedRows = await params.db.resolve(
+    source,
+    programId,
+    params.academicYear ?? CURRENT_ACADEMIC_YEAR,
+  );
   const byBusinessId = resolvedStudentsByBusinessId(resolvedRows);
   const scope = classifyHistoricalSource(source, byBusinessId);
   const blockers = [

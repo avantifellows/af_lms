@@ -126,7 +126,11 @@ describe("Historical Holistic Notes import entrypoint", () => {
       nullableMentors: 10,
       quarantinedUnmatched: 11,
     });
-    expect(resolve).toHaveBeenCalledWith(records, PROGRAM_IDS.EMRS_COE);
+    expect(resolve).toHaveBeenCalledWith(
+      records,
+      PROGRAM_IDS.EMRS_COE,
+      "2026-2027",
+    );
 
     const blockedApply = await runHistoricalHolisticNotesImport({
       ...input,
@@ -159,8 +163,12 @@ describe("Historical Holistic Notes import entrypoint", () => {
   it("allows a reviewed Program 1 pilot to override the full-cohort counts", async () => {
     const records = approvedHistoricalRecords().slice(0, 1);
     const insert = vi.fn();
+    const input = approvedImportInput(records, insert);
+    const resolve = vi.fn(input.db.resolve);
     const report = await runHistoricalHolisticNotesImport({
-      ...approvedImportInput(records, insert),
+      ...input,
+      academicYear: "2025-2026",
+      db: { ...input.db, resolve },
       approvedBaseline: {
         safeCandidates: 1,
         substantive: 1,
@@ -172,6 +180,7 @@ describe("Historical Holistic Notes import entrypoint", () => {
 
     expect(report.ok).toBe(true);
     expect(report.counts).toMatchObject({ safeCandidates: 1, writes: 1 });
+    expect(resolve).toHaveBeenCalledWith(records, PROGRAM_IDS.COE, "2025-2026");
     expect(insert).toHaveBeenCalledOnce();
   });
 
@@ -283,7 +292,7 @@ describe("Historical Holistic Notes import entrypoint", () => {
       },
     });
 
-    expect(report.blockers).toContain("1 source Students are outside the approved current roster");
+    expect(report.blockers).toContain("1 source Students are outside the approved roster");
     expect(report.ok).toBe(false);
   });
 
