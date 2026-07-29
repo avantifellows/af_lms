@@ -170,7 +170,8 @@ function approvedBaselineFor(
   programId: number,
   approvedBaseline?: HistoricalImportBaseline,
 ) {
-  return programId === PROGRAM_IDS.COE ? PROGRAM_1_APPROVED_BASELINE : approvedBaseline;
+  return approvedBaseline ??
+    (programId === PROGRAM_IDS.COE ? PROGRAM_1_APPROVED_BASELINE : undefined);
 }
 
 function baselineMatches(
