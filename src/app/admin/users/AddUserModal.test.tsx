@@ -481,7 +481,7 @@ describe("AddUserModal — role descriptions", () => {
     ).toBeInTheDocument();
   });
 
-  it("offers the dedicated Holistic Mentorship Admin role and its Program 1 scope", async () => {
+  it("offers the dedicated Holistic Mentorship Admin role and both supported Programs", async () => {
     const user = userEvent.setup();
     renderModal();
 
@@ -491,9 +491,9 @@ describe("AddUserModal — role descriptions", () => {
     );
 
     expect(
-      screen.getByText("Holistic Mentorship Admins can manage Holistic Mentorship for Program 1")
+      screen.getByText("Holistic Mentorship Admins can manage JNV CoE and EMRS CoE mentorship")
     ).toBeInTheDocument();
-    expect(screen.getByText(/Program 1 Schools/)).toBeInTheDocument();
+    expect(screen.getByText(/all JNV CoE and EMRS CoE Schools/)).toBeInTheDocument();
     expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query, withTransaction } from "./db";
 
 export type HolisticPhaseQuestion = {
@@ -52,28 +52,30 @@ type QuestionRow = { id: number | string; phase_id: number | string; text: strin
 
 async function lockPhasePlanForYear(
   client: PoolClient,
-  academicYear: string
+  academicYear: string,
+  programId: number,
 ): Promise<number | null> {
   const plan = await client.query<{ id: number | string }>(
     `SELECT id FROM holistic_mentorship_phase_plans
      WHERE program_id = $1 AND academic_year = $2
      FOR UPDATE`,
-    [PROGRAM_IDS.COE, academicYear]
+    [programId, academicYear]
   );
   return plan.rows[0] ? Number(plan.rows[0].id) : null;
 }
 
 async function lockPhasePlanForPhase(
   client: PoolClient,
-  phaseId: number
+  phaseId: number,
+  programId: number,
 ): Promise<number | null> {
   const plan = await client.query<{ id: number | string }>(
     `SELECT plan.id
      FROM holistic_mentorship_phase_plans plan
      JOIN holistic_mentorship_phases phase ON phase.phase_plan_id = plan.id
-     WHERE phase.id = $1
+     WHERE phase.id = $1 AND plan.program_id = $2
      FOR UPDATE OF plan`,
-    [phaseId]
+    [phaseId, programId]
   );
   return plan.rows[0] ? Number(plan.rows[0].id) : null;
 }
@@ -83,6 +85,7 @@ export type PhasePlanResult =
   | { ok: false; status: 404 | 409 | 422; error: string; currentRevision?: number };
 
 type PhaseDefinition = {
+  programId: number;
   phaseId: number;
   expectedRevision: number;
   actorEmail: string;
@@ -169,7 +172,11 @@ function validateDefinition(
   return validateHolisticGuidance(input.guidanceMarkdown);
 }
 
-async function getMutablePhase(client: PoolClient, phaseId: number): Promise<MutablePhaseRow | null> {
+async function getMutablePhase(
+  client: PoolClient,
+  phaseId: number,
+  programId: number,
+): Promise<MutablePhaseRow | null> {
   const result = await client.query<MutablePhaseRow>(
     `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.guidance_markdown,
             plan.academic_year, p.frozen_at,
@@ -181,7 +188,7 @@ async function getMutablePhase(client: PoolClient, phaseId: number): Promise<Mut
      JOIN holistic_mentorship_phase_plans plan ON plan.id = p.phase_plan_id
      WHERE p.id = $1 AND plan.program_id = $2
      FOR UPDATE`,
-    [phaseId, PROGRAM_IDS.COE]
+    [phaseId, programId]
   );
   return result.rows[0] ?? null;
 }
@@ -200,9 +207,10 @@ function checkRevision(row: MutablePhaseRow | null, expectedRevision: number): P
 async function checkedPhase(
   client: PoolClient,
   phaseId: number,
-  expectedRevision: number
+  expectedRevision: number,
+  programId: number,
 ): Promise<{ phase: MutablePhaseRow; error: null } | { phase: null; error: PhasePlanResult }> {
-  const phase = await getMutablePhase(client, phaseId);
+  const phase = await getMutablePhase(client, phaseId, programId);
   const error = checkRevision(phase, expectedRevision);
   return error ? { phase: null, error } : { phase: phase!, error: null };
 }
@@ -263,7 +271,12 @@ async function updatePhaseTransaction(
   client: PoolClient,
   input: PhaseDefinition
 ): Promise<PhasePlanResult> {
-  const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
+  const checked = await checkedPhase(
+    client,
+    input.phaseId,
+    input.expectedRevision,
+    input.programId,
+  );
   if (checked.error) return checked.error;
   const phase = checked.phase;
   const invalidChange = validateDefinitionChange(phase, input);
@@ -292,13 +305,14 @@ async function updatePhaseTransaction(
 }
 
 export async function getHolisticPhasePlan(
-  academicYear: string
+  academicYear: string,
+  programId: number,
 ): Promise<HolisticPhasePlan | null> {
   const plans = await query<PlanRow>(
     `SELECT id, program_id, academic_year
      FROM holistic_mentorship_phase_plans
      WHERE program_id = $1 AND academic_year = $2`,
-    [PROGRAM_IDS.COE, academicYear]
+    [programId, academicYear]
   );
   if (!plans[0]) return null;
 
@@ -356,6 +370,7 @@ export async function getHolisticPhasePlan(
 }
 
 export async function createHolisticPhasePlan(params: {
+  programId: number;
   academicYear: string;
   copyFromAcademicYear?: string;
 } & AuditActor): Promise<PhasePlanResult> {
@@ -371,7 +386,7 @@ export async function createHolisticPhasePlan(params: {
       const source = await client.query<{ id: number | string }>(
         `SELECT id FROM holistic_mentorship_phase_plans
          WHERE program_id = $1 AND academic_year = $2 FOR SHARE`,
-        [PROGRAM_IDS.COE, params.copyFromAcademicYear]
+        [params.programId, params.copyFromAcademicYear]
       );
       if (!source.rows[0]) return { ok: false, status: 404, error: "Prior Plan not found" };
       sourcePlanId = Number(source.rows[0].id);
@@ -381,7 +396,7 @@ export async function createHolisticPhasePlan(params: {
        VALUES ($1, $2, NOW(), NOW())
        ON CONFLICT (program_id, academic_year) DO NOTHING
        RETURNING id`,
-      [PROGRAM_IDS.COE, params.academicYear]
+      [params.programId, params.academicYear]
     );
     if (!inserted.rows[0]) return { ok: false, status: 409, error: "Plan already exists" };
     const planId = Number(inserted.rows[0].id);
@@ -426,6 +441,7 @@ export async function createHolisticPhasePlan(params: {
 }
 
 export async function addHolisticPhase(params: {
+  programId: number;
   academicYear: string;
   grade: 11 | 12;
   title: string;
@@ -438,7 +454,11 @@ export async function addHolisticPhase(params: {
     return { ok: false, status: 422, error: "Prior-year Plans are read-only" };
   }
   return withTransaction(async (client) => {
-    const planId = await lockPhasePlanForYear(client, params.academicYear);
+    const planId = await lockPhasePlanForYear(
+      client,
+      params.academicYear,
+      params.programId,
+    );
     if (!planId) return { ok: false, status: 404, error: "Plan not found" };
     const inserted = await client.query<{ id: number | string; phase_plan_id: number | string }>(
       `INSERT INTO holistic_mentorship_phases
@@ -450,7 +470,7 @@ export async function addHolisticPhase(params: {
        JOIN grade ON grade.number = $5
        WHERE plan.program_id = $1 AND plan.academic_year = $2
        RETURNING id, phase_plan_id`,
-      [PROGRAM_IDS.COE, params.academicYear, params.title.trim(), params.guidanceMarkdown, params.grade]
+      [params.programId, params.academicYear, params.title.trim(), params.guidanceMarkdown, params.grade]
     );
     const phaseId = Number(inserted.rows[0].id);
     for (const [index, question] of params.questions.entries()) {
@@ -538,12 +558,18 @@ async function validatePhaseStateChange(
 async function setPhaseStateTransaction(
   client: PoolClient,
   input: {
+    programId: number;
     phaseId: number;
     expectedRevision: number;
     state: "locked" | "open";
   } & AuditActor
 ): Promise<PhasePlanResult> {
-  const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
+  const checked = await checkedPhase(
+    client,
+    input.phaseId,
+    input.expectedRevision,
+    input.programId,
+  );
   if (checked.error) return checked.error;
   const phase = checked.phase;
   const validation = await validatePhaseStateChange(client, phase, input);
@@ -565,6 +591,7 @@ async function setPhaseStateTransaction(
 }
 
 export async function setHolisticPhaseState(input: {
+  programId: number;
   phaseId: number;
   expectedRevision: number;
   state: "locked" | "open";
@@ -575,6 +602,7 @@ export async function setHolisticPhaseState(input: {
 }
 
 type DeletePhaseInput = {
+  programId: number;
   phaseId: number;
   expectedRevision: number;
 } & AuditActor;
@@ -612,9 +640,18 @@ async function deletePhaseTransaction(
   client: PoolClient,
   input: DeletePhaseInput
 ): Promise<PhasePlanResult> {
-  const planId = await lockPhasePlanForPhase(client, input.phaseId);
+  const planId = await lockPhasePlanForPhase(
+    client,
+    input.phaseId,
+    input.programId,
+  );
   if (!planId) return { ok: false, status: 404, error: "Phase not found" };
-  const checked = await checkedPhase(client, input.phaseId, input.expectedRevision);
+  const checked = await checkedPhase(
+    client,
+    input.phaseId,
+    input.expectedRevision,
+    input.programId,
+  );
   if (checked.error) return checked.error;
   const phase = checked.phase;
   if (immutablePhase(phase)) {
@@ -653,7 +690,8 @@ export async function deleteHolisticPhase(input: DeletePhaseInput): Promise<Phas
 
 async function loadReorderPhases(
   client: PoolClient,
-  academicYear: string
+  academicYear: string,
+  programId: number,
 ): Promise<ReorderPhaseRow[]> {
   const result = await client.query<ReorderPhaseRow>(
     `SELECT p.id, p.phase_plan_id, p.position, p.revision, p.state, p.frozen_at,
@@ -665,7 +703,7 @@ async function loadReorderPhases(
      JOIN holistic_mentorship_phase_plans plan ON plan.id = p.phase_plan_id
      WHERE plan.program_id = $1 AND plan.academic_year = $2
      ORDER BY p.position FOR UPDATE`,
-    [PROGRAM_IDS.COE, academicYear]
+    [programId, academicYear]
   );
   return result.rows;
 }
@@ -758,13 +796,22 @@ async function persistReorder(
 async function reorderPhaseTransaction(
   client: PoolClient,
   input: {
+    programId: number;
     academicYear: string;
     phases: { id: number; expectedRevision: number }[];
   } & AuditActor
 ): Promise<PhasePlanResult> {
-  const planId = await lockPhasePlanForYear(client, input.academicYear);
+  const planId = await lockPhasePlanForYear(
+    client,
+    input.academicYear,
+    input.programId,
+  );
   if (!planId) return { ok: false, status: 409, error: "Phase order changed" };
-  const rows = await loadReorderPhases(client, input.academicYear);
+  const rows = await loadReorderPhases(
+    client,
+    input.academicYear,
+    input.programId,
+  );
   const validationError = validateReorder(rows, input.phases);
   if (validationError) return validationError;
   const changedIds = reorderedPhaseIds(rows, input.phases);
@@ -774,6 +821,7 @@ async function reorderPhaseTransaction(
 }
 
 export async function reorderHolisticPhases(input: {
+  programId: number;
   academicYear: string;
   phases: { id: number; expectedRevision: number }[];
 } & AuditActor): Promise<PhasePlanResult> {

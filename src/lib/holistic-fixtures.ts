@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
-import { PROGRAM_IDS } from "./constants";
+import { HOLISTIC_MENTORSHIP_PROGRAM_IDS, PROGRAM_IDS } from "./constants";
 
 export const HOLISTIC_FIXTURE_MANIFEST = {
   academicYear: "2026-2027",
@@ -68,7 +68,10 @@ type FixtureStudent = {
   batch_group_id: number | string;
 };
 
-export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
+export async function seedHolisticFixtures(
+  client: Pick<PoolClient, "query">,
+  programId: number = PROGRAM_IDS.COE
+) {
   const scopeResult = await client.query<FixtureScope>(
     `/* fixture_scope */
      SELECT centre.id AS centre_id, centre.school_id, school.code AS school_code,
@@ -88,7 +91,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
             WHERE school_group.type = 'school' AND school_group.child_id = centre.school_id) = 2
      ORDER BY centre.school_id
      `,
-    [PROGRAM_IDS.COE, HOLISTIC_FIXTURE_MANIFEST.academicYear]
+    [programId, HOLISTIC_FIXTURE_MANIFEST.academicYear]
   );
   let scope: FixtureScope | undefined;
   let students: FixtureStudent[] = [];
@@ -111,10 +114,10 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
          FROM group_user batch_member
          JOIN "group" batch_group ON batch_group.id = batch_member.group_id AND batch_group.type = 'batch'
          JOIN batch ON batch.id = batch_group.child_id
-         WHERE batch_member.user_id = student.user_id
-         ORDER BY array_position(ARRAY[1, 2, 64]::int[], batch.program_id), batch.id
+         WHERE batch_member.user_id = student.user_id AND batch.program_id = $3
+         ORDER BY batch.id
          LIMIT 1
-       ) roster_program ON roster_program.program_id = $3
+       ) roster_program ON TRUE
        WHERE centre.id = $1 AND student.status IS DISTINCT FROM 'dropout'
      ), ranked AS (
        SELECT candidates.*,
@@ -123,7 +126,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
      )
      SELECT student_id, user_id, grade, batch_group_id FROM ranked
      WHERE position <= 3 ORDER BY grade, position`,
-      [candidateScope.centre_id, HOLISTIC_FIXTURE_MANIFEST.academicYear, PROGRAM_IDS.COE]
+      [candidateScope.centre_id, HOLISTIC_FIXTURE_MANIFEST.academicYear, programId]
     );
     if (studentResult.rows.filter(({ grade }) => Number(grade) === 11).length === 3 &&
         studentResult.rows.filter(({ grade }) => Number(grade) === 12).length === 3) {
@@ -132,7 +135,9 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
       break;
     }
   }
-  if (!scope) throw new Error("Holistic fixtures require three eligible Program 1 Students in each Grade at one School");
+  if (!scope) {
+    throw new Error("Holistic fixtures require three eligible Students in each Grade at one School");
+  }
 
   for (const student of students) {
     await client.query(
@@ -172,14 +177,24 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
        ), permission AS (
          INSERT INTO user_permission
            (email, level, role, program_ids, school_codes, full_name, read_only, user_id, revoked_at)
-         SELECT $1, $4, $3, ARRAY[$5::int], ARRAY[$6::text], CONCAT('Synthetic ', $2), $7, actor.id, NULL
+         SELECT $1, $4, $3, $5::int[], ARRAY[$6::text], CONCAT('Synthetic ', $2), $7, actor.id, NULL
          FROM actor
          ON CONFLICT (email) DO UPDATE SET level = EXCLUDED.level, role = EXCLUDED.role,
            program_ids = EXCLUDED.program_ids, school_codes = EXCLUDED.school_codes,
            read_only = EXCLUDED.read_only, user_id = EXCLUDED.user_id, revoked_at = NULL
        )
        SELECT id FROM actor`,
-      [email, role.replaceAll("_", " "), role, level, PROGRAM_IDS.COE, scope.school_code, readOnly]
+      [
+        email,
+        role.replaceAll("_", " "),
+        role,
+        level,
+        role === "holistic_mentorship_admin"
+          ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
+          : [programId],
+        scope.school_code,
+        readOnly,
+      ]
     );
     return Number(result.rows[0].id);
   };
@@ -228,7 +243,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
      )
      SELECT id FROM created UNION ALL
      SELECT id FROM holistic_mentorship_phase_plans WHERE program_id = $1 AND academic_year = $2 LIMIT 1`,
-    [PROGRAM_IDS.COE, HOLISTIC_FIXTURE_MANIFEST.academicYear]
+    [programId, HOLISTIC_FIXTURE_MANIFEST.academicYear]
   );
   const planId = Number(planResult.rows[0].id);
   await client.query(
@@ -322,7 +337,7 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
             $1, 'synthetic_fixture', now(), now()
      FROM unnest($6::bigint[]) student_id
      ON CONFLICT (student_id, academic_year) WHERE ended_at IS NULL DO NOTHING`,
-    [mentorUserId, scope.school_id, PROGRAM_IDS.COE, HOLISTIC_FIXTURE_MANIFEST.academicYear,
+    [mentorUserId, scope.school_id, programId, HOLISTIC_FIXTURE_MANIFEST.academicYear,
       grade11.map(({ student_id }) => Number(student_id)),
       students.filter(({ student_id }) => Number(student_id) !== Number(grade11[2].student_id)).map(({ student_id }) => Number(student_id))]
   );
@@ -335,7 +350,8 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
             '2026-06-30T00:00:00Z', $2, 'mentor_removed', 'synthetic_access_loss', now(), now()
      WHERE NOT EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings
                        WHERE student_id = $1 AND mentor_user_id = $2 AND end_reason = 'synthetic_access_loss')`,
-    [grade12[2].student_id, formerMentorUserId, scope.school_id, PROGRAM_IDS.COE, HOLISTIC_FIXTURE_MANIFEST.academicYear]
+    [grade12[2].student_id, formerMentorUserId, scope.school_id, programId,
+      HOLISTIC_FIXTURE_MANIFEST.academicYear]
   );
 
   await client.query(
@@ -374,28 +390,30 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
     [grade11[0].student_id, grade12[0].student_id, configurationId]
   );
 
-  await client.query(
-    `WITH note AS (
-       INSERT INTO holistic_mentorship_historical_notes
-         (student_id, mentor_user_id, source_system, source_record_key, source_fingerprint,
-          imported_by_user_id, imported_at, reconciliation_metadata, inserted_at, updated_at)
-       VALUES ($1, NULL, 'synthetic_fixture', 'synthetic-grade12-history',
-         'synthetic-history-fingerprint', $2, '2026-07-01T00:00:00Z',
-         '{"synthetic":true}'::jsonb, now(), now())
-       ON CONFLICT (student_id, source_system) DO NOTHING RETURNING id
-     ), selected AS (
-       SELECT id FROM note UNION ALL SELECT id FROM holistic_mentorship_historical_notes
-       WHERE student_id = $1 AND source_system = 'synthetic_fixture' LIMIT 1
-     )
-     INSERT INTO holistic_mentorship_historical_note_answers
-       (historical_note_id, position, question, answer, inserted_at, updated_at)
-     SELECT selected.id, position, CONCAT('Synthetic historical question ', position, '?'),
-            CASE WHEN position = 4 THEN NULL ELSE CONCAT('Synthetic historical answer ', position, '.') END,
-            now(), now()
-     FROM selected CROSS JOIN generate_series(1, 4) position
-     ON CONFLICT (historical_note_id, position) DO NOTHING`,
-    [grade12[0].student_id, holisticAdminUserId]
-  );
+  if (programId === PROGRAM_IDS.COE) {
+    await client.query(
+      `WITH note AS (
+         INSERT INTO holistic_mentorship_historical_notes
+           (student_id, mentor_user_id, source_system, source_record_key, source_fingerprint,
+            imported_by_user_id, imported_at, reconciliation_metadata, inserted_at, updated_at)
+         VALUES ($1, NULL, 'synthetic_fixture', 'synthetic-grade12-history',
+           'synthetic-history-fingerprint', $2, '2026-07-01T00:00:00Z',
+           '{"synthetic":true}'::jsonb, now(), now())
+         ON CONFLICT (student_id, source_system) DO NOTHING RETURNING id
+       ), selected AS (
+         SELECT id FROM note UNION ALL SELECT id FROM holistic_mentorship_historical_notes
+         WHERE student_id = $1 AND source_system = 'synthetic_fixture' LIMIT 1
+       )
+       INSERT INTO holistic_mentorship_historical_note_answers
+         (historical_note_id, position, question, answer, inserted_at, updated_at)
+       SELECT selected.id, position, CONCAT('Synthetic historical question ', position, '?'),
+              CASE WHEN position = 4 THEN NULL ELSE CONCAT('Synthetic historical answer ', position, '.') END,
+              now(), now()
+       FROM selected CROSS JOIN generate_series(1, 4) position
+       ON CONFLICT (historical_note_id, position) DO NOTHING`,
+      [grade12[0].student_id, holisticAdminUserId]
+    );
+  }
 
   const completedPhaseId = phaseByPosition.get(1)!;
   const draftPhaseId = phaseByPosition.get(2)!;
@@ -431,11 +449,12 @@ export async function seedHolisticFixtures(client: Pick<PoolClient, "query">) {
 
   return {
     schoolCode: scope.school_code,
+    programId,
     academicYear: HOLISTIC_FIXTURE_MANIFEST.academicYear,
     students: 6,
     mappings: 5,
     profiles: 2,
-    historicalNotes: 1,
+    historicalNotes: programId === PROGRAM_IDS.COE ? 1 : 0,
     draftNotes: 1,
     submittedNotes: 1,
     phases: 6,

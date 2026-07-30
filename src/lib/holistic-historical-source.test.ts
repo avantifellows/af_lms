@@ -87,6 +87,20 @@ describe("Historical Notes private-source preparation", () => {
       substantive: 44,
       empty: 9,
     })).not.toThrow();
+    expect(() => assertApprovedHistoricalSourceCounts({
+      sourceRows: 3_301,
+      sourceStudents: 159,
+      selectedStudents: 11,
+      substantive: 10,
+      empty: 1,
+    }, 78)).not.toThrow();
+    expect(() => assertApprovedHistoricalSourceCounts({
+      sourceRows: 3_301,
+      sourceStudents: 159,
+      selectedStudents: 10,
+      substantive: 9,
+      empty: 1,
+    }, 78)).toThrow("Historical source counts differ from the approved private snapshot");
   });
 
   it("rejects duplicate or one-sided matrix rows without exposing source identity", () => {

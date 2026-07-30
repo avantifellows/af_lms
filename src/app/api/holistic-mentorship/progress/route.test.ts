@@ -68,6 +68,20 @@ describe("Holistic progress API", () => {
     expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ sort: "school", page: 1 }));
   });
 
+  it("carries EMRS Program 78 into access and progress queries", async () => {
+    const response = await GET(new Request(
+      "http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=78"
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "admin@example.com" } },
+      "program_read",
+      { programId: 78 }
+    );
+    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ programId: 78 }));
+  });
+
   it("exports all matching rows with the same filters and sort", async () => {
     mockCsv.mockReturnValue("Academic Year\r\n2026-2027");
     const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=csv&direction=desc") as never);

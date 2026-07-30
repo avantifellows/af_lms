@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PROGRAM_IDS } from "./constants";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("./db", () => ({ query: mockQuery }));
@@ -196,6 +197,49 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
+  it("loads imported Historical notes for an EMRS launch Grade 12 Student", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 12, entry_grade: 12,
+      }])
+      .mockResolvedValueOnce([{
+        id: 75, academic_year: "2026-2027", grade: 12, title: "Grade 12 start",
+        position: 5, revision: 1, state: "open", guidance_markdown: "Listen first.",
+      }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { question: "What worked?", answer: "Peer study", position: 1 },
+      ]);
+
+    const result = await getHolisticStudentPhase({
+      programId: PROGRAM_IDS.EMRS_COE,
+      studentId: 41,
+      phaseId: 75,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    const [historicalSql, historicalParams] = mockQuery.mock.calls[7];
+    expect(String(historicalSql)).toContain("FROM holistic_mentorship_historical_notes notes");
+    expect(historicalParams).toEqual([41]);
+    expect(result).toMatchObject({
+      selectedPhase: {
+        context: {
+          label: "Historical notes",
+          items: [{ label: "What worked?", content: "Peer study" }],
+        },
+      },
+    });
+  });
+
   it("uses the Active-configuration Profile only at the entry Grade's first Phase", () => {
     const input = {
       phases: [
@@ -282,6 +326,7 @@ describe("Holistic Student Phase derivation", () => {
       ]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 75,
       schoolId: 4,
@@ -294,6 +339,8 @@ describe("Holistic Student Phase derivation", () => {
     const [mappingSql, mappingParams] = mockQuery.mock.calls[0];
     expect(String(mappingSql)).toContain("FROM centre_students roster_student");
     expect(String(mappingSql)).toContain("roster_centre.school_id = mapping.school_id");
+    expect(String(mappingSql)).toContain("SELECT MIN(roster_student.grade) AS grade");
+    expect(String(mappingSql)).toContain("HAVING COUNT(DISTINCT roster_student.grade) = 1");
     expect(String(mappingSql)).toContain("current_roster ON mapping.academic_year = $5");
     expect(String(mappingSql)).not.toContain("batch_enrollment");
     expect(mappingParams).toEqual([41, 4, 1, "2026-2027", "2026-2027"]);
@@ -321,6 +368,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     await expect(getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
@@ -356,6 +404,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
@@ -418,6 +467,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 63,
       schoolId: 4,
@@ -464,6 +514,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,
@@ -496,6 +547,7 @@ describe("Holistic Student Phase derivation", () => {
       .mockResolvedValueOnce([]);
 
     const result = await getHolisticStudentPhase({
+      programId: 1,
       studentId: 41,
       phaseId: 73,
       schoolId: 4,

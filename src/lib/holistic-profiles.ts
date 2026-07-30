@@ -1,14 +1,18 @@
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "./constants";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { query, withTransaction } from "./db";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 
 type RegenerationState = "queued" | "running" | "completed" | "failed";
 
-export async function getHolisticProfileAdmin(studentId: number, academicYear: string): Promise<{
+export async function getHolisticProfileAdmin(
+  studentId: number,
+  academicYear: string,
+  programId: number,
+): Promise<{
   summaries: Array<{ position: number; title: string; summary: string }>;
   regeneration: null | { requestKey: string; state: RegenerationState; requestedAt: string; errorCode: string | null };
 }> {
-  await reconcileHolisticMappings({ academicYear, studentIds: [studentId] });
+  await reconcileHolisticMappings({ academicYear, studentIds: [studentId], programId });
   const [summaries, requests] = await Promise.all([
     query<{ position: number; title: string; summary: string }>(
       `SELECT summary.position, summary.question_set_title AS title, summary.summary
@@ -41,7 +45,7 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
                          )
                        )))
        ORDER BY summary.position`,
-      [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
+      [studentId, programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
     query<{ request_key: string; state: RegenerationState; inserted_at: string; error_code: string | null }>(
       `SELECT request.request_key, request.state, request.inserted_at, request.error_code
@@ -72,7 +76,7 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
                          )
                        )))
        ORDER BY request.inserted_at DESC, request.id DESC LIMIT 1`,
-      [studentId, PROGRAM_IDS.COE, academicYear, CURRENT_ACADEMIC_YEAR]
+      [studentId, programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
   ]);
   return {
@@ -89,6 +93,7 @@ export async function getHolisticProfileAdmin(studentId: number, academicYear: s
 export async function requestHolisticProfileRegeneration(params: {
   email: string;
   studentId: number;
+  programId: number;
   requestKey: string;
   force: true;
 }): Promise<
@@ -104,6 +109,7 @@ export async function requestHolisticProfileRegeneration(params: {
   await reconcileHolisticMappings({
     academicYear: CURRENT_ACADEMIC_YEAR,
     studentIds: [params.studentId],
+    programId: params.programId,
   });
   const request = await withTransaction(async (client) => {
     const scope = await client.query<{
@@ -117,22 +123,29 @@ export async function requestHolisticProfileRegeneration(params: {
        JOIN "user" actor ON actor.id = permission.user_id OR LOWER(actor.email) = LOWER(permission.email)
        JOIN student ON student.id = $2 AND student.status IS DISTINCT FROM 'dropout'
        JOIN "user" student_user ON student_user.id = student.user_id
-       JOIN enrollment_record batch_enrollment ON batch_enrollment.user_id = student_user.id
-         AND batch_enrollment.group_type = 'batch' AND batch_enrollment.is_current IS TRUE
-       JOIN batch ON batch.id = batch_enrollment.group_id AND batch.program_id = $3
-       JOIN enrollment_record grade_enrollment ON grade_enrollment.user_id = student_user.id
-         AND grade_enrollment.group_type = 'grade' AND grade_enrollment.is_current IS TRUE
-       JOIN grade ON grade.id = grade_enrollment.group_id AND grade.number IN (11, 12)
        JOIN holistic_mentorship_prompt_configurations configuration ON configuration.state = 'active'
        WHERE LOWER(permission.email) = LOWER($1) AND permission.revoked_at IS NULL
          AND permission.read_only IS NOT TRUE
          AND permission.role IN ('admin', 'holistic_mentorship_admin')
+         AND EXISTS (
+           SELECT 1
+           FROM centre_students roster_student
+           JOIN centres roster_centre
+             ON roster_centre.id = roster_student.centre_id
+            AND roster_centre.program_id = $3
+            AND roster_centre.is_active IS TRUE
+           WHERE roster_student.user_id = student_user.id
+             AND roster_student.academic_year = $4
+             AND roster_student.program_id = $3
+             AND roster_student.grade IN (11, 12)
+           HAVING COUNT(DISTINCT roster_student.grade) = 1
+         )
          AND NOT EXISTS (
            SELECT 1 FROM holistic_mentorship_privacy_deletions deletion
            WHERE deletion.student_id = student.id
          )
        LIMIT 1 FOR UPDATE OF permission, student, configuration`,
-      [params.email, params.studentId, PROGRAM_IDS.COE]
+      [params.email, params.studentId, params.programId, CURRENT_ACADEMIC_YEAR]
     );
     const row = scope.rows[0];
     if (!row) return null;

@@ -12,6 +12,7 @@ const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
 const actor = { actorEmail: "hm-admin@example.com", actorUserId: 9 };
 const newPhase = {
+  programId: 1,
   academicYear: "2026-2027",
   ...actor,
   grade: 11 as const,
@@ -36,7 +37,12 @@ function deletePhaseClient(laterPhase: Record<string, unknown>) {
 async function deletePhaseWithLater(laterPhase: Record<string, unknown>) {
   const client = deletePhaseClient(laterPhase);
   mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
-  const result = await deleteHolisticPhase({ phaseId: 21, expectedRevision: 1, ...actor });
+  const result = await deleteHolisticPhase({
+    programId: 1,
+    phaseId: 21,
+    expectedRevision: 1,
+    ...actor,
+  });
   return { client, result };
 }
 
@@ -72,6 +78,7 @@ describe("Holistic Phase Plans", () => {
 
     await expect(
       updateHolisticPhase({
+      programId: 1,
         phaseId: 21,
         expectedRevision: 3,
         ...actor,
@@ -99,6 +106,7 @@ describe("Holistic Phase Plans", () => {
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
     await expect(updateHolisticPhase({
+      programId: 1,
       phaseId: 21,
       expectedRevision: 2,
       ...actor,
@@ -200,6 +208,7 @@ describe("Holistic Phase Plans", () => {
     mockWithTransaction.mockImplementation(async (fn) => fn(client as never));
 
     await expect(createHolisticPhasePlan({
+      programId: 1,
       academicYear: "2026-2027",
       copyFromAcademicYear: "2025-2026",
       ...actor,
@@ -275,6 +284,7 @@ describe("Holistic Phase Plans", () => {
   it("rejects raw HTML, embedded images, and unsafe Guidance links", async () => {
     for (const guidanceMarkdown of ["<iframe src='x'>", "![image](https://x)", "[bad](javascript:alert(1))"]) {
       const result = await addHolisticPhase({
+      programId: 1,
         academicYear: "2026-2027", ...actor, grade: 11, title: "Safety", guidanceMarkdown,
         questions: [{ text: "What matters?" }],
       });

@@ -54,4 +54,19 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.UTTARAKHAND_COE]: "Uttarakhand CoE",
 };
 
+export const HOLISTIC_MENTORSHIP_PROGRAM_IDS = [
+  PROGRAM_IDS.COE,
+  PROGRAM_IDS.EMRS_COE,
+] as const;
+
+export type HolisticMentorshipProgramId =
+  (typeof HOLISTIC_MENTORSHIP_PROGRAM_IDS)[number];
+
+export function isHolisticMentorshipProgramId(
+  value: unknown,
+): value is HolisticMentorshipProgramId {
+  return typeof value === "number" &&
+    HOLISTIC_MENTORSHIP_PROGRAM_IDS.some((programId) => programId === value);
+}
+
 export const ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST = ["*"] as const;

@@ -3,7 +3,12 @@
 import { useCallback, useId, useRef, useState } from "react";
 
 import { Select } from "@/components/ui";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
+  PROGRAM_IDS,
+  PROGRAM_ID_TO_LABEL,
+} from "@/lib/constants";
 import PhasePlanSetup from "./PhasePlanSetup";
 import ProgressWorkspace from "./ProgressWorkspace";
 import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
@@ -28,10 +33,14 @@ function nextWorkspaceIndex(key: string, index: number, count: number) {
 export default function HolisticMentorshipWorkspace({
   mode,
   schoolCode,
+  programId,
+  initialProgramId = PROGRAM_IDS.COE,
   canEdit = true,
 }: {
   mode: WorkspaceMode;
   schoolCode?: string;
+  programId?: number;
+  initialProgramId?: number;
   canEdit?: boolean;
 }) {
   const workspaces = WORKSPACES.admin;
@@ -40,6 +49,7 @@ export default function HolisticMentorshipWorkspace({
   const tabSetId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [academicYear, setAcademicYear] = useState(CURRENT_ACADEMIC_YEAR);
+  const [selectedProgramId, setSelectedProgramId] = useState(initialProgramId);
   const [academicYears, setAcademicYears] = useState<string[]>([CURRENT_ACADEMIC_YEAR]);
   const updateAcademicYears = useCallback((years: string[]) => {
     if (years.length === 0) return;
@@ -65,7 +75,11 @@ export default function HolisticMentorshipWorkspace({
 
   if (mode === "teacher") {
     return schoolCode
-      ? <TeacherMappingWorkspace schoolCode={schoolCode} canEdit={canEdit} />
+      ? <TeacherMappingWorkspace
+          schoolCode={schoolCode}
+          programId={programId ?? PROGRAM_IDS.COE}
+          canEdit={canEdit}
+        />
       : null;
   }
 
@@ -74,8 +88,21 @@ export default function HolisticMentorshipWorkspace({
       <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
           <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             Program
-            <Select aria-label="Program" className="mt-1 w-full font-normal normal-case tracking-normal" value={PROGRAM_IDS.COE} disabled>
-              <option value={PROGRAM_IDS.COE}>{PROGRAM_IDS.COE} - {PROGRAM_ID_TO_LABEL[PROGRAM_IDS.COE]}</option>
+            <Select
+              aria-label="Program"
+              className="mt-1 w-full font-normal normal-case tracking-normal"
+              value={selectedProgramId}
+              onChange={(event) => {
+                setSelectedProgramId(Number(event.target.value));
+                setAcademicYear(CURRENT_ACADEMIC_YEAR);
+                setAcademicYears([CURRENT_ACADEMIC_YEAR]);
+              }}
+            >
+              {HOLISTIC_MENTORSHIP_PROGRAM_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {id} - {PROGRAM_ID_TO_LABEL[id]}
+                </option>
+              ))}
             </Select>
           </label>
           <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
@@ -122,9 +149,16 @@ export default function HolisticMentorshipWorkspace({
         className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {active.id === "phases" ? (
-          <PhasePlanSetup academicYear={academicYear} />
+          <PhasePlanSetup
+            academicYear={academicYear}
+            programId={selectedProgramId}
+          />
         ) : (
-          <ProgressWorkspace academicYear={academicYear} onAcademicYears={updateAcademicYears} />
+          <ProgressWorkspace
+            academicYear={academicYear}
+            programId={selectedProgramId}
+            onAcademicYears={updateAcademicYears}
+          />
         )}
       </div>
     </section>

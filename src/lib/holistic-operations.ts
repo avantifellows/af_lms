@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "./constants";
 import { hasValidHistoricalSourceProvenance } from "./holistic-historical-provenance";
 
 export type HolisticOperationMode = "dry-run" | "apply";
@@ -25,12 +26,15 @@ export interface ResolvedHistoricalStudent {
   eligible: boolean;
 }
 
-export interface HistoricalImportSource {
+interface HistoricalImportSource {
   read(): Promise<HistoricalHolisticNoteSource[]>;
 }
 
 export interface HistoricalImportDb {
-  resolve(source: HistoricalHolisticNoteSource[]): Promise<ResolvedHistoricalStudent[]>;
+  resolve(
+    source: HistoricalHolisticNoteSource[],
+    programId: number
+  ): Promise<ResolvedHistoricalStudent[]>;
   existing(studentIds: number[], sourceSystem: string): Promise<Map<number, string>>;
   insert(records: HistoricalImportWrite[]): Promise<void>;
 }
@@ -61,8 +65,27 @@ export interface HistoricalImportReport {
   };
 }
 
+export interface HistoricalImportBaseline {
+  safeCandidates: number;
+  substantive: number;
+  emptySkips: number;
+  nullableMentors: number;
+  quarantinedUnmatched: number;
+}
+
+export function isValidHistoricalImportBaseline(
+  baseline: HistoricalImportBaseline
+): boolean {
+  const values = Object.values(baseline);
+  return values.every((value) => Number.isSafeInteger(value) && value >= 0) &&
+    baseline.safeCandidates > 0 &&
+    baseline.substantive > 0 &&
+    baseline.safeCandidates === baseline.substantive + baseline.emptySkips &&
+    baseline.nullableMentors <= baseline.safeCandidates;
+}
+
 const HISTORICAL_SOURCE_SYSTEM = "approved_2025_holistic_export";
-const APPROVED_BASELINE = {
+const PROGRAM_1_APPROVED_BASELINE: HistoricalImportBaseline = {
   safeCandidates: 42,
   substantive: 39,
   emptySkips: 3,
@@ -70,70 +93,173 @@ const APPROVED_BASELINE = {
   quarantinedUnmatched: 11,
 };
 
-export async function runHistoricalHolisticNotesImport(params: {
+type HistoricalImportParams = {
   mode?: HolisticOperationMode;
   source: HistoricalImportSource;
   db: HistoricalImportDb;
   actorUserId?: number;
   sourceSnapshot?: string;
-}): Promise<HistoricalImportReport> {
-  const mode = params.mode ?? "dry-run";
-  const source = await params.source.read();
-  const resolvedRows = await params.db.resolve(source);
+  programId?: number;
+  approvedBaseline?: HistoricalImportBaseline;
+};
+
+function validateHistoricalImportParams(
+  params: HistoricalImportParams,
+  programId: number,
+) {
+  if (!isHolisticMentorshipProgramId(programId)) {
+    throw new Error("Historical import requires Program 1 or 78");
+  }
+  if (params.approvedBaseline &&
+      !isValidHistoricalImportBaseline(params.approvedBaseline)) {
+    throw new Error("Historical import approved counts are invalid");
+  }
+}
+
+function resolvedStudentsByBusinessId(rows: ResolvedHistoricalStudent[]) {
   const byBusinessId = new Map<string, ResolvedHistoricalStudent[]>();
-  for (const row of resolvedRows) {
+  for (const row of rows) {
     const matches = byBusinessId.get(row.businessStudentId) ?? [];
     matches.push(row);
     byBusinessId.set(row.businessStudentId, matches);
   }
+  return byBusinessId;
+}
 
-  const blockers: string[] = [];
-  if (source.some((row) => !hasValidHistoricalSourceProvenance(row) ||
-      row.questions.length !== 4 ||
-      row.questions.some((question, index) =>
-        question.position !== index + 1 || !question.question.trim()))) {
-    blockers.push("Source records must contain approved provenance and Question positions 1 through 4");
+function invalidHistoricalSourceRecord(row: HistoricalHolisticNoteSource) {
+  return !hasValidHistoricalSourceProvenance(row) ||
+    row.questions.length !== 4 ||
+    row.questions.some((question, index) =>
+      question.position !== index + 1 || !question.question.trim());
+}
+
+function sourceValidationBlockers(source: HistoricalHolisticNoteSource[]) {
+  return source.some(invalidHistoricalSourceRecord)
+    ? ["Source records must contain approved provenance and Question positions 1 through 4"]
+    : [];
+}
+
+function classifyHistoricalSource(
+  source: HistoricalHolisticNoteSource[],
+  byBusinessId: Map<string, ResolvedHistoricalStudent[]>,
+) {
+  const safe: HistoricalHolisticNoteSource[] = [];
+  let ambiguous = 0;
+  let unmatched = 0;
+  let wrongScope = 0;
+  for (const row of source) {
+    const matches = byBusinessId.get(row.businessStudentId);
+    if (!matches) unmatched += 1;
+    else if (matches.length !== 1) ambiguous += 1;
+    else if (!matches[0].eligible) wrongScope += 1;
+    else safe.push(row);
   }
-  const safe = source.filter((row) => {
-    const matches = byBusinessId.get(row.businessStudentId) ?? [];
-    return matches.length === 1 && matches[0].eligible;
-  });
-  const wrongScope = source.filter((row) => {
-    const matches = byBusinessId.get(row.businessStudentId) ?? [];
-    return matches.length === 1 && !matches[0].eligible;
-  }).length;
-  const ambiguous = source.length - safe.length - source.filter(
-    (row) => !byBusinessId.has(row.businessStudentId)
-  ).length - wrongScope;
-  const unmatched = source.filter((row) => !byBusinessId.has(row.businessStudentId)).length;
-  if (ambiguous) blockers.push(`${ambiguous} source Student IDs are ambiguous`);
-  if (wrongScope) blockers.push(`${wrongScope} source Students are outside the approved current roster`);
+  return { safe, ambiguous, unmatched, wrongScope };
+}
 
-  const substantive = safe.filter((row) => row.questions.some(({ answer }) => answer?.trim()));
-  const nullableMentors = safe.filter(
+function sourceScopeBlockers(scope: ReturnType<typeof classifyHistoricalSource>) {
+  const blockers: string[] = [];
+  if (scope.ambiguous) blockers.push(`${scope.ambiguous} source Student IDs are ambiguous`);
+  if (scope.wrongScope) {
+    blockers.push(`${scope.wrongScope} source Students are outside the approved current roster`);
+  }
+  return blockers;
+}
+
+function approvedBaselineFor(
+  programId: number,
+  approvedBaseline?: HistoricalImportBaseline,
+) {
+  return approvedBaseline ??
+    (programId === PROGRAM_IDS.COE ? PROGRAM_1_APPROVED_BASELINE : undefined);
+}
+
+function baselineMatches(
+  baseline: HistoricalImportBaseline,
+  counts: HistoricalImportReport["counts"],
+  substantive: number,
+) {
+  return [
+    counts.safeCandidates === baseline.safeCandidates,
+    substantive === baseline.substantive,
+    counts.emptySkips === baseline.emptySkips,
+    counts.nullableMentors === baseline.nullableMentors,
+    counts.quarantinedUnmatched === baseline.quarantinedUnmatched,
+  ].every(Boolean);
+}
+
+function baselineBlockers(params: {
+  baseline?: HistoricalImportBaseline;
+  counts: HistoricalImportReport["counts"];
+  substantive: number;
+  mode: HolisticOperationMode;
+  programId: number;
+}) {
+  if (!params.baseline) {
+    return params.mode === "apply"
+      ? [`Apply requires approved reconciliation counts for Program ${params.programId}`]
+      : [];
+  }
+  if (baselineMatches(params.baseline, params.counts, params.substantive)) return [];
+  return [
+    `Reconciliation counts differ from the approved ` +
+    `${params.baseline.safeCandidates}/${params.baseline.substantive}/` +
+    `${params.baseline.emptySkips}/${params.baseline.nullableMentors}/` +
+    `${params.baseline.quarantinedUnmatched} baseline`,
+  ];
+}
+
+function applyMetadataBlockers(
+  mode: HolisticOperationMode,
+  actorUserId?: number,
+  sourceSnapshot?: string,
+) {
+  if (mode !== "apply") return [];
+  const valid = [
+    Number.isSafeInteger(actorUserId),
+    (actorUserId ?? 0) >= 1,
+    Boolean(sourceSnapshot?.trim()),
+  ].every(Boolean);
+  return valid ? [] : ["Apply requires actor and source-snapshot metadata"];
+}
+
+export async function runHistoricalHolisticNotesImport(
+  params: HistoricalImportParams,
+): Promise<HistoricalImportReport> {
+  const mode = params.mode ?? "dry-run";
+  const programId = params.programId ?? PROGRAM_IDS.COE;
+  validateHistoricalImportParams(params, programId);
+  const source = await params.source.read();
+  const resolvedRows = await params.db.resolve(source, programId);
+  const byBusinessId = resolvedStudentsByBusinessId(resolvedRows);
+  const scope = classifyHistoricalSource(source, byBusinessId);
+  const blockers = [
+    ...sourceValidationBlockers(source),
+    ...sourceScopeBlockers(scope),
+  ];
+  const substantive = scope.safe.filter(
+    (row) => row.questions.some(({ answer }) => answer?.trim())
+  );
+  const nullableMentors = scope.safe.filter(
     (row) => byBusinessId.get(row.businessStudentId)?.[0].mentorUserId == null
   ).length;
   const counts = {
-    safeCandidates: safe.length,
+    safeCandidates: scope.safe.length,
     writes: substantive.length,
-    emptySkips: safe.length - substantive.length,
+    emptySkips: scope.safe.length - substantive.length,
     nullableMentors,
-    quarantinedUnmatched: unmatched,
+    quarantinedUnmatched: scope.unmatched,
   };
-  if (
-    counts.safeCandidates !== APPROVED_BASELINE.safeCandidates ||
-    substantive.length !== APPROVED_BASELINE.substantive ||
-    counts.emptySkips !== APPROVED_BASELINE.emptySkips ||
-    counts.nullableMentors !== APPROVED_BASELINE.nullableMentors ||
-    counts.quarantinedUnmatched !== APPROVED_BASELINE.quarantinedUnmatched
-  ) {
-    blockers.push("Reconciliation counts differ from the approved 42/39/3/10/11 baseline");
-  }
-  if (mode === "apply" &&
-      (!Number.isSafeInteger(params.actorUserId) || (params.actorUserId ?? 0) < 1 ||
-        !params.sourceSnapshot?.trim())) {
-    blockers.push("Apply requires actor and source-snapshot metadata");
-  }
+  blockers.push(
+    ...baselineBlockers({
+      baseline: approvedBaselineFor(programId, params.approvedBaseline),
+      counts,
+      substantive: substantive.length,
+      mode,
+      programId,
+    }),
+    ...applyMetadataBlockers(mode, params.actorUserId, params.sourceSnapshot),
+  );
 
   const resolved = substantive.map((row) => ({
     row,
@@ -147,11 +273,12 @@ export async function runHistoricalHolisticNotesImport(params: {
   if (fingerprintConflicts) {
     blockers.push(`${fingerprintConflicts} existing Historical Notes records have different source content`);
   }
-  const writes = resolved.filter(({ match }) => !existing.has(match.studentId)).map(({ row, match }) => ({
+  const writes = resolved.filter(({ match }) => !existing.has(match.studentId))
+    .map(({ row, match, sourceFingerprint }) => ({
     studentId: match.studentId,
     mentorUserId: match.mentorUserId,
     sourceRecordKey: row.sourceRecordKey,
-    sourceFingerprint: historicalSourceFingerprint(row),
+    sourceFingerprint,
     sourceSnapshot: params.sourceSnapshot ?? "dry-run",
     sourceStartedAt: row.sourceStartedAt,
     sourceEndedAt: row.sourceEndedAt,
@@ -190,8 +317,17 @@ export interface HolisticRolloverCandidate {
 }
 
 export interface HolisticRolloverDb {
-  candidates(fromAcademicYear: string, toAcademicYear: string): Promise<HolisticRolloverCandidate[]>;
-  apply(fromAcademicYear: string, toAcademicYear: string, actorUserId: number): Promise<HolisticRolloverCounts>;
+  candidates(
+    fromAcademicYear: string,
+    toAcademicYear: string,
+    programId: number
+  ): Promise<HolisticRolloverCandidate[]>;
+  apply(
+    fromAcademicYear: string,
+    toAcademicYear: string,
+    actorUserId: number,
+    programId: number
+  ): Promise<HolisticRolloverCounts>;
 }
 
 export type HolisticRolloverCounts = { carried: number; skipped: number; ineligible: number };
@@ -201,6 +337,7 @@ export async function runHolisticMappingRollover(params: {
   fromAcademicYear: string;
   toAcademicYear: string;
   actorUserId: number;
+  programId: number;
   db: HolisticRolloverDb;
 }): Promise<{
   ok: true;
@@ -220,10 +357,19 @@ export async function runHolisticMappingRollover(params: {
     return {
       ok: true,
       mode,
-      counts: await params.db.apply(params.fromAcademicYear, params.toAcademicYear, params.actorUserId),
+      counts: await params.db.apply(
+        params.fromAcademicYear,
+        params.toAcademicYear,
+        params.actorUserId,
+        params.programId
+      ),
     };
   }
-  const candidates = await params.db.candidates(params.fromAcademicYear, params.toAcademicYear);
+  const candidates = await params.db.candidates(
+    params.fromAcademicYear,
+    params.toAcademicYear,
+    params.programId
+  );
   const carried = candidates.filter((candidate) => candidate.eligible && !candidate.alreadyMapped);
   const counts = {
     carried: carried.length,

@@ -21,7 +21,10 @@ import {
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
 } from "@/lib/permissions";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isHolisticMentorshipProgramId,
+} from "@/lib/constants";
 import { type Grade } from "@/components/StudentTable";
 import { getSchoolRoster, getCentreStudents } from "@/lib/school-students";
 import PageHeader from "@/components/PageHeader";
@@ -288,14 +291,16 @@ function redirectHolisticMentorshipAdmin(permission: UserPermission | null): voi
 /**
  * Holistic Mentorship tab content, or null when the tab shouldn't render.
  *
- * This tab MUST be reachable on centre pages: holistic's users are Program-1
- * (CoE) subject teachers, and those teachers hold centre seats — which this
- * page confines away from the school roster. School-page-only holistic would
- * lock them out of their own workspace.
+ * This tab MUST be reachable on centre pages: holistic's users are CoE subject
+ * teachers, and those teachers hold centre seats — which this page confines
+ * away from the school roster. School-page-only holistic would lock them out
+ * of their own workspace.
  *
- * It stays CoE-scoped though: a centre page shows only its own program's
- * surfaces, so a Nodal centre at a school that *also* has a CoE centre must
- * not surface CoE holistic data.
+ * It stays scoped to holistic's own programs though: a centre page shows only
+ * its own program's surfaces, so a Nodal centre at a school that *also* has a
+ * CoE centre must not surface CoE holistic data. The allowed set is
+ * HOLISTIC_MENTORSHIP_PROGRAM_IDS (JNV CoE + EMRS CoE), not a hardcoded CoE —
+ * both active EMRS CoE centres are school-linked and must show the tab.
  */
 async function buildHolisticMentorshipContent({
   session,
@@ -313,7 +318,7 @@ async function buildHolisticMentorshipContent({
   centreProgramId?: number;
 }): Promise<ReactNode | null> {
   if (!access.canView) return null;
-  if (isCentre && Number(centreProgramId) !== PROGRAM_IDS.COE) return null;
+  if (isCentre && !isHolisticMentorshipProgramId(Number(centreProgramId))) return null;
   const isTeacher = permission?.role === "teacher";
   const holisticAccess = await requireHolisticMentorshipAccess(
     session,
@@ -326,6 +331,7 @@ async function buildHolisticMentorshipContent({
       <HolisticMentorshipWorkspace
         mode="teacher"
         schoolCode={schoolCode}
+        programId={holisticAccess.school!.programId}
         canEdit={holisticAccess.canEdit}
       />
     );
@@ -333,8 +339,10 @@ async function buildHolisticMentorshipContent({
   return (
     <AdminSchoolRoster
       schoolCode={schoolCode}
+      programId={holisticAccess.school!.programId}
       students={await listHolisticAssignmentRoster({
         schoolId: holisticAccess.school!.id,
+        programId: holisticAccess.school!.programId,
         academicYear: CURRENT_ACADEMIC_YEAR,
       })}
     />
