@@ -39,6 +39,10 @@ describe("AdminSchoolRoster", () => {
     );
     expect(screen.queryByRole("link", { name: "Open Ravi Shah" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View tutorial" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/tutorial",
+    );
   });
 
   it("filters by assignment without changing the summary", () => {

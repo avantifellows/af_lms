@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-07-27
+last_updated: 2026-07-30
 ---
 
 # Permissions
@@ -70,6 +70,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
+- **Holistic Mentorship tutorial:** `/holistic-mentorship/tutorial` uses `program_read` for the Admin guide. Teacher links add `school_code`, and the same route uses `roster_view` for that School before showing the Teacher guide. Program Managers, Program Admins, passcode users, and unsupported Teacher School access remain blocked.
 - **School page Mentorship tab:** visibility comes from `academic_mentorship` feature access. Teachers see only their own current-year active Mentees; PMs/Admins/Program Admins see a read-only School overview; only Admins and Program Admins get the management link.
 - **Visit routes:** use `src/lib/visits-policy.ts` instead — `requireVisitsAccess(session, "view"|"edit")` then `enforceVisit*`. See `context/visits.md`.
 - **List queries:** scope at the SQL level with `getAccessibleSchoolCodes(email)` (returns `"all"` or `string[]`) or, for visits, `buildVisitScopePredicate(actor)`.

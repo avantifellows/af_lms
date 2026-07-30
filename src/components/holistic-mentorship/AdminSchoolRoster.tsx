@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Badge, Input, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import type { HolisticAssignmentRosterStudent as Student } from "@/lib/holistic-mappings";
+import HolisticTutorialLink from "./HolisticTutorialLink";
 import StudentIdentity from "./StudentIdentity";
 
 type AssignmentFilter = "all" | "assigned" | "unassigned";
@@ -160,6 +161,7 @@ export default function AdminSchoolRoster({
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">Holistic Mentorship</h2>
         <Badge variant="info">Read-only</Badge>
+        <HolisticTutorialLink />
       </div>
       <p className="mt-1 text-sm text-text-muted">School assignment coverage for {CURRENT_ACADEMIC_YEAR}</p>
     </div>
