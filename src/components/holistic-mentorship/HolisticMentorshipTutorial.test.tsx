@@ -25,6 +25,11 @@ describe("HolisticMentorshipTutorial", () => {
       .toBeInTheDocument();
     expect(screen.getByText("No previous session notes available?")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /shown side by side/ })).toBeInTheDocument();
+    expect(screen.queryAllByTestId("screenshot-highlight")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: /Submit notes/ }));
+    expect(screen.getByText("Before submission")).toBeInTheDocument();
+    expect(screen.getByText("After submission")).toBeInTheDocument();
     expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(2);
   });
 

@@ -9,7 +9,7 @@ import Image from "next/image";
 import { useRef, useState, type ReactNode } from "react";
 
 type Audience = "teacher" | "admin";
-type StepLayout = "split" | "prepare" | "stack";
+type StepLayout = "notes" | "prepare" | "split";
 
 type GuideStep = {
   number: string;
@@ -31,6 +31,7 @@ type GuideStep = {
       height: number;
     }>;
   };
+  secondaryMedia?: GuideStep["media"];
   callout?: ReactNode;
   layout?: StepLayout;
 };
@@ -155,10 +156,6 @@ const teacherSteps: GuideStep[] = [
       label: "Student Context and Phase Guidance",
       width: 1280,
       height: 800,
-      highlights: [
-        { left: 2.3, top: 42, width: 47.2, height: 56.5 },
-        { left: 50.5, top: 42, width: 47.2, height: 56.5 },
-      ],
     },
     callout: (
       <GuideCallout title="No previous session notes available?">
@@ -178,35 +175,45 @@ const teacherSteps: GuideStep[] = [
     label: "Record the conversation",
     title: "Complete the post-session notes",
     summary: "Answer the questions after meeting the student.",
-    layout: "stack",
+    layout: "notes",
     instructions: (
-      <>
-        <ol>
-          <li>
-            Answer every question under <strong>Post-Session Notes</strong>.
-          </li>
-          <li>Your draft saves automatically while you type.</li>
-          <li>
-            Check the answers, then choose <strong>Submit Notes</strong>.
-          </li>
-          <li>Confirm the submission. The phase shows as completed.</li>
-        </ol>
-        <GuideCallout>
-          To correct submitted notes, choose <strong>Edit Notes</strong>, update the
-          answers, and select <strong>Save Changes</strong>.
-        </GuideCallout>
-      </>
+      <ol>
+        <li>
+          Answer every question under <strong>Post-Session Notes</strong>.
+        </li>
+        <li>Your draft saves automatically while you type.</li>
+        <li>
+          Check the answers, then choose <strong>Submit Notes</strong>.
+        </li>
+        <li>Confirm the submission. The phase shows as completed.</li>
+      </ol>
     ),
     media: {
-      src: `${IMAGE_ROOT}/post-session-context.png`,
-      alt: "All five actual Phase 1 questions with submitted responses",
-      label: "Actual Phase 1 questions",
-      width: 1280,
-      height: 800,
+      src: `${IMAGE_ROOT}/post-session-submit-focused.png`,
+      alt: "Post-Session Notes with one actual Phase 1 question and the Submit Notes button",
+      label: "Before submission",
+      width: 1220,
+      height: 350,
       highlights: [
-        { left: 2.3, top: 33, width: 95.5, height: 66 },
+        { left: 86, top: 76.6, width: 12.3, height: 14.2 },
       ],
     },
+    secondaryMedia: {
+      src: `${IMAGE_ROOT}/post-session-edit.png`,
+      alt: "Three actual Phase 1 questions with submitted responses and the Edit Notes button",
+      label: "After submission",
+      width: 1220,
+      height: 350,
+      highlights: [
+        { left: 87.7, top: 7.2, width: 10.7, height: 14.2 },
+      ],
+    },
+    callout: (
+      <GuideCallout>
+        To correct submitted notes, choose <strong>Edit Notes</strong>, update the
+        answers, and select <strong>Save Changes</strong>.
+      </GuideCallout>
+    ),
   },
 ];
 
@@ -441,7 +448,7 @@ function GuideMedia({ media }: { media: GuideStep["media"] }) {
               key={`${highlight.left}-${highlight.top}-${index}`}
               aria-hidden="true"
               data-testid="screenshot-highlight"
-              className="pointer-events-none absolute rounded-sm border-[3px] border-success bg-success/10 shadow-[0_0_0_2px_rgba(255,255,255,0.95),0_0_0_5px_rgba(22,101,74,0.22)]"
+              className="pointer-events-none absolute rounded-sm border-[3px] border-success shadow-[0_0_0_2px_rgba(255,255,255,0.95),0_0_0_5px_rgba(22,101,74,0.22)]"
               style={{
                 left: `${highlight.left}%`,
                 top: `${highlight.top}%`,
@@ -475,11 +482,17 @@ function StepBody({ step }: { step: GuideStep }) {
     );
   }
 
-  if (step.layout === "stack") {
+  if (step.layout === "notes") {
     return (
       <div className="space-y-6">
         {instructions}
-        <GuideMedia media={step.media} />
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(16rem,0.72fr)_minmax(0,1.55fr)]">
+          <div className="[&_aside]:mt-0">{step.callout}</div>
+          <div className="space-y-4">
+            <GuideMedia media={step.media} />
+            {step.secondaryMedia && <GuideMedia media={step.secondaryMedia} />}
+          </div>
+        </div>
       </div>
     );
   }
