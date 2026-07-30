@@ -85,6 +85,10 @@ describe("HolisticMentorshipWorkspace", () => {
     const user = userEvent.setup();
     render(<HolisticMentorshipWorkspace mode="admin" />);
 
+    expect(screen.getByRole("link", { name: "View tutorial" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/tutorial",
+    );
     expect(screen.getByRole("tab", { name: "Students & Progress" })).toBeInTheDocument();
     expect(await screen.findByText("No mapped Students exist for this Academic Year.")).toBeInTheDocument();
     expect(screen.getAllByRole("option", { name: "2026-2027" })).toHaveLength(1);

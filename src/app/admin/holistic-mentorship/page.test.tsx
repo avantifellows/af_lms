@@ -58,10 +58,6 @@ describe("HolisticMentorshipAdminPage", () => {
     render(await HolisticMentorshipAdminPage());
 
     expect(screen.getByRole("heading", { name: "Holistic Mentorship" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View tutorial" })).toHaveAttribute(
-      "href",
-      "/holistic-mentorship/tutorial",
-    );
     expect(screen.getByRole("tab", { name: "Students & Progress" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Phase Setup" })).toBeInTheDocument();
     expect(mockRequireAccess).toHaveBeenCalledWith(

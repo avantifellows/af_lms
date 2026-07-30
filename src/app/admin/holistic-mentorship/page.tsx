@@ -2,7 +2,6 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
 import HolisticMentorshipWorkspace from "@/components/holistic-mentorship/HolisticMentorshipWorkspace";
-import HolisticTutorialLink from "@/components/holistic-mentorship/HolisticTutorialLink";
 import PageHeader from "@/components/PageHeader";
 import { authOptions } from "@/lib/auth";
 import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
@@ -31,12 +30,9 @@ export default async function HolisticMentorshipAdminPage({
         backHref={access.permission.role === "admin" ? "/dashboard" : undefined}
         userEmail={session?.user?.email ?? undefined}
         actions={
-          <div className="flex items-center gap-2">
-            <HolisticTutorialLink />
-            <span className="hidden rounded-full bg-info-bg px-3 py-1.5 text-xs font-extrabold text-info sm:inline-flex">
-              Mentorship Admin
-            </span>
-          </div>
+          <span className="hidden rounded-full bg-info-bg px-3 py-1.5 text-xs font-extrabold text-info sm:inline-flex">
+            Mentorship Admin
+          </span>
         }
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
