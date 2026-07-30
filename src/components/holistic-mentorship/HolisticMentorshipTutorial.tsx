@@ -238,6 +238,9 @@ const adminSteps: GuideStep[] = [
       label: "LMS landing page",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 59.9, top: 1.1, width: 13.1, height: 5.7 },
+      ],
     },
   },
   {
@@ -306,6 +309,9 @@ const adminSteps: GuideStep[] = [
       label: "Open Phase button",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 80.9, top: 43.5, width: 11.8, height: 7.8 },
+      ],
     },
   },
   {

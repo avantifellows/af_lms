@@ -33,11 +33,17 @@ describe("HolisticMentorshipTutorial", () => {
     expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(2);
   });
 
-  it("shows the Admin-specific steps and help", () => {
+  it("shows the Admin-specific steps and help", async () => {
+    const user = userEvent.setup();
     render(<HolisticMentorshipTutorial audience="admin" />);
 
     expect(screen.getByRole("heading", { name: "Open the Mentorship Admin workspace" }))
       .toBeInTheDocument();
+    expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /Open phase/ }));
+    expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(1);
+
     expect(screen.getByText("Phase cannot be edited")).toBeInTheDocument();
     expect(screen.getByText("Handle student information carefully")).toBeInTheDocument();
     expect(screen.queryByText("No Holistic Mentorship tab")).not.toBeInTheDocument();
