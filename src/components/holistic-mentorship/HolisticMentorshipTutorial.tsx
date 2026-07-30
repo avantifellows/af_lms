@@ -24,6 +24,12 @@ type GuideStep = {
     label: string;
     width: number;
     height: number;
+    highlights?: Array<{
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    }>;
   };
   callout?: ReactNode;
   layout?: StepLayout;
@@ -53,6 +59,9 @@ const teacherSteps: GuideStep[] = [
       label: "Holistic Mentorship tab",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 62.2, top: 11.5, width: 14.5, height: 7 },
+      ],
     },
   },
   {
@@ -85,6 +94,10 @@ const teacherSteps: GuideStep[] = [
       label: "JNV Adilabad student list",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 3.1, top: 54.3, width: 4.3, height: 7 },
+        { left: 83.3, top: 40.8, width: 13.1, height: 6.8 },
+      ],
     },
   },
   {
@@ -110,6 +123,9 @@ const teacherSteps: GuideStep[] = [
       label: "My Mentees",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 2.3, top: 57.5, width: 31.5, height: 16.8 },
+      ],
     },
   },
   {
@@ -139,6 +155,10 @@ const teacherSteps: GuideStep[] = [
       label: "Student Context and Phase Guidance",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 2.3, top: 42, width: 47.2, height: 56.5 },
+        { left: 50.5, top: 42, width: 47.2, height: 56.5 },
+      ],
     },
     callout: (
       <GuideCallout title="No previous session notes available?">
@@ -183,6 +203,9 @@ const teacherSteps: GuideStep[] = [
       label: "Actual Phase 1 questions",
       width: 1280,
       height: 800,
+      highlights: [
+        { left: 2.3, top: 33, width: 95.5, height: 66 },
+      ],
     },
   },
 ];
@@ -403,15 +426,31 @@ function GuideMedia({ media }: { media: GuideStep["media"] }) {
         aria-label={`Open ${media.label} full size`}
         className="block overflow-x-auto bg-white"
       >
-        <Image
-          src={media.src}
-          alt={media.alt}
-          width={media.width}
-          height={media.height}
-          loading="eager"
-          sizes="(max-width: 1024px) 100vw, 70vw"
-          className="h-auto min-w-[640px] max-w-none sm:min-w-0 sm:max-w-full"
-        />
+        <span className="relative block min-w-[640px] sm:min-w-0">
+          <Image
+            src={media.src}
+            alt={media.alt}
+            width={media.width}
+            height={media.height}
+            loading="eager"
+            sizes="(max-width: 1024px) 100vw, 70vw"
+            className="h-auto w-full"
+          />
+          {media.highlights?.map((highlight, index) => (
+            <span
+              key={`${highlight.left}-${highlight.top}-${index}`}
+              aria-hidden="true"
+              data-testid="screenshot-highlight"
+              className="pointer-events-none absolute rounded-sm border-[3px] border-success bg-success/10 shadow-[0_0_0_2px_rgba(255,255,255,0.95),0_0_0_5px_rgba(22,101,74,0.22)]"
+              style={{
+                left: `${highlight.left}%`,
+                top: `${highlight.top}%`,
+                width: `${highlight.width}%`,
+                height: `${highlight.height}%`,
+              }}
+            />
+          ))}
+        </span>
       </a>
     </figure>
   );

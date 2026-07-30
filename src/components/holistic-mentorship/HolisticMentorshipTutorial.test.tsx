@@ -12,17 +12,20 @@ describe("HolisticMentorshipTutorial", () => {
     expect(screen.getByRole("heading", { name: "Open Holistic Mentorship" }))
       .toBeInTheDocument();
     expect(screen.getByRole("img", { name: /JNV Adilabad page/ })).toBeInTheDocument();
+    expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: /Assign students/ }));
     expect(screen.getByRole("heading", { name: "Assign students to yourself" }))
       .toBeInTheDocument();
     expect(screen.getByText("Student already has a mentor?")).toBeInTheDocument();
+    expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: /Prepare/ }));
     expect(screen.getByRole("heading", { name: "Review the student context and guidance" }))
       .toBeInTheDocument();
     expect(screen.getByText("No previous session notes available?")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /shown side by side/ })).toBeInTheDocument();
+    expect(screen.getAllByTestId("screenshot-highlight")).toHaveLength(2);
   });
 
   it("shows the Admin-specific steps and help", () => {
