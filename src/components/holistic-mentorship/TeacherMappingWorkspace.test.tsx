@@ -34,6 +34,10 @@ describe("TeacherMappingWorkspace", () => {
     const user = userEvent.setup();
 
     render(<TeacherMappingWorkspace schoolCode="SCH001" />);
+    expect(screen.getByRole("link", { name: "View tutorial" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/tutorial?school_code=SCH001",
+    );
     const checkbox = await screen.findByRole("checkbox", { name: "Select Asha Rao" });
     expect(checkbox.closest("label")).toHaveClass("min-h-11", "min-w-11");
     await user.click(checkbox);

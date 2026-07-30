@@ -9,6 +9,7 @@ import {
   PROGRAM_IDS,
   PROGRAM_ID_TO_LABEL,
 } from "@/lib/constants";
+import HolisticTutorialLink from "./HolisticTutorialLink";
 import PhasePlanSetup from "./PhasePlanSetup";
 import ProgressWorkspace from "./ProgressWorkspace";
 import TeacherMappingWorkspace from "./TeacherMappingWorkspace";
@@ -85,6 +86,9 @@ export default function HolisticMentorshipWorkspace({
 
   return (
     <section className="min-w-0 max-w-full space-y-4">
+      <div className="flex justify-end">
+        <HolisticTutorialLink />
+      </div>
       <div className="grid gap-3 rounded-md border border-border bg-bg-card p-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
           <label className="block min-w-0 text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
             Program

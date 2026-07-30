@@ -1,10 +1,13 @@
 import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetServerSession, mockPageHeader, mockRedirect, mockRequireAccess, mockWorkspace } = vi.hoisted(
   () => ({
     mockGetServerSession: vi.fn(),
-    mockPageHeader: vi.fn(({ title }: { title: string }) => <h1>{title}</h1>),
+    mockPageHeader: vi.fn(({ title, actions }: { title: string; actions?: ReactNode }) => (
+      <><h1>{title}</h1>{actions}</>
+    )),
     mockRedirect: vi.fn((url: string) => {
       throw new Error(`REDIRECT:${url}`);
     }),

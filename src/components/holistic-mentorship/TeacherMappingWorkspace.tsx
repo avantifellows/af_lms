@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import HolisticTutorialLink from "./HolisticTutorialLink";
 import StudentIdentity, { studentInitials } from "./StudentIdentity";
 
 interface Student {
@@ -352,9 +353,12 @@ export default function TeacherMappingWorkspace({
           </h2>
           <p className="text-sm text-text-muted">Assign Students to yourself to start mentorship</p>
         </div>
-        <span className="self-start rounded-full bg-info-bg px-3 py-1.5 font-mono text-xs font-bold text-info sm:self-auto">
-          {CURRENT_ACADEMIC_YEAR}
-        </span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <HolisticTutorialLink schoolCode={schoolCode} />
+          <span className="rounded-full bg-info-bg px-3 py-1.5 font-mono text-xs font-bold text-info">
+            {CURRENT_ACADEMIC_YEAR}
+          </span>
+        </div>
       </div>
       {message && <p role="alert" className="text-sm text-danger">{message}</p>}
       {success && <p role="status" className="text-sm text-success">{success}</p>}

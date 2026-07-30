@@ -407,6 +407,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - On a School's **Holistic Mentorship Tab**, a global **Admin** sees read-only assignment coverage for all eligible Students, including unassigned Students, Mentor assignment, and current progress; Student drill-down returns to that School tab
 - A **Holistic Mentorship Admin** can read every Holistic Mentee's Student Context and Post-Session Notes across the launch Program
 - **Holistic Mentorship Admins** and **Admins** can view Mapping status but cannot assign, reassign, or remove Holistic Mentees in v1
+- Holistic Mentorship Teacher and Admin workspaces include an in-context **View tutorial** link that opens the matching role guide in a new tab; the guide stays inside LMS and uses the same Teacher School-scope or Admin Program-scope access check as the workspace
 - The db-service table for **Academic Mentor-Mentee Mappings** is `academic_mentorship_mentor_mentee_mappings`
 - The **Academic Mentorship Mentor-Mentee Mapping Table** stores `id`, `school_id`, nullable `program_id`, `academic_year`, `mentor_user_id`, `student_id`, `assigned_at`, `assigned_by_user_id`, `ended_at`, `ended_by_user_id`, optional `end_reason`, and normal timestamps
 - `assigned_by_user_id` and `ended_by_user_id` on the **Academic Mentorship Mentor-Mentee Mapping Table** reference `user.id`, not `user_permission.id`, because mappings audit the person taking the action rather than the person's mutable permission row

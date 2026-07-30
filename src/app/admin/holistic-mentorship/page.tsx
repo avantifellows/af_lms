@@ -30,7 +30,7 @@ export default async function HolisticMentorshipAdminPage({
         backHref={access.permission.role === "admin" ? "/dashboard" : undefined}
         userEmail={session?.user?.email ?? undefined}
         actions={
-          <span className="rounded-full bg-info-bg px-3 py-1.5 text-xs font-extrabold text-info">
+          <span className="hidden rounded-full bg-info-bg px-3 py-1.5 text-xs font-extrabold text-info sm:inline-flex">
             Mentorship Admin
           </span>
         }
