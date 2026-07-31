@@ -243,7 +243,7 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.getByRole("button", { name: "Request Profile regeneration" })).toBeEnabled();
   });
 
-  it("shows the same Profile failure reason to Mentors without an Admin action", () => {
+  it("explains an ambiguous Profile source to Mentors without an Admin action", () => {
     const detail = teacherDetail();
     (detail.selectedPhase as OpenPhase).context = {
       label: null,
@@ -252,14 +252,14 @@ describe("StudentPhaseWorkspace", () => {
       regeneration: {
         requestKey: "request-1",
         state: "failed",
-        errorCode: "no_questionnaire_submission",
+        errorCode: "ambiguous_journey_source",
       },
     };
 
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={detail} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "This Student has not submitted the profile questionnaire."
+      "More than one eligible questionnaire response was found for this Student. Please ask an Admin to review the source data."
     );
     expect(screen.queryByRole("button", { name: "Request Profile regeneration" })).not.toBeInTheDocument();
   });
