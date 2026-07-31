@@ -1234,6 +1234,7 @@ function profileFailureMessage(errorCode: string | null) {
     form_not_approved: "The submitted questionnaire is not an approved Profile questionnaire.",
     form_grade_mismatch: "The submitted questionnaire does not match the Student's entry Grade.",
     journey_source_conflict: "The questionnaire does not match the Student's existing Profile journey.",
+    ambiguous_journey_source: "More than one eligible questionnaire response was found for this Student. Please ask an Admin to review the source data.",
     program_ineligible: "This Student is not eligible for the Holistic Mentorship Program.",
     school_missing_or_ambiguous: "The Student's School details must be corrected before a Profile can be generated.",
     grade_ineligible: "This Student's Grade is not eligible for a Profile.",
