@@ -55,14 +55,14 @@ describe("GET /api/teacher-feedback/cycles", () => {
         {
           setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",          batch_class_ids: ["EnableStudents_TP_2027_engg_C024"],
           teacher_name: "Manjit Kumar", teacher_order: 2, teacher_id: "AF836",
-          session_pk: 6, status: "created",
+          session_pk: "6", status: "created",
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
           created_by: "pm@avantifellows.org", inserted_at: "2026-06-22 10:00:00",
         },
         {
           setup_run_id: "run-1", cycle_label: "Jun 2026", centre_name: "JNV Palghar - CoE",          batch_class_ids: ["EnableStudents_TP_2027_engg_C024"],
           teacher_name: "Sanjeet Pal", teacher_order: 1, teacher_id: "AF400",
-          session_pk: 5, status: "created",
+          session_pk: "5", status: "created",
           start_time: "2026-06-22 00:00:00", end_time: "2026-06-23 00:00:00",
           created_by: "pm@avantifellows.org", inserted_at: "2026-06-22 10:00:00",
         },
@@ -71,10 +71,11 @@ describe("GET /api/teacher-feedback/cycles", () => {
         { batch_id: "EnableStudents_TP_2027_engg_C024", name: "CoE JNV Palghar 2027 Engineering" },
       ] as never) // batch name resolution
       .mockResolvedValueOnce([
-        // session rows (links filled by the Lambda). id is a STRING here on
-        // purpose: session.id is a bigint, which node-pg returns as a string,
-        // while lms_teacher_feedback.session_pk is an integer (number). The route
-        // must coerce to match — this guards that key-type regression.
+        // session rows (links filled by the Lambda). Both ids are STRINGS here
+        // on purpose: session.id and lms_teacher_feedback.session_pk are both
+        // bigints, which node-pg returns as strings. A number-keyed map with a
+        // raw string lookup misses every row, and the UI then shows
+        // "Generating links…" forever — this guards that regression.
         { id: "5", platform_id: "quiz_s", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_s", meta_data: { admin_testing_link: "https://staging-quiz/form/quiz_s" } },
         { id: "6", platform_id: "quiz_m", portal_link: "https://staging-auth.avantifellows.org/?sessionId=EnableStudents_quiz_m", meta_data: {} },
       ] as never);

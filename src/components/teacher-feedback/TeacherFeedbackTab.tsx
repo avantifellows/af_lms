@@ -56,6 +56,12 @@ interface Cycle {
 
 const DEFAULT_DURATION_HOURS = 24;
 
+/**
+ * Background refresh, so links the sessionCreator Lambda writes asynchronously
+ * appear without a manual reload. Matches the Quiz Sessions tab's interval.
+ */
+const CYCLE_REFRESH_MS = 40000;
+
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
   const d = new Date(value.includes("T") || value.includes("Z") ? value : value.replace(" ", "T") + "Z");
@@ -96,8 +102,10 @@ export default function TeacherFeedbackTab({
     }
   }, [schoolCode]);
 
-  const fetchCycles = useCallback(async () => {
-    setLoadingCycles(true);
+  const fetchCycles = useCallback(async ({ background = false } = {}) => {
+    // background: a periodic refresh must not flash the loading state or raise a
+    // toast on a transient failure — the next tick retries.
+    if (!background) setLoadingCycles(true);
     try {
       // no-store: links are filled asynchronously by the Lambda, so a cached
       // response would keep showing "Generating…" after they're ready.
@@ -108,9 +116,11 @@ export default function TeacherFeedbackTab({
       const body = await res.json();
       setCycles(Array.isArray(body.cycles) ? body.cycles : []);
     } catch {
-      setToast({ variant: "error", message: "Failed to load feedback rounds" });
+      if (!background) {
+        setToast({ variant: "error", message: "Failed to load feedback rounds" });
+      }
     } finally {
-      setLoadingCycles(false);
+      if (!background) setLoadingCycles(false);
     }
   }, [schoolCode]);
 
@@ -118,6 +128,18 @@ export default function TeacherFeedbackTab({
     fetchCentres();
     fetchCycles();
   }, [fetchCentres, fetchCycles]);
+
+  // The sessionCreator Lambda fills each session's links a few seconds after
+  // setup returns, so a mount-only fetch leaves "Generating links…" on screen
+  // until the user happens to reload. Same background refresh the Quiz Sessions
+  // tab uses for its own async state.
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      fetchCycles({ background: true });
+    }, CYCLE_REFRESH_MS);
+    return () => window.clearInterval(intervalId);
+  }, [fetchCycles]);
 
   return (
     <div className="space-y-4">

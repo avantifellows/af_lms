@@ -12,7 +12,8 @@ interface Row {
   teacher_name: string;
   teacher_order: number;
   teacher_id: string | null;
-  session_pk: number | null;
+  /** bigint — node-pg hands these back as strings, so always coerce before use. */
+  session_pk: number | string | null;
   status: string;
   start_time: string | null;
   end_time: string | null;
@@ -71,8 +72,9 @@ interface SessionLinks {
 /**
  * Read the launch links the sessionCreator Lambda writes onto each session,
  * keyed by session pk. Absent until the Lambda has run (UI shows "Generating…").
- * session.id is a bigint (node-pg returns a string), so coerce to a number key
- * to match session_pk (an integer).
+ * Both session.id and lms_teacher_feedback.session_pk are bigints, which node-pg
+ * returns as strings — every key and lookup here goes through Number() so the
+ * map can't miss on "18046" vs 18046.
  */
 async function resolveSessionLinks(
   sessionPks: number[]
@@ -153,7 +155,11 @@ export async function GET(request: NextRequest) {
   // (async); absent until it has run, so the UI shows "Generating…".
   const linksByPk = await resolveSessionLinks(
     Array.from(
-      new Set(rows.map((r) => r.session_pk).filter((pk): pk is number => pk != null))
+      new Set(
+        rows
+          .map((r) => (r.session_pk == null ? null : Number(r.session_pk)))
+          .filter((pk): pk is number => pk != null && !Number.isNaN(pk))
+      )
     )
   );
 
@@ -177,7 +183,11 @@ export async function GET(request: NextRequest) {
       };
       byRun.set(r.setup_run_id, cycle);
     }
-    const links = r.session_pk != null ? linksByPk.get(r.session_pk) : undefined;
+    // Number(): session_pk is a bigint, so pg returns "18046" and a raw lookup
+    // against this number-keyed map misses every time — every row then reads as
+    // "Generating links…" even once the Lambda has filled them in.
+    const links =
+      r.session_pk != null ? linksByPk.get(Number(r.session_pk)) : undefined;
     cycle.teachers.push({
       teacherName: r.teacher_name,
       teacherOrder: r.teacher_order,
