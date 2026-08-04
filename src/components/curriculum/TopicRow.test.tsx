@@ -42,14 +42,13 @@ describe("TopicRow", () => {
       <TopicRow topic={baseTopic} isCompleted={true} />
     );
 
-    // Checkbox span has completed green style
-    const checkbox = container.querySelector("span.bg-green-500");
-    expect(checkbox).toBeInTheDocument();
-    expect(checkbox?.classList.contains("border-green-500")).toBe(true);
-    expect(checkbox?.classList.contains("text-white")).toBe(true);
+    // Read-only check mark rendered in the success color (not a checkbox control)
+    const svg = container.querySelector("svg");
+    expect(svg).toBeInTheDocument();
+    expect(svg?.classList.contains("text-success")).toBe(true);
 
-    // Checkmark SVG is rendered
-    expect(container.querySelector("svg")).toBeInTheDocument();
+    // No pending ring when completed
+    expect(container.querySelector("span.border-gray-300")).toBeNull();
 
     // Topic name has muted text
     expect(screen.getByText("Newton's Laws of Motion").className).toContain(

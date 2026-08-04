@@ -7,7 +7,12 @@ import Link from "next/link";
 import CompleteVisitButton from "@/components/visits/CompleteVisitButton";
 import DeleteVisitButton from "@/components/visits/DeleteVisitButton";
 import ActionPointList from "@/components/visits/ActionPointList";
-import { buildVisitsActor, canEditVisit, canViewVisit } from "@/lib/visits-policy";
+import {
+  buildVisitsActor,
+  canEditVisit,
+  canViewVisit,
+  requiresVisitActionsForCompletion,
+} from "@/lib/visits-policy";
 import { statusBadgeClass } from "@/lib/visit-actions";
 import { Card } from "@/components/ui";
 
@@ -113,7 +118,8 @@ export default async function VisitDetailPage({ params }: PageProps) {
   }
 
   const permission = await getResolvedPermission(session.user.email);
-  if (!getFeatureAccess(permission, "visits").canView) {
+  const visitsAccess = getFeatureAccess(permission, "visits");
+  if (!visitsAccess.canView) {
     redirect("/dashboard");
   }
 
@@ -153,7 +159,7 @@ export default async function VisitDetailPage({ params }: PageProps) {
   const progressPercent = actions.length === 0
     ? 0
     : Math.round((completedCount / actions.length) * 100);
-  const canEdit = canEditVisit(actor, {
+  const canEdit = visitsAccess.canEdit && canEditVisit(actor, {
     pmEmail: visit.pm_email,
     schoolCode: visit.school_code,
     schoolRegion: visit.school_region,
@@ -229,6 +235,11 @@ export default async function VisitDetailPage({ params }: PageProps) {
           </p>
         ) : canEdit ? (
           <div className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              {requiresVisitActionsForCompletion(actor)
+                ? "Complete all required Action Types before completing this Visit. School Staff Interaction is optional."
+                : "Actions are optional for this Visit. End any in-progress Action before completing."}
+            </p>
             <CompleteVisitButton visitId={visit.id} />
             <div className="border-t border-danger/20 pt-4">
               <DeleteVisitButton visitId={visit.id} mode="detail" redirectTo={visit.school_udise ? `/school/${visit.school_udise}` : "/visits"} />

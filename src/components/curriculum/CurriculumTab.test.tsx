@@ -395,7 +395,7 @@ describe("CurriculumTab", () => {
       )
     );
 
-    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
 
     expect(screen.getByTestId("log-session-modal")).toHaveAttribute(
       "data-chapters",
@@ -409,7 +409,7 @@ describe("CurriculumTab", () => {
 
     await screen.findByTestId("chapter-accordion");
 
-    const addButton = screen.getByRole("button", { name: "+ Add Log" });
+    const addButton = screen.getByRole("button", { name: "+ Log a class" });
     await waitFor(() => expect(addButton).not.toBeDisabled());
     expect(screen.queryByText("History")).not.toBeInTheDocument();
 
@@ -427,7 +427,7 @@ describe("CurriculumTab", () => {
     renderTab({ canEdit: true });
 
     await screen.findByTestId("chapter-accordion");
-    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
     await user.click(screen.getByText("Save Mock Log"));
 
     await waitFor(() => {
@@ -482,7 +482,7 @@ describe("CurriculumTab", () => {
     renderTab({ canEdit: true });
 
     await screen.findByTestId("chapter-accordion");
-    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
     await user.click(screen.getByText("Save Mock Log"));
 
     await waitFor(() => {
@@ -500,7 +500,7 @@ describe("CurriculumTab", () => {
     renderTab({ canEdit: true });
 
     await screen.findByTestId("chapter-accordion");
-    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
     await user.click(screen.getByText("Save Completion Only"));
 
     await waitFor(() => {
@@ -806,7 +806,7 @@ describe("CurriculumTab", () => {
     renderTab({ canEdit: true });
 
     await screen.findByTestId("chapter-accordion");
-    await user.click(screen.getByRole("button", { name: "+ Add Log" }));
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
     await user.click(screen.getByText("Save Completion Only"));
 
     expect(

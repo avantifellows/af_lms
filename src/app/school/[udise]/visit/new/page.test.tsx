@@ -5,13 +5,13 @@ import { render, screen } from "@testing-library/react";
 
 const {
   mockGetServerSession,
-  mockGetUserPermission,
+  mockGetResolvedPermission,
   mockGetFeatureAccess,
   mockCanAccessSchool,
   mockRedirect,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
-  mockGetUserPermission: vi.fn(),
+  mockGetResolvedPermission: vi.fn(),
   mockGetFeatureAccess: vi.fn(),
   mockCanAccessSchool: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -23,7 +23,7 @@ vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/permissions", () => ({
-  getUserPermission: mockGetUserPermission,
+  getResolvedPermission: mockGetResolvedPermission,
   getFeatureAccess: mockGetFeatureAccess,
   canAccessSchool: mockCanAccessSchool,
 }));
@@ -60,7 +60,7 @@ describe("NewVisitPage (server component)", () => {
       NewVisitPage({ params: makeParams("12345") })
     ).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-    expect(mockGetUserPermission).not.toHaveBeenCalled();
+    expect(mockGetResolvedPermission).not.toHaveBeenCalled();
   });
 
   it("redirects to / when session has no email", async () => {
@@ -74,14 +74,14 @@ describe("NewVisitPage (server component)", () => {
 
   it("redirects to / when user has no visit edit access", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
-    mockGetUserPermission.mockResolvedValue({ level: 1 });
+    mockGetResolvedPermission.mockResolvedValue({ level: 1 });
     mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: false });
 
     await expect(
       NewVisitPage({ params: makeParams("12345") })
     ).rejects.toThrow("REDIRECT:/");
     expect(mockRedirect).toHaveBeenCalledWith("/");
-    expect(mockGetUserPermission).toHaveBeenCalledWith(
+    expect(mockGetResolvedPermission).toHaveBeenCalledWith(
       "pm@avantifellows.org"
     );
     expect(mockGetFeatureAccess).toHaveBeenCalledWith({ level: 1 }, "visits");
@@ -90,7 +90,7 @@ describe("NewVisitPage (server component)", () => {
 
   it("redirects to school page when user cannot access the school", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
-    mockGetUserPermission.mockResolvedValue({ level: 2 });
+    mockGetResolvedPermission.mockResolvedValue({ level: 2 });
     mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
     mockCanAccessSchool.mockResolvedValue(false);
 
@@ -106,7 +106,7 @@ describe("NewVisitPage (server component)", () => {
 
   it("renders NewVisitForm when all checks pass", async () => {
     mockGetServerSession.mockResolvedValue(pmSession);
-    mockGetUserPermission.mockResolvedValue({ level: 3 });
+    mockGetResolvedPermission.mockResolvedValue({ level: 3 });
     mockGetFeatureAccess.mockReturnValue({ canView: true, canEdit: true });
     mockCanAccessSchool.mockResolvedValue(true);
 
@@ -116,5 +116,38 @@ describe("NewVisitPage (server component)", () => {
     const form = screen.getByTestId("new-visit-form");
     expect(form).toBeInTheDocument();
     expect(form).toHaveAttribute("data-udise", "54321");
+  });
+
+  it("renders for a Program Admin whose Visit access comes from a Centre seat", async () => {
+    const resolvedPermission = {
+      email: "program-admin@avantifellows.org",
+      level: 1,
+      role: "program_admin",
+      program_ids: [],
+      scope: {
+        schools: new Set(["54321"]),
+        centres: new Set([10]),
+        programs: new Set([1]),
+      },
+    };
+    mockGetServerSession.mockResolvedValue({
+      user: { email: resolvedPermission.email },
+    });
+    mockGetResolvedPermission.mockResolvedValue(resolvedPermission);
+    mockGetFeatureAccess.mockReturnValue({
+      access: "edit",
+      canView: true,
+      canEdit: true,
+    });
+    mockCanAccessSchool.mockResolvedValue(true);
+
+    const jsx = await NewVisitPage({ params: makeParams("54321") });
+    render(jsx);
+
+    expect(mockGetFeatureAccess).toHaveBeenCalledWith(
+      resolvedPermission,
+      "visits"
+    );
+    expect(screen.getByTestId("new-visit-form")).toBeInTheDocument();
   });
 });

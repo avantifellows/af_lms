@@ -77,12 +77,12 @@ describe("LogSessionModal", () => {
   it("renders topic-backed log controls with today's IST date", () => {
     renderModal();
 
-    expect(screen.getByText("Log Teaching Session")).toBeInTheDocument();
+    expect(screen.getByText("Log a class")).toBeInTheDocument();
     expect((document.querySelector('input[type="date"]') as HTMLInputElement).value).toBe(
       "2026-02-15"
     );
     expect(screen.getByText("Select topics covered")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Log" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save class log" })).toBeDisabled();
     expect(screen.queryByText("Will Complete")).not.toBeInTheDocument();
   });
 
@@ -94,7 +94,7 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByText("Kinematics"));
     const topicLabel = screen.getByText("Motion in a Straight Line").closest("label")!;
     await user.click(within(topicLabel).getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Save Log" }));
+    await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
       date: "2026-02-15",
@@ -119,7 +119,7 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByText("Laws of Motion"));
     const topicLabel = screen.getByText("Newton's Laws").closest("label")!;
     await user.click(within(topicLabel).getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Save Log" }));
+    await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
       date: "2026-02-15",
@@ -145,7 +145,7 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByText("Kinematics"));
     const topicLabel = screen.getByText("Motion in a Straight Line").closest("label")!;
     await user.click(within(topicLabel).getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Save Log" }));
+    await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
       date: "2026-02-15",
@@ -171,7 +171,7 @@ describe("LogSessionModal", () => {
     await user.click(within(lawsRow).getByRole("checkbox", { name: /complete/i }));
 
     expect(screen.getByText("Prescribed: 1h 30m")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save Log" }));
+    await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
       date: "2026-02-15",
@@ -241,7 +241,7 @@ describe("LogSessionModal", () => {
     const topicLabel = screen.getByText("Projectile Motion").closest("label")!;
     expect(within(topicLabel).getByRole("checkbox")).toBeChecked();
 
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(onSave).toHaveBeenCalledWith({
       date: "2026-02-12",
       durationMinutes: 90,

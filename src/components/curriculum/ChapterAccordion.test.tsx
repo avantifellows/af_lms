@@ -6,16 +6,17 @@ import type { Chapter, ChapterProgress } from "@/types/curriculum";
 
 // --- Mocks ---
 
-const mockGetProgressIndicator = vi.fn();
-const mockGetProgressColorClass = vi.fn();
 const mockFormatDuration = vi.fn();
 const mockFormatDate = vi.fn();
 
 vi.mock("@/lib/curriculum-helpers", () => ({
-  getProgressIndicator: (...args: unknown[]) =>
-    mockGetProgressIndicator(...args),
-  getProgressColorClass: (...args: unknown[]) =>
-    mockGetProgressColorClass(...args),
+  getChapterStatus: (progress: ChapterProgress | undefined) => {
+    if (progress?.isChapterComplete) return { key: "complete", label: "Complete" };
+    if (progress && progress.completedTopicIds.length > 0) {
+      return { key: "progress", label: "In progress" };
+    }
+    return { key: "none", label: "Not started" };
+  },
   formatDuration: (...args: unknown[]) => mockFormatDuration(...args),
   formatDate: (...args: unknown[]) => mockFormatDate(...args),
 }));
@@ -64,8 +65,6 @@ describe("ChapterAccordion", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetProgressIndicator.mockReturnValue("○");
-    mockGetProgressColorClass.mockReturnValue("text-gray-400");
     mockFormatDuration.mockReturnValue("1h 30m");
     mockFormatDate.mockReturnValue("-");
   });
@@ -159,32 +158,42 @@ describe("ChapterAccordion", () => {
     );
 
     expect(screen.getByText("1. Kinematics")).toHaveClass("line-through");
-    await user.click(screen.getByRole("button", { name: "Unmark complete" }));
+    await user.click(screen.getByRole("button", { name: "Undo" }));
     expect(onToggleChapterCompletion).toHaveBeenCalledWith(1, false);
   });
 
-  it("shows progress indicator and color class from helpers", () => {
+  it("shows the status pill derived from progress", () => {
     const chapters = [makeChapter({ id: 1, name: "Kinematics" })];
-    const progress = {
-      1: makeProgress(1, { completedTopicIds: [10, 11] }),
-    };
 
-    mockGetProgressIndicator.mockReturnValue("◐");
-    mockGetProgressColorClass.mockReturnValue("text-yellow-500");
-
-    render(
+    const { rerender } = render(
       <ChapterAccordion
         chapters={chapters}
-        progress={progress}
+        progress={{}}
         expandedChapterIds={[]}
         onToggleChapter={vi.fn()}
       />
     );
+    expect(screen.getByText("Not started")).toBeInTheDocument();
 
-    const indicator = screen.getByText("◐");
-    expect(indicator).toHaveClass("text-yellow-500");
-    expect(mockGetProgressIndicator).toHaveBeenCalledWith(progress[1]);
-    expect(mockGetProgressColorClass).toHaveBeenCalledWith(progress[1]);
+    rerender(
+      <ChapterAccordion
+        chapters={chapters}
+        progress={{ 1: makeProgress(1, { completedTopicIds: [10, 11] }) }}
+        expandedChapterIds={[]}
+        onToggleChapter={vi.fn()}
+      />
+    );
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+
+    rerender(
+      <ChapterAccordion
+        chapters={chapters}
+        progress={{ 1: makeProgress(1, { isChapterComplete: true }) }}
+        expandedChapterIds={[]}
+        onToggleChapter={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Complete")).toBeInTheDocument();
   });
 
   it("shows completed/total topic counts", () => {

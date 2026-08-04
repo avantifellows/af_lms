@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildProgramStats } from "./enrollment-stats";
+import {
+  buildProgramStats,
+  studentDroppedFromProgram,
+} from "./enrollment-stats";
 import { PROGRAM_IDS } from "./permissions";
 
 type S = {
@@ -20,8 +23,18 @@ const mk = (s: Partial<S>): S => ({
 describe("buildProgramStats", () => {
   it("scopes to the given program_id and sets a known label", () => {
     const students: S[] = [
-      mk({ program_id: PROGRAM_IDS.NVS, grade: 11, gender: "Female", category: "ST" }),
-      mk({ program_id: PROGRAM_IDS.COE, grade: 12, gender: "Male", category: "OBC" }),
+      mk({
+        program_id: PROGRAM_IDS.NVS,
+        grade: 11,
+        gender: "Female",
+        category: "ST",
+      }),
+      mk({
+        program_id: PROGRAM_IDS.COE,
+        grade: 12,
+        gender: "Male",
+        category: "OBC",
+      }),
     ];
 
     const stats = buildProgramStats(students, PROGRAM_IDS.NVS);
@@ -77,7 +90,11 @@ describe("buildProgramStats", () => {
 
   it("trims gender and category whitespace", () => {
     const students: S[] = [
-      mk({ program_id: PROGRAM_IDS.NVS, gender: "  Male  ", category: "  OBC  " }),
+      mk({
+        program_id: PROGRAM_IDS.NVS,
+        gender: "  Male  ",
+        category: "  OBC  ",
+      }),
     ];
     const stats = buildProgramStats(students, PROGRAM_IDS.NVS);
     expect(stats.byGender).toEqual([{ value: "Male", count: 1 }]);
@@ -86,12 +103,43 @@ describe("buildProgramStats", () => {
 
   it("ignores students from other programs", () => {
     const students: S[] = [
-      mk({ program_id: PROGRAM_IDS.COE, grade: 11, gender: "Male", category: "OBC" }),
-      mk({ program_id: PROGRAM_IDS.NVS, grade: 11, gender: "Female", category: "ST" }),
+      mk({
+        program_id: PROGRAM_IDS.COE,
+        grade: 11,
+        gender: "Male",
+        category: "OBC",
+      }),
+      mk({
+        program_id: PROGRAM_IDS.NVS,
+        grade: 11,
+        gender: "Female",
+        category: "ST",
+      }),
     ];
     const stats = buildProgramStats(students, PROGRAM_IDS.NVS);
     expect(stats.total).toBe(1);
     expect(stats.byGrade).toEqual([{ grade: 11, count: 1 }]);
     expect(stats.byGender).toEqual([{ value: "Female", count: 1 }]);
+  });
+
+  it("counts a multi-program student in each current program", () => {
+    const student = {
+      ...mk({ program_id: PROGRAM_IDS.COE, grade: 11 }),
+      student_program_ids: [PROGRAM_IDS.COE, PROGRAM_IDS.NVS],
+    };
+
+    expect(buildProgramStats([student], PROGRAM_IDS.COE).total).toBe(1);
+    expect(buildProgramStats([student], PROGRAM_IDS.NVS).total).toBe(1);
+  });
+
+  it("tracks a program dropout while another program stays active", () => {
+    const student = {
+      ...mk({ program_id: PROGRAM_IDS.NVS }),
+      status: "active",
+      dropout_program_ids: [PROGRAM_IDS.COE],
+    };
+
+    expect(studentDroppedFromProgram(student, PROGRAM_IDS.COE)).toBe(true);
+    expect(studentDroppedFromProgram(student, PROGRAM_IDS.NVS)).toBe(false);
   });
 });

@@ -138,7 +138,8 @@ export default async function VisitActionDetailPage({ params, searchParams }: Pa
     redirect("/dashboard");
   }
 
-  if (!getFeatureAccess(permission, "visits").canView) {
+  const visitsAccess = getFeatureAccess(permission, "visits");
+  if (!visitsAccess.canView) {
     redirect("/dashboard");
   }
 
@@ -162,9 +163,8 @@ export default async function VisitActionDetailPage({ params, searchParams }: Pa
     return notFoundState("Action not found", "This action may have been deleted.", fallbackBackHref);
   }
 
-  const canWrite = backToSummary
-    ? false
-    : canEditVisit(actor, {
+  const canWrite = visitsAccess.canEdit && !backToSummary &&
+    canEditVisit(actor, {
         pmEmail: detail.visit.pm_email,
         schoolCode: detail.visit.school_code,
         schoolRegion: detail.visit.school_region,

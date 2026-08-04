@@ -53,6 +53,21 @@ export function getProgressColorClass(progress: ChapterProgress | undefined): st
   return "text-yellow-600";
 }
 
+// Read-only completion status for a chapter, shown as a labelled pill on the
+// progress view. This replaces the old glyph indicator, which looked like a
+// clickable tickbox — the label makes clear it is a status, not a control.
+export type ChapterStatusKey = "complete" | "progress" | "none";
+
+export function getChapterStatus(
+  progress: ChapterProgress | undefined
+): { key: ChapterStatusKey; label: string } {
+  if (progress?.isChapterComplete) return { key: "complete", label: "Complete" };
+  if (progress && progress.completedTopicIds.length > 0) {
+    return { key: "progress", label: "In progress" };
+  }
+  return { key: "none", label: "Not started" };
+}
+
 // Summary stats
 export interface CurriculumStats {
   chaptersCompleted: number;

@@ -95,6 +95,27 @@ describe("getProgramContextSync", () => {
     expect(ctx.isNVSOnly).toBe(false);
   });
 
+  it("treats a Punjab CoE teacher as having CoE/Nodal (not NVS-only)", () => {
+    const ctx = getProgramContextSync(
+      makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_COE] })
+    );
+    expect(ctx.hasCoEOrNodal).toBe(true);
+    expect(ctx.isNVSOnly).toBe(false);
+  });
+
+  it("treats Punjab Nodal and EMRS CoE as CoE/Nodal too", () => {
+    expect(
+      getProgramContextSync(
+        makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.PUNJAB_NODAL] })
+      ).hasCoEOrNodal
+    ).toBe(true);
+    expect(
+      getProgramContextSync(
+        makePermission({ role: "teacher", program_ids: [PROGRAM_IDS.EMRS_COE] })
+      ).hasCoEOrNodal
+    ).toBe(true);
+  });
+
   it("returns no access for non-admin with empty program_ids", () => {
     const ctx = getProgramContextSync(
       makePermission({ role: "teacher", program_ids: [] })
@@ -231,12 +252,12 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(false);
     });
 
-    it("gives program_admin view on visits", () => {
+    it("gives program_admin edit on visits", () => {
       const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.COE] });
       const result = getFeatureAccess(perm, "visits");
-      expect(result.access).toBe("view");
+      expect(result.access).toBe("edit");
       expect(result.canView).toBe(true);
-      expect(result.canEdit).toBe(false);
+      expect(result.canEdit).toBe(true);
     });
 
     it("gives program_admin view on quiz sessions", () => {
@@ -268,6 +289,28 @@ describe("getFeatureAccess", () => {
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
     });
+
+    it.each([
+      ["teacher", "edit"],
+      ["holistic_mentorship_admin", "edit"],
+      ["admin", "edit"],
+      ["program_manager", "none"],
+      ["program_admin", "none"],
+    ] as const)("gives %s %s access to holistic mentorship", (role, access) => {
+      const permission = makePermission({ role, program_ids: [PROGRAM_IDS.COE] });
+      expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe(access);
+    });
+
+    it("grants the dedicated role no other feature access", () => {
+      const permission = makePermission({
+        role: "holistic_mentorship_admin",
+        level: 3,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(permission, "holistic_mentorship").access).toBe("edit");
+      expect(getFeatureAccess(permission, "students").access).toBe("none");
+      expect(getFeatureAccess(permission, "academic_mentorship").access).toBe("none");
+    });
   });
 
   describe("NVS-only gating", () => {
@@ -296,6 +339,15 @@ describe("getFeatureAccess", () => {
       });
       const result = getFeatureAccess(perm, "curriculum");
       expect(result.access).toBe("none");
+    });
+
+    it("does NOT gate a Punjab CoE teacher out of curriculum or quiz sessions", () => {
+      const perm = makePermission({
+        role: "teacher",
+        program_ids: [PROGRAM_IDS.PUNJAB_COE],
+      });
+      expect(getFeatureAccess(perm, "curriculum").canView).toBe(true);
+      expect(getFeatureAccess(perm, "quiz_sessions").canView).toBe(true);
     });
 
     it("allows CoE PM to access visits", () => {
@@ -332,6 +384,32 @@ describe("getFeatureAccess", () => {
       expect(result.access).toBe("view");
       expect(result.canView).toBe(true);
       expect(result.canEdit).toBe(false);
+    });
+
+    it("downgrades program_admin visit access to view", () => {
+      const perm = makePermission({
+        role: "program_admin",
+        read_only: true,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(perm, "visits")).toEqual({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
+    });
+
+    it("downgrades holistic mentorship writes to view", () => {
+      const permission = makePermission({
+        role: "holistic_mentorship_admin",
+        read_only: true,
+        program_ids: [PROGRAM_IDS.COE],
+      });
+      expect(getFeatureAccess(permission, "holistic_mentorship")).toEqual({
+        access: "view",
+        canView: true,
+        canEdit: false,
+      });
     });
 
     it("does not affect view-only features", () => {
@@ -374,6 +452,20 @@ describe("ownsRecord", () => {
   it("returns false for empty program_ids", () => {
     const perm = makePermission({ program_ids: [] });
     expect(ownsRecord(perm, PROGRAM_IDS.NVS)).toBe(false);
+  });
+
+  // Regression: pg returns bigint columns (batch.program_id) as strings.
+  // Before the coercion fix, [1].includes("1") was false and every non-admin
+  // got 403 Forbidden on document upload/delete once getStudentSchool started
+  // resolving real program ids (post-#162 batch join).
+  it("owns the record when programId arrives as a bigint string", () => {
+    const perm = makePermission({ program_ids: [PROGRAM_IDS.COE] });
+    expect(ownsRecord(perm, String(PROGRAM_IDS.COE))).toBe(true);
+  });
+
+  it("still rejects a non-owned program passed as a string", () => {
+    const perm = makePermission({ program_ids: [PROGRAM_IDS.COE] });
+    expect(ownsRecord(perm, String(PROGRAM_IDS.NVS))).toBe(false);
   });
 });
 
@@ -889,6 +981,15 @@ describe("getStudentSchool", () => {
     mockQuery.mockResolvedValueOnce([]);
     const result = await getStudentSchool(999);
     expect(result).toBeNull();
+  });
+
+  // batch.program_id is a Postgres bigint, which pg returns as a string
+  // unless cast. The ::int cast keeps program_id a number so ownsRecord's
+  // includes() check matches. Regression pin for the post-#162 403s.
+  it("casts program_id to int in the SQL", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    await getStudentSchool(42);
+    expect(mockQuery.mock.calls[0][0]).toContain("b.program_id::int");
   });
 });
 

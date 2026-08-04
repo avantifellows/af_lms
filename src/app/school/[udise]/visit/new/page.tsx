@@ -1,7 +1,11 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { getUserPermission, getFeatureAccess, canAccessSchool } from "@/lib/permissions";
+import {
+  getResolvedPermission,
+  getFeatureAccess,
+  canAccessSchool,
+} from "@/lib/permissions";
 import NewVisitForm from "@/components/visits/NewVisitForm";
 
 interface PageProps {
@@ -16,7 +20,7 @@ export default async function NewVisitPage({ params }: PageProps) {
     redirect("/");
   }
 
-  const permission = await getUserPermission(session.user.email);
+  const permission = await getResolvedPermission(session.user.email);
   const visitAccess = getFeatureAccess(permission, "visits");
 
   if (!visitAccess.canEdit) {

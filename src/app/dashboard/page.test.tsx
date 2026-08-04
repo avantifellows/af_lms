@@ -463,6 +463,29 @@ describe("DashboardPage (server component)", () => {
     expect(screen.queryByText("Admin")).not.toBeInTheDocument();
   });
 
+  it("sends a Holistic Mentorship Admin directly to their only workspace", async () => {
+    mockGetServerSession.mockResolvedValue({
+      user: { email: "holistic@example.com" },
+    });
+    mockGetUserPermission.mockResolvedValue({
+      email: "holistic@example.com",
+      level: 3,
+      role: "holistic_mentorship_admin",
+      school_codes: null,
+      regions: null,
+      program_ids: [1],
+    });
+    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetFeatureAccess.mockImplementation((_permission, feature) => ({
+      canView: feature === "holistic_mentorship",
+      canEdit: feature === "holistic_mentorship",
+    }));
+    await expect(
+      DashboardPage({ searchParams: defaultSearchParams })
+    ).rejects.toThrow("REDIRECT:/admin/holistic-mentorship");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   // --- PM nav links ---
 
   it("shows Visit Summary nav for admin users with visit access", async () => {

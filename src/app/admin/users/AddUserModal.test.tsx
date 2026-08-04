@@ -476,7 +476,25 @@ describe("AddUserModal — role descriptions", () => {
     const roleSelect = screen.getAllByRole("combobox")[0];
     await user.selectOptions(roleSelect, "program_admin");
 
-    expect(screen.getByText(/Program Admins can oversee scoped schools/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Program Admins can oversee scoped schools and manage their own school visits"),
+    ).toBeInTheDocument();
+  });
+
+  it("offers the dedicated Holistic Mentorship Admin role and both supported Programs", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.selectOptions(
+      screen.getAllByRole("combobox")[0],
+      "holistic_mentorship_admin"
+    );
+
+    expect(
+      screen.getByText("Holistic Mentorship Admins can manage JNV CoE and EMRS CoE mentorship")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/all JNV CoE and EMRS CoE Schools/)).toBeInTheDocument();
+    expect(screen.queryByText("Assign Programs")).not.toBeInTheDocument();
   });
 });
 

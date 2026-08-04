@@ -1,6 +1,6 @@
 import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curriculum-schema";
 import { query } from "./db";
-import { PROGRAM_IDS, type UserPermission } from "./permissions";
+import { PHYSICAL_CENTRE_PROGRAM_IDS, getProgramContextSync, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumSummarySortKey =
@@ -222,7 +222,9 @@ interface GuardQueryRow {
   estimated_rows: string | number | null;
 }
 
-const CURRICULUM_PROGRAM_IDS = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
+// The summary spans every physical-centre program (all non-NVS programs), so
+// Punjab/EMRS/RGNV curriculum rows appear rather than being restricted to JNV 1/2.
+const CURRICULUM_PROGRAM_IDS = PHYSICAL_CENTRE_PROGRAM_IDS;
 const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 const SORT_SQL: Record<CurriculumSummarySortKey, string> = {
   school: "school_name",
@@ -397,7 +399,7 @@ export function buildCommonQueryParams(
     permission.level === 2 ? permission.regions ?? [] : null,
     CURRICULUM_PROGRAM_IDS,
     permission.role === "admin",
-    permission.program_ids ?? [],
+    getProgramContextSync(permission).programIds,
     filters.schools.length ? filters.schools : null,
     filters.programs.length ? filters.programs : null,
     filters.grades.length ? filters.grades : null,

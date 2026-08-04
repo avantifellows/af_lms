@@ -78,6 +78,8 @@ jobs:
           NEXTAUTH_URL: ${{ steps.preview.outputs.url }}
           DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
+          HOLISTIC_PROFILE_ETL_URL: ${{ secrets.HOLISTIC_PROFILE_ETL_URL }}
+          HOLISTIC_PROFILE_ETL_TOKEN: ${{ secrets.HOLISTIC_PROFILE_ETL_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -92,6 +94,14 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
+          SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
+          QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
+          QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
+          AF_SHORTENER_URL: ${{ secrets.AF_SHORTENER_URL }}
+          AF_SHORTENER_AUTH_TOKEN: ${{ secrets.AF_SHORTENER_AUTH_TOKEN }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -106,6 +116,8 @@ jobs:
             --arg i "$NEXTAUTH_URL" \
             --arg j "$DB_SERVICE_URL" \
             --arg k "$DB_SERVICE_TOKEN" \
+            --arg holistic_etl_url "$HOLISTIC_PROFILE_ETL_URL" \
+            --arg holistic_etl_token "$HOLISTIC_PROFILE_ETL_TOKEN" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -120,6 +132,14 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg cms_url "$CMS_SERVICE_URL" \
+            --arg cms_token "$CMS_SERVICE_TOKEN" \
+            --arg quiz_url "$QUIZ_BACKEND_URL" \
+            --arg portal_url "$SESSION_PORTAL_URL" \
+            --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
+            --arg quiz_af_key "$QUIZ_AF_API_KEY" \
+            --arg shortener_url "$AF_SHORTENER_URL" \
+            --arg shortener_token "$AF_SHORTENER_AUTH_TOKEN" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -132,6 +152,8 @@ jobs:
               NEXTAUTH_URL: $i,
               DB_SERVICE_URL: $j,
               DB_SERVICE_TOKEN: $k,
+              HOLISTIC_PROFILE_ETL_URL: $holistic_etl_url,
+              HOLISTIC_PROFILE_ETL_TOKEN: $holistic_etl_token,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -145,7 +167,15 @@ jobs:
               S3_DOCS_PREFIX: $v,
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
-              S3_DOCS_SECRET_ACCESS_KEY: $y
+              S3_DOCS_SECRET_ACCESS_KEY: $y,
+              CMS_SERVICE_URL: $cms_url,
+              CMS_SERVICE_TOKEN: $cms_token,
+              QUIZ_BACKEND_URL: $quiz_url,
+              SESSION_PORTAL_URL: $portal_url,
+              QUIZ_FRONTEND_URL: $quiz_fe_url,
+              QUIZ_AF_API_KEY: $quiz_af_key,
+              AF_SHORTENER_URL: $shortener_url,
+              AF_SHORTENER_AUTH_TOKEN: $shortener_token
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -225,6 +255,8 @@ jobs:
           NEXTAUTH_URL: ${{ steps.preview.outputs.url }}
           DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
+          HOLISTIC_PROFILE_ETL_URL: ${{ secrets.HOLISTIC_PROFILE_ETL_URL }}
+          HOLISTIC_PROFILE_ETL_TOKEN: ${{ secrets.HOLISTIC_PROFILE_ETL_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -239,6 +271,14 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
+          SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
+          QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
+          QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
+          AF_SHORTENER_URL: ${{ secrets.AF_SHORTENER_URL }}
+          AF_SHORTENER_AUTH_TOKEN: ${{ secrets.AF_SHORTENER_AUTH_TOKEN }}
         run: |
           BRANCH="${{ steps.preview.outputs.branch }}"
           ENV_VARS=$(jq -n \
@@ -253,6 +293,8 @@ jobs:
             --arg i "$NEXTAUTH_URL" \
             --arg j "$DB_SERVICE_URL" \
             --arg k "$DB_SERVICE_TOKEN" \
+            --arg holistic_etl_url "$HOLISTIC_PROFILE_ETL_URL" \
+            --arg holistic_etl_token "$HOLISTIC_PROFILE_ETL_TOKEN" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -267,6 +309,14 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg cms_url "$CMS_SERVICE_URL" \
+            --arg cms_token "$CMS_SERVICE_TOKEN" \
+            --arg quiz_url "$QUIZ_BACKEND_URL" \
+            --arg portal_url "$SESSION_PORTAL_URL" \
+            --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
+            --arg quiz_af_key "$QUIZ_AF_API_KEY" \
+            --arg shortener_url "$AF_SHORTENER_URL" \
+            --arg shortener_token "$AF_SHORTENER_AUTH_TOKEN" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -279,6 +329,8 @@ jobs:
               NEXTAUTH_URL: $i,
               DB_SERVICE_URL: $j,
               DB_SERVICE_TOKEN: $k,
+              HOLISTIC_PROFILE_ETL_URL: $holistic_etl_url,
+              HOLISTIC_PROFILE_ETL_TOKEN: $holistic_etl_token,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -292,7 +344,15 @@ jobs:
               S3_DOCS_PREFIX: $v,
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
-              S3_DOCS_SECRET_ACCESS_KEY: $y
+              S3_DOCS_SECRET_ACCESS_KEY: $y,
+              CMS_SERVICE_URL: $cms_url,
+              CMS_SERVICE_TOKEN: $cms_token,
+              QUIZ_BACKEND_URL: $quiz_url,
+              SESSION_PORTAL_URL: $portal_url,
+              QUIZ_FRONTEND_URL: $quiz_fe_url,
+              QUIZ_AF_API_KEY: $quiz_af_key,
+              AF_SHORTENER_URL: $shortener_url,
+              AF_SHORTENER_AUTH_TOKEN: $shortener_token
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \
@@ -383,6 +443,8 @@ jobs:
           NEXTAUTH_URL: ${{ steps.url.outputs.value }}
           DB_SERVICE_URL: ${{ secrets.DB_SERVICE_URL }}
           DB_SERVICE_TOKEN: ${{ secrets.DB_SERVICE_TOKEN }}
+          HOLISTIC_PROFILE_ETL_URL: ${{ secrets.HOLISTIC_PROFILE_ETL_URL }}
+          HOLISTIC_PROFILE_ETL_TOKEN: ${{ secrets.HOLISTIC_PROFILE_ETL_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DYNAMODB_URL: ${{ secrets.DYNAMODB_URL }}
           DYNAMODB_REGION: ${{ secrets.DYNAMODB_REGION }}
@@ -397,6 +459,14 @@ jobs:
           S3_DOCS_REGION: ${{ secrets.S3_DOCS_REGION }}
           S3_DOCS_ACCESS_KEY_ID: ${{ secrets.S3_DOCS_ACCESS_KEY_ID }}
           S3_DOCS_SECRET_ACCESS_KEY: ${{ secrets.S3_DOCS_SECRET_ACCESS_KEY }}
+          CMS_SERVICE_URL: ${{ secrets.CMS_SERVICE_URL }}
+          CMS_SERVICE_TOKEN: ${{ secrets.CMS_SERVICE_TOKEN }}
+          QUIZ_BACKEND_URL: ${{ secrets.QUIZ_BACKEND_URL }}
+          SESSION_PORTAL_URL: ${{ secrets.SESSION_PORTAL_URL }}
+          QUIZ_FRONTEND_URL: ${{ secrets.QUIZ_FRONTEND_URL }}
+          QUIZ_AF_API_KEY: ${{ secrets.QUIZ_AF_API_KEY }}
+          AF_SHORTENER_URL: ${{ secrets.AF_SHORTENER_URL }}
+          AF_SHORTENER_AUTH_TOKEN: ${{ secrets.AF_SHORTENER_AUTH_TOKEN }}
         run: |
           ENV_VARS=$(jq -n \
             --arg a "$DATABASE_HOST" \
@@ -410,6 +480,8 @@ jobs:
             --arg i "$NEXTAUTH_URL" \
             --arg j "$DB_SERVICE_URL" \
             --arg k "$DB_SERVICE_TOKEN" \
+            --arg holistic_etl_url "$HOLISTIC_PROFILE_ETL_URL" \
+            --arg holistic_etl_token "$HOLISTIC_PROFILE_ETL_TOKEN" \
             --arg l "$GOOGLE_SERVICE_ACCOUNT_JSON" \
             --arg m "$DYNAMODB_URL" \
             --arg n "$DYNAMODB_REGION" \
@@ -424,6 +496,14 @@ jobs:
             --arg w "$S3_DOCS_REGION" \
             --arg x "$S3_DOCS_ACCESS_KEY_ID" \
             --arg y "$S3_DOCS_SECRET_ACCESS_KEY" \
+            --arg cms_url "$CMS_SERVICE_URL" \
+            --arg cms_token "$CMS_SERVICE_TOKEN" \
+            --arg quiz_url "$QUIZ_BACKEND_URL" \
+            --arg portal_url "$SESSION_PORTAL_URL" \
+            --arg quiz_fe_url "$QUIZ_FRONTEND_URL" \
+            --arg quiz_af_key "$QUIZ_AF_API_KEY" \
+            --arg shortener_url "$AF_SHORTENER_URL" \
+            --arg shortener_token "$AF_SHORTENER_AUTH_TOKEN" \
             '{
               DATABASE_HOST: $a,
               DATABASE_PORT: $b,
@@ -436,6 +516,8 @@ jobs:
               NEXTAUTH_URL: $i,
               DB_SERVICE_URL: $j,
               DB_SERVICE_TOKEN: $k,
+              HOLISTIC_PROFILE_ETL_URL: $holistic_etl_url,
+              HOLISTIC_PROFILE_ETL_TOKEN: $holistic_etl_token,
               GOOGLE_SERVICE_ACCOUNT_JSON: $l,
               DYNAMODB_URL: $m,
               DYNAMODB_REGION: $n,
@@ -449,7 +531,15 @@ jobs:
               S3_DOCS_PREFIX: $v,
               S3_DOCS_REGION: $w,
               S3_DOCS_ACCESS_KEY_ID: $x,
-              S3_DOCS_SECRET_ACCESS_KEY: $y
+              S3_DOCS_SECRET_ACCESS_KEY: $y,
+              CMS_SERVICE_URL: $cms_url,
+              CMS_SERVICE_TOKEN: $cms_token,
+              QUIZ_BACKEND_URL: $quiz_url,
+              SESSION_PORTAL_URL: $portal_url,
+              QUIZ_FRONTEND_URL: $quiz_fe_url,
+              QUIZ_AF_API_KEY: $quiz_af_key,
+              AF_SHORTENER_URL: $shortener_url,
+              AF_SHORTENER_AUTH_TOKEN: $shortener_token
             }')
           aws amplify update-branch \
             --app-id ${{ env.AMPLIFY_APP_ID }} \

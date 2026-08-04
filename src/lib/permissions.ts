@@ -1,5 +1,6 @@
 import { query } from "./db";
 import {
+  PHYSICAL_CENTRE_PROGRAM_IDS,
   PROGRAM_IDS,
   PROGRAM_IDS_ORDERED,
   PROGRAM_ID_TO_LABEL,
@@ -7,7 +8,7 @@ import {
 
 // Re-exported from constants so existing `@/lib/permissions` imports keep
 // working while the definitions live in a client-safe module.
-export { PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
+export { PHYSICAL_CENTRE_PROGRAM_IDS, PROGRAM_IDS, PROGRAM_IDS_ORDERED, PROGRAM_ID_TO_LABEL };
 
 // Permission levels (school scope only)
 export type AccessLevel = 1 | 2 | 3;
@@ -16,7 +17,18 @@ export type AccessLevel = 1 | 2 | 3;
 // 3 = All schools access
 
 // User roles
-export type UserRole = "teacher" | "program_manager" | "program_admin" | "admin";
+const USER_ROLES = [
+  "teacher",
+  "program_manager",
+  "program_admin",
+  "holistic_mentorship_admin",
+  "admin",
+] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export function isUserRole(value: unknown): value is UserRole {
+  return typeof value === "string" && USER_ROLES.includes(value as UserRole);
+}
 
 // Feature types for permission checking
 export type Feature =
@@ -24,6 +36,7 @@ export type Feature =
   | "visits"
   | "curriculum"
   | "academic_mentorship"
+  | "holistic_mentorship"
   | "performance"
   | "summary_stats"
   | "pm_dashboard"
@@ -35,17 +48,20 @@ export type FeatureAccess = "none" | "view" | "edit";
 
 // Feature permission matrix: feature → role → access level
 const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
-  students:      { teacher: "edit",  program_manager: "edit",  program_admin: "edit",  admin: "edit" },
-  visits:        { teacher: "none",  program_manager: "edit",  program_admin: "view",  admin: "edit" },
-  curriculum:    { teacher: "edit",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
-  academic_mentorship: { teacher: "view",  program_manager: "view",  program_admin: "edit",  admin: "edit" },
-  performance:   { teacher: "view",  program_manager: "view",  program_admin: "view",  admin: "view" },
-  summary_stats: { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
-  pm_dashboard:  { teacher: "none",  program_manager: "view",  program_admin: "view",  admin: "view" },
-  quiz_sessions: { teacher: "edit",  program_manager: "view",  program_admin: "view",  admin: "view" },
+  students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  academic_mentorship: { teacher: "view", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  holistic_mentorship: { teacher: "edit", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "edit", admin: "edit" },
+  performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  pm_dashboard: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
+  quiz_sessions: { teacher: "edit", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
   // PM-driven: a PM/admin sets up student feedback ABOUT teachers, so teachers
-  // must not have edit (or view) here — mirrors the visits access shape.
-  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "view", admin: "edit" },
+  // must not have edit (or view) here. Mirrors `visits`, which main widened to
+  // program_admin: "edit" — feedback setup is the same class of PM fieldwork.
+  // `holistic_mentorship_admin` is scoped to its own feature only.
+  teacher_feedback: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
 };
 
 // Features gated to CoE/Nodal programs only (NVS-only users get "none")
@@ -114,7 +130,7 @@ export function getFeatureAccess(
  */
 export function ownsRecord(
   permission: UserPermission | null,
-  programId: number | null,
+  programId: number | string | null,
   opts?: { isPasscodeUser?: boolean },
 ): boolean {
   // Passcode users own all records at their school
@@ -124,9 +140,10 @@ export function ownsRecord(
   if (permission.role === "admin") return true;
   // Unassigned records are editable by anyone with feature-level edit
   if (programId === null) return true;
-  // Check program_ids
+  // Check program_ids. Coerce before comparing: pg returns bigint columns
+  // (e.g. batch.program_id) as strings, and [1].includes("1") is false.
   if (!permission.program_ids || permission.program_ids.length === 0) return false;
-  return permission.program_ids.includes(programId);
+  return permission.program_ids.includes(Number(programId));
 }
 
 export interface UserPermission {
@@ -170,7 +187,7 @@ export interface ProgramPermissionContext {
   hasCoEOrNodal: boolean;
 }
 
-export interface SchoolPasscode {
+interface SchoolPasscode {
   schoolCode: string;
   passcode: string; // 8 digits
 }
@@ -451,7 +468,7 @@ export async function getStudentSchool(
   studentPkId: number | string,
 ): Promise<StudentScope | null> {
   const rows = await query<StudentScope>(
-    `SELECT sch.code, sch.region, b.program_id
+    `SELECT sch.code, sch.region, b.program_id::int AS program_id
      FROM student s
      JOIN group_user gu_sch ON gu_sch.user_id = s.user_id
      JOIN "group" g_sch ON g_sch.id = gu_sch.group_id AND g_sch.type = 'school'
@@ -460,8 +477,7 @@ export async function getStudentSchool(
        ON er_batch.user_id = s.user_id
        AND er_batch.group_type = 'batch'
        AND er_batch.is_current = true
-     LEFT JOIN "group" g_batch ON g_batch.id = er_batch.group_id AND g_batch.type = 'batch'
-     LEFT JOIN batch b ON b.id = g_batch.child_id
+     LEFT JOIN batch b ON b.id = er_batch.group_id
      WHERE s.id = $1
      LIMIT 1`,
     [studentPkId],
@@ -577,9 +593,14 @@ export function getProgramContextSync(
   }
 
   const hasNVS = programIds.includes(PROGRAM_IDS.NVS);
-  const hasCoE = programIds.includes(PROGRAM_IDS.COE);
-  const hasNodal = programIds.includes(PROGRAM_IDS.NODAL);
-  const hasCoEOrNodal = hasCoE || hasNodal;
+  // The full LMS feature set (curriculum, quiz sessions, visits, PM dashboard,
+  // summary stats) is granted by ANY non-NVS program — JNV CoE/Nodal plus every
+  // physical-centre program (Punjab CoE/Nodal, EMRS CoE, Uttarakhand CoE, …).
+  // Only NVS-only users are gated out. A Punjab/EMRS/RGNV teacher must not be
+  // treated as NVS-only.
+  const hasCoEOrNodal = programIds.some((id) =>
+    PHYSICAL_CENTRE_PROGRAM_IDS.includes(id)
+  );
   const isNVSOnly = hasNVS && !hasCoEOrNodal;
 
   return {

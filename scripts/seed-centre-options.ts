@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-07 (beb7e62). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Seed fixed Centre option sets and seed-managed Centre options.
  *
  * Usage:

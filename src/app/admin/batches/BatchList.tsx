@@ -33,6 +33,7 @@ const STREAM_OPTIONS = [
   { value: "medical", label: "Medical" },
   { value: "ca", label: "CA" },
   { value: "clat", label: "CLAT" },
+  { value: "nda", label: "NDA" },
   { value: "pcmb", label: "PCMB" },
   { value: "pcb", label: "PCB" },
   { value: "pcm", label: "PCM" },

@@ -39,8 +39,12 @@ export async function getSchoolRoster(
       u.state,
       u.pincode,
       s.student_id,
+      s.pen_number,
       s.apaar_id,
       s.category,
+      s.physically_handicapped,
+      s.g10_board,
+      s.g10_roll_no,
       s.stream,
       s.board_stream,
       s.school_medium,
@@ -64,33 +68,92 @@ export async function getSchoolRoster(
       gr.number as grade,
       p.program_name,
       p.program_id,
+      sp.student_program_ids,
+      dp.dropout_program_ids,
+      EXISTS (
+        SELECT 1
+        FROM lms_student_write_audits dropout
+        WHERE dropout.action = 'student_program_dropout'
+          AND dropout.program_id = 64
+          AND (dropout.affected_identifiers ->> 'student_pk_id')::bigint = s.id
+          AND dropout.changed_values ? 'batch_enrollment_id'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM lms_student_write_audits undo
+            WHERE undo.action = 'student_program_dropout_undo'
+              AND (undo.affected_identifiers ->> 'dropout_audit_id')::bigint = dropout.id
+          )
+      ) AS can_undo_nvs_dropout,
       GREATEST(s.updated_at, u.updated_at) as updated_at
     FROM group_user gu
     JOIN "group" g ON gu.group_id = g.id
     JOIN "user" u ON gu.user_id = u.id
     LEFT JOIN student s ON s.user_id = u.id
-    -- Restrict the roster to students enrolled for the current academic year.
-    -- Inner join (not LEFT) so students whose only grade enrollment is from a
-    -- prior year (e.g. graduated cohorts still attached to old batches) are
-    -- excluded rather than shown with a blank grade.
+    -- Restrict the roster to the current academic year. Keep every current
+    -- grade row so duplicate-grade data issues still surface, but collapse
+    -- dropout history to the latest same-year grade after DB Service ends
+    -- current grade enrollment.
     JOIN enrollment_record er_grade ON er_grade.user_id = u.id
       AND er_grade.group_type = 'grade'
-      AND er_grade.is_current = true
       AND er_grade.academic_year = $2
+      AND (
+        er_grade.is_current = true
+        OR (
+          s.status = 'dropout'
+          AND er_grade.id = (
+            SELECT er_latest.id
+            FROM enrollment_record er_latest
+            WHERE er_latest.user_id = u.id
+              AND er_latest.group_type = 'grade'
+              AND er_latest.academic_year = $2
+            ORDER BY er_latest.end_date DESC NULLS LAST, er_latest.updated_at DESC, er_latest.id DESC
+            LIMIT 1
+          )
+        )
+      )
     LEFT JOIN grade gr ON er_grade.group_id = gr.id
     LEFT JOIN LATERAL (
       SELECT p.name as program_name, p.id as program_id
-      FROM group_user gu_batch
-      JOIN "group" g_batch ON gu_batch.group_id = g_batch.id AND g_batch.type = 'batch'
-      JOIN batch b ON g_batch.child_id = b.id
+      FROM enrollment_record er_batch
+      JOIN batch b ON b.id = er_batch.group_id
       JOIN program p ON b.program_id = p.id
-      WHERE gu_batch.user_id = u.id
+      WHERE er_batch.user_id = u.id
+        AND er_batch.group_type = 'batch'
       -- Deterministic tiebreaker for students in multiple program batches:
       -- prefer CoE → Nodal → NVS (matches PROGRAM_IDS_ORDERED). Interim until
       -- a primary_batch field lands; see PR #58 discussion.
-      ORDER BY array_position(ARRAY[1, 2, 64]::int[], b.program_id)
+      -- Dropout ends the current batch membership, so fall back to the latest
+      -- historical batch when no current batch remains.
+      ORDER BY
+        er_batch.is_current DESC,
+        CASE WHEN er_batch.is_current THEN array_position(ARRAY[1, 2, 64]::int[], b.program_id) END,
+        (er_batch.academic_year = $2) DESC,
+        er_batch.end_date DESC NULLS LAST,
+        er_batch.updated_at DESC,
+        er_batch.id DESC
       LIMIT 1
     ) p ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        ARRAY_AGG(DISTINCT b.program_id) FILTER (WHERE b.program_id IS NOT NULL),
+        ARRAY[]::int[]
+      ) AS student_program_ids
+      FROM enrollment_record er_batch
+      JOIN batch b ON b.id = er_batch.group_id
+      WHERE er_batch.user_id = u.id
+        AND er_batch.group_type = 'batch'
+        AND er_batch.is_current = true
+    ) sp ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        ARRAY_AGG(DISTINCT audit.program_id) FILTER (WHERE audit.program_id IS NOT NULL),
+        ARRAY[]::int[]
+      ) AS dropout_program_ids
+      FROM lms_student_write_audits audit
+      WHERE audit.action = 'student_program_dropout'
+        AND (audit.affected_identifiers ->> 'student_pk_id')::bigint = s.id
+        AND NOT (audit.program_id = ANY(sp.student_program_ids))
+    ) dp ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
     [schoolId, CURRENT_ACADEMIC_YEAR],

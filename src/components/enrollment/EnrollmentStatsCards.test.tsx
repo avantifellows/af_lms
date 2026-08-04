@@ -3,6 +3,7 @@ import { useState } from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import EnrollmentStatsCards from "./EnrollmentStatsCards";
 import type { ProgramStats } from "@/lib/enrollment-stats";
+import type { AdmissionSummary } from "@/lib/enrollment-readiness";
 
 const coeStats: ProgramStats = {
   id: 1,
@@ -32,16 +33,36 @@ const nvsStats: ProgramStats = {
   byCategory: [{ value: "ST", count: 3 }],
 };
 
-function Harness({ programs }: { programs: ProgramStats[] }) {
+function Harness({
+  programs,
+  admission,
+  consentLoading,
+  consentError,
+}: {
+  programs: ProgramStats[];
+  admission?: AdmissionSummary | null;
+  consentLoading?: boolean;
+  consentError?: boolean;
+}) {
   const [selectedId, setSelectedId] = useState<number>(programs[0]?.id ?? 0);
   return (
     <EnrollmentStatsCards
       programs={programs}
       selectedId={selectedId}
       onSelect={setSelectedId}
+      admission={admission}
+      consentLoading={consentLoading}
+      consentError={consentError}
     />
   );
 }
+
+const admissionSummary: AdmissionSummary = {
+  total: 40,
+  infoAvailable: 30,
+  infoAvailablePct: 75,
+  docsAvailablePct: 60,
+};
 
 describe("EnrollmentStatsCards", () => {
   it("renders nothing when there are no programs", () => {
@@ -100,5 +121,39 @@ describe("EnrollmentStatsCards", () => {
     const pill = labelSpan.parentElement;
     expect(pill).not.toBeNull();
     expect(within(pill as HTMLElement).getByText("40")).toBeInTheDocument();
+  });
+
+  it("does not render the admission row without admission data", () => {
+    render(<Harness programs={[coeStats]} />);
+    expect(screen.queryByTestId("admission-stats-row")).not.toBeInTheDocument();
+  });
+
+  it("renders the compact admission row scoped to the filter", () => {
+    render(<Harness programs={[coeStats]} admission={admissionSummary} />);
+    const row = screen.getByTestId("admission-stats-row");
+    expect(within(row).getByText("Admission")).toBeInTheDocument();
+    expect(within(row).getByText("75%")).toBeInTheDocument(); // info
+    expect(within(row).getByText("60%")).toBeInTheDocument(); // docs
+  });
+
+  it("explains the admission metrics via the info hint", () => {
+    render(<Harness programs={[coeStats]} admission={admissionSummary} />);
+    const row = screen.getByTestId("admission-stats-row");
+    const hint = within(row).getByRole("button", {
+      name: /students with all profile details filled in/i,
+    });
+    expect(within(hint).getByRole("tooltip")).toHaveTextContent(
+      /required consent documents uploaded/i,
+    );
+  });
+
+  it("dashes consent-derived metrics while consent is loading", () => {
+    render(
+      <Harness programs={[coeStats]} admission={admissionSummary} consentLoading />,
+    );
+    const row = screen.getByTestId("admission-stats-row");
+    // info is computed locally so it still shows; docs is pending
+    expect(within(row).getByText("75%")).toBeInTheDocument();
+    expect(within(row).getAllByText("…").length).toBe(1);
   });
 });

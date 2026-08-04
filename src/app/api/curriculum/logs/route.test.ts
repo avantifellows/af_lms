@@ -7,10 +7,11 @@ vi.mock("@/lib/db", () => ({
   query: vi.fn(),
   withTransaction: vi.fn(),
 }));
-vi.mock("@/lib/permissions", () => {
+vi.mock("@/lib/permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/permissions")>();
   const getUserPermission = vi.fn();
   return {
-    PROGRAM_IDS: { COE: 1, NODAL: 2, NVS: 64 },
+    ...actual,
     getFeatureAccess: vi.fn(),
     getUserPermission,
     getResolvedPermission: getUserPermission,

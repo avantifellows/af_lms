@@ -217,6 +217,7 @@ describe("BatchList — edit mode", () => {
     // Should show Save / Cancel buttons
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "NDA" })).toHaveValue("nda");
   });
 
   it("pre-fills stream select with current metadata value", async () => {

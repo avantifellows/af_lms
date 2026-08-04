@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type KeyboardEvent, useId, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { statusBadgeClass } from "@/lib/visit-actions";
@@ -26,6 +26,7 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
   // Seed the initial tab from ?tab= if it points to a visible tab; otherwise fall back.
   const initial = urlTab && tabs.some((t) => t.id === urlTab) ? urlTab : fallback;
   const [activeTab, setActiveTabState] = useState(initial);
+  const tabGroupId = useId();
 
   const setActiveTab = (id: string) => {
     setActiveTabState(id);
@@ -38,14 +39,34 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
 
   const activeContent = tabs.find((t) => t.id === activeTab)?.content;
 
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = tabs.length - 1;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    const nextId = tabs[nextIndex].id;
+    setActiveTab(nextId);
+    document.getElementById(`${tabGroupId}-tab-${nextId}`)?.focus();
+  };
+
   return (
     <div>
       <div className="mb-6 border-b-2 border-border-accent">
-        <nav className="-mb-px flex flex-wrap gap-x-4 gap-y-2 sm:gap-x-6" aria-label="Tabs">
-          {tabs.map((tab) => (
+        <nav role="tablist" className="-mb-px flex flex-wrap gap-x-4 gap-y-2 sm:gap-x-6" aria-label="School sections">
+          {tabs.map((tab, index) => (
             <button
               key={tab.id}
+              id={`${tabGroupId}-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls={`${tabGroupId}-panel`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
               className={`whitespace-nowrap min-h-[48px] py-3 px-1 border-b-2 text-xs sm:text-sm uppercase tracking-wide font-bold transition-colors ${
                 activeTab === tab.id
                   ? "border-accent text-accent"
@@ -57,7 +78,8 @@ export default function SchoolTabs({ tabs, defaultTab }: Props) {
           ))}
         </nav>
       </div>
-      <div>{activeContent}</div>
+      <div id={`${tabGroupId}-panel`} role="tabpanel"
+        aria-labelledby={`${tabGroupId}-tab-${activeTab}`} tabIndex={0}>{activeContent}</div>
     </div>
   );
 }

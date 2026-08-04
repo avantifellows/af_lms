@@ -309,6 +309,11 @@ describe("updateTeacherRecord", () => {
     mockQuery
       .mockResolvedValueOnce([{ id: 1, user_id: 70 }])
       .mockResolvedValueOnce([]);
+    mockClientQuery.mockImplementation(async (sql: unknown) => ({
+      rows: String(sql).includes("RETURNING mapping.student_id")
+        ? [{ student_id: 41 }]
+        : [],
+    }));
 
     const result = await updateTeacherRecord({
       id: 1,
@@ -326,6 +331,11 @@ describe("updateTeacherRecord", () => {
     expect(String(blockerCall?.[0])).toContain("m.ended_at IS NULL");
     expect(blockerCall?.[1]).toEqual([70]);
     const clientSql = mockClientQuery.mock.calls.map((call) => call[0]).join("\n");
+    expect(clientSql).toContain("pg_advisory_xact_lock");
+    expect(clientSql).toContain("holistic_mentorship_mentor_mentee_mappings");
+    expect(clientSql).toContain("end_reason = $3");
+    expect(clientSql).toContain("holistic_mentorship_post_session_answers");
+    expect(clientSql).toContain("holistic_mentorship_post_session_note_audits");
     expect(clientSql).toContain("UPDATE centre_positions SET user_id = NULL");
     expect(clientSql).toContain("UPDATE user_permission SET revoked_at = now()");
   });
@@ -720,9 +730,29 @@ describe("positions", () => {
     expect(await updatePosition({ id: 44, body: { user_id: null } })).toEqual({
       ok: true,
     });
-    const updateCall = mockClientQuery.mock.calls.at(-1)!;
-    expect(updateCall[0]).toContain("SET user_id = $1");
+    const updateCall = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE centre_positions SET user_id = $1")
+    )!;
     expect(updateCall[1]).toEqual([null, 44]);
+    const holisticCleanup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(holisticCleanup?.[1]).toEqual([
+      70,
+      "af_lms_staff_management",
+      "mentor_seat_changed",
+      false,
+      expect.any(Array),
+    ]);
+    expect(String(holisticCleanup?.[0])).toContain("NOT EXISTS");
+    const advisoryLockIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("pg_advisory_xact_lock")
+    );
+    const holisticCleanupIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings")
+    );
+    expect(advisoryLockIndex).toBeGreaterThanOrEqual(0);
+    expect(advisoryLockIndex).toBeLessThan(holisticCleanupIndex);
     expect(
       mockClientQuery.mock.calls.some(([sql]) =>
         String(sql).includes("SET school_codes = NULL")
@@ -749,7 +779,11 @@ describe("positions", () => {
     expect(
       await updatePosition({ id: 44, body: { user_id: null }, force: true })
     ).toEqual({ ok: true });
-    expect(mockClientQuery.mock.calls.at(-1)![0]).toContain("SET user_id = $1");
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("UPDATE centre_positions SET user_id = $1")
+      )
+    ).toBe(true);
   });
 
   it("updatePosition fills a seat and clears the occupant's explicit scope", async () => {
@@ -821,6 +855,152 @@ describe("positions", () => {
     expect(
       await setUserRole({ body: { user_id: 70, role: "spm" } })
     ).toMatchObject({ ok: false, status: 404 });
+  });
+
+  // --- app-role sync (user_permission.role driven by centre seats) ---
+
+  // Locate the syncAppRoleFromSeats UPDATE among the transaction's queries.
+  const appRoleUpdate = () =>
+    mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE user_permission") &&
+      String(sql).includes("SET role = $2")
+    );
+
+  it("createPosition promotes Teachers without overwriting manually elevated roles", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    mockClientQuery.mockResolvedValueOnce({ rows: [] }); // INSERT centre_positions
+    mockClientQuery.mockResolvedValueOnce({ rows: [] }); // clearExplicitSchoolScope
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ n: 1 }] }); // has a PM-tier seat
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "apm", user_id: 70 } })
+    ).toEqual({ ok: true });
+    const roleUpdate = appRoleUpdate()!;
+    expect(roleUpdate[1]).toEqual([70, "program_manager"]);
+    // The narrow role band also preserves holistic_mentorship_admin.
+    expect(String(roleUpdate[0])).toContain(
+      "role IN ('teacher', 'program_manager')"
+    );
+  });
+
+  it("createPosition keeps role at teacher for a subject seat (no PM seat)", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check (none)
+    // SELECT-has-PM-seat falls through to the default mock ({ rows: [] }) → none.
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "physics", user_id: 70 } })
+    ).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("setUserRole promotes to program_manager when set to a PM tier", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 44 }] }); // seats updated
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ n: 1 }] }); // has a PM-tier seat
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "spm" } })
+    ).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "program_manager"]);
+  });
+
+  it("setUserRole demotes to teacher when all seats become subject roles", async () => {
+    mockSchemaReady();
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 44 }] }); // seats updated
+    mockClientQuery.mockResolvedValueOnce({ rows: [{ id: 4 }] }); // subject lookup (physics)
+    // SELECT-has-PM-seat → default mock ({ rows: [] }) → no PM tier left.
+    expect(
+      await setUserRole({ body: { user_id: 70, role: "physics" } })
+    ).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("updatePosition re-derives the prior occupant's role when a seat is vacated", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([
+      { id: 44, centre_id: 8, role: "pm", user_id: 70 },
+    ]); // position (occupied by 70)
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    expect(await updatePosition({ id: 44, body: { user_id: null } })).toEqual({
+      ok: true,
+    });
+    // 70 lost this PM seat; with no PM seat left (default mock) → teacher.
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("deletePosition demotes the occupant when their last PM seat is removed", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last (subject seat remains)
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(appRoleUpdate()![1]).toEqual([70, "teacher"]);
+  });
+
+  it("deletePosition of a vacant seat touches no app role", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: null }]); // vacant position
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(appRoleUpdate()).toBeUndefined();
+  });
+
+  // --- program_ids sync (user_permission.program_ids = union of seat programs) ---
+
+  const progUpdate = () =>
+    mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE user_permission") &&
+      String(sql).includes("SET program_ids")
+    );
+  // Route the transaction's client queries by SQL so the program_id SELECT can
+  // return a controlled set regardless of call order.
+  const routeClient = (programIds: number[], hasPmSeat = true) =>
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const s = String(sql);
+      if (s.includes("SELECT DISTINCT c.program_id"))
+        return Promise.resolve({ rows: programIds.map((program_id: number) => ({ program_id })) });
+      if (s.includes("role = ANY")) return Promise.resolve({ rows: hasPmSeat ? [{ n: 1 }] : [] });
+      return Promise.resolve({ rows: [] });
+    });
+
+  it("createPosition sets program_ids to the union of the person's seat programs", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8 }]); // centre
+    mockQuery.mockResolvedValueOnce([{ id: 70 }]); // user
+    mockQuery.mockResolvedValueOnce([{ level: 1 }]); // region-level guard
+    mockQuery.mockResolvedValueOnce([]); // duplicate check
+    routeClient([2, 1]); // active seats now span programs 1 and 2 (unsorted)
+    expect(
+      await createPosition({ body: { centre_id: 8, role: "pm", user_id: 70 } })
+    ).toEqual({ ok: true });
+    const upd = progUpdate()!;
+    expect(upd[1]).toEqual([70, [1, 2]]); // sorted union
+    // Seat sync never shrinks either manually elevated admin role's Program scope.
+    expect(String(upd[0])).toContain(
+      "role NOT IN ('admin', 'holistic_mentorship_admin')"
+    );
+    expect(String(upd[0])).toContain("revoked_at IS NULL");
+  });
+
+  it("deletePosition recomputes program_ids from the remaining seats", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    routeClient([1]); // after removal only a program-1 seat remains
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(progUpdate()![1]).toEqual([70, [1]]);
+  });
+
+  it("does not touch program_ids when the person has no active seat", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // position
+    mockQuery.mockResolvedValueOnce([{ id: 99 }]); // isLastActiveSeat → not last
+    routeClient([]); // no seats resolve to a program
+    expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
+    expect(progUpdate()).toBeUndefined();
   });
 
   it("createTeacher creates the user, teacher record, and seat", async () => {
@@ -971,6 +1151,62 @@ describe("positions", () => {
     expect(seatInsert![1]).toEqual([8, "spm", 701]);
   });
 
+  it("createSeatedUser creates an APC: teacher record, 'apc' seat, no subject", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 603 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 702 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: {
+          email: "apc@x.org",
+          full_name: "Apc Person",
+          kind: "apc",
+          centre_id: 8,
+        },
+      })
+    ).toEqual({ ok: true });
+    // An APC is a teacher record with role 'teacher' on the permission.
+    const permInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO user_permission")
+    );
+    expect(permInsert![1]).toEqual(["apc@x.org", "teacher", [2], "Apc Person"]);
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([702, null, null]); // subject + AF both blank
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "apc", 702]);
+  });
+
+  it("createSeatedUser keeps a subject on an APC when one is chosen", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 604 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [] }) // SELECT user (none)
+      .mockResolvedValueOnce({ rows: [{ id: 703 }] }); // INSERT user
+    expect(
+      await createSeatedUser({
+        body: { email: "apc2@x.org", kind: "apc", centre_id: 8, subject_id: 2 },
+      })
+    ).toEqual({ ok: true });
+    const teacherInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO teacher")
+    );
+    expect(teacherInsert![1]).toEqual([703, 2, null]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "apc", 703]); // still an APC seat
+  });
+
   it("createSeatedUser refuses an email that already exists", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
@@ -1008,6 +1244,35 @@ describe("positions", () => {
         String(c[0]).includes("INSERT INTO teacher")
       )
     ).toBe(false);
+  });
+
+  it("createSeatedUser preserves a dormant subject for a subject-less APC", async () => {
+    mockSchemaReady();
+    mockQuery.mockResolvedValueOnce([{ id: 8, program_id: 2 }]); // centre
+    mockQuery.mockResolvedValueOnce([]); // existing permission (none — was deleted)
+    mockClientQuery
+      .mockResolvedValueOnce({ rows: [{ id: 605 }] }) // INSERT user_permission
+      .mockResolvedValueOnce({ rows: [{ id: 246196 }] }) // SELECT user (exists by email)
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE user_permission user_id
+      .mockResolvedValueOnce({ rows: [{ id: 3099 }] }); // dormant teacher row exists
+
+    expect(
+      await createSeatedUser({
+        body: { email: "dormant-apc@x.org", kind: "apc", centre_id: 8 },
+      })
+    ).toEqual({ ok: true });
+
+    const teacherUpdate = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("UPDATE teacher SET")
+    );
+    expect(teacherUpdate![0]).toContain(
+      "subject_id = COALESCE($1, subject_id)"
+    );
+    expect(teacherUpdate![1]).toEqual([null, null, 3099]);
+    const seatInsert = mockClientQuery.mock.calls.find((c) =>
+      String(c[0]).includes("INSERT INTO centre_positions")
+    );
+    expect(seatInsert![1]).toEqual([8, "apc", 246196]);
   });
 
   it("createSeatedUser blocks a centre with no program", async () => {
@@ -1050,9 +1315,13 @@ describe("positions", () => {
   it("deletePosition soft-deletes a vacant seat", async () => {
     mockSchemaReady();
     mockQuery.mockResolvedValueOnce([{ id: 44, user_id: null }]); // vacant seat
-    mockQuery.mockResolvedValueOnce([]); // UPDATE
     expect(await deletePosition({ id: 44 })).toEqual({ ok: true });
-    expect(mockQuery.mock.calls.at(-1)![0]).toContain("SET deleted_at = now()");
+    // Soft-delete now runs inside the transaction (so the role re-derive is atomic).
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET deleted_at = now()")
+      )
+    ).toBe(true);
   });
 
   it("deletePosition refuses to delete an occupant's only seat unless forced", async () => {
@@ -1067,9 +1336,12 @@ describe("positions", () => {
 
     resetStaffSchemaCheckForTests();
     mockQuery.mockResolvedValueOnce(SCHEMA_ROWS);
-    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // occupied seat
-    mockQuery.mockResolvedValueOnce([]); // UPDATE (force skips the last-seat check)
+    mockQuery.mockResolvedValueOnce([{ id: 44, user_id: 70 }]); // occupied seat (force skips the last-seat check)
     expect(await deletePosition({ id: 44, force: true })).toEqual({ ok: true });
-    expect(mockQuery.mock.calls.at(-1)![0]).toContain("SET deleted_at = now()");
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET deleted_at = now()")
+      )
+    ).toBe(true);
   });
 });

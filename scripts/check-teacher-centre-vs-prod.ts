@@ -1,4 +1,7 @@
 /**
+ * Last updated: 2026-06-18 (6406710). One-off script — if the schema or app has
+ * moved on since this date, review/update it before running.
+ *
  * Read-only consistency check: do STAGING centre<->teacher seat mappings line
  * up with PRODUCTION user<->school mappings, for every teacher whose school is
  * linked to a centre?

@@ -1,10 +1,20 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { type Grade, type Student } from "./StudentTable";
 import { Modal, Button, FormSection } from "@/components/ui";
 import { UploadDocumentForm } from "@/components/documents/UploadDocumentForm";
 import { DocumentsList } from "@/components/documents/DocumentsList";
+import {
+  ANNUAL_FAMILY_INCOME_OPTIONS,
+  BOARD_STREAM_OPTIONS,
+  CBSE_BOARD,
+  CATEGORY_OPTIONS,
+  G10_BOARD_OPTIONS,
+  STUDENT_ADDITION_GENDER_OPTIONS,
+  STUDENT_DOB_MAX,
+  STUDENT_DOB_MIN,
+} from "@/lib/student-addition-fields";
 
 export interface Batch {
   id: number;
@@ -23,163 +33,116 @@ interface EditStudentModalProps {
   grades: Grade[];
   batches?: Batch[];
   nvsStreams?: string[];
+  /**
+   * The program the roster is scoped to — the same program the per-row Edit
+   * gate authorized. Must NOT fall back to student.program_id: for
+   * mixed-program students that is the roster's tiebreak pick and can differ
+   * from the program the user is acting under.
+   */
+  programId?: number | null;
 }
 
-const CATEGORY_OPTIONS = ["Gen", "OBC", "SC", "ST", "Gen-EWS"];
+const STREAM_OPTIONS = [
+  { value: "engineering", label: "Engineering" },
+  { value: "medical", label: "Medical" },
+  { value: "ca", label: "CA" },
+  { value: "clat", label: "CLAT" },
+  { value: "nda", label: "NDA" },
+] as const;
 
-// Parse category to extract base category and PWD status
-function parseCategory(category: string | null): {
-  baseCategory: string;
-  isPWD: boolean;
-} {
-  if (!category) return { baseCategory: "", isPWD: false };
-
-  if (category.startsWith("PWD-")) {
-    const base = category.replace("PWD-", "");
-    // Normalize variations like "PWD-General" to "Gen"
-    const normalizedBase = base === "General" ? "Gen" : base;
-    return { baseCategory: normalizedBase, isPWD: true };
-  }
-
-  return { baseCategory: category, isPWD: false };
-}
-
-// Combine base category and PWD status
-function combineCategory(baseCategory: string, isPWD: boolean): string {
-  if (!baseCategory) return "";
-  return isPWD ? `PWD-${baseCategory}` : baseCategory;
-}
-const GENDER_OPTIONS = ["Male", "Female", "Other"];
-const BOARD_STREAM_OPTIONS = ["PCM", "PCB", "PCMB"];
-const SCHOOL_MEDIUM_OPTIONS = ["English", "Hindi", "Others"];
-// Canonical Indian states + union territories. Free-form legacy values in the
-// data are preserved by selectField() rather than forced into this list.
-const INDIAN_STATE_OPTIONS = [
-  "Andhra Pradesh",
-  "Arunachal Pradesh",
-  "Assam",
-  "Bihar",
-  "Chhattisgarh",
-  "Goa",
-  "Gujarat",
-  "Haryana",
-  "Himachal Pradesh",
-  "Jharkhand",
-  "Karnataka",
-  "Kerala",
-  "Madhya Pradesh",
-  "Maharashtra",
-  "Manipur",
-  "Meghalaya",
-  "Mizoram",
-  "Nagaland",
-  "Odisha",
-  "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu",
-  "Telangana",
-  "Tripura",
-  "Uttar Pradesh",
-  "Uttarakhand",
-  "West Bengal",
-  "Andaman and Nicobar Islands",
-  "Chandigarh",
-  "Dadra and Nagar Haveli and Daman and Diu",
-  "Delhi",
-  "Jammu and Kashmir",
-  "Ladakh",
-  "Lakshadweep",
-  "Puducherry",
-];
-
-// Format a date string from the database to YYYY-MM-DD for HTML date input
 function formatDateForInput(dateString: string | null): string {
   if (!dateString) return "";
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "";
-    // Use UTC methods to avoid timezone shifts
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(date.getUTCDate()).padStart(2, "0");
+    if (Number.isNaN(date.getTime())) return "";
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+        .formatToParts(date)
+        .map(({ type, value }) => [type, value]),
+    );
+    const { year, month, day } = parts;
     return `${year}-${month}-${day}`;
   } catch {
     return "";
   }
 }
 
+function legacyPwdCategory(category: string | null) {
+  if (!category?.startsWith("PWD-")) return { category: category || "", pwd: false };
+  const value = category.replace("PWD-", "");
+  return {
+    category: value === "General" || value === "Gen" ? "Gen" : value === "EWS" ? "Gen-EWS" : value,
+    pwd: true,
+  };
+}
+
+function fullName(student: Student) {
+  return [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
+}
+
+function textValue(value: string | null | undefined) {
+  return value || "";
+}
+
+function editGender(gender: string | null) {
+  return gender === "Others" ? "Other" : textValue(gender);
+}
+
+function initialFormData(student: Student) {
+  const legacyCategory = legacyPwdCategory(student.category);
+  return {
+    first_name: fullName(student),
+    phone: textValue(student.phone),
+    gender: editGender(student.gender),
+    date_of_birth: formatDateForInput(student.date_of_birth),
+    category: legacyCategory.category,
+    physically_handicapped: Boolean(student.physically_handicapped ?? legacyCategory.pwd),
+    stream: textValue(student.stream),
+    board_stream: textValue(student.board_stream),
+    father_name: textValue(student.father_name),
+    annual_family_income: textValue(student.annual_family_income),
+    g10_board: student.g10_board === CBSE_BOARD ? CBSE_BOARD : "Others",
+    grade: textValue(student.grade?.toString()),
+  };
+}
+
 const inputClassName =
   "mt-1 block w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-bg-card-alt disabled:text-text-muted transition-colors";
 const labelClassName = "block text-sm font-medium text-text-secondary";
-// Heading shown at the top of each FormSection card.
 const sectionHeadingClassName = "mb-4 text-sm font-semibold text-text-primary";
+const errorClassName = "mt-1 text-xs text-danger";
 
+function digitsOnly(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+function lettersAndSpacesOnly(value: string) {
+  return value.replace(/[^A-Za-z ]+/g, "");
+}
+
+// fallow-ignore-next-line complexity
 export default function EditStudentModal({
   student,
   isOpen,
   onClose,
   onSave,
   grades,
-  batches = [],
-  nvsStreams = [],
+  programId = null,
 }: EditStudentModalProps) {
-  const { baseCategory, isPWD } = parseCategory(student.category);
-
-  // Find the group_id for the student's current grade
-  // Use String() to handle potential type mismatches (number vs string)
-  const currentGrade = grades.find(
-    (g) => String(g.id) === String(student.grade_id)
-  );
-  const initialGroupId = currentGrade?.group_id || "";
-  const originalStream = student.stream || "";
-  const originalGradeGroupId = initialGroupId;
-
-  const [formData, setFormData] = useState({
-    first_name: student.first_name || "",
-    last_name: student.last_name || "",
-    phone: student.phone || "",
-    whatsapp_phone: student.whatsapp_phone || "",
-    gender: student.gender || "",
-    date_of_birth: formatDateForInput(student.date_of_birth),
-    baseCategory: baseCategory,
-    isPWD: isPWD,
-    stream: student.stream || "",
-    board_stream: student.board_stream || "",
-    school_medium: student.school_medium || "",
-    group_id: initialGroupId,
-    batch_group_id: "", // Will be set when stream changes
-    // Address (user table)
-    address: student.address || "",
-    city: student.city || "",
-    district: student.district || "",
-    state: student.state || "",
-    pincode: student.pincode || "",
-    // Family / guardian (student table)
-    father_name: student.father_name || "",
-    father_phone: student.father_phone || "",
-    father_profession: student.father_profession || "",
-    father_education_level: student.father_education_level || "",
-    mother_name: student.mother_name || "",
-    mother_phone: student.mother_phone || "",
-    mother_profession: student.mother_profession || "",
-    mother_education_level: student.mother_education_level || "",
-    guardian_name: student.guardian_name || "",
-    guardian_relation: student.guardian_relation || "",
-    guardian_phone: student.guardian_phone || "",
-    guardian_education_level: student.guardian_education_level || "",
-    guardian_profession: student.guardian_profession || "",
-    annual_family_income: student.annual_family_income || "",
-    monthly_family_income: student.monthly_family_income || "",
-  });
+  const initialData = initialFormData(student);
+  const [formData, setFormData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<"details" | "documents">("details");
-  // Bumped after a successful upload so DocumentsList refetches.
   const [documentsRefresh, setDocumentsRefresh] = useState(0);
-  const studentName = [student.first_name, student.last_name].filter(Boolean).join(" ").trim();
-  // Reject NaN + non-numeric junk so the Documents tab disables cleanly
-  // instead of firing /api/students/NaN/documents.
+
+  const studentName = fullName(student);
   const studentPkId = (() => {
     const raw = student.student_pk_id;
     if (!raw || !/^\d+$/.test(raw)) return null;
@@ -187,38 +150,11 @@ export default function EditStudentModal({
     return Number.isFinite(n) && n > 0 ? n : null;
   })();
 
-  // Check if stream or grade has changed
-  const streamChanged = formData.stream !== originalStream && formData.stream !== "";
-  const gradeChanged = formData.group_id !== originalGradeGroupId && formData.group_id !== "";
-  const needsBatchUpdate = streamChanged || gradeChanged;
-
-  // Get the current grade number from the selected group_id
-  const selectedGradeObj = grades.find((g) => g.group_id === formData.group_id);
-  const currentGradeNumber = selectedGradeObj?.number || student.grade;
-
-  // Filter batches by program, grade, and stream when either changes
-  const availableBatches = useMemo(() => {
-    if (!needsBatchUpdate || !currentGradeNumber || !student.program_id) return [];
-    return batches.filter(
-      (b) =>
-        b.program_id === student.program_id &&
-        b.metadata?.grade === currentGradeNumber &&
-        b.metadata?.stream === formData.stream
-    );
-  }, [needsBatchUpdate, currentGradeNumber, formData.stream, batches, student.program_id]);
-
-  // Auto-select batch if only one option
-  useMemo(() => {
-    if (availableBatches.length === 1 && formData.batch_group_id !== availableBatches[0].group_id) {
-      setFormData((prev) => ({ ...prev, batch_group_id: availableBatches[0].group_id }));
-    } else if (availableBatches.length === 0 && formData.batch_group_id !== "") {
-      setFormData((prev) => ({ ...prev, batch_group_id: "" }));
-    }
-  }, [availableBatches]);
-
+  // fallow-ignore-next-line complexity
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setFieldErrors({});
     setLoading(true);
 
     if (!student.student_pk_id) {
@@ -227,63 +163,69 @@ export default function EditStudentModal({
       return;
     }
 
-    // Validate phone numbers (10 digits if provided)
-    const phoneFields: { label: string; value: string }[] = [
-      { label: "Phone number", value: formData.phone },
-      { label: "WhatsApp number", value: formData.whatsapp_phone },
-      { label: "Father's phone", value: formData.father_phone },
-      { label: "Mother's phone", value: formData.mother_phone },
-      { label: "Guardian's phone", value: formData.guardian_phone },
-    ];
-    for (const { label, value } of phoneFields) {
-      if (value && !/^\d{10}$/.test(value.replace(/\s/g, ""))) {
-        setError(`${label} must be exactly 10 digits`);
-        setLoading(false);
-        return;
-      }
-    }
+    const changed = Object.fromEntries(
+      Object.entries(formData).filter(([field, value]) =>
+        value !== initialData[field as keyof typeof initialData]
+      ),
+    );
 
-    // Validate: if stream or grade changed, batch must be selected
-    if (needsBatchUpdate && !formData.batch_group_id) {
-      setError("Please select a batch for the new stream/grade combination");
+    if (Object.keys(changed).length === 0) {
+      setError("No changes to save");
       setLoading(false);
       return;
     }
 
+    if ("first_name" in changed && formData.first_name.includes(".")) {
+      setFieldErrors({ first_name: "Student Name should not contain '.'" });
+      setLoading(false);
+      return;
+    }
+
+    if ("phone" in changed && !/^[1-9]\d{9}$/.test(formData.phone)) {
+      setError("Parents Phone Number must be exactly 10 digits and cannot start with zero");
+      setLoading(false);
+      return;
+    }
+
+    if (
+      "date_of_birth" in changed &&
+      (formData.date_of_birth < STUDENT_DOB_MIN || formData.date_of_birth > STUDENT_DOB_MAX)
+    ) {
+      setFieldErrors({ date_of_birth: "Date of Birth must be between 2000 and 2015" });
+      setLoading(false);
+      return;
+    }
+
+    if ("grade" in changed && !["11", "12"].includes(formData.grade)) {
+      setFieldErrors({ grade: "Grade must be 11 or 12" });
+      setLoading(false);
+      return;
+    }
+
+    const payload: Record<string, unknown> = { ...changed };
+    if ("first_name" in changed) payload.last_name = "";
+    if ("grade" in changed) payload.grade = formData.grade ? Number(formData.grade) : undefined;
+    if ("category" in changed || "physically_handicapped" in changed) {
+      payload.category = formData.category;
+      payload.physically_handicapped = formData.physically_handicapped;
+    }
+    // The program the student is being edited under — the roster's selected
+    // program, the same one the Edit button was gated on. The API authorizes
+    // the edit against it and passes it to the DB service for enrollment
+    // context. Never send student.program_id here: for mixed-program students
+    // it is the roster's tiebreak pick and may differ from the acting program.
+    if (programId != null) payload.program_id = Number(programId);
+
     try {
-      // Combine category and PWD status before sending
-      const { baseCategory, isPWD, group_id, batch_group_id, ...rest } = formData;
-
-      // Find the grade_id (grade table ID) from the selected group_id
-      const selectedGrade = grades.find((g) => g.group_id === group_id);
-      const gradeId = selectedGrade?.id || null;
-
-      const dataToSend: Record<string, unknown> = {
-        ...rest,
-        category: combineCategory(baseCategory, isPWD),
-        // Include user_id for grade/batch enrollment updates
-        user_id: student.user_id,
-        // group_id for enrollment_record update (via PATCH /update-group-user-by-type)
-        group_id: group_id,
-        // grade_id for student table update (via PATCH /student)
-        grade_id: gradeId,
-      };
-
-      // Include batch_group_id if stream or grade changed
-      if (needsBatchUpdate && batch_group_id) {
-        dataToSend.batch_group_id = batch_group_id;
-      }
-
       const response = await fetch(`/api/student/${student.student_pk_id}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(dataToSend),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        setFieldErrors(data.field_errors ?? {});
         throw new Error(data.error || "Failed to update student");
       }
 
@@ -301,15 +243,30 @@ export default function EditStudentModal({
   ) => {
     const { name, value, type } = e.target;
     if (type === "checkbox") {
-      const checked = (e.target as HTMLInputElement).checked;
-      setFormData((prev) => ({ ...prev, [name]: checked }));
-    } else {
-      setFormData((prev) => ({ ...prev, [name]: value }));
+      setFormData((prev) => ({
+        ...prev,
+        [name]: (e.target as HTMLInputElement).checked,
+      }));
+      return;
     }
+    setFormData((prev) => ({
+      ...prev,
+      [name]:
+        name === "phone"
+          ? digitsOnly(value).replace(/^0+/, "").slice(0, 10)
+          : name === "father_name"
+            ? lettersAndSpacesOnly(value)
+            : value,
+    }));
+    setError("");
+    setFieldErrors((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
-  // Labeled text input bound to a formData key. Keeps the many optional
-  // profile fields below concise without diverging from the inline style above.
   const textField = (
     name: keyof typeof formData,
     label: string,
@@ -325,19 +282,24 @@ export default function EditStudentModal({
         onChange={handleChange}
         className={inputClassName}
       />
+      {fieldErrors[name] && <p className={errorClassName}>{fieldErrors[name]}</p>}
     </div>
   );
 
-  // Labeled dropdown bound to a formData key. Any existing value that isn't in
-  // `options` is preserved as a leading option so legacy data is never silently
-  // dropped or overwritten on save.
   const selectField = (
     name: keyof typeof formData,
     label: string,
-    options: readonly string[],
+    options: readonly string[] | ReadonlyArray<{ value: string; label: string }>,
   ) => {
     const current = String(formData[name] ?? "");
-    const opts = current && !options.includes(current) ? [current, ...options] : options;
+    const values = options.map((option) =>
+      typeof option === "string" ? option : option.value,
+    );
+    const opts =
+      current && !values.includes(current)
+        ? [{ value: current, label: current }, ...options]
+        : options;
+
     return (
       <div>
         <label className={labelClassName}>{label}</label>
@@ -348,12 +310,17 @@ export default function EditStudentModal({
           className={inputClassName}
         >
           <option value="">Select...</option>
-          {opts.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
+          {opts.map((option) => {
+            const value = typeof option === "string" ? option : option.value;
+            const labelText = typeof option === "string" ? option : option.label;
+            return (
+              <option key={value} value={value}>
+                {labelText}
+              </option>
+            );
+          })}
         </select>
+        {fieldErrors[name] && <p className={errorClassName}>{fieldErrors[name]}</p>}
       </div>
     );
   };
@@ -366,26 +333,12 @@ export default function EditStudentModal({
     >
       <div className="flex items-start justify-between border-b border-border px-6 py-4">
         <div>
-          <h2 className="text-xl font-semibold text-text-primary">
-            Edit Student
-          </h2>
-          {studentName && (
-            <p className="mt-0.5 text-sm text-text-muted">{studentName}</p>
-          )}
+          <h2 className="text-xl font-semibold text-text-primary">Edit Student</h2>
+          {studentName && <p className="mt-0.5 text-sm text-text-muted">{studentName}</p>}
         </div>
-        <Button variant="icon" onClick={onClose}>
-          <svg
-            className="h-6 w-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
+        <Button variant="icon" onClick={onClose} aria-label="Close edit modal">
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </Button>
       </div>
@@ -426,9 +379,6 @@ export default function EditStudentModal({
             studentId={studentPkId}
             studentName={studentName || "this student"}
             onUploaded={() => {
-              // Bump the modal's own list, and also tell the parent
-              // (StudentTable) so any inline DocumentsList visible elsewhere
-              // refetches.
               setDocumentsRefresh((n) => n + 1);
               onSave();
             }}
@@ -445,10 +395,7 @@ export default function EditStudentModal({
           </div>
         </div>
       ) : (
-        <form
-          onSubmit={handleSubmit}
-          className="flex min-h-0 flex-1 flex-col"
-        >
+        <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {error && (
               <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
@@ -456,269 +403,92 @@ export default function EditStudentModal({
               </div>
             )}
 
-            {/* Basic Information */}
             <FormSection>
-              <h3 className={sectionHeadingClassName}>Basic Information</h3>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                <div>
-                  <label className={labelClassName}>First Name</label>
-                  <input
-                    type="text"
-                    name="first_name"
-                    value={formData.first_name}
-                    onChange={handleChange}
-                    className={inputClassName}
-                  />
-                </div>
-                <div>
-                  <label className={labelClassName}>Last Name</label>
-                  <input
-                    type="text"
-                    name="last_name"
-                    value={formData.last_name}
-                    onChange={handleChange}
-                    className={inputClassName}
-                  />
-                </div>
+              <h3 className={sectionHeadingClassName}>Student Details</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {textField("first_name", "Student Name")}
                 <div>
                   <label className={labelClassName}>Date of Birth</label>
                   <input
                     type="date"
                     name="date_of_birth"
+                    min={STUDENT_DOB_MIN}
+                    max={STUDENT_DOB_MAX}
                     value={formData.date_of_birth}
                     onChange={handleChange}
                     className={inputClassName}
                   />
+                  {fieldErrors.date_of_birth && (
+                    <p className={errorClassName}>{fieldErrors.date_of_birth}</p>
+                  )}
                 </div>
-                <div>
-                  <label className={labelClassName}>Gender</label>
-                  <select
-                    name="gender"
-                    value={formData.gender}
-                    onChange={handleChange}
-                    className={inputClassName}
-                  >
-                    <option value="">Select...</option>
-                    {GENDER_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClassName}>Phone</label>
+                {selectField("gender", "Gender", STUDENT_ADDITION_GENDER_OPTIONS)}
+                {selectField("category", "Category", CATEGORY_OPTIONS)}
+                <label className="mt-6 flex w-fit cursor-pointer items-center gap-2">
                   <input
-                    type="text"
-                    name="phone"
-                    value={formData.phone}
+                    type="checkbox"
+                    name="physically_handicapped"
+                    checked={formData.physically_handicapped}
                     onChange={handleChange}
-                    className={inputClassName}
+                    className="h-4 w-4 rounded border-2 border-border text-accent focus:ring-accent/20"
                   />
-                </div>
-                <div>
-                  <label className={labelClassName}>Category</label>
-                  <select
-                    name="baseCategory"
-                    value={formData.baseCategory}
-                    onChange={handleChange}
-                    className={inputClassName}
-                  >
-                    <option value="">Select...</option>
-                    {CATEGORY_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <span className={labelClassName}>CWSN</span>
+                </label>
+                {textField("phone", "Parents Phone Number", "tel")}
+                {textField("father_name", "Father Name")}
+                {selectField(
+                  "annual_family_income",
+                  "Yearly / Annual Family Income",
+                  ANNUAL_FAMILY_INCOME_OPTIONS,
+                )}
               </div>
+            </FormSection>
 
-              <label className="mt-4 flex w-fit cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  name="isPWD"
-                  checked={formData.isPWD}
-                  onChange={handleChange}
-                  className="h-4 w-4 rounded border-2 border-border text-accent focus:ring-accent/20"
-                />
-                <span className={labelClassName}>
-                  Person with Disability (PWD)
-                </span>
-              </label>
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Academic</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {selectField(
+                  "grade",
+                  "Grade",
+                  grades
+                    .filter((grade) => grade.number === 11 || grade.number === 12)
+                    .map((grade) => ({
+                      value: String(grade.number),
+                      label: `Grade ${grade.number}`,
+                    })),
+                )}
+                {selectField("stream", "Primary Exam preparing for", STREAM_OPTIONS)}
+                {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
+                {selectField("g10_board", "G10 board", G10_BOARD_OPTIONS)}
+              </div>
+            </FormSection>
 
-              <div className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-4 md:grid-cols-3">
+            <FormSection>
+              <h3 className={sectionHeadingClassName}>Locked Identity</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div>
                   <label className={labelClassName}>Student ID</label>
-                  <input
-                    type="text"
-                    value={student.student_id || "—"}
-                    disabled
-                    className={inputClassName}
-                  />
+                  <input type="text" value={student.student_id || "—"} disabled className={inputClassName} />
+                </div>
+                <div>
+                  <label className={labelClassName}>PEN</label>
+                  <input type="text" value={student.pen_number || "—"} disabled className={inputClassName} />
                 </div>
                 <div>
                   <label className={labelClassName}>APAAR ID</label>
-                  <input
-                    type="text"
-                    value={student.apaar_id || "—"}
-                    disabled
-                    className={inputClassName}
-                  />
+                  <input type="text" value={student.apaar_id || "—"} disabled className={inputClassName} />
+                </div>
+                <div>
+                  <label className={labelClassName}>Grade 10 Roll no</label>
+                  <input type="text" value={student.g10_roll_no || "—"} disabled className={inputClassName} />
                 </div>
                 <div>
                   <label className={labelClassName}>Program</label>
-                  <input
-                    type="text"
-                    value={student.program_name || "—"}
-                    disabled
-                    className={inputClassName}
-                  />
+                  <input type="text" value={student.program_name || "—"} disabled className={inputClassName} />
                 </div>
               </div>
             </FormSection>
 
-            {/* Enrollment */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Enrollment</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClassName}>Grade</label>
-                  <select
-                    name="group_id"
-                    value={formData.group_id}
-                    onChange={handleChange}
-                    className={inputClassName}
-                  >
-                    <option value="">Select...</option>
-                    {grades.map((grade) => (
-                      <option key={grade.id} value={grade.group_id}>
-                        Grade {grade.number}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClassName}>Stream</label>
-                  <select
-                    name="stream"
-                    value={formData.stream}
-                    onChange={handleChange}
-                    className={inputClassName}
-                  >
-                    <option value="">Select...</option>
-                    {nvsStreams.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Batch selection - shown when stream or grade changes */}
-              {needsBatchUpdate && batches.length > 0 && (
-                <div className="mt-4 rounded-lg border border-accent bg-hover-bg p-4">
-                  <label className={`${labelClassName} text-accent-hover`}>
-                    New Batch (required for {streamChanged && gradeChanged ? "stream and grade change" : streamChanged ? "stream change" : "grade change"})
-                  </label>
-                  {availableBatches.length === 0 ? (
-                    <p className="mt-1 text-sm text-danger">
-                      No batch found for Grade {currentGradeNumber} + {formData.stream}.
-                      Please contact admin.
-                    </p>
-                  ) : (
-                    <select
-                      name="batch_group_id"
-                      value={formData.batch_group_id}
-                      onChange={handleChange}
-                      className={inputClassName}
-                    >
-                      <option value="">Select batch...</option>
-                      {availableBatches.map((batch) => (
-                        <option key={batch.id} value={batch.group_id}>
-                          {batch.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {availableBatches.length === 1 && (
-                    <p className="mt-1 text-xs text-accent">
-                      Auto-selected: {availableBatches[0].name}
-                    </p>
-                  )}
-                </div>
-              )}
-            </FormSection>
-
-            {/* Academic */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Academic</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {selectField("board_stream", "Board Stream", BOARD_STREAM_OPTIONS)}
-                {selectField("school_medium", "School Medium", SCHOOL_MEDIUM_OPTIONS)}
-              </div>
-            </FormSection>
-
-            {/* Contact & Address */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Contact &amp; Address</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {textField("whatsapp_phone", "WhatsApp Number", "tel")}
-                {textField("pincode", "Pincode", "numeric")}
-              </div>
-              <div className="mt-4">{textField("address", "Address")}</div>
-              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3">
-                {textField("city", "City")}
-                {textField("district", "District")}
-                {selectField("state", "State", INDIAN_STATE_OPTIONS)}
-              </div>
-            </FormSection>
-
-            {/* Father */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Father</h3>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                {textField("father_name", "Name")}
-                {textField("father_phone", "Phone", "tel")}
-                {textField("father_profession", "Profession")}
-                {textField("father_education_level", "Education Level")}
-              </div>
-            </FormSection>
-
-            {/* Mother */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Mother</h3>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                {textField("mother_name", "Name")}
-                {textField("mother_phone", "Phone", "tel")}
-                {textField("mother_profession", "Profession")}
-                {textField("mother_education_level", "Education Level")}
-              </div>
-            </FormSection>
-
-            {/* Guardian */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Guardian</h3>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                {textField("guardian_name", "Name")}
-                {textField("guardian_relation", "Relation")}
-                {textField("guardian_phone", "Phone", "tel")}
-                {textField("guardian_education_level", "Education Level")}
-                {textField("guardian_profession", "Profession")}
-              </div>
-            </FormSection>
-
-            {/* Socio-economic */}
-            <FormSection>
-              <h3 className={sectionHeadingClassName}>Socio-economic</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {textField("annual_family_income", "Annual Family Income")}
-                {textField("monthly_family_income", "Monthly Family Income")}
-              </div>
-            </FormSection>
-
-            {/* Last Updated */}
             {student.updated_at && (
               <p className="text-right text-xs text-text-muted">
                 Last updated: {new Date(student.updated_at).toLocaleDateString("en-IN", {
@@ -736,10 +506,7 @@ export default function EditStudentModal({
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={loading || (needsBatchUpdate && availableBatches.length === 0)}
-            >
+            <Button type="submit" disabled={loading}>
               {loading ? "Saving..." : "Save Changes"}
             </Button>
           </div>

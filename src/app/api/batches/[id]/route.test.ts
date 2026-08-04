@@ -100,6 +100,21 @@ describe("PATCH /api/batches/[id]", () => {
     expect(json).toEqual(result);
   });
 
+  it("accepts NDA stream metadata", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockIsAdmin.mockResolvedValue(true);
+    const result = { id: 42, metadata: { stream: "nda", grade: 11 } };
+    mockFetch.mockResolvedValue(new Response(JSON.stringify(result), { status: 200 }));
+
+    const req = jsonRequest("http://localhost/api/batches/42", {
+      method: "PATCH",
+      body: { metadata: { stream: "nda", grade: 11 } },
+    });
+    const res = await PATCH(req as never, params);
+
+    expect(res.status).toBe(200);
+  });
+
   it("forwards error status from DB service", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockIsAdmin.mockResolvedValue(true);

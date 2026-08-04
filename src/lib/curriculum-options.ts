@@ -1,8 +1,9 @@
 import { compareCurriculumCodes } from "./curriculum-code-sort";
 import { query } from "./db";
 import {
-  PROGRAM_IDS,
+  PHYSICAL_CENTRE_PROGRAM_IDS,
   canAccessSchoolSync,
+  getProgramContextSync,
   type UserPermission,
 } from "./permissions";
 import type {
@@ -16,7 +17,10 @@ import type {
 } from "@/types/curriculum";
 
 export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
-const CURRICULUM_PROGRAM_IDS: number[] = [PROGRAM_IDS.COE, PROGRAM_IDS.NODAL];
+// Curriculum applies to every physical-centre program (all non-NVS programs),
+// not just JNV CoE/Nodal — otherwise a Punjab/EMRS/RGNV teacher's programs
+// intersect to empty and their curriculum tab loads blank.
+const CURRICULUM_PROGRAM_IDS: number[] = PHYSICAL_CENTRE_PROGRAM_IDS;
 const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"];
 const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_main: 1,
@@ -26,6 +30,10 @@ const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
 interface SchoolScopeRow {
   code: string;
   region: string | null;
+}
+
+interface PreferredSeatProgramRow {
+  program_id: number | string | null;
 }
 
 interface ConfigScopeRow {
@@ -65,6 +73,7 @@ interface ScopeSuccess {
   school: SchoolScopeRow;
   programs: CurriculumProgramOption[];
   allowedProgramIds: number[];
+  preferredProgramId: number | null;
 }
 
 type ProgramScopeResult = ScopeSuccess | ScopeFailure;
@@ -116,6 +125,30 @@ export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
   return EXAM_TRACK_CURRICULUM_IDS[examTrack];
 }
 
+// The batch stream (as produced by parseBatchStream: "engineering" | "medical") each exam
+// track targets. Used to reject mismatched pairings (e.g. a NEET test on an engineering
+// batch), which would otherwise put a wrong-subject test live for those students.
+const EXAM_TRACK_STREAMS: Record<ExamTrack, string> = {
+  jee_main: "engineering",
+  jee_advanced: "engineering",
+  neet: "medical",
+};
+
+export function streamForExamTrack(examTrack: ExamTrack): string {
+  return EXAM_TRACK_STREAMS[examTrack];
+}
+
+// CMS grade id from the grade table (grade number -> id). Both CMS routes resolve it via
+// the DB rather than a client-supplied map (which could drift), so the lookup lives here
+// once. Returns null when no grade row matches.
+export async function resolveGradeId(gradeNumber: number): Promise<number | null> {
+  const rows = await query<{ id: number }>(
+    `SELECT id FROM grade WHERE number = $1 LIMIT 1`,
+    [gradeNumber]
+  );
+  return rows[0]?.id ?? null;
+}
+
 function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; subject: SubjectName }>(
   rows: T[]
 ): T[] {
@@ -149,7 +182,9 @@ export async function resolveCurriculumProgramScope(
   }
 
   const callerProgramIds =
-    permission.role === "admin" ? CURRICULUM_PROGRAM_IDS : permission.program_ids ?? [];
+    permission.role === "admin"
+      ? CURRICULUM_PROGRAM_IDS
+      : getProgramContextSync(permission).programIds;
   const allowedProgramIds = CURRICULUM_PROGRAM_IDS.filter((id) =>
     callerProgramIds.includes(id)
   );
@@ -163,12 +198,32 @@ export async function resolveCurriculumProgramScope(
         [allowedProgramIds]
       )).map((program) => ({ ...program, id: Number(program.id) }))
     : [];
+  const seatCentreIds = permission.scope?.centres;
+  const preferredProgramRows =
+    allowedProgramIds.length > 0 && seatCentreIds instanceof Set && seatCentreIds.size > 0
+      ? await query<PreferredSeatProgramRow>(
+          `SELECT c.program_id
+           FROM centres c
+           JOIN school s ON s.id = c.school_id
+           WHERE c.id = ANY($1::int[])
+             AND s.code = $2
+             AND c.program_id = ANY($3::int[])
+           ORDER BY array_position($3::int[], c.program_id), c.id
+           LIMIT 1`,
+          [[...seatCentreIds], schoolCode, allowedProgramIds]
+        )
+      : [];
+  const preferredProgramId =
+    preferredProgramRows[0]?.program_id == null
+      ? null
+      : Number(preferredProgramRows[0].program_id);
 
   return {
     ok: true,
     school,
     programs,
     allowedProgramIds: programs.map((program) => program.id),
+    preferredProgramId,
   };
 }
 
@@ -243,7 +298,7 @@ export async function getCurriculumOptions(params: {
     examTracks,
     gradeSubjects,
     defaults: {
-      programId: overrideProgramId ?? scope.programs[0]?.id ?? null,
+      programId: overrideProgramId ?? scope.preferredProgramId ?? scope.programs[0]?.id ?? null,
       examTrack: examTracks[0] ?? null,
       grade: firstGradeSubject?.grade ?? null,
       gradeId: firstGradeSubject?.gradeId ?? null,
