@@ -32,8 +32,10 @@ import {
   type FeedbackQuestion,
 } from "@/lib/teacher-feedback-form";
 
-// Defaults to production; BIGQUERY_PROJECT overrides it so a local run can read
-// the staging dataset.
+// The BigQuery project holding the responses. Defaults to production, which is
+// what every deployed environment uses (`bigquery.ts` hardcodes the same, so
+// staging af_lms also reads prod BQ). BIGQUERY_PROJECT is unset in staging and
+// prod; it exists so a local run can point at `avantifellows-staging` instead.
 const BQ_PROJECT = process.env.BIGQUERY_PROJECT?.trim() || "avantifellows";
 const FORM_LEVEL_TABLE = `\`${BQ_PROJECT}.assessments.all_responses_form_level\``;
 const BQ_LOCATION = "asia-south1";
