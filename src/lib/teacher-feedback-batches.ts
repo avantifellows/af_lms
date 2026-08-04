@@ -86,7 +86,7 @@ export async function getBatchesForCentre(
   const parents = await query<FeedbackBatchRow>(
     `SELECT b.id, b.name, b.batch_id, b.parent_id, b.program_id
      FROM batch b
-     WHERE b.id = ANY($1::int[])
+     WHERE b.id = ANY($1::bigint[])
      ORDER BY b.name`,
     [missing]
   );

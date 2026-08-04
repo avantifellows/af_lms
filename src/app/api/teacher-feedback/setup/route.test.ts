@@ -106,7 +106,7 @@ beforeEach(() => {
   mockCreateSession.mockImplementation(async (p) => ({
     sessionPk: 100 + p.feedback.teacherOrder,
   }));
-  mockPublish.mockResolvedValue(undefined);
+  mockPublish.mockResolvedValue(true); // publishMessage reports whether it published
 });
 
 describe("POST /api/teacher-feedback/setup", () => {
@@ -223,6 +223,28 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(mockQuery).toHaveBeenCalledTimes(5);
   });
 
+  it("does not report success when the SNS publish failed", async () => {
+    // publishMessage swallows its errors, so before it returned a boolean a failed
+    // publish still recorded 'created': the Lambda was never asked to build the
+    // quiz, and the round sat on "Generating links…" with nothing saying why.
+    mockPublish.mockResolvedValue(false);
+
+    const res = await POST(
+      req(validBody({ teachers: [{ id: "1", name: "Manjit Kumar", order: 1 }] }))
+    );
+    expect(res.status).toBe(207);
+    const json = await res.json();
+    expect(json.createdCount).toBe(0);
+    expect(json.failedCount).toBe(1);
+    expect(json.teachers[0].error).toMatch(/could not be triggered/i);
+
+    // The row is marked failed, not created, so it reads as retryable.
+    const bind = mockQuery.mock.calls.find((c) =>
+      (c[0] as string).includes("SET session_pk = $1, status = $2")
+    );
+    expect((bind?.[1] as unknown[])[1]).toBe("failed");
+  });
+
   it("reserves the row before creating the session or publishing SNS", async () => {
     // The partial unique index on (setup_run_id, teacher_order) can only act as a
     // lock if the row lands FIRST. Previously the insert came last, so a repeat of
@@ -246,6 +268,7 @@ describe("POST /api/teacher-feedback/setup", () => {
     });
     mockPublish.mockImplementation(async () => {
       order.push("sns");
+      return true;
     });
 
     await POST(req(validBody({ teachers: [{ id: "1", name: "Manjit Kumar", order: 1 }] })));
@@ -310,9 +333,7 @@ describe("POST /api/teacher-feedback/setup", () => {
     // The failed teacher's row is upserted to 'failed' rather than left pending.
     expect(sqls.some((s) => s.includes("DO UPDATE SET status = 'failed'"))).toBe(true);
     // The successful teacher's row is bound to its session.
-    expect(sqls.some((s) => s.includes("SET session_pk = $1, status = 'created'"))).toBe(
-      true
-    );
+    expect(sqls.some((s) => s.includes("SET session_pk = $1, status = $2"))).toBe(true);
     // SNS only published for the successful teacher.
     expect(mockPublish).toHaveBeenCalledTimes(1);
   });

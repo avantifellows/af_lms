@@ -284,16 +284,29 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Trigger the Lambda to build the quiz + links for this session.
-      await publishMessage({ action: "db_id", id: created.sessionPk });
+      // Trigger the Lambda to build the quiz + links for this session. publish
+      // never throws, so check the result: without it a failed publish still
+      // recorded 'created', and the round then sat on "Generating links…" forever
+      // with nothing anywhere saying the Lambda was never asked to run.
+      const published = await publishMessage({
+        action: "db_id",
+        id: created.sessionPk,
+      });
 
-      // Bind the session to the reserved row and mark it live.
+      // Bind the session to the reserved row. 'created' only if the Lambda was
+      // actually triggered — otherwise the row is a retryable failure.
       await query(
         `UPDATE lms_teacher_feedback
-            SET session_pk = $1, status = 'created', updated_at = now()
-          WHERE id = $2`,
-        [created.sessionPk, reservedId]
+            SET session_pk = $1, status = $2, updated_at = now()
+          WHERE id = $3`,
+        [created.sessionPk, published ? "created" : "failed", reservedId]
       );
+
+      if (!published) {
+        throw new Error(
+          "Session created but the quiz build could not be triggered (SNS publish failed). Retry setup for this teacher."
+        );
+      }
 
       resultsByOrder.set(teacher.order, {
         teacherName: teacher.name,

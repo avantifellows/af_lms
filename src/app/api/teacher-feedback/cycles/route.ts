@@ -87,7 +87,7 @@ async function resolveSessionLinks(
     portal_link: string | null;
     meta_data: { admin_testing_link?: string } | null;
   }>(
-    `SELECT id, platform_id, portal_link, meta_data FROM session WHERE id = ANY($1::int[])`,
+    `SELECT id, platform_id, portal_link, meta_data FROM session WHERE id = ANY($1::bigint[])`,
     [sessionPks]
   );
   for (const s of sessionRows) {

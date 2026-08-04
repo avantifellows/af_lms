@@ -75,6 +75,18 @@ describe("getBatchesForCentre", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("casts the parent lookup to bigint[], matching batch.id", async () => {
+    // batch.id and session.id are bigints; an ::int[] cast throws
+    // "integer out of range" once an id exceeds 2^31. Plenty of headroom today,
+    // but the cast should agree with the column type.
+    mockQuery.mockResolvedValueOnce([
+      { id: 1008, name: "b", batch_id: "B", parent_id: 958, program_id: 1 },
+    ]);
+    mockQuery.mockResolvedValueOnce([]);
+    await getBatchesForCentre({ centreId: 38, schoolId: 393, programId: 1 });
+    expect(mockQuery.mock.calls[1][0]).toContain("::bigint[]");
+  });
+
   it("skips the parent lookup when no parents are missing", async () => {
     mockQuery.mockResolvedValueOnce([
       { id: 958, name: "Parent", batch_id: "P1", parent_id: null, program_id: 1 },
