@@ -688,7 +688,6 @@ async function buildSchoolTabs({
       label: "Teacher Feedback",
       content: (
         <TeacherFeedbackTab
-          schoolId={school.id}
           schoolCode={school.code}
           canEdit={teacherFeedbackAccess.canEdit}
         />

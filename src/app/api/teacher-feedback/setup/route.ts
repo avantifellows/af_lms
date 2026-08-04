@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
 import { query } from "@/lib/db";
-import { canAccessQuizSessionBatches } from "@/lib/quiz-session-access";
+import {
+  canAccessQuizSessionBatches,
+  resolveBatchGroups,
+} from "@/lib/quiz-session-access";
 import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
+import {
+  centreOwnsAllBatches,
+  getCentreScope,
+} from "@/lib/teacher-feedback-batches";
 import { FEEDBACK_FORM_VERSION } from "@/lib/teacher-feedback-form";
 import { createFeedbackSession } from "@/lib/teacher-feedback-session";
 import { publishMessage } from "@/lib/sns";
@@ -49,18 +56,6 @@ function cycleLabelFor(date: Date): string {
 function cycleKeyFor(date: Date): string {
   const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   return `${date.getUTCFullYear()}-${m}`;
-}
-
-/**
- * group = the program tag = the CLASS batch_id prefix before the first
- * underscore (e.g. "EnableStudents_TP_2027_engg_C024" -> "EnableStudents").
- * Gurukul filters sessions on meta_data->>'group', so this MUST come from a
- * class batch_id, NOT the parent batch (whose id may be unrelated, e.g.
- * "EN-TP-2027-engg-C01").
- */
-function deriveGroup(classBatchId: string): string {
-  const idx = classBatchId.indexOf("_");
-  return idx === -1 ? classBatchId : classBatchId.slice(0, idx);
 }
 
 // POST /api/teacher-feedback/setup
@@ -125,27 +120,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Confirm the selected class batches belong to this school (don't trust the
-  // client). parentBatchId is best-effort (used only for the group attach).
-  const ownership = await query<{ ok: boolean }>(
-    `
-    SELECT EXISTS (
-      SELECT 1
-      FROM batch b
-      JOIN school_batch sb ON sb.batch_id = b.id
-      JOIN school s ON s.id = sb.school_id
-      WHERE b.batch_id = ANY($1::text[]) AND s.code = $2
-    ) AS ok
-    `,
-    [classBatchIds, schoolCode]
-  );
-  if (!ownership[0]?.ok) {
-    return NextResponse.json(
-      { error: "Selected batches do not belong to this school" },
-      { status: 400 }
-    );
-  }
-
   // Confirm the centre belongs to this school + grab its name for the record.
   const centreRows = await query<{ name: string }>(
     `SELECT c.name FROM centres c JOIN school s ON s.id = c.school_id
@@ -156,6 +130,36 @@ export async function POST(request: NextRequest) {
   if (!centreName) {
     return NextResponse.json(
       { error: "Selected centre does not belong to this school" },
+      { status: 400 }
+    );
+  }
+
+  // Every selected class batch must belong to the CHOSEN CENTRE's cohort — not
+  // merely to the school. A school can host a CoE and a Nodal centre, so a
+  // school-level check would let a Nodal feedback round be answered by CoE
+  // students. Checking all ids (not "any") also stops a crafted payload from
+  // smuggling foreign batches in alongside one valid one.
+  // parentBatchId is best-effort (used only for the group attach).
+  const centreScope = await getCentreScope(centreId);
+  if (!centreScope) {
+    return NextResponse.json(
+      { error: "Selected centre is not active or has no school" },
+      { status: 400 }
+    );
+  }
+  if (centreScope.programId === null) {
+    return NextResponse.json(
+      {
+        error:
+          `${centreName} has no programme set, so its batches cannot be identified. ` +
+          `Ask an admin to set the centre's programme.`,
+      },
+      { status: 400 }
+    );
+  }
+  if (!(await centreOwnsAllBatches(centreScope, classBatchIds))) {
+    return NextResponse.json(
+      { error: `Selected batches do not all belong to ${centreName}` },
       { status: 400 }
     );
   }
@@ -182,19 +186,44 @@ export async function POST(request: NextRequest) {
   const startIso = startTime.toISOString();
   const endIso = endTime.toISOString();
 
-  const group = deriveGroup(classBatchIds[0]);
   const cycleLabel = cycleLabelFor(startTime);
   const sourceId = `teacher-feedback:${FEEDBACK_FORM_VERSION}:${schoolCode}:${cycleKeyFor(startTime)}`;
   const setupRunId = randomUUID();
 
-  // Student login auth type depends on the group (auth_group.input_schema.auth_type):
-  // EnableStudents/EMRS use "ID,DOB", Punjab/Gujarat use "ID", etc. portal-frontend
-  // honours the session's auth_type over the auth_group's, so it must match here.
-  const authRows = await query<{ auth_type: string | null }>(
-    `SELECT input_schema->>'auth_type' AS auth_type FROM auth_group WHERE name = $1 LIMIT 1`,
-    [group]
-  );
-  const authType = authRows[0]?.auth_type || "ID";
+  // `group` (which Gurukul filters sessions on) and `auth_type` (which
+  // portal-frontend honours over the auth_group's own) both come from the
+  // batch -> auth_group FK.
+  //
+  // NOT from the batch_id prefix: 314 of 1262 production batches have a prefix
+  // that is not their auth_group name (e.g. "EMRS-11-25-P01", "AIS-11-A25").
+  // For those, prefix-derivation silently produced a group Gurukul never
+  // matches AND missed the auth_group row, defaulting auth_type to "ID" so
+  // students could not even log in. Shared with the quiz-session create path.
+  const batchGroups = await resolveBatchGroups(classBatchIds);
+  const resolvedGroup = batchGroups.get(classBatchIds[0]);
+  if (!resolvedGroup) {
+    return NextResponse.json(
+      { error: "Selected batch has no auth group configured" },
+      { status: 400 }
+    );
+  }
+  // One session carries a single group/auth_type pair, so a mixed selection
+  // would silently strand whichever batches don't match the first one.
+  const mismatched = classBatchIds.find((batchId) => {
+    const bg = batchGroups.get(batchId);
+    return (
+      !bg ||
+      bg.group !== resolvedGroup.group ||
+      bg.authType !== resolvedGroup.authType
+    );
+  });
+  if (mismatched) {
+    return NextResponse.json(
+      { error: "Selected class batches must share the same auth group" },
+      { status: 400 }
+    );
+  }
+  const { group, authType } = resolvedGroup;
 
   // No chaining — each feedback session stands alone (Gurukul has no chaining;
   // students fill them in any order). Process in given order.

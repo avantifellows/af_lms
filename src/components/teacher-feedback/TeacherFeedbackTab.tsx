@@ -66,36 +66,19 @@ function formatDateTime(value: string | null): string {
 }
 
 export default function TeacherFeedbackTab({
-  schoolId,
   schoolCode,
   canEdit,
 }: {
-  schoolId: string;
   schoolCode: string;
   canEdit: boolean;
 }) {
-  const [batches, setBatches] = useState<BatchOption[]>([]);
   const [centres, setCentres] = useState<FeedbackCentre[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
-  const [loadingBatches, setLoadingBatches] = useState(true);
   const [loadingCentres, setLoadingCentres] = useState(true);
   const [loadingCycles, setLoadingCycles] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [analysisQuiz, setAnalysisQuiz] = useState<{ quizId: string; teacherName: string } | null>(null);
   const [toast, setToast] = useState<{ variant: "error" | "success" | "info"; message: string } | null>(null);
-
-  const fetchBatches = useCallback(async () => {
-    setLoadingBatches(true);
-    try {
-      const res = await fetch(`/api/quiz-sessions/batches?schoolId=${schoolId}`);
-      const body = await res.json();
-      setBatches(Array.isArray(body.batches) ? body.batches : []);
-    } catch {
-      setToast({ variant: "error", message: "Failed to load batches" });
-    } finally {
-      setLoadingBatches(false);
-    }
-  }, [schoolId]);
 
   const fetchCentres = useCallback(async () => {
     setLoadingCentres(true);
@@ -132,10 +115,9 @@ export default function TeacherFeedbackTab({
   }, [schoolCode]);
 
   useEffect(() => {
-    fetchBatches();
     fetchCentres();
     fetchCycles();
-  }, [fetchBatches, fetchCentres, fetchCycles]);
+  }, [fetchCentres, fetchCycles]);
 
   return (
     <div className="space-y-4">
@@ -191,9 +173,8 @@ export default function TeacherFeedbackTab({
       {isCreateOpen && (
         <SetupModal
           schoolCode={schoolCode}
-          batches={batches}
           centres={centres}
-          loading={loadingBatches || loadingCentres}
+          loading={loadingCentres}
           onClose={() => setIsCreateOpen(false)}
           onDone={(result) => {
             setIsCreateOpen(false);
@@ -551,23 +532,26 @@ type TimingMode = "start_now" | "schedule";
 
 function SetupModal({
   schoolCode,
-  batches,
   centres,
   loading,
   onClose,
   onDone,
 }: {
   schoolCode: string;
-  batches: BatchOption[];
   centres: FeedbackCentre[];
   loading: boolean;
   onClose: () => void;
   onDone: (result: SetupResponse) => void;
 }) {
-  // Centre is picked first (teachers map to a centre, not a school).
+  // Centre is picked first: it scopes BOTH the teachers and the batches. A
+  // school can host a CoE and a Nodal centre, each with its own cohorts, so
+  // batches must not be fetched school-wide.
   const [centreId, setCentreId] = useState<number | null>(null);
   const [teachers, setTeachers] = useState<FeedbackTeacher[]>([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [batches, setBatches] = useState<BatchOption[]>([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const [classBatchIds, setClassBatchIds] = useState<string[]>([]);
   const [selectedTeachers, setSelectedTeachers] = useState<FeedbackTeacher[]>([]);
   const [timingMode, setTimingMode] = useState<TimingMode>("start_now");
@@ -612,6 +596,41 @@ function SetupModal({
         if (!cancelled) setTeachers([]);
       } finally {
         if (!cancelled) setLoadingTeachers(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [centreId]);
+
+  // Fetch the centre's batches; clear any batch selection when centre changes so
+  // a batch picked for one centre can never be submitted against another.
+  useEffect(() => {
+    if (centreId === null) {
+      setBatches([]);
+      setBatchNotice(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingBatches(true);
+    setClassBatchIds([]);
+    setBatchNotice(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/teacher-feedback/batches?centre_id=${centreId}`, {
+          cache: "no-store",
+        });
+        const body = await res.json();
+        if (cancelled) return;
+        setBatches(Array.isArray(body.batches) ? body.batches : []);
+        setBatchNotice(typeof body.reason === "string" ? body.reason : null);
+      } catch {
+        if (!cancelled) {
+          setBatches([]);
+          setBatchNotice("Failed to load batches for this centre.");
+        }
+      } finally {
+        if (!cancelled) setLoadingBatches(false);
       }
     })();
     return () => {
@@ -736,10 +755,14 @@ function SetupModal({
 
             <SectionCard title="2. Select Class Batches">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
-                {loading ? (
+                {centreId === null ? (
+                  <div className="px-3 py-4 text-sm text-text-secondary">Select a centre first.</div>
+                ) : loadingBatches ? (
                   <div className="px-3 py-4 text-sm text-text-secondary">Loading batches…</div>
                 ) : availableClassBatches.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-text-secondary">No class batches available.</div>
+                  <div className="px-3 py-4 text-sm text-text-secondary">
+                    {batchNotice ?? "No class batches available for this centre."}
+                  </div>
                 ) : (
                   availableClassBatches.map((b) => {
                     const checked = classBatchIds.includes(b.batch_id);
