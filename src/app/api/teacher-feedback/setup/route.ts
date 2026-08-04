@@ -269,19 +269,18 @@ export async function POST(request: NextRequest) {
       await query(
         `
         INSERT INTO lms_teacher_feedback
-          (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
+          (setup_run_id, cycle_label, school_code, centre_id, program_id,
            batch_class_ids, teacher_id, teacher_name, teacher_order,
            session_pk, status, start_time, end_time, created_by)
         VALUES
-          ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, $11, 'created', $12, $13, $14)
+          ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, 'created', $11, $12, $13)
         `,
         [
           setupRunId,
           cycleLabel,
-          sourceId,
           schoolCode,
           centreId,
-          centreName,
+          centreScope.programId,
           classBatchIds,
           teacher.id,
           teacher.name,
@@ -311,19 +310,18 @@ export async function POST(request: NextRequest) {
         await query(
           `
           INSERT INTO lms_teacher_feedback
-            (setup_run_id, cycle_label, source_id, school_code, centre_id, centre_name,
+            (setup_run_id, cycle_label, school_code, centre_id, program_id,
              batch_class_ids, teacher_id, teacher_name, teacher_order,
              status, start_time, end_time, created_by)
           VALUES
-            ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9, $10, 'failed', $11, $12, $13)
+            ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, 'failed', $10, $11, $12)
           `,
           [
             setupRunId,
             cycleLabel,
-            sourceId,
             schoolCode,
             centreId,
-            centreName,
+            centreScope.programId,
             classBatchIds,
             teacher.id,
             teacher.name,

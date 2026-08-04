@@ -127,13 +127,19 @@ export async function GET(request: NextRequest) {
 
   const rows = await query<Row>(
     `
-    SELECT setup_run_id, cycle_label, centre_name, batch_class_ids,
-           teacher_name, teacher_order, teacher_id, session_pk, status,
-           start_time::text AS start_time, end_time::text AS end_time,
-           created_by, inserted_at::text AS inserted_at
-    FROM lms_teacher_feedback
-    WHERE school_code = $1 AND deleted_at IS NULL
-    ORDER BY inserted_at DESC, teacher_order ASC
+    SELECT tf.setup_run_id, tf.cycle_label, c.name AS centre_name,
+           tf.batch_class_ids,
+           tf.teacher_name, tf.teacher_order, tf.teacher_id, tf.session_pk,
+           tf.status,
+           tf.start_time::text AS start_time, tf.end_time::text AS end_time,
+           tf.created_by, tf.inserted_at::text AS inserted_at
+    FROM lms_teacher_feedback tf
+    -- Centre name is resolved at read time rather than stored, so a renamed
+    -- centre reads correctly on historical rounds instead of keeping a stale
+    -- copy. LEFT JOIN: a round survives its centre being removed.
+    LEFT JOIN centres c ON c.id = tf.centre_id
+    WHERE tf.school_code = $1 AND tf.deleted_at IS NULL
+    ORDER BY tf.inserted_at DESC, tf.teacher_order ASC
     `,
     [schoolCode]
   );

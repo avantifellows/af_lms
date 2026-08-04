@@ -214,6 +214,28 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(mockQuery).toHaveBeenCalledTimes(3);
   });
 
+  it("records the centre's programme on each row, and no derivable columns", async () => {
+    // program_id is what defines the round's cohort (batches are selected by it),
+    // so it must be stored rather than re-inferred from the centre later.
+    // source_id and centre_name are deliberately NOT columns: the former is
+    // derivable and lives on the session's cms_test_id, the latter is joined from
+    // `centres` at read time so a renamed centre reads correctly.
+    await POST(req(validBody()));
+
+    const inserts = mockQuery.mock.calls.filter((c) =>
+      (c[0] as string).includes("INSERT INTO lms_teacher_feedback")
+    );
+    expect(inserts).toHaveLength(2);
+
+    for (const [sql, params] of inserts) {
+      expect(sql).toContain("program_id");
+      expect(sql).not.toContain("source_id");
+      expect(sql).not.toContain("centre_name");
+      // programId from the resolved centre scope, not from the request body.
+      expect(params as unknown[]).toContain(1);
+    }
+  });
+
   it("does not chain — each session is created independently (no next_step_url)", async () => {
     await POST(req(validBody()));
     // Sessions are created in given order, none carrying a next_step_url.
