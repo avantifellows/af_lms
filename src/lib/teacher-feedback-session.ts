@@ -92,7 +92,9 @@ export function buildFeedbackSessionPayload(
     group: params.group,
     parent_id: params.parentBatchId,
     batch_id: params.classBatchIds.join(","),
-    grade: params.grade,
+    // String: sessionCreator forwards this into the quiz-backend /quiz body,
+    // whose metadata.grade is a string — a number 422s the whole quiz build.
+    grade: String(params.grade),
     course: params.course,
     stream: params.stream,
     // Canonical quiz-creator values (Options.ts). No feedback-specific values.

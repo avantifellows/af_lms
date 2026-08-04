@@ -47,6 +47,15 @@ afterEach(() => {
 });
 
 describe("buildFeedbackSessionPayload", () => {
+  it("sends grade as a string (a number 422s the quiz build)", async () => {
+    // Failed silently in staging: the quiz build 422s, the Lambda dies before
+    // writing platform_id, and the UI sits on "Generating links…" with no error.
+    const { buildFeedbackSessionPayload } = await import("./teacher-feedback-session");
+    const meta = buildFeedbackSessionPayload(baseParams).meta_data as Record<string, unknown>;
+    expect(meta.grade).toBe("11");
+    expect(typeof meta.grade).toBe("string");
+  });
+
   it("uses canonical quiz-creator meta_data values (no feedback purpose)", async () => {
     const { buildFeedbackSessionPayload } = await import("./teacher-feedback-session");
     const meta = buildFeedbackSessionPayload(baseParams).meta_data as Record<string, unknown>;
