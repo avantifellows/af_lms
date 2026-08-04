@@ -134,11 +134,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Every selected class batch must belong to the CHOSEN CENTRE's cohort — not
-  // merely to the school. A school can host a CoE and a Nodal centre, so a
-  // school-level check would let a Nodal feedback round be answered by CoE
-  // students. Checking all ids (not "any") also stops a crafted payload from
-  // smuggling foreign batches in alongside one valid one.
+  // Against the chosen CENTRE's cohort, not the school: a school-level check
+  // would let a Nodal round be answered by CoE students.
   // parentBatchId is best-effort (used only for the group attach).
   const centreScope = await getCentreScope(centreId);
   if (!centreScope) {
@@ -190,15 +187,9 @@ export async function POST(request: NextRequest) {
   const sourceId = `teacher-feedback:${FEEDBACK_FORM_VERSION}:${schoolCode}:${cycleKeyFor(startTime)}`;
   const setupRunId = randomUUID();
 
-  // `group` (which Gurukul filters sessions on) and `auth_type` (which
-  // portal-frontend honours over the auth_group's own) both come from the
-  // batch -> auth_group FK.
-  //
-  // NOT from the batch_id prefix: 314 of 1262 production batches have a prefix
-  // that is not their auth_group name (e.g. "EMRS-11-25-P01", "AIS-11-A25").
-  // For those, prefix-derivation silently produced a group Gurukul never
-  // matches AND missed the auth_group row, defaulting auth_type to "ID" so
-  // students could not even log in. Shared with the quiz-session create path.
+  // From the batch -> auth_group FK, never the batch_id prefix: ~25% of
+  // production batches have a prefix that isn't their auth_group name, which
+  // silently broke both Gurukul visibility and student login.
   const batchGroups = await resolveBatchGroups(classBatchIds);
   const resolvedGroup = batchGroups.get(classBatchIds[0]);
   if (!resolvedGroup) {
@@ -207,8 +198,7 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-  // One session carries a single group/auth_type pair, so a mixed selection
-  // would silently strand whichever batches don't match the first one.
+  // One session carries a single group/auth_type pair.
   const mismatched = classBatchIds.find((batchId) => {
     const bg = batchGroups.get(batchId);
     return (
@@ -232,15 +222,46 @@ export async function POST(request: NextRequest) {
   const resultsByOrder = new Map<number, TeacherResult>();
 
   for (const teacher of ordered) {
-    // Teacher name first: sessionCreator truncates the quiz title to 30 chars
-    // (session_data["name"][:30]), so the most useful part must lead. School code
-    // dropped (not useful in the title). e.g. "Bonthu Tavitinaidu - Feedback Jun 2026".
+    // Name first: sessionCreator truncates the quiz title to 30 chars.
     const title = `${teacher.name} - Feedback ${cycleLabel}`;
 
     try {
-      // Create the bare session row. The sessionCreator Lambda (triggered by the
-      // SNS db_id below) builds the quiz from its bundled Teacher Feedback form
-      // and fills in session_id / platform_id / portal_link / admin link.
+      // Claim the slot before any external work: the partial unique index makes
+      // this INSERT the lock, so a repeat within this run is rejected before a
+      // session or SNS message exists. A *second submit* mints a new
+      // setup_run_id and is not covered — see the PR's idempotency debt note.
+      const reserved = await query<{ id: number | string }>(
+        `
+        INSERT INTO lms_teacher_feedback
+          (setup_run_id, cycle_label, school_code, centre_id, program_id,
+           batch_class_ids, teacher_id, teacher_name, teacher_order,
+           status, start_time, end_time, created_by)
+        VALUES
+          ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, 'pending', $10, $11, $12)
+        RETURNING id
+        `,
+        [
+          setupRunId,
+          cycleLabel,
+          schoolCode,
+          centreId,
+          centreScope.programId,
+          classBatchIds,
+          teacher.id,
+          teacher.name,
+          teacher.order,
+          startIso,
+          endIso,
+          email,
+        ]
+      );
+      const reservedId = reserved[0]?.id;
+      if (reservedId == null) {
+        throw new Error("Failed to reserve a feedback row for this teacher");
+      }
+
+      // The Lambda (triggered by the SNS db_id below) builds the quiz and fills
+      // in session_id / platform_id / portal_link / admin link.
       const created = await createFeedbackSession({
         group,
         authType,
@@ -266,30 +287,12 @@ export async function POST(request: NextRequest) {
       // Trigger the Lambda to build the quiz + links for this session.
       await publishMessage({ action: "db_id", id: created.sessionPk });
 
+      // Bind the session to the reserved row and mark it live.
       await query(
-        `
-        INSERT INTO lms_teacher_feedback
-          (setup_run_id, cycle_label, school_code, centre_id, program_id,
-           batch_class_ids, teacher_id, teacher_name, teacher_order,
-           session_pk, status, start_time, end_time, created_by)
-        VALUES
-          ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, 'created', $11, $12, $13)
-        `,
-        [
-          setupRunId,
-          cycleLabel,
-          schoolCode,
-          centreId,
-          centreScope.programId,
-          classBatchIds,
-          teacher.id,
-          teacher.name,
-          teacher.order,
-          created.sessionPk,
-          startIso,
-          endIso,
-          email,
-        ]
+        `UPDATE lms_teacher_feedback
+            SET session_pk = $1, status = 'created', updated_at = now()
+          WHERE id = $2`,
+        [created.sessionPk, reservedId]
       );
 
       resultsByOrder.set(teacher.order, {
@@ -305,7 +308,8 @@ export async function POST(request: NextRequest) {
         message
       );
 
-      // Record the failure so the cycle is auditable and retryable.
+      // The row is usually already reserved, so mark it failed; ON CONFLICT
+      // covers the case where the reservation itself was what failed.
       try {
         await query(
           `
@@ -315,6 +319,8 @@ export async function POST(request: NextRequest) {
              status, start_time, end_time, created_by)
           VALUES
             ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, 'failed', $10, $11, $12)
+          ON CONFLICT (setup_run_id, teacher_order) WHERE deleted_at IS NULL
+            DO UPDATE SET status = 'failed', updated_at = now()
           `,
           [
             setupRunId,

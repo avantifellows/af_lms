@@ -89,9 +89,18 @@ beforeEach(() => {
   // Batches are validated against the chosen centre's cohort.
   mockCentreScope.mockResolvedValue({ centreId: 40, schoolId: 408, programId: 1 });
   mockCentreOwns.mockResolvedValue(true);
-  // Route's remaining direct SQL: centre name for the record, then the INSERTs.
+  // Route's direct SQL: the centre-name SELECT, then per teacher a reservation
+  // INSERT ... RETURNING id (which must yield a row) and an UPDATE binding the
+  // session. `reservedId` is incremented so each teacher gets a distinct row.
+  let reservedId = 0;
   mockQuery.mockImplementation(async (sql: string) => {
-    if (sql.includes("FROM centres c JOIN school")) return [{ name: "JNV Palghar - CoE" }] as never;
+    if (sql.includes("FROM centres c JOIN school")) {
+      return [{ name: "JNV Palghar - CoE" }] as never;
+    }
+    if (sql.includes("INSERT INTO lms_teacher_feedback")) {
+      reservedId += 1;
+      return [{ id: reservedId }] as never;
+    }
     return [] as never;
   });
   mockCreateSession.mockImplementation(async (p) => ({
@@ -209,9 +218,39 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(mockPublish).toHaveBeenCalledWith({ action: "db_id", id: 101 });
     // auth_type comes from the batch's auth_group and is passed to the session
     expect(mockCreateSession.mock.calls[0][0].authType).toBe("ID,DOB");
-    // Direct SQL: the centre-name SELECT + one insert per teacher. (Batch scope
-    // and auth-group resolution live in their own mocked modules.)
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    // Direct SQL: the centre-name SELECT, then per teacher a reservation INSERT
+    // and the UPDATE that binds its session — 1 + 2*2 = 5.
+    expect(mockQuery).toHaveBeenCalledTimes(5);
+  });
+
+  it("reserves the row before creating the session or publishing SNS", async () => {
+    // The partial unique index on (setup_run_id, teacher_order) can only act as a
+    // lock if the row lands FIRST. Previously the insert came last, so a repeat of
+    // the same run was rejected only after a db-service session and an SNS message
+    // already existed — the constraint fired too late to prevent anything.
+    const order: string[] = [];
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM centres c JOIN school")) {
+        return [{ name: "JNV Palghar - CoE" }] as never;
+      }
+      if (sql.includes("INSERT INTO lms_teacher_feedback")) {
+        order.push("reserve");
+        return [{ id: order.length }] as never;
+      }
+      if (sql.includes("SET session_pk")) order.push("bind");
+      return [] as never;
+    });
+    mockCreateSession.mockImplementation(async (p) => {
+      order.push("create-session");
+      return { sessionPk: 100 + p.feedback.teacherOrder };
+    });
+    mockPublish.mockImplementation(async () => {
+      order.push("sns");
+    });
+
+    await POST(req(validBody({ teachers: [{ id: "1", name: "Manjit Kumar", order: 1 }] })));
+
+    expect(order).toEqual(["reserve", "create-session", "sns", "bind"]);
   });
 
   it("records the centre's programme on each row, and no derivable columns", async () => {
@@ -260,12 +299,20 @@ describe("POST /api/teacher-feedback/setup", () => {
     const failed = json.teachers.find((t: { status: string }) => t.status === "failed");
     expect(failed.error).toMatch(/db-service down/);
 
-    // centre-name SELECT + 1 success insert + 1 failure insert
-    expect(mockQuery).toHaveBeenCalledTimes(3);
-    const insertedStatuses = mockQuery.mock.calls
-      .map((c) => c[0] as string)
-      .filter((sql) => sql.includes("INSERT INTO lms_teacher_feedback"));
-    expect(insertedStatuses.length).toBe(2);
+    // centre-name SELECT, then teacher 1: reserve + bind (success); teacher 2:
+    // reserve + the failure upsert (its session create threw) = 5.
+    expect(mockQuery).toHaveBeenCalledTimes(5);
+    const sqls = mockQuery.mock.calls.map((c) => c[0] as string);
+    // One reservation per teacher, both written BEFORE any session exists.
+    expect(
+      sqls.filter((s) => s.includes("INSERT INTO lms_teacher_feedback")).length
+    ).toBe(3); // 2 reservations + the failure upsert
+    // The failed teacher's row is upserted to 'failed' rather than left pending.
+    expect(sqls.some((s) => s.includes("DO UPDATE SET status = 'failed'"))).toBe(true);
+    // The successful teacher's row is bound to its session.
+    expect(sqls.some((s) => s.includes("SET session_pk = $1, status = 'created'"))).toBe(
+      true
+    );
     // SNS only published for the successful teacher.
     expect(mockPublish).toHaveBeenCalledTimes(1);
   });

@@ -1,23 +1,11 @@
 /**
- * Teacher Feedback report — reads student responses from BigQuery and scores
- * them against the V2 form config.
+ * Teacher Feedback report — scores student responses from
+ * `assessments.all_responses_form_level` (what the quiz ETL writes for forms).
  *
- * Source: avantifellows.assessments.all_responses_form_level (the form-specific
- * table the quiz ETL writes; NOT the graded production_dbt_final tables). Each
- * row is one (test_id, user_id, question_position_index) with `question_text`,
- * `user_response` (the selected option index as a string) and
- * `user_response_labels` (option text, or raw subjective text).
- *
- * Questions are matched by TEXT, and scored options by their LABEL — not by
- * position or option index. `question_position_index` is not a stable identifier
- * for this form; see the long note in the "identity by text" section of
- * `teacher-feedback-form.ts` for why, and what replaces this once the form has
- * real CMS ids.
- *
- * No per-batch breakdown: BigQuery's `batch` column is the *quiz* batch
- * (`meta_data.parent_id`, e.g. "EN-TP-2028-engg-C01" — shared by every CoE 2028
- * Engineering school), not the class batch the PM selected, so it collapsed every
- * respondent into one row named after a national batch.
+ * Questions are matched by TEXT and options by their LABEL, never by position;
+ * see the "identity by text" section of `teacher-feedback-form.ts`. No per-batch
+ * breakdown: BigQuery's `batch` is the shared *quiz* batch, not the class batch
+ * the PM picked.
  */
 
 import { getBigQueryClient } from "@/lib/bigquery";
@@ -32,10 +20,8 @@ import {
   type FeedbackQuestion,
 } from "@/lib/teacher-feedback-form";
 
-// The BigQuery project holding the responses. Defaults to production, which is
-// what every deployed environment uses (`bigquery.ts` hardcodes the same, so
-// staging af_lms also reads prod BQ). BIGQUERY_PROJECT is unset in staging and
-// prod; it exists so a local run can point at `avantifellows-staging` instead.
+// Unset in staging and prod (both read prod BQ, as `bigquery.ts` does); set it
+// locally to read `avantifellows-staging`.
 const BQ_PROJECT = process.env.BIGQUERY_PROJECT?.trim() || "avantifellows";
 const FORM_LEVEL_TABLE = `\`${BQ_PROJECT}.assessments.all_responses_form_level\``;
 const BQ_LOCATION = "asia-south1";
@@ -112,9 +98,8 @@ function foldComment(acc: Accumulator, r: RawRow, role: "liked" | "improve"): vo
 function foldRow(acc: Accumulator, r: RawRow): void {
   acc.users.add(r.user_id);
 
-  // Resolve by text. A row whose question this form version doesn't contain is
-  // skipped rather than guessed at: scoring it against whatever sits at its
-  // position is how a stale form generation corrupts a live cycle's numbers.
+  // Skip rows from an older form generation rather than scoring them against
+  // whatever now sits at their position.
   const question = lookUpQuestionByText(r.question_text);
   if (!question) {
     const key = (r.question_text ?? "(empty)").slice(0, 120);
@@ -155,8 +140,8 @@ export async function getTeacherFeedbackReport(
   quizId: string
 ): Promise<TeacherFeedbackReport> {
   const client = getBigQueryClient();
-  // Scoped to one quiz id (= one teacher's session), so an older generation of
-  // the form living under the same cms_test_id cannot bleed into this report.
+  // Per quiz id, so an older form generation under the same cms_test_id can't
+  // bleed in.
   const sql = `
     SELECT
       user_id,

@@ -3,26 +3,10 @@ import { query } from "@/lib/db";
 /**
  * Teacher Feedback — the batches a feedback round may be attached to.
  *
- * A school can host more than one centre (a CoE and a Nodal), and each centre
- * runs its *own* cohorts. Scoping batches by school alone therefore offers a
- * PM the other centre's batches: at JNV Chandrapur, setting up feedback for
- * Nodal teachers would list the two CoE class batches as well, so CoE students
- * could be asked to rate teachers who never taught them.
- *
- * The discriminator is the **programme**. `centres.program_id` and
- * `batch.program_id` are both live operational columns (CoE = 1, Nodal = 2,
- * Punjab CoE/Nodal = 74/94, ...), and no school in production has two active
- * centres sharing a programme — so (school, centre programme) selects exactly
- * one centre's cohorts.
- *
- * Deliberately NOT used here:
- *   - `centre_batch` — present in production but only partially seeded (47 of
- *     56 seated centres) and known to contain at least one cross-school link,
- *     so trusting it would silently narrow or corrupt the picker today.
- *   - `batch.metadata->>'centre'` — never backfilled (no batch row carries it).
- *
- * When `centre_batch` becomes authoritative this module is the single place to
- * switch, and the route contract does not change.
+ * Scoped by (school, centre programme), not by school: a school can host both a
+ * CoE and a Nodal centre, each with its own cohorts, so a school-wide list offers
+ * the other centre's batches. `centre_batch` is deliberately not used — it is
+ * only partially seeded in production. See `.mex/context/teacher-feedback.md`.
  */
 
 export interface FeedbackBatchRow {
@@ -41,12 +25,9 @@ export interface CentreScope {
 }
 
 /**
- * Resolve a centre to the scope needed to list its batches. Returns null when
- * the centre does not exist, is inactive, or is not attached to a school —
- * callers must treat that as "no batches", never as "all batches".
- *
- * `centres.id` / `school_id` / `program_id` are bigints, which node-pg returns
- * as strings, so every one is coerced on read.
+ * Null when the centre is missing, inactive, or school-less — callers must treat
+ * that as "no batches", never "all batches". Bigints are coerced (pg returns
+ * them as strings).
  */
 export async function getCentreScope(centreId: number): Promise<CentreScope | null> {
   const rows = await query<{
@@ -70,12 +51,9 @@ export async function getCentreScope(centreId: number): Promise<CentreScope | nu
 }
 
 /**
- * Class batches belonging to one centre's cohort, plus any parent batches
- * needed to render the hierarchy whole.
- *
- * Fails closed on a centre with no `program_id`: without it there is nothing to
- * discriminate the school's centres by, and returning every school batch is the
- * exact cross-centre leak this function exists to prevent.
+ * One centre's cohort, plus parent batches so the hierarchy renders whole. Fails
+ * closed without a `program_id` — returning all school batches is the leak this
+ * exists to prevent.
  */
 export async function getBatchesForCentre(
   scope: CentreScope
@@ -92,9 +70,8 @@ export async function getBatchesForCentre(
     [scope.schoolId, scope.programId]
   );
 
-  // Parent (quiz) batches are shared across schools, so they are usually not in
-  // the school-scoped result. The picker needs them to know which rows are
-  // class batches (parent_id !== null and not itself a parent).
+  // Parent batches are shared across schools, so they are usually absent above;
+  // the picker needs them to tell class batches apart.
   const parentIds = Array.from(
     new Set(
       batches
@@ -117,12 +94,8 @@ export async function getBatchesForCentre(
 }
 
 /**
- * Are all of these class batch ids inside the centre's cohort? Used to validate
- * a setup request, so a crafted payload cannot attach another centre's — or
- * another school's — batches to a feedback session.
- *
- * Requires EVERY id to match: proving that *one* submitted batch is in scope
- * would let valid and foreign ids be mixed in a single request.
+ * Validates a setup request's batches. EVERY id must match: checking that *one*
+ * is in scope would let a payload mix valid and foreign batches.
  */
 export async function centreOwnsAllBatches(
   scope: CentreScope,

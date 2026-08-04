@@ -1,23 +1,10 @@
 /**
- * Teacher Feedback — the sessionCreator form bundle, generated from this repo.
+ * Generates sessionCreator's `teacher_feedback_form.py` from `FEEDBACK_QUESTIONS`,
+ * so the two copies of the form can't diverge silently: `npm run
+ * teacher-feedback:bundle` rewrites it and a unit test pins the output.
  *
- * sessionCreator (etl-data-flow) builds the student-facing quiz from a bundled
- * Python literal, `teacher_feedback_form.py`, which is a hand-copied duplicate of
- * `FEEDBACK_QUESTIONS`. Two copies in two repos and two languages, with nothing
- * detecting divergence: an edit to either alone silently changes what students
- * are asked or how their answers are read.
- *
- * This module makes the duplication mechanical instead of manual. `npm run
- * teacher-feedback:bundle` regenerates the Python file from the TypeScript
- * config, and a unit test pins the generated text against the committed
- * snapshot — so editing the form without regenerating fails CI rather than
- * shipping a mismatch.
- *
- * The generated rows are shaped for sessionCreator's `CSVFormQuestion` parser
- * (columns: Theme, Baseline Questions, Question Type, Options, Summary).
- *
- * Transitional. When the form moves to the CMS both copies go away; see the note
- * in the "identity by text" section of `teacher-feedback-form.ts`.
+ * Rows are shaped for sessionCreator's `CSVFormQuestion` parser (Theme, Baseline
+ * Questions, Question Type, Options, Summary).
  */
 
 import { FEEDBACK_QUESTIONS, FEEDBACK_FORM_VERSION } from "./teacher-feedback-form";
@@ -35,13 +22,7 @@ export interface FormBundleRow {
 /** The theme sessionCreator groups open-ended questions under. */
 const OPEN_THEME = "Open Feedback";
 
-/**
- * The form as sessionCreator rows, in exact form order.
- *
- * Order matters twice over: it is the order students see, and sessionCreator
- * groups these rows by Theme into question sets. Themes must stay contiguous —
- * `assertContiguousThemes` enforces that.
- */
+/** The form as sessionCreator rows, in exact form order. */
 export function buildFormBundleRows(): FormBundleRow[] {
   return FEEDBACK_QUESTIONS.map((q) =>
     q.kind === "scored"
@@ -63,13 +44,8 @@ export function buildFormBundleRows(): FormBundleRow[] {
 }
 
 /**
- * Throw if a theme appears, stops, and appears again.
- *
- * sessionCreator emits one question set per theme in first-appearance order, so
- * a split theme silently moves questions relative to the flat build the pilot
- * script produced. The report no longer scores by position, so this is no longer
- * a correctness bug — but it still reorders what students see, so it should be a
- * deliberate choice rather than a surprise.
+ * sessionCreator emits one question set per theme in first-appearance order, so a
+ * split theme silently reorders the form students see.
  */
 export function assertContiguousThemes(rows: FormBundleRow[]): void {
   const seen = new Set<string>();
@@ -108,11 +84,7 @@ const COLUMNS: (keyof FormBundleRow)[] = [
   "Summary",
 ];
 
-/**
- * Render `teacher_feedback_form.py` for sessionCreator. Byte-for-byte
- * deterministic: the same config always yields the same text, which is what lets
- * a test compare it against the committed snapshot.
- */
+/** Deterministic render, so a test can compare it to the committed snapshot. */
 export function renderFormBundlePython(): string {
   const rows = buildFormBundleRows();
   assertContiguousThemes(rows);
