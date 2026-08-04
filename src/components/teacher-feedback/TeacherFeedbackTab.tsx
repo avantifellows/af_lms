@@ -40,6 +40,7 @@ interface CycleTeacher {
   status: string;
   portalLink: string;
   adminTestingLink: string;
+  buildFailed: boolean;
 }
 
 interface Cycle {
@@ -341,6 +342,15 @@ function CycleCard({
                 <div className="flex flex-wrap items-center gap-4">
                   {t.status === "failed" ? (
                     <span className="text-xs font-medium text-danger">Setup failed</span>
+                  ) : t.buildFailed ? (
+                    // sessionCreator reported a failed build; without this the row
+                    // would pulse "Generating links…" forever.
+                    <span
+                      className="text-xs font-medium text-danger"
+                      title="The quiz build failed. Set this teacher up again."
+                    >
+                      Quiz build failed
+                    </span>
                   ) : t.portalLink ? (
                     <>
                       <CopyLink label="Session link" href={t.portalLink} onCopy={onCopy} />

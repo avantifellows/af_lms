@@ -96,6 +96,31 @@ describe("GET /api/teacher-feedback/cycles", () => {
     expect(cycle.teachers[0].adminTestingLink).toContain("/form/quiz_s");
   });
 
+  it("flags a failed quiz build instead of leaving it 'generating'", async () => {
+    // sessionCreator writes meta_data.status = "failed" when the build breaks —
+    // its only signal back. Without reading it, a broken build is
+    // indistinguishable from one still in progress.
+    mockQuery
+      .mockResolvedValueOnce([{ id: 408 }] as never)
+      .mockResolvedValueOnce([
+        {
+          setup_run_id: "run-2", cycle_label: "Aug 2026", centre_name: "CoE",
+          batch_class_ids: ["B1"], teacher_name: "Manjit Kumar", teacher_order: 1,
+          teacher_id: "AF836", session_pk: "9", status: "created",
+          start_time: null, end_time: null,
+          created_by: "pm@avantifellows.org", inserted_at: "2026-08-04 10:00:00",
+        },
+      ] as never)
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([
+        { id: "9", platform_id: null, portal_link: null, meta_data: { status: "failed" } },
+      ] as never);
+
+    const res = await GET(req("34054"));
+    const json = await res.json();
+    expect(json.cycles[0].teachers[0].buildFailed).toBe(true);
+  });
+
   it("returns empty cycles when none exist", async () => {
     mockQuery
       .mockResolvedValueOnce([{ id: 408 }] as never)

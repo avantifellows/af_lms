@@ -31,6 +31,8 @@ interface TeacherEntry {
   /** Filled by the sessionCreator Lambda; "" until it has run ("Generating…"). */
   portalLink: string;
   adminTestingLink: string;
+  /** The Lambda reported a failed quiz build — not still in progress. */
+  buildFailed: boolean;
 }
 
 interface Cycle {
@@ -67,11 +69,16 @@ interface SessionLinks {
   quizId: string | null;
   portalLink: string;
   adminTestingLink: string;
+  /** sessionCreator's own outcome, written onto the session's meta_data. */
+  buildStatus: string | null;
 }
 
 /**
  * Read the launch links the sessionCreator Lambda writes onto each session,
  * keyed by session pk. Absent until the Lambda has run (UI shows "Generating…").
+ * Also reads its meta_data.status: the Lambda sets that to "failed" when the quiz
+ * build breaks, which is the only signal it gives back — without it a broken build
+ * is indistinguishable from one still in progress.
  * Both session.id and lms_teacher_feedback.session_pk are bigints, which node-pg
  * returns as strings — every key and lookup here goes through Number() so the
  * map can't miss on "18046" vs 18046.
@@ -85,7 +92,7 @@ async function resolveSessionLinks(
     id: number | string;
     platform_id: string | null;
     portal_link: string | null;
-    meta_data: { admin_testing_link?: string } | null;
+    meta_data: { admin_testing_link?: string; status?: string } | null;
   }>(
     `SELECT id, platform_id, portal_link, meta_data FROM session WHERE id = ANY($1::bigint[])`,
     [sessionPks]
@@ -95,6 +102,7 @@ async function resolveSessionLinks(
       quizId: s.platform_id || null,
       portalLink: s.portal_link ?? "",
       adminTestingLink: s.meta_data?.admin_testing_link ?? "",
+      buildStatus: s.meta_data?.status ?? null,
     });
   }
   return byPk;
@@ -196,6 +204,7 @@ export async function GET(request: NextRequest) {
       quizId: links?.quizId ?? null,
       portalLink: links?.portalLink ?? "",
       adminTestingLink: links?.adminTestingLink ?? "",
+      buildFailed: links?.buildStatus === "failed",
     });
   }
 
