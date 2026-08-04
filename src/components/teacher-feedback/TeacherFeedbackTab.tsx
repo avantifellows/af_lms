@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import Toast from "@/components/Toast";
+import { Modal } from "@/components/ui";
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 
 interface BatchOption {
@@ -386,7 +387,6 @@ interface ReportData {
   percentage: number;
   parameters: ParameterScore[];
   comments: { role: "liked" | "improve"; text: string }[];
-  batches: { batch: string; batchName: string; responseCount: number }[];
 }
 
 function AnalysisModal({
@@ -401,12 +401,6 @@ function AnalysisModal({
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -433,11 +427,7 @@ function AnalysisModal({
   const improve = data?.comments.filter((c) => c.role === "improve") ?? [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="relative flex max-h-[92vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-bg-card shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal open onClose={onClose} className="flex max-h-[92vh] max-w-2xl flex-col border border-border">
         <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
           <div>
             <h2 className="text-lg font-bold text-text-primary">{teacherName}</h2>
@@ -498,19 +488,6 @@ function AnalysisModal({
                 </div>
               </SectionCard>
 
-              {data.batches.length > 0 && (
-                <SectionCard title="Responses by batch">
-                  <ul className="space-y-1 text-sm">
-                    {data.batches.map((b) => (
-                      <li key={b.batch} className="flex justify-between">
-                        <span className="text-text-primary">{b.batchName}</span>
-                        <span className="text-text-secondary">{b.responseCount}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </SectionCard>
-              )}
-
               <SectionCard title="What students liked">
                 {liked.length === 0 ? (
                   <p className="text-sm text-text-muted">No comments.</p>
@@ -537,8 +514,7 @@ function AnalysisModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -583,12 +559,6 @@ function SetupModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose]);
 
   // Auto-select when there's exactly one centre. Centres load asynchronously, so
   // this must be an effect (a one-time state initializer would see []).
@@ -738,11 +708,7 @@ function SetupModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="relative flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-border bg-bg-card shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal open onClose={onClose} className="flex max-h-[92vh] max-w-4xl flex-col border border-border">
         <div className="flex items-start justify-between border-b-4 border-border-accent px-5 py-4">
           <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">Set Up Teacher Feedback</h2>
           <button onClick={onClose} className="text-text-secondary hover:text-text-primary" aria-label="Close">
@@ -925,7 +891,6 @@ function SetupModal({
             {saving ? "Setting up…" : "Create Feedback Forms"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -16,14 +16,12 @@ import {
 // writes to all_responses_form_level — never by position or option index.
 function scoredRow(
   userId: string,
-  batch: string,
   question: (typeof SCORED_QUESTIONS)[number],
   optionIndex: number
 ) {
   const option = question.options[optionIndex];
   return {
     user_id: userId,
-    batch,
     question_text: question.text,
     user_response: String(optionIndex),
     user_response_labels: option.text,
@@ -32,14 +30,12 @@ function scoredRow(
 
 function openRow(
   userId: string,
-  batch: string,
   role: "liked" | "improve",
   text: string
 ) {
   const question = OPEN_QUESTIONS.find((q) => q.role === role)!;
   return {
     user_id: userId,
-    batch,
     question_text: question.text,
     user_response: text,
     user_response_labels: text,
@@ -47,10 +43,10 @@ function openRow(
 }
 
 /** One student answering every scored question at `optionIndex`, plus both open ones. */
-function fullResponseRows(userId: string, batch: string, optionIndex: number) {
-  const rows = SCORED_QUESTIONS.map((q) => scoredRow(userId, batch, q, optionIndex));
-  rows.push(openRow(userId, batch, "liked", "Great teacher"));
-  rows.push(openRow(userId, batch, "improve", "no"));
+function fullResponseRows(userId: string, optionIndex: number) {
+  const rows = SCORED_QUESTIONS.map((q) => scoredRow(userId, q, optionIndex));
+  rows.push(openRow(userId, "liked", "Great teacher"));
+  rows.push(openRow(userId, "improve", "no"));
   return rows;
 }
 
@@ -60,7 +56,7 @@ beforeEach(() => {
 
 describe("getTeacherFeedbackReport", () => {
   it("scores a perfect response as 28/28 = 100% and extracts the meaningful comment", async () => {
-    mockQuery.mockResolvedValueOnce([fullResponseRows("u1", "BATCH_A", 0)]);
+    mockQuery.mockResolvedValueOnce([fullResponseRows("u1", 0)]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.responseCount).toBe(1);
     expect(r.totalScore).toBe(28);
@@ -68,13 +64,12 @@ describe("getTeacherFeedbackReport", () => {
     expect(r.percentage).toBe(100);
     // "Great teacher" is meaningful; "no" is filtered out
     expect(r.comments).toEqual([{ role: "liked", text: "Great teacher" }]);
-    expect(r.batches).toEqual([{ batch: "BATCH_A", batchName: "BATCH_A", responseCount: 1 }]);
   });
 
   it("averages across students (worst option = score 0 -> 0%)", async () => {
     mockQuery.mockResolvedValueOnce([[
-      ...fullResponseRows("u1", "BATCH_A", 0), // 28
-      ...fullResponseRows("u2", "BATCH_A", 2), // 0
+      ...fullResponseRows("u1", 0), // 28
+      ...fullResponseRows("u2", 2), // 0
     ]]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.responseCount).toBe(2);
@@ -82,19 +77,6 @@ describe("getTeacherFeedbackReport", () => {
     expect(r.percentage).toBe(50);
   });
 
-  it("reports per-batch response counts", async () => {
-    mockQuery.mockResolvedValueOnce([[
-      ...fullResponseRows("u1", "BATCH_A", 0),
-      ...fullResponseRows("u2", "BATCH_B", 1),
-      ...fullResponseRows("u3", "BATCH_B", 1),
-    ]]);
-    const r = await getTeacherFeedbackReport("quiz_x");
-    expect(r.responseCount).toBe(3);
-    expect(r.batches).toEqual([
-      { batch: "BATCH_B", batchName: "BATCH_B", responseCount: 2 },
-      { batch: "BATCH_A", batchName: "BATCH_A", responseCount: 1 },
-    ]);
-  });
 
   it("averages a parameter over only the students who rated it (skips don't dilute)", async () => {
     // Two Planning questions exist. u1 answers everything at the best option
@@ -103,8 +85,8 @@ describe("getTeacherFeedbackReport", () => {
     expect(planningQuestions.length).toBe(2);
 
     const rows = [
-      ...fullResponseRows("u1", "BATCH_A", 0),
-      scoredRow("u2", "BATCH_A", planningQuestions[0], 0),
+      ...fullResponseRows("u1", 0),
+      scoredRow("u2", planningQuestions[0], 0),
     ];
     mockQuery.mockResolvedValueOnce([rows]);
     const r = await getTeacherFeedbackReport("quiz_x");
@@ -123,8 +105,8 @@ describe("getTeacherFeedbackReport", () => {
 
   it("marks a parameter no one rated as answeredBy 0 / score 0", async () => {
     const rows = [
-      openRow("u1", "BATCH_A", "liked", "Nice"),
-      openRow("u1", "BATCH_A", "improve", "More PYQs"),
+      openRow("u1", "liked", "Nice"),
+      openRow("u1", "improve", "More PYQs"),
     ];
     mockQuery.mockResolvedValueOnce([rows]);
     const r = await getTeacherFeedbackReport("quiz_x");
@@ -149,7 +131,7 @@ describe("getTeacherFeedbackReport", () => {
   it("scores correctly when the quiz reordered the questions", async () => {
     // Same answers, rows delivered in reverse order. Positional scoring would
     // attribute each answer to the wrong parameter; text matching must not care.
-    const forward = fullResponseRows("u1", "BATCH_A", 0);
+    const forward = fullResponseRows("u1", 0);
     mockQuery.mockResolvedValueOnce([[...forward].reverse()]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.totalScore).toBe(28);
@@ -163,7 +145,6 @@ describe("getTeacherFeedbackReport", () => {
     const rows = [
       {
         user_id: "u1",
-        batch: "BATCH_A",
         question_text: q.text,
         user_response: "0",
         user_response_labels: q.options[2].text, // score 0
@@ -180,10 +161,9 @@ describe("getTeacherFeedbackReport", () => {
     // A question from an older generation of the form. It must not be scored
     // against whatever now sits at its position.
     const rows = [
-      ...fullResponseRows("u1", "BATCH_A", 0),
+      ...fullResponseRows("u1", 0),
       {
         user_id: "u1",
-        batch: "BATCH_A",
         question_text: "Does the teacher bring snacks?",
         user_response: "0",
         user_response_labels: "Always",
@@ -204,7 +184,6 @@ describe("getTeacherFeedbackReport", () => {
     const rows = [
       {
         user_id: "u1",
-        batch: "BATCH_A",
         question_text: `  ${mangled} `,
         user_response: "0",
         user_response_labels: q.options[0].text,

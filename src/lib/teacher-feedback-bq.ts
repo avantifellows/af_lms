@@ -14,8 +14,10 @@
  * `teacher-feedback-form.ts` for why, and what replaces this once the form has
  * real CMS ids.
  *
- * A feedback session can span grades, so analysis is BATCH-WISE: rows carry the
- * student's `batch`, and we report per-batch breakdowns alongside the overall.
+ * No per-batch breakdown: BigQuery's `batch` column is the *quiz* batch
+ * (`meta_data.parent_id`, e.g. "EN-TP-2028-engg-C01" — shared by every CoE 2028
+ * Engineering school), not the class batch the PM selected, so it collapsed every
+ * respondent into one row named after a national batch.
  */
 
 import { getBigQueryClient } from "@/lib/bigquery";
@@ -30,12 +32,14 @@ import {
   type FeedbackQuestion,
 } from "@/lib/teacher-feedback-form";
 
-const FORM_LEVEL_TABLE = "`avantifellows.assessments.all_responses_form_level`";
+// Defaults to production; BIGQUERY_PROJECT overrides it so a local run can read
+// the staging dataset.
+const BQ_PROJECT = process.env.BIGQUERY_PROJECT?.trim() || "avantifellows";
+const FORM_LEVEL_TABLE = `\`${BQ_PROJECT}.assessments.all_responses_form_level\``;
 const BQ_LOCATION = "asia-south1";
 
 interface RawRow {
   user_id: string;
-  batch: string | null;
   question_text: string | null;
   user_response: string | null;
   user_response_labels: string | null;
@@ -62,12 +66,6 @@ export interface TeacherFeedbackReport {
   percentage: number;
   parameters: ParameterScore[];
   comments: SubjectiveComment[];
-  /**
-   * Per-batch response counts (analysis is batch-wise). `batch` is the raw
-   * batch_id; `batchName` is the human-readable name, resolved by the API route
-   * (this module only talks to BigQuery). Falls back to the id when unknown.
-   */
-  batches: { batch: string; batchName: string; responseCount: number }[];
 }
 
 function isMeaningful(text: string): boolean {
@@ -80,7 +78,6 @@ function isMeaningful(text: string): boolean {
 
 interface Accumulator {
   users: Set<string>;
-  batchCounts: Map<string, Set<string>>;
   paramTotals: Map<string, number>;
   /** Distinct users who answered ≥1 question in each parameter — the honest
    *  denominator, so a skipped parameter reads "0 rated" rather than a fake 0.0. */
@@ -90,12 +87,6 @@ interface Accumulator {
    *  the form under the same cms_test_id). Skipped, and counted so the drift is
    *  visible in the logs instead of silently altering the numbers. */
   unrecognizedQuestions: Map<string, number>;
-}
-
-function trackBatch(acc: Accumulator, r: RawRow): void {
-  if (!r.batch) return;
-  if (!acc.batchCounts.has(r.batch)) acc.batchCounts.set(r.batch, new Set());
-  acc.batchCounts.get(r.batch)!.add(r.user_id);
 }
 
 function foldScored(
@@ -115,10 +106,9 @@ function foldComment(acc: Accumulator, r: RawRow, role: "liked" | "improve"): vo
   if (isMeaningful(text)) acc.comments.push({ role, text });
 }
 
-/** Fold one row into the accumulator: track responders/batches, sum scores, collect comments. */
+/** Fold one row into the accumulator: track responders, sum scores, collect comments. */
 function foldRow(acc: Accumulator, r: RawRow): void {
   acc.users.add(r.user_id);
-  trackBatch(acc, r);
 
   // Resolve by text. A row whose question this form version doesn't contain is
   // skipped rather than guessed at: scoring it against whatever sits at its
@@ -141,7 +131,6 @@ function foldRow(acc: Accumulator, r: RawRow): void {
 function accumulate(rows: RawRow[]): Accumulator {
   const acc: Accumulator = {
     users: new Set<string>(),
-    batchCounts: new Map<string, Set<string>>(),
     paramTotals: new Map<string, number>(),
     paramResponders: new Map<string, Set<string>>(),
     comments: [],
@@ -169,7 +158,6 @@ export async function getTeacherFeedbackReport(
   const sql = `
     SELECT
       user_id,
-      batch,
       question_text,
       user_response,
       user_response_labels
@@ -195,7 +183,7 @@ export async function getTeacherFeedbackReport(
         `${FEEDBACK_FORM_VERSION} — ${skipped}`
     );
   }
-  const { users, batchCounts, paramTotals, paramResponders, comments } = acc;
+  const { users, paramTotals, paramResponders, comments } = acc;
 
   const responseCount = users.size;
 
@@ -212,11 +200,6 @@ export async function getTeacherFeedbackReport(
   });
   const totalScore = parameters.reduce((acc, p) => acc + p.score, 0);
 
-  const batches = Array.from(batchCounts.entries())
-    // batchName defaults to the id; the API route fills in the readable name.
-    .map(([batch, set]) => ({ batch, batchName: batch, responseCount: set.size }))
-    .sort((a, b) => b.responseCount - a.responseCount);
-
   // Order comments liked-first then improve, for stable rendering.
   const order = OPEN_QUESTIONS.map((q) => q.role);
   comments.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
@@ -229,6 +212,5 @@ export async function getTeacherFeedbackReport(
     percentage: MAX_TOTAL_SCORE > 0 ? (totalScore / MAX_TOTAL_SCORE) * 100 : 0,
     parameters,
     comments,
-    batches,
   };
 }
