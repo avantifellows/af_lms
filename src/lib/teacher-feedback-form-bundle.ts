@@ -17,7 +17,7 @@
  * (columns: Theme, Baseline Questions, Question Type, Options, Summary).
  *
  * Transitional. When the form moves to the CMS both copies go away; see the note
- * above `normalizeFormText` in `teacher-feedback-form.ts`.
+ * in the "identity by text" section of `teacher-feedback-form.ts`.
  */
 
 import { FEEDBACK_QUESTIONS, FEEDBACK_FORM_VERSION } from "./teacher-feedback-form";

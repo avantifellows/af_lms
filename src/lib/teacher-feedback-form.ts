@@ -292,7 +292,9 @@ export function scoreUserResponse(
   return question.options[idx].score;
 }
 
-// --- identity by text (how the report resolves questions) ---------------------
+// --- identity by text -----------------------------------------------------
+// (How the report resolves questions. Referenced from teacher-feedback-bq.ts
+//  and teacher-feedback-form-bundle.ts as "the identity by text section".)
 
 /**
  * Why the report keys on question TEXT rather than position.
@@ -328,7 +330,7 @@ export function scoreUserResponse(
  * "teacher’s voice" vary between the config and the stored rows. Case and
  * trailing punctuation are preserved — those are authored, not incidental.
  */
-export function normalizeFormText(text: string): string {
+function normalizeFormText(text: string): string {
   return text
     .replace(/[‘’ʼ]/g, "'")
     .replace(/[“”]/g, '"')

@@ -10,7 +10,7 @@
  *
  * Questions are matched by TEXT, and scored options by their LABEL — not by
  * position or option index. `question_position_index` is not a stable identifier
- * for this form; see the long note above `normalizeFormText` in
+ * for this form; see the long note in the "identity by text" section of
  * `teacher-feedback-form.ts` for why, and what replaces this once the form has
  * real CMS ids.
  *
