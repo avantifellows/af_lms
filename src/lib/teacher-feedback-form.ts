@@ -269,6 +269,10 @@ export function maxScoreForParameter(parameter: string): number {
  * `positionIndex`. `user_response` is the selected option index as a string
  * (e.g. "0"). Returns null when unanswered/invalid or when the position isn't a
  * scored question. Mirrors the prototype's score_answer().
+ *
+ * @deprecated Positional scoring — kept only for the unit tests that pin the
+ * option-index → score ladder. The report resolves questions by TEXT instead;
+ * see `lookUpQuestionByText` and the note on `normalizeFormText`.
  */
 export function scoreUserResponse(
   positionIndex: number,
@@ -286,6 +290,82 @@ export function scoreUserResponse(
     return null;
   }
   return question.options[idx].score;
+}
+
+// --- identity by text (how the report resolves questions) ---------------------
+
+/**
+ * Why the report keys on question TEXT rather than position.
+ *
+ * The response rows in `assessments.all_responses_form_level` carry
+ * `question_position_index`, but that index is a walk over the quiz doc's
+ * `question_sets`, and the same form is built into two different shapes:
+ *   - one flat set of 16 (the pilot script / `buildFeedbackQuizBody`), and
+ *   - eight themed sets (sessionCreator groups the rows by Theme).
+ * Both agree today only because the themes happen to be contiguous. Add a
+ * second "Planning" question at the end of the form and the themed build
+ * silently shifts every later index while the flat build does not — and nothing
+ * in the response row says which shape produced it.
+ *
+ * Production rows already show the damage: under one `cms_test_id`, position 14
+ * is an open-ended question in three quizzes and a scored one in three others,
+ * because the form was edited between pilot runs.
+ *
+ * There is no stable id to join on instead. The table has no `source_id`, and
+ * `question_id` is a per-quiz Mongo ObjectId (different for every teacher).
+ * `option.metadata.score` is null in the quiz docs sessionCreator writes, so the
+ * score is not in the data either. `question_text` and `user_response_labels`
+ * are the only self-describing, cross-quiz-stable identifiers available — so the
+ * report matches on those and is immune to both shapes and to reordering.
+ *
+ * This is transitional. When the form moves to the CMS (see the PR description)
+ * questions gain real ids and this layer is replaced by an id join.
+ */
+
+/**
+ * Normalise a form string for comparison. The quiz pipeline round-trips text
+ * through CSV/JSON/Mongo, so whitespace runs and the smart apostrophes in
+ * "teacher’s voice" vary between the config and the stored rows. Case and
+ * trailing punctuation are preserved — those are authored, not incidental.
+ */
+export function normalizeFormText(text: string): string {
+  return text
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const QUESTION_BY_TEXT: Map<string, FeedbackQuestion> = new Map(
+  FEEDBACK_QUESTIONS.map((q) => [normalizeFormText(q.text), q])
+);
+
+/**
+ * Resolve a response row's `question_text` to its form question. Returns
+ * undefined for text this form version does not contain — an older generation of
+ * the form, which the caller must skip rather than guess at.
+ */
+export function lookUpQuestionByText(
+  questionText: string | null | undefined
+): FeedbackQuestion | undefined {
+  if (!questionText) return undefined;
+  return QUESTION_BY_TEXT.get(normalizeFormText(questionText));
+}
+
+/**
+ * Score a scored question from the OPTION TEXT the student chose
+ * (`user_response_labels`), not its index. Returns null when the label doesn't
+ * belong to this question — which is exactly the mismatch an index lookup would
+ * have scored silently and wrongly.
+ */
+export function scoreByOptionText(
+  question: FeedbackQuestion,
+  optionLabel: string | null | undefined
+): number | null {
+  if (question.kind !== "scored" || !optionLabel) return null;
+  const wanted = normalizeFormText(optionLabel);
+  const option = question.options.find((o) => normalizeFormText(o.text) === wanted);
+  return option ? option.score : null;
 }
 
 // --- quiz-backend /quiz body builder -----------------------------------------

@@ -4,9 +4,15 @@
  *
  * Source: avantifellows.assessments.all_responses_form_level (the form-specific
  * table the quiz ETL writes; NOT the graded production_dbt_final tables). Each
- * row is one (test_id, user_id, question_position_index) with `user_response`
- * (the selected option index as a string) and `user_response_labels` (option
- * text, or raw subjective text). We join to the form by question_position_index.
+ * row is one (test_id, user_id, question_position_index) with `question_text`,
+ * `user_response` (the selected option index as a string) and
+ * `user_response_labels` (option text, or raw subjective text).
+ *
+ * Questions are matched by TEXT, and scored options by their LABEL — not by
+ * position or option index. `question_position_index` is not a stable identifier
+ * for this form; see the long note above `normalizeFormText` in
+ * `teacher-feedback-form.ts` for why, and what replaces this once the form has
+ * real CMS ids.
  *
  * A feedback session can span grades, so analysis is BATCH-WISE: rows carry the
  * student's `batch`, and we report per-batch breakdowns alongside the overall.
@@ -14,12 +20,14 @@
 
 import { getBigQueryClient } from "@/lib/bigquery";
 import {
-  FEEDBACK_QUESTIONS,
   PARAMETERS,
   MAX_TOTAL_SCORE,
+  FEEDBACK_FORM_VERSION,
   maxScoreForParameter,
-  scoreUserResponse,
+  lookUpQuestionByText,
+  scoreByOptionText,
   OPEN_QUESTIONS,
+  type FeedbackQuestion,
 } from "@/lib/teacher-feedback-form";
 
 const FORM_LEVEL_TABLE = "`avantifellows.assessments.all_responses_form_level`";
@@ -28,7 +36,7 @@ const BQ_LOCATION = "asia-south1";
 interface RawRow {
   user_id: string;
   batch: string | null;
-  qpi: number | string;
+  question_text: string | null;
   user_response: string | null;
   user_response_labels: string | null;
 }
@@ -78,6 +86,10 @@ interface Accumulator {
    *  denominator, so a skipped parameter reads "0 rated" rather than a fake 0.0. */
   paramResponders: Map<string, Set<string>>;
   comments: SubjectiveComment[];
+  /** Rows whose question text isn't in this form version (an older generation of
+   *  the form under the same cms_test_id). Skipped, and counted so the drift is
+   *  visible in the logs instead of silently altering the numbers. */
+  unrecognizedQuestions: Map<string, number>;
 }
 
 function trackBatch(acc: Accumulator, r: RawRow): void {
@@ -86,8 +98,13 @@ function trackBatch(acc: Accumulator, r: RawRow): void {
   acc.batchCounts.get(r.batch)!.add(r.user_id);
 }
 
-function foldScored(acc: Accumulator, r: RawRow, qpi: number, parameter: string): void {
-  const score = scoreUserResponse(qpi, r.user_response);
+function foldScored(
+  acc: Accumulator,
+  r: RawRow,
+  question: FeedbackQuestion,
+  parameter: string
+): void {
+  const score = scoreByOptionText(question, r.user_response_labels);
   if (score === null) return;
   acc.paramTotals.set(parameter, (acc.paramTotals.get(parameter) ?? 0) + score);
   acc.paramResponders.get(parameter)!.add(r.user_id);
@@ -103,12 +120,18 @@ function foldRow(acc: Accumulator, r: RawRow): void {
   acc.users.add(r.user_id);
   trackBatch(acc, r);
 
-  const qpi = typeof r.qpi === "number" ? r.qpi : Number(r.qpi);
-  const question = FEEDBACK_QUESTIONS[qpi];
-  if (!question) return;
+  // Resolve by text. A row whose question this form version doesn't contain is
+  // skipped rather than guessed at: scoring it against whatever sits at its
+  // position is how a stale form generation corrupts a live cycle's numbers.
+  const question = lookUpQuestionByText(r.question_text);
+  if (!question) {
+    const key = (r.question_text ?? "(empty)").slice(0, 120);
+    acc.unrecognizedQuestions.set(key, (acc.unrecognizedQuestions.get(key) ?? 0) + 1);
+    return;
+  }
 
   if (question.kind === "scored") {
-    foldScored(acc, r, qpi, question.parameter);
+    foldScored(acc, r, question, question.parameter);
   } else {
     foldComment(acc, r, question.role);
   }
@@ -122,6 +145,7 @@ function accumulate(rows: RawRow[]): Accumulator {
     paramTotals: new Map<string, number>(),
     paramResponders: new Map<string, Set<string>>(),
     comments: [],
+    unrecognizedQuestions: new Map<string, number>(),
   };
   for (const p of PARAMETERS) {
     acc.paramTotals.set(p, 0);
@@ -140,11 +164,13 @@ export async function getTeacherFeedbackReport(
   quizId: string
 ): Promise<TeacherFeedbackReport> {
   const client = getBigQueryClient();
+  // Scoped to one quiz id (= one teacher's session), so an older generation of
+  // the form living under the same cms_test_id cannot bleed into this report.
   const sql = `
     SELECT
       user_id,
       batch,
-      question_position_index AS qpi,
+      question_text,
       user_response,
       user_response_labels
     FROM ${FORM_LEVEL_TABLE}
@@ -158,6 +184,17 @@ export async function getTeacherFeedbackReport(
   });
 
   const acc = accumulate(rows as RawRow[]);
+
+  if (acc.unrecognizedQuestions.size > 0) {
+    const skipped = Array.from(acc.unrecognizedQuestions.entries())
+      .map(([text, n]) => `${n}× ${JSON.stringify(text)}`)
+      .join("; ");
+    console.warn(
+      `[teacher-feedback] quiz ${quizId}: skipped responses for ` +
+        `${acc.unrecognizedQuestions.size} question(s) absent from form ` +
+        `${FEEDBACK_FORM_VERSION} — ${skipped}`
+    );
+  }
   const { users, batchCounts, paramTotals, paramResponders, comments } = acc;
 
   const responseCount = users.size;

@@ -6,16 +6,51 @@ vi.mock("@/lib/bigquery", () => ({
 }));
 
 import { getTeacherFeedbackReport } from "./teacher-feedback-bq";
+import {
+  FEEDBACK_QUESTIONS,
+  OPEN_QUESTIONS,
+  SCORED_QUESTIONS,
+} from "./teacher-feedback-form";
 
-// One student answering all 14 scored questions with option 0 (= score 2 each)
-// plus the two open-ended. qpi 0-13 scored, 14/15 subjective.
-function fullResponseRows(userId: string, batch: string, optionIndex: string) {
-  const rows = [];
-  for (let qpi = 0; qpi < 14; qpi++) {
-    rows.push({ user_id: userId, batch, qpi, user_response: optionIndex, user_response_labels: "opt" });
-  }
-  rows.push({ user_id: userId, batch, qpi: 14, user_response: "Great teacher", user_response_labels: "Great teacher" });
-  rows.push({ user_id: userId, batch, qpi: 15, user_response: "no", user_response_labels: "no" });
+// Rows are keyed by question TEXT and option LABEL, mirroring what the ETL
+// writes to all_responses_form_level — never by position or option index.
+function scoredRow(
+  userId: string,
+  batch: string,
+  question: (typeof SCORED_QUESTIONS)[number],
+  optionIndex: number
+) {
+  const option = question.options[optionIndex];
+  return {
+    user_id: userId,
+    batch,
+    question_text: question.text,
+    user_response: String(optionIndex),
+    user_response_labels: option.text,
+  };
+}
+
+function openRow(
+  userId: string,
+  batch: string,
+  role: "liked" | "improve",
+  text: string
+) {
+  const question = OPEN_QUESTIONS.find((q) => q.role === role)!;
+  return {
+    user_id: userId,
+    batch,
+    question_text: question.text,
+    user_response: text,
+    user_response_labels: text,
+  };
+}
+
+/** One student answering every scored question at `optionIndex`, plus both open ones. */
+function fullResponseRows(userId: string, batch: string, optionIndex: number) {
+  const rows = SCORED_QUESTIONS.map((q) => scoredRow(userId, batch, q, optionIndex));
+  rows.push(openRow(userId, batch, "liked", "Great teacher"));
+  rows.push(openRow(userId, batch, "improve", "no"));
   return rows;
 }
 
@@ -25,7 +60,7 @@ beforeEach(() => {
 
 describe("getTeacherFeedbackReport", () => {
   it("scores a perfect response as 28/28 = 100% and extracts the meaningful comment", async () => {
-    mockQuery.mockResolvedValueOnce([fullResponseRows("u1", "BATCH_A", "0")]);
+    mockQuery.mockResolvedValueOnce([fullResponseRows("u1", "BATCH_A", 0)]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.responseCount).toBe(1);
     expect(r.totalScore).toBe(28);
@@ -36,10 +71,10 @@ describe("getTeacherFeedbackReport", () => {
     expect(r.batches).toEqual([{ batch: "BATCH_A", batchName: "BATCH_A", responseCount: 1 }]);
   });
 
-  it("averages across students (option 2 = score 0 -> 0%)", async () => {
+  it("averages across students (worst option = score 0 -> 0%)", async () => {
     mockQuery.mockResolvedValueOnce([[
-      ...fullResponseRows("u1", "BATCH_A", "0"), // 28
-      ...fullResponseRows("u2", "BATCH_A", "2"), // 0
+      ...fullResponseRows("u1", "BATCH_A", 0), // 28
+      ...fullResponseRows("u2", "BATCH_A", 2), // 0
     ]]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.responseCount).toBe(2);
@@ -49,9 +84,9 @@ describe("getTeacherFeedbackReport", () => {
 
   it("reports per-batch response counts", async () => {
     mockQuery.mockResolvedValueOnce([[
-      ...fullResponseRows("u1", "BATCH_A", "0"),
-      ...fullResponseRows("u2", "BATCH_B", "1"),
-      ...fullResponseRows("u3", "BATCH_B", "1"),
+      ...fullResponseRows("u1", "BATCH_A", 0),
+      ...fullResponseRows("u2", "BATCH_B", 1),
+      ...fullResponseRows("u3", "BATCH_B", 1),
     ]]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.responseCount).toBe(3);
@@ -62,18 +97,21 @@ describe("getTeacherFeedbackReport", () => {
   });
 
   it("averages a parameter over only the students who rated it (skips don't dilute)", async () => {
-    // Two students. u1 answers everything (option 0 → score 2 on qpi 0 & 1,
-    // both "Planning"). u2 answers ONLY qpi 0 (score 2) and skips the rest.
+    // Two Planning questions exist. u1 answers everything at the best option
+    // (score 2 each). u2 answers only the FIRST Planning question, skipping the rest.
+    const planningQuestions = SCORED_QUESTIONS.filter((q) => q.parameter === "Planning");
+    expect(planningQuestions.length).toBe(2);
+
     const rows = [
-      ...fullResponseRows("u1", "BATCH_A", "0"),
-      { user_id: "u2", batch: "BATCH_A", qpi: 0, user_response: "0", user_response_labels: "opt" },
+      ...fullResponseRows("u1", "BATCH_A", 0),
+      scoredRow("u2", "BATCH_A", planningQuestions[0], 0),
     ];
     mockQuery.mockResolvedValueOnce([rows]);
     const r = await getTeacherFeedbackReport("quiz_x");
     expect(r.responseCount).toBe(2);
 
     const planning = r.parameters.find((p) => p.parameter === "Planning")!;
-    // qpi 0 rated by both (2 + 2), qpi 1 rated by u1 only (2) → total 6, over 2 raters = 3.0
+    // Q1 rated by both (2 + 2), Q2 by u1 only (2) → total 6, over 2 raters = 3.0
     expect(planning.answeredBy).toBe(2);
     expect(planning.score).toBe(3);
 
@@ -84,10 +122,9 @@ describe("getTeacherFeedbackReport", () => {
   });
 
   it("marks a parameter no one rated as answeredBy 0 / score 0", async () => {
-    // Single student who answers only the two open-ended questions, no scored ones.
     const rows = [
-      { user_id: "u1", batch: "BATCH_A", qpi: 14, user_response: "Nice", user_response_labels: "Nice" },
-      { user_id: "u1", batch: "BATCH_A", qpi: 15, user_response: "More PYQs", user_response_labels: "More PYQs" },
+      openRow("u1", "BATCH_A", "liked", "Nice"),
+      openRow("u1", "BATCH_A", "improve", "More PYQs"),
     ];
     mockQuery.mockResolvedValueOnce([rows]);
     const r = await getTeacherFeedbackReport("quiz_x");
@@ -105,5 +142,94 @@ describe("getTeacherFeedbackReport", () => {
     expect(r.totalScore).toBe(0);
     expect(r.percentage).toBe(0);
     expect(r.comments).toEqual([]);
+  });
+
+  // --- the drift cases this scorer exists to survive -------------------------
+
+  it("scores correctly when the quiz reordered the questions", async () => {
+    // Same answers, rows delivered in reverse order. Positional scoring would
+    // attribute each answer to the wrong parameter; text matching must not care.
+    const forward = fullResponseRows("u1", "BATCH_A", 0);
+    mockQuery.mockResolvedValueOnce([[...forward].reverse()]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+    expect(r.totalScore).toBe(28);
+    expect(r.percentage).toBe(100);
+  });
+
+  it("scores by option label, ignoring a stale option index", async () => {
+    // user_response says "0" (the best option) but the chosen LABEL is the worst.
+    // The label is what the student actually saw, so it must win.
+    const q = SCORED_QUESTIONS[0];
+    const rows = [
+      {
+        user_id: "u1",
+        batch: "BATCH_A",
+        question_text: q.text,
+        user_response: "0",
+        user_response_labels: q.options[2].text, // score 0
+      },
+    ];
+    mockQuery.mockResolvedValueOnce([rows]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+    const param = r.parameters.find((p) => p.parameter === q.parameter)!;
+    expect(param.answeredBy).toBe(1);
+    expect(param.score).toBe(0);
+  });
+
+  it("skips responses to questions absent from this form version", async () => {
+    // A question from an older generation of the form. It must not be scored
+    // against whatever now sits at its position.
+    const rows = [
+      ...fullResponseRows("u1", "BATCH_A", 0),
+      {
+        user_id: "u1",
+        batch: "BATCH_A",
+        question_text: "Does the teacher bring snacks?",
+        user_response: "0",
+        user_response_labels: "Always",
+      },
+    ];
+    mockQuery.mockResolvedValueOnce([rows]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+    // Unchanged from the clean perfect-score case.
+    expect(r.totalScore).toBe(28);
+    expect(r.percentage).toBe(100);
+  });
+
+  it("tolerates whitespace and smart-quote drift in question text", async () => {
+    // The pipeline round-trips text through CSV/JSON/Mongo, so apostrophes and
+    // whitespace vary. One form question genuinely contains a curly apostrophe.
+    const q = SCORED_QUESTIONS.find((x) => /[’']/.test(x.text))!;
+    const mangled = q.text.replace(/[’']/g, "'").replace(/ /g, "  ");
+    const rows = [
+      {
+        user_id: "u1",
+        batch: "BATCH_A",
+        question_text: `  ${mangled} `,
+        user_response: "0",
+        user_response_labels: q.options[0].text,
+      },
+    ];
+    mockQuery.mockResolvedValueOnce([rows]);
+    const r = await getTeacherFeedbackReport("quiz_x");
+    const param = r.parameters.find((p) => p.parameter === q.parameter)!;
+    expect(param.answeredBy).toBe(1);
+    expect(param.score).toBe(2);
+  });
+
+  it("every form question is uniquely identifiable by its text", async () => {
+    // The guarantee the whole approach rests on: no two questions share text.
+    const texts = FEEDBACK_QUESTIONS.map((q) => q.text.trim());
+    expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  it("each scored question's options are uniquely identifiable by their text", async () => {
+    // Likewise for options, or a label could not pick out one score.
+    for (const q of SCORED_QUESTIONS) {
+      const labels = q.options.map((o) => o.text.trim());
+      expect(new Set(labels).size, `duplicate option text in: ${q.text}`).toBe(
+        labels.length
+      );
+    }
   });
 });
