@@ -16,6 +16,7 @@ vi.mock("@/lib/teacher-feedback-session", async (importOriginal) => {
   return {
     ...actual,
     createFeedbackSession: vi.fn(),
+    deactivateFeedbackSession: vi.fn(),
   };
 });
 vi.mock("@/lib/sns", () => ({ publishMessage: vi.fn() }));
@@ -30,7 +31,10 @@ import {
   getCentreScope,
 } from "@/lib/teacher-feedback-batches";
 import { authenticateTeacherFeedback } from "@/lib/teacher-feedback-access";
-import { createFeedbackSession } from "@/lib/teacher-feedback-session";
+import {
+  createFeedbackSession,
+  deactivateFeedbackSession,
+} from "@/lib/teacher-feedback-session";
 import { publishMessage } from "@/lib/sns";
 import { query } from "@/lib/db";
 import { POST } from "./route";
@@ -42,6 +46,7 @@ const mockResolveGroups = vi.mocked(resolveBatchGroups);
 const mockCentreScope = vi.mocked(getCentreScope);
 const mockCentreOwns = vi.mocked(centreOwnsAllBatches);
 const mockCreateSession = vi.mocked(createFeedbackSession);
+const mockDeactivate = vi.mocked(deactivateFeedbackSession);
 const mockPublish = vi.mocked(publishMessage);
 const mockQuery = vi.mocked(query);
 
@@ -107,6 +112,7 @@ beforeEach(() => {
     sessionPk: 100 + p.feedback.teacherOrder,
   }));
   mockPublish.mockResolvedValue(true); // publishMessage reports whether it published
+  mockDeactivate.mockResolvedValue(undefined);
 });
 
 describe("POST /api/teacher-feedback/setup", () => {
@@ -218,8 +224,7 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(mockPublish).toHaveBeenCalledWith({ action: "db_id", id: 101 });
     // auth_type comes from the batch's auth_group and is passed to the session
     expect(mockCreateSession.mock.calls[0][0].authType).toBe("ID,DOB");
-    // Direct SQL: the centre-name SELECT, then per teacher a reservation INSERT
-    // and the UPDATE that binds its session — 1 + 2*2 = 5.
+    // Centre-name SELECT + per teacher a reservation and a bind — 1 + 2*2.
     expect(mockQuery).toHaveBeenCalledTimes(5);
   });
 
@@ -238,11 +243,11 @@ describe("POST /api/teacher-feedback/setup", () => {
     expect(json.failedCount).toBe(1);
     expect(json.teachers[0].error).toMatch(/could not be triggered/i);
 
-    // The row is marked failed, not created, so it reads as retryable.
-    const bind = mockQuery.mock.calls.find((c) =>
-      (c[0] as string).includes("SET session_pk = $1, status = $2")
-    );
-    expect((bind?.[1] as unknown[])[1]).toBe("failed");
+    // The orphaned session is deactivated so it can't surface to students, and
+    // the row ends up 'failed' via the catch.
+    expect(mockDeactivate).toHaveBeenCalledWith(101);
+    const sqls = mockQuery.mock.calls.map((c) => c[0] as string);
+    expect(sqls.some((s) => s.includes("DO UPDATE SET status = 'failed'"))).toBe(true);
   });
 
   it("reserves the row before creating the session or publishing SNS", async () => {
@@ -273,7 +278,9 @@ describe("POST /api/teacher-feedback/setup", () => {
 
     await POST(req(validBody({ teachers: [{ id: "1", name: "Manjit Kumar", order: 1 }] })));
 
-    expect(order).toEqual(["reserve", "create-session", "sns", "bind"]);
+    // The bind lands BEFORE the publish: if it failed we would not have triggered
+    // the Lambda, so no orphaned quiz can exist.
+    expect(order).toEqual(["reserve", "create-session", "bind", "sns"]);
   });
 
   it("records the centre's programme on each row, and no derivable columns", async () => {
@@ -322,8 +329,8 @@ describe("POST /api/teacher-feedback/setup", () => {
     const failed = json.teachers.find((t: { status: string }) => t.status === "failed");
     expect(failed.error).toMatch(/db-service down/);
 
-    // centre-name SELECT, then teacher 1: reserve + bind (success); teacher 2:
-    // reserve + the failure upsert (its session create threw) = 5.
+    // Centre-name SELECT; teacher 1 reserve+bind; teacher 2 reserve + the
+    // failure upsert (its session create threw).
     expect(mockQuery).toHaveBeenCalledTimes(5);
     const sqls = mockQuery.mock.calls.map((c) => c[0] as string);
     // One reservation per teacher, both written BEFORE any session exists.
@@ -332,8 +339,10 @@ describe("POST /api/teacher-feedback/setup", () => {
     ).toBe(3); // 2 reservations + the failure upsert
     // The failed teacher's row is upserted to 'failed' rather than left pending.
     expect(sqls.some((s) => s.includes("DO UPDATE SET status = 'failed'"))).toBe(true);
-    // The successful teacher's row is bound to its session.
-    expect(sqls.some((s) => s.includes("SET session_pk = $1, status = $2"))).toBe(true);
+    // The successful teacher's row is bound to its session and marked created.
+    expect(
+      sqls.some((s) => s.includes("SET session_pk = $1, status = 'created'"))
+    ).toBe(true);
     // SNS only published for the successful teacher.
     expect(mockPublish).toHaveBeenCalledTimes(1);
   });

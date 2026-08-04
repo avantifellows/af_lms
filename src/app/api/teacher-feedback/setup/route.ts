@@ -12,7 +12,10 @@ import {
   getCentreScope,
 } from "@/lib/teacher-feedback-batches";
 import { FEEDBACK_FORM_VERSION } from "@/lib/teacher-feedback-form";
-import { createFeedbackSession } from "@/lib/teacher-feedback-session";
+import {
+  createFeedbackSession,
+  deactivateFeedbackSession,
+} from "@/lib/teacher-feedback-session";
 import { publishMessage } from "@/lib/sns";
 
 const DEFAULT_WINDOW_HOURS = 24;
@@ -224,6 +227,8 @@ export async function POST(request: NextRequest) {
   for (const teacher of ordered) {
     // Name first: sessionCreator truncates the quiz title to 30 chars.
     const title = `${teacher.name} - Feedback ${cycleLabel}`;
+    // Hoisted so the catch can deactivate a session whose setup then failed.
+    let sessionPk: number | null = null;
 
     try {
       // Claim the slot before any external work: the partial unique index makes
@@ -283,25 +288,27 @@ export async function POST(request: NextRequest) {
           schoolCode,
         },
       });
+      sessionPk = created.sessionPk;
 
-      // Trigger the Lambda to build the quiz + links for this session. publish
-      // never throws, so check the result: without it a failed publish still
-      // recorded 'created', and the round then sat on "Generating links…" forever
-      // with nothing anywhere saying the Lambda was never asked to run.
+      // Bind the session to its reserved row BEFORE triggering the Lambda: if this
+      // write fails we have not published yet, so no quiz gets built and the
+      // session is deactivated below — rather than the Lambda producing a working
+      // quiz the dashboard has no row for. A publish failure after this point
+      // throws, and the catch flips the row to 'failed'.
+      await query(
+        `UPDATE lms_teacher_feedback
+            SET session_pk = $1, status = 'created', updated_at = now()
+          WHERE id = $2`,
+        [created.sessionPk, reservedId]
+      );
+
+      // publishMessage never throws, so check the result: a failed publish means
+      // the Lambda was never asked to build the quiz, and leaving the row
+      // 'created' would strand the round on "Generating links…" with no reason.
       const published = await publishMessage({
         action: "db_id",
         id: created.sessionPk,
       });
-
-      // Bind the session to the reserved row. 'created' only if the Lambda was
-      // actually triggered — otherwise the row is a retryable failure.
-      await query(
-        `UPDATE lms_teacher_feedback
-            SET session_pk = $1, status = $2, updated_at = now()
-          WHERE id = $3`,
-        [created.sessionPk, published ? "created" : "failed", reservedId]
-      );
-
       if (!published) {
         throw new Error(
           "Session created but the quiz build could not be triggered (SNS publish failed). Retry setup for this teacher."
@@ -320,6 +327,12 @@ export async function POST(request: NextRequest) {
         `Teacher feedback setup failed for ${teacher.name} (order ${teacher.order}):`,
         message
       );
+
+      // The session exists but its setup did not finish, so deactivate it rather
+      // than leaving a live-looking session with no quiz behind.
+      if (sessionPk != null) {
+        await deactivateFeedbackSession(sessionPk);
+      }
 
       // The row is usually already reserved, so mark it failed; ON CONFLICT
       // covers the case where the reservation itself was what failed.

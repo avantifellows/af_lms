@@ -192,3 +192,28 @@ export async function createFeedbackSession(
 
   return { sessionPk: written.id };
 }
+
+/**
+ * Deactivate a session whose setup could not be completed, so a half-built round
+ * cannot surface to students. Best-effort: the setup already failed, and throwing
+ * here would replace the real error with this one. Mirrors `markSessionFailed` on
+ * the CMS quiz-session create path.
+ */
+export async function deactivateFeedbackSession(sessionPk: number): Promise<void> {
+  try {
+    const res = await fetch(`${dbBaseUrl()}/session/${sessionPk}`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ is_active: false }),
+    });
+    if (!res.ok) {
+      console.error(
+        `Failed to deactivate session ${sessionPk}:`,
+        res.status,
+        await res.text()
+      );
+    }
+  } catch (error) {
+    console.error(`Failed to deactivate session ${sessionPk}:`, error);
+  }
+}
