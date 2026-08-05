@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
+import { getTestALsByUser } from "@/lib/bigquery";
 
 export async function GET(
   request: Request,
@@ -42,6 +43,30 @@ export async function GET(
         { error: "No results available for this test yet. Please check back in a few hours." },
         { status: 404 }
       );
+    }
+
+    // AL lives in BigQuery, the rest of this payload in DynamoDB. Joined here
+    // (rather than inside lib/dynamodb) so each lib module stays single-store.
+    // Deliberately non-fatal: AL is one column, so a BQ hiccup should degrade
+    // it to "—" rather than 500 the whole deep-dive.
+    try {
+      const alByUser = await getTestALsByUser(
+        udise,
+        grade,
+        sessionId,
+        program,
+        stream
+      );
+      if (alByUser.size > 0) {
+        data.students = data.students.map((s) => ({
+          ...s,
+          academic_level: s.enrollment_user_id
+            ? alByUser.get(s.enrollment_user_id) ?? null
+            : null,
+        }));
+      }
+    } catch (alError) {
+      console.error("Test deep dive AL join failed (column degrades to —):", alError);
     }
 
     return NextResponse.json(data);

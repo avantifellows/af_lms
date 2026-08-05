@@ -152,6 +152,13 @@ export interface StudentDeepDiveRow {
   // client-side matching against the (INT64) BQ value.
   enrollment_user_id: string | null;
   gender: string | null;
+  // Social category from the LMS Postgres roster (student.category), carried
+  // through from the matched roster student — not from the report doc.
+  category: string | null;
+  // AL earned on *this* test, joined from BigQuery on enrollment_user_id.
+  // Null for chapter tests (which carry no AL) and for any student with no
+  // section='overall' row for the session.
+  academic_level: string | null;
   marks_scored: number;
   max_marks: number;
   percentage: number;

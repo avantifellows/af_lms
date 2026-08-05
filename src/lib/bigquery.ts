@@ -530,6 +530,68 @@ export async function getTestQuestionLevelData(
 }
 
 /**
+ * Academic Level per student for a single test, keyed by enrollment_user_id —
+ * the AL column in Student Results (#28, #248).
+ *
+ * Deliberately NOT filtered by MAJOR_TEST_FORMATS: the caller already pins one
+ * session_id, and filtering by format here would silently return an empty map
+ * for a chapter test instead of letting the column render "—". Chapter tests
+ * legitimately have no AL (see MAJOR_TEST_FORMATS above).
+ *
+ * Returns a Map rather than rows because the only consumer joins it onto
+ * DynamoDB-sourced student rows.
+ */
+export async function getTestALsByUser(
+  udise: string,
+  grade: number,
+  sessionId: string,
+  program?: string,
+  stream?: string
+): Promise<Map<string, string>> {
+  const client = getBigQueryClient();
+  const programFilter = program ? `AND student_program = @program` : "";
+  const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
+
+  const params: Record<string, string | number> = { udise, grade, sessionId };
+  if (program) params.program = program;
+  if (stream) params.stream = stream;
+
+  const alList = REAL_AL_VALUES.map((v) => `'${v.replace(/'/g, "\\'")}'`).join(",");
+
+  const sql = `
+    SELECT
+      enrollment_user_id,
+      ANY_VALUE(academic_level) AS academic_level
+    FROM ${FACT_TABLE}
+    WHERE student_school_udise_code = @udise
+      AND student_grade = @grade
+      AND session_id = @sessionId
+      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
+      AND LOWER(section) = 'overall'
+      AND academic_level IN (${alList})
+      AND enrollment_user_id IS NOT NULL
+      ${programFilter}
+      ${streamFilter}
+    GROUP BY enrollment_user_id
+  `;
+
+  interface RawRow {
+    enrollment_user_id: number | string | null;
+    academic_level: string | null;
+  }
+
+  const [rows] = await client.query({ query: sql, params });
+  const byUser = new Map<string, string>();
+  for (const r of rows as RawRow[]) {
+    // Stringified to match StudentDeepDiveRow.enrollment_user_id, which the
+    // DynamoDB side also stringifies (BQ hands back INT64 as number|string).
+    const key = String(r.enrollment_user_id ?? "");
+    if (key && r.academic_level) byUser.set(key, r.academic_level);
+  }
+  return byUser;
+}
+
+/**
  * Per-(student, question) results for a single test — the grain behind the
  * Student Results → chapter → question drill-down. Returns ALL students in one
  * query (the table is clustered by session_id/enrollment_user_id, but a

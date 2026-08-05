@@ -8,6 +8,8 @@ const STUDENTS: StudentDeepDiveRow[] = [
     student_name: "Asha Rao",
     enrollment_user_id: "368592",
     gender: "F",
+    category: "OBC",
+    academic_level: "Not Qualified",
     marks_scored: 40,
     max_marks: 100,
     percentage: 40,
@@ -76,6 +78,50 @@ describe("StudentResultsTable", () => {
     render(<StudentResultsTable {...props} />);
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("renders the student's social category as a chip", () => {
+    render(<StudentResultsTable {...props} />);
+    expect(screen.getByText("Category")).toBeInTheDocument();
+    expect(screen.getByText("OBC")).toBeInTheDocument();
+  });
+
+  it("renders an em-dash for a student with no recorded category", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], category: null }]}
+      />
+    );
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("shortens the long AL values so they fit a table cell", () => {
+    render(<StudentResultsTable {...props} />);
+    expect(screen.getByText("AL")).toBeInTheDocument();
+    // "Not Qualified" -> "NQ"; the raw value must not leak into the cell.
+    expect(screen.getByText("NQ")).toBeInTheDocument();
+    expect(screen.queryByText("Not Qualified")).not.toBeInTheDocument();
+  });
+
+  it("renders M1/B1-style ALs verbatim", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], academic_level: "M1" }]}
+      />
+    );
+    expect(screen.getByText("M1")).toBeInTheDocument();
+  });
+
+  it("renders an em-dash for a test with no AL (e.g. a chapter test)", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], academic_level: null }]}
+      />
+    );
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 
   it("fetches question detail once on first student expand and drills down to question level (0-based index -> Q1)", async () => {

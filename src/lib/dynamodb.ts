@@ -47,6 +47,7 @@ interface StudentIdentifiers {
   last_name: string | null;
   gender: string | null;
   stream: string | null;
+  category: string | null;
 }
 
 // Built from the canonical school roster (the same query + dedup the
@@ -70,6 +71,7 @@ async function getSchoolStudentIdentifiers(
       last_name: s.last_name,
       gender: s.gender,
       stream: s.stream,
+      category: s.category,
     })
   );
 }
@@ -415,6 +417,10 @@ export async function getTestDeepDiveFromDynamo(
       // doc.user_id is the enrollment_user_id (the BQ question-level join key).
       enrollment_user_id: doc.user_id != null ? String(doc.user_id) : null,
       gender: student.gender,
+      category: student.category,
+      // DynamoDB carries no AL — the route joins it in from BigQuery so this
+      // module stays single-store.
+      academic_level: null,
       marks_scored: toNum(overall.marks_scored),
       max_marks: toNum(overall.max_marks_possible),
       percentage: toNum(overall.percentage),

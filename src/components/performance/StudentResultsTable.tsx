@@ -8,6 +8,8 @@ import type {
   StudentChapterScore,
   StudentQuestionRow,
 } from "@/types/quiz";
+import { getCategoryColor } from "@/lib/student-utils";
+import { alChipColor, alShortLabel } from "@/lib/academic-level";
 
 interface Props {
   students: StudentDeepDiveRow[];
@@ -289,6 +291,8 @@ export default function StudentResultsTable({
                 Name{sortIcon("student_name")}
               </th>
               <th className={TH}>Gender</th>
+              <th className={TH}>Category</th>
+              <th className={TH}>AL</th>
               <th className={SORTABLE_TH} onClick={() => handleSort("marks_scored")}>
                 Marks{sortIcon("marks_scored")}
               </th>
@@ -326,6 +330,24 @@ export default function StudentResultsTable({
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
                       {s.gender || "-"}
                     </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getCategoryColor(s.category)}`}
+                      >
+                        {s.category || "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {s.academic_level ? (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded border ${alChipColor(s.academic_level)}`}
+                        >
+                          {alShortLabel(s.academic_level)}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-text-primary">
                       {s.marks_scored}/{s.max_marks}
                     </td>
@@ -341,7 +363,7 @@ export default function StudentResultsTable({
                   </tr>
                   {isExpanded && s.subject_scores.length > 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-2 bg-bg">
+                      <td colSpan={9} className="px-4 py-2 bg-bg">
                         <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead>
