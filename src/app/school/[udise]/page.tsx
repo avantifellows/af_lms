@@ -32,6 +32,7 @@ import PerformanceTab from "@/components/PerformanceTab";
 import VisitsTab from "@/components/VisitsTab";
 import { Batch } from "@/components/EditStudentModal";
 import QuizSessionsTab from "@/components/quiz-sessions/QuizSessionsTab";
+import TeacherFeedbackTab from "@/components/teacher-feedback/TeacherFeedbackTab";
 import {
   buildProgramStats,
   studentDroppedFromProgram,
@@ -636,6 +637,7 @@ async function buildSchoolTabs({
   holisticMentorshipAccess,
   visitsAccess,
   quizSessionsAccess,
+  teacherFeedbackAccess,
 }: {
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
@@ -648,6 +650,7 @@ async function buildSchoolTabs({
   holisticMentorshipAccess: FeatureAccessResult;
   visitsAccess: FeatureAccessResult;
   quizSessionsAccess: FeatureAccessResult;
+  teacherFeedbackAccess: FeatureAccessResult;
 }): Promise<SchoolTab[]> {
   const holisticContent = await buildHolisticMentorshipContent({
     session,
@@ -677,6 +680,18 @@ async function buildSchoolTabs({
       id: "quiz_sessions",
       label: "Quiz Sessions",
       content: <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />,
+    });
+  }
+  if (teacherFeedbackAccess.canView) {
+    tabs.push({
+      id: "teacher_feedback",
+      label: "Teacher Feedback",
+      content: (
+        <TeacherFeedbackTab
+          schoolCode={school.code}
+          canEdit={teacherFeedbackAccess.canEdit}
+        />
+      ),
     });
   }
   if (mentorshipAccess.canView) {
@@ -732,6 +747,7 @@ function schoolFeatureAccess(permission: UserPermission | null, isPasscodeUser?:
     holisticMentorship: getFeatureAccess(permission, "holistic_mentorship", options),
     visits: getFeatureAccess(permission, "visits", options),
     quizSessions: getFeatureAccess(permission, "quiz_sessions", options),
+    teacherFeedback: getFeatureAccess(permission, "teacher_feedback", options),
   };
 }
 
@@ -822,6 +838,7 @@ export default async function SchoolPage({ params }: PageProps) {
     holisticMentorshipAccess: access.holisticMentorship,
     visitsAccess: access.visits,
     quizSessionsAccess: access.quizSessions,
+    teacherFeedbackAccess: access.teacherFeedback,
   });
 
   return (
