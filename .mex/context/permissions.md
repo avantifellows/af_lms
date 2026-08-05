@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-07-30
+last_updated: 2026-08-05
 ---
 
 # Permissions
@@ -47,7 +47,7 @@ A `read_only` flag downgrades any `edit` to `view`.
 
 - Looks up `FEATURE_PERMISSIONS[feature][role]` (`none`/`view`/`edit`).
 - **NVS gating:** features in `NVS_GATED_FEATURES` (`visits`, `curriculum`, `pm_dashboard`, `summary_stats`, `quiz_sessions`) become `none` unless the user `hasCoEOrNodal`.
-- **Academic Mentorship:** uses the `academic_mentorship` feature key and its own Program allowlist (`ACADEMIC_MENTORSHIP_PROGRAM_ALLOWLIST`, v1 wildcard `*`), so NVS-only users are not blocked by the NVS-gated feature set.
+- **Academic Mentorship:** is temporarily disabled for every role by setting its feature-matrix row to `none`. The existing Program allowlist, routes, APIs, mappings, and data remain in place for later restoration.
 - **Holistic Mentorship:** uses the `holistic_mentorship` feature key. Teachers, Holistic Mentorship Admins, and global Admins receive base edit access; the shared action policy then enforces the JNV CoE (`1`) and EMRS CoE (`78`) allowlist, unambiguous Program and School scope, Teacher-seat eligibility, and Mapping ownership. The dedicated Admin role has no other feature access.
 - **Holistic Mapping lifecycle:** Teachers may claim, confirm takeover, or remove only their own Mappings in the resolved supported Program. Teacher exit, LMS access revoke, relevant app/seat-role changes, and seat loss end affected active Mappings and erase unsubmitted draft answers in the same LMS transaction; another eligible seat at the same School/Program preserves access. Canonical User hard deletion is blocked by the Holistic schema's restrictive history foreign keys; removing `user_permission` is a revoke, not a hard delete.
 - **Holistic Notes authorship:** only the current Mentor may draft or Submit; submitted Notes are correctable only by their author while that author remains the current Mentor. Replacement Mentors can read submitted history but receive an editable blank form after an unsubmitted draft is erased; Holistic/global Admins never receive draft answers.
@@ -71,7 +71,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
 - **Holistic Mentorship tutorial:** `/holistic-mentorship/tutorial` uses `program_read` for the Admin guide. Teacher links add `school_code`, and the same route uses `roster_view` for that School before showing the Teacher guide. Program Managers, Program Admins, passcode users, and unsupported Teacher School access remain blocked.
-- **School page Mentorship tab:** visibility comes from `academic_mentorship` feature access. Teachers see only their own current-year active Mentees; PMs/Admins/Program Admins see a read-only School overview; only Admins and Program Admins get the management link.
+- **School page Academic Mentorship tab:** visibility comes from `academic_mentorship` feature access, so it is hidden while that feature is disabled. Its prior role-based views remain implemented behind the gate.
 - **Visit routes:** use `src/lib/visits-policy.ts` instead — `requireVisitsAccess(session, "view"|"edit")` then `enforceVisit*`. See `context/visits.md`.
 - **List queries:** scope at the SQL level with `getAccessibleSchoolCodes(email)` (returns `"all"` or `string[]`) or, for visits, `buildVisitScopePredicate(actor)`.
 
