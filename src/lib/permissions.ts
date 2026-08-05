@@ -51,7 +51,7 @@ const FEATURE_PERMISSIONS: Record<Feature, Record<UserRole, FeatureAccess>> = {
   students: { teacher: "edit", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
   visits: { teacher: "none", program_manager: "edit", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
   curriculum: { teacher: "edit", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
-  academic_mentorship: { teacher: "view", program_manager: "view", program_admin: "edit", holistic_mentorship_admin: "none", admin: "edit" },
+  academic_mentorship: { teacher: "none", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "none", admin: "none" },
   holistic_mentorship: { teacher: "edit", program_manager: "none", program_admin: "none", holistic_mentorship_admin: "edit", admin: "edit" },
   performance: { teacher: "view", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },
   summary_stats: { teacher: "none", program_manager: "view", program_admin: "view", holistic_mentorship_admin: "none", admin: "view" },

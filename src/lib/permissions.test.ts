@@ -268,12 +268,19 @@ describe("getFeatureAccess", () => {
       expect(result.canEdit).toBe(false);
     });
 
-    it("gives NVS-only program_admin edit on academic mentorship", () => {
-      const perm = makePermission({ role: "program_admin", program_ids: [PROGRAM_IDS.NVS] });
-      const result = getFeatureAccess(perm, "academic_mentorship");
-      expect(result.access).toBe("edit");
-      expect(result.canView).toBe(true);
-      expect(result.canEdit).toBe(true);
+    it.each([
+      "teacher",
+      "program_manager",
+      "program_admin",
+      "holistic_mentorship_admin",
+      "admin",
+    ] as const)("disables academic mentorship for %s", (role) => {
+      const permission = makePermission({ role, program_ids: [PROGRAM_IDS.NVS] });
+      expect(getFeatureAccess(permission, "academic_mentorship")).toEqual({
+        access: "none",
+        canView: false,
+        canEdit: false,
+      });
     });
 
     it("gives admin edit on visits", () => {
