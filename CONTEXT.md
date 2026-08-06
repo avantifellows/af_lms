@@ -238,6 +238,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Initial **Centre Exam Track** mappings come from one approved import keyed by stable Centre identity and Grade; after import, Admins maintain them in Centre Management without live Sheet sync
 - The approved **Centre Exam Track** import does not infer mappings from legacy centre-wide stream values; dry-run and apply modes fail unless every row matches exactly, and the legacy Centre Stream field is removed after cutover
 - The issue #252 feature change includes the reviewed mapping file and deterministic dry-run import script; production runs the import once after the schema change
+- Issue #252 is not activated in production until the verified **Centre Exam Track** mapping file passes the import dry run
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
 - Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
@@ -274,6 +275,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An existing **LMS Curriculum Log** cannot change its log type; correcting the type requires soft-deleting the entry and creating another
 - A **Doubt Solving Log** can select one in-syllabus Chapter from LMS Chapter Exam Config for its Exam Track, Grade, and Subject, but cannot use free text or an out-of-syllabus Chapter
 - Curriculum shows all three LMS Curriculum Log types in one chronological history with a clear type label and only the details relevant to that type; issue #252 adds no history type filter
+- Regular Class, **Class Cancellation Log**, and **Doubt Solving Log** dates can be today or in the past, but not in the future
+- All three LMS Curriculum Log types reuse the existing Curriculum permission: Teacher, Program Admin, and Admin can edit, while Program Manager can view
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
 - **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
