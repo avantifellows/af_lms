@@ -149,6 +149,31 @@ describe("LogSessionModal", () => {
     expect(screen.getByRole("button", { name: "Save class log" })).toBeEnabled();
   });
 
+  it("swaps to Date, Duration, and one in-syllabus Chapter for Doubt Solving", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderModal({ onSave });
+
+    await user.selectOptions(screen.getByLabelText("Log type"), "doubt_solving");
+
+    expect(screen.queryByText("What did you teach?")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(2);
+    expect(screen.getByText("Which Chapter did you cover doubts for?")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Laws of Motion" }));
+    await user.click(screen.getByRole("button", { name: "Save class log" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      logType: "doubt_solving",
+      date: "2026-02-15",
+      durationMinutes: 60,
+      chapterId: 2,
+      topicIds: [],
+      completeChapterIds: [],
+      uncompleteChapterIds: [],
+    });
+  });
+
   it("locks the type selector when editing a Class Cancelled log", () => {
     renderModal({
       editLog: {

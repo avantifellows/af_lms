@@ -75,9 +75,11 @@ export default function LogSessionModal({
   const initialDurationMinutes = editLog?.durationMinutes ?? 60;
   // A saved log's type is immutable, so edit mode pins the selector to it.
   const [logType, setLogType] = useState<WritableCurriculumLogType>(
-    editLog?.logType === "class_cancelled" ? "class_cancelled" : "regular"
+    editLog?.logType === "class_cancelled" || editLog?.logType === "doubt_solving"
+      ? editLog.logType
+      : "regular"
   );
-  const [cancelledChapterId, setCancelledChapterId] = useState<number | null>(
+  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
     editLog?.chapterId ?? null
   );
   const [date, setDate] = useState(editLog?.logDate ?? getTodayIST());
@@ -92,6 +94,8 @@ export default function LogSessionModal({
     new Set(initialExpandedChapterIds)
   );
   const isClassCancelled = logType === "class_cancelled";
+  const isDoubtSolving = logType === "doubt_solving";
+  const isChapterBacked = isClassCancelled || isDoubtSolving;
 
   const toggleTopic = (topicId: number) => {
     setSelectedTopicIds((prev) => {
@@ -145,16 +149,27 @@ export default function LogSessionModal({
   };
 
   const handleSave = () => {
-    if (isClassCancelled) {
-      if (cancelledChapterId == null) {
-        alert("Please pick the Chapter whose class was cancelled");
+    if (isChapterBacked) {
+      if (selectedChapterId == null) {
+        alert(
+          isClassCancelled
+            ? "Please pick the Chapter whose class was cancelled"
+            : "Please pick the Chapter covered by doubt solving"
+        );
+        return;
+      }
+      const durationMinutes = isDoubtSolving
+        ? parseDurationInput(hours) * 60 + parseDurationInput(minutes)
+        : null;
+      if (isDoubtSolving && !durationMinutes) {
+        alert("Please enter a valid duration");
         return;
       }
       onSave({
-        logType: "class_cancelled",
+        logType,
         date,
-        durationMinutes: null,
-        chapterId: cancelledChapterId,
+        durationMinutes,
+        chapterId: selectedChapterId,
         topicIds: [],
         completeChapterIds: [],
         uncompleteChapterIds: [],
@@ -318,14 +333,16 @@ export default function LogSessionModal({
             {/* Divider */}
             <div className="border-t border-gray-200 my-4" />
 
-            {isClassCancelled ? (
-              /* Cancelled Chapter Selection */
+            {isChapterBacked ? (
+              /* Chapter-backed log selection */
               <div>
                 <label className="block text-sm font-medium text-gray-700">
-                  Which class was cancelled?
+                  {isClassCancelled
+                    ? "Which class was cancelled?"
+                    : "Which Chapter did you cover doubts for?"}
                 </label>
                 <p className="mb-2 mt-0.5 text-xs text-gray-500">
-                  Pick the one Chapter the cancelled class was for.
+                  Pick one in-syllabus Chapter.
                 </p>
 
                 <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
@@ -339,9 +356,9 @@ export default function LogSessionModal({
                       >
                         <input
                           type="radio"
-                          name="cancelled-chapter"
-                          checked={cancelledChapterId === chapterId}
-                          onChange={() => setCancelledChapterId(chapterId)}
+                          name="curriculum-log-chapter"
+                          checked={selectedChapterId === chapterId}
+                          onChange={() => setSelectedChapterId(chapterId)}
                           className="w-4 h-4 border-gray-300 text-accent focus:ring-accent/20"
                         />
                         <span className="flex-1 text-sm text-gray-700">
@@ -479,7 +496,7 @@ export default function LogSessionModal({
             )}
 
             {/* Selection Summary */}
-            {!isClassCancelled && (
+            {!isChapterBacked && (
             <div className="mt-3 text-sm text-gray-600 space-y-1">
               {selectedTopicIds.size > 0 && (
                 <div>
@@ -513,8 +530,8 @@ export default function LogSessionModal({
             <button
               onClick={handleSave}
               disabled={
-                (isClassCancelled
-                  ? cancelledChapterId == null
+                (isChapterBacked
+                  ? selectedChapterId == null
                   : (isEditMode && selectedTopicIds.size === 0) ||
                     (!isEditMode &&
                       selectedTopicIds.size === 0 &&

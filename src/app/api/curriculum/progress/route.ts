@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     subjectTotalTimeMinutes: result.subjectTotalTimeMinutes,
+    doubtSolvingTotalTimeMinutes: result.doubtSolvingTotalTimeMinutes,
     progress: result.progress,
   });
 }

@@ -42,11 +42,10 @@ export const CURRICULUM_LOG_TYPES = [
 
 export type CurriculumLogType = (typeof CURRICULUM_LOG_TYPES)[number];
 
-// The types a user can create today. `doubt_solving` is a stored value the schema
-// already accepts, but nothing writes it until that slice lands.
 export const WRITABLE_CURRICULUM_LOG_TYPES = [
   "regular",
   "class_cancelled",
+  "doubt_solving",
 ] as const satisfies readonly CurriculumLogType[];
 
 export type WritableCurriculumLogType =

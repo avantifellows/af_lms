@@ -59,6 +59,7 @@ export default function CurriculumTab({
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [progress, setProgress] = useState<Record<number, ChapterProgress>>({});
   const [subjectTotalTimeMinutes, setSubjectTotalTimeMinutes] = useState(0);
+  const [doubtSolvingTotalTimeMinutes, setDoubtSolvingTotalTimeMinutes] = useState(0);
   const [logs, setLogs] = useState<LmsCurriculumLog[]>([]);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
@@ -88,6 +89,7 @@ export default function CurriculumTab({
     setLogs([]);
     setProgress({});
     setSubjectTotalTimeMinutes(0);
+    setDoubtSolvingTotalTimeMinutes(0);
   }, []);
 
   useEffect(() => {
@@ -100,6 +102,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setDoubtSolvingTotalTimeMinutes(0);
 
       try {
         const response = await fetch(
@@ -140,6 +143,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setDoubtSolvingTotalTimeMinutes(0);
       setIsDataLoading(false);
       return;
     }
@@ -159,6 +163,7 @@ export default function CurriculumTab({
       setLogs([]);
       setProgress({});
       setSubjectTotalTimeMinutes(0);
+      setDoubtSolvingTotalTimeMinutes(0);
 
       const params = new URLSearchParams({
         school_code: schoolCode,
@@ -181,6 +186,7 @@ export default function CurriculumTab({
         const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
         const progressData = (await progressResponse.json()) as {
           subjectTotalTimeMinutes: number;
+          doubtSolvingTotalTimeMinutes: number;
           progress: Record<number, ChapterProgress>;
         };
         if (!isCancelled) {
@@ -188,6 +194,9 @@ export default function CurriculumTab({
           setLogs(logsData.logs);
           setProgress(progressData.progress);
           setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
+          setDoubtSolvingTotalTimeMinutes(
+            progressData.doubtSolvingTotalTimeMinutes ?? 0
+          );
         }
       } catch (err) {
         if (!isCancelled) {
@@ -233,11 +242,15 @@ export default function CurriculumTab({
     const logsData = (await logsResponse.json()) as { logs: LmsCurriculumLog[] };
     const progressData = (await progressResponse.json()) as {
       subjectTotalTimeMinutes: number;
+      doubtSolvingTotalTimeMinutes: number;
       progress: Record<number, ChapterProgress>;
     };
     setLogs(logsData.logs);
     setProgress(progressData.progress);
     setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
+    setDoubtSolvingTotalTimeMinutes(
+      progressData.doubtSolvingTotalTimeMinutes ?? 0
+    );
   }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
 
   const gradeOptions: GradeNumber[] = [11, 12];
@@ -349,26 +362,32 @@ export default function CurriculumTab({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
             isEditMode
-              ? payload.logType === "class_cancelled"
+              ? payload.logType !== "regular"
                 ? {
                     log_date: payload.date,
                     chapter_id: payload.chapterId,
+                    ...(payload.logType === "doubt_solving"
+                      ? { duration_minutes: payload.durationMinutes }
+                      : {}),
                   }
                 : {
                     log_date: payload.date,
                     duration_minutes: payload.durationMinutes,
                     topic_ids: payload.topicIds,
                   }
-              : payload.logType === "class_cancelled"
+              : payload.logType !== "regular"
                 ? {
                     school_code: schoolCode,
                     program_id: selectedProgramId,
                     exam_track: selectedExamTrack,
                     grade: selectedGrade,
                     subject: selectedSubject,
-                    log_type: "class_cancelled",
+                    log_type: payload.logType,
                     log_date: payload.date,
                     chapter_id: payload.chapterId,
+                    ...(payload.logType === "doubt_solving"
+                      ? { duration_minutes: payload.durationMinutes }
+                      : {}),
                   }
                 : {
                     school_code: schoolCode,
@@ -729,6 +748,7 @@ export default function CurriculumTab({
                 chapters={chapters}
                 progress={progress}
                 subjectTotalTimeMinutes={subjectTotalTimeMinutes}
+                doubtSolvingTotalTimeMinutes={doubtSolvingTotalTimeMinutes}
               />
               <ChapterAccordion
                 chapters={chapters}

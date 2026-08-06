@@ -253,6 +253,62 @@ test.describe("Curriculum read path", () => {
     await expect(alphaRow.getByText(/Time:/)).toHaveText(String(timeBefore));
   });
 
+  test("admin can create, edit, and delete a Doubt Solving log without moving Curriculum Progress", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
+
+    const alphaRow = adminPage
+      .locator("[data-chapter-row]")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await alphaRow.getByText("Fixture Alpha Physics").click();
+    const timeBefore = await alphaRow.getByText(/Time:/).textContent();
+
+    await adminPage.getByRole("button", { name: "+ Log a class" }).click();
+    await adminPage.getByLabel("Log type").selectOption("doubt_solving");
+    await expect(
+      adminPage.getByText("Which Chapter did you cover doubts for?")
+    ).toBeVisible();
+    await adminPage
+      .getByRole("radio", { name: "Fixture Alpha Physics" })
+      .check();
+    const [hours, minutes] = await adminPage.getByRole("spinbutton").all();
+    await hours.fill("1");
+    await minutes.fill("15");
+    await adminPage.getByRole("button", { name: "Save class log" }).click();
+
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    const doubtLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Doubt Solving" });
+    await expect(doubtLog).toContainText("Fixture Alpha Physics");
+    await expect(doubtLog).toContainText("Duration: 1h 15m");
+    await expect(doubtLog).not.toContainText("Topics covered");
+
+    await doubtLog.getByRole("button", { name: "Edit log" }).click();
+    await expect(adminPage.getByLabel("Log type")).toBeDisabled();
+    const editMinutes = adminPage.getByRole("spinbutton").nth(1);
+    await editMinutes.fill("30");
+    await adminPage.getByRole("button", { name: "Save changes" }).click();
+    await expect(doubtLog).toContainText("Duration: 1h 30m");
+
+    await adminPage.getByRole("button", { name: "Chapters" }).click();
+    await expect(alphaRow.getByText(/Time:/)).toHaveText(String(timeBefore));
+    const doubtSolvingMetric = adminPage
+      .getByText("doubt solving time")
+      .locator("..");
+    await expect(doubtSolvingMetric).toContainText("1h 30m");
+
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    adminPage.once("dialog", (dialog) => dialog.accept());
+    await doubtLog.getByRole("button", { name: "Delete log" }).click();
+    await expect(doubtLog).toBeHidden();
+  });
+
   test("admin can delete a log and it stays excluded after reload", async ({
     adminPage,
   }) => {

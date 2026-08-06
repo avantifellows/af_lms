@@ -14,12 +14,14 @@ vi.mock("./ProgressSummary", () => ({
     chapters: Chapter[];
     progress: Record<number, ChapterProgress>;
     subjectTotalTimeMinutes: number;
+    doubtSolvingTotalTimeMinutes?: number;
   }) => (
     <div
       data-testid="progress-summary"
       data-chapters={JSON.stringify(props.chapters)}
       data-progress={JSON.stringify(props.progress)}
       data-subject-total-time-minutes={props.subjectTotalTimeMinutes}
+      data-doubt-solving-total-time-minutes={props.doubtSolvingTotalTimeMinutes}
     />
   ),
 }));
@@ -82,8 +84,10 @@ vi.mock("./LogSessionModal", () => ({
   default: (props: {
     chapters: Chapter[];
     onSave: (payload: {
+      logType: "regular" | "class_cancelled" | "doubt_solving";
       date: string;
-      durationMinutes: number;
+      durationMinutes: number | null;
+      chapterId: number | null;
       topicIds: number[];
       completeChapterIds: number[];
       uncompleteChapterIds: number[];
@@ -101,8 +105,10 @@ vi.mock("./LogSessionModal", () => ({
       <button
         onClick={() =>
           props.onSave({
+            logType: "regular",
             date: "2026-02-15",
             durationMinutes: 90,
+            chapterId: null,
             topicIds: [101],
             completeChapterIds: [],
             uncompleteChapterIds: [],
@@ -115,8 +121,10 @@ vi.mock("./LogSessionModal", () => ({
       <button
         onClick={() =>
           props.onSave({
+            logType: "regular",
             date: "2026-02-15",
             durationMinutes: 0,
+            chapterId: null,
             topicIds: [],
             completeChapterIds: [1],
             uncompleteChapterIds: [],
@@ -125,6 +133,22 @@ vi.mock("./LogSessionModal", () => ({
         disabled={props.isSaving}
       >
         Save Completion Only
+      </button>
+      <button
+        onClick={() =>
+          props.onSave({
+            logType: "doubt_solving",
+            date: "2026-02-15",
+            durationMinutes: 75,
+            chapterId: 1,
+            topicIds: [],
+            completeChapterIds: [],
+            uncompleteChapterIds: [],
+          })
+        }
+        disabled={props.isSaving}
+      >
+        Save Doubt Solving
       </button>
     </div>
   ),
@@ -529,6 +553,35 @@ describe("CurriculumTab", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
     );
+  });
+
+  it("saves a Doubt Solving log with only its Chapter-backed fields", async () => {
+    const user = userEvent.setup();
+    renderTab({ canEdit: true });
+
+    await screen.findByTestId("chapter-accordion");
+    await user.click(screen.getByRole("button", { name: "+ Log a class" }));
+    await user.click(screen.getByText("Save Doubt Solving"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/curriculum/logs",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            school_code: "70705",
+            program_id: 1,
+            exam_track: "jee_main",
+            grade: 11,
+            subject: "Physics",
+            log_type: "doubt_solving",
+            log_date: "2026-02-15",
+            chapter_id: 1,
+            duration_minutes: 75,
+          }),
+        })
+      );
+    });
   });
 
   it("closes the Add Log modal and reports reload guidance when refresh fails after save", async () => {

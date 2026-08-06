@@ -325,10 +325,11 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 function normalizeChapterId(chapterId: unknown): number | null {
-  const parsed =
-    typeof chapterId === "number"
-      ? chapterId
-      : Number.parseInt(String(chapterId ?? ""), 10);
+  const parsed = typeof chapterId === "number"
+    ? chapterId
+    : typeof chapterId === "string" && /^\d+$/.test(chapterId)
+      ? Number(chapterId)
+      : NaN;
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -564,11 +565,12 @@ async function replaceCurriculumLogTopics(
   return true;
 }
 
-async function updateClassCancelledLog(
+async function updateChapterBackedLog(
   client: PoolClient,
   params: {
     logId: number;
     logDate: string;
+    durationMinutes: number | null;
     chapterId: number;
     actorEmail: string;
   }
@@ -576,12 +578,19 @@ async function updateClassCancelledLog(
   const updated = await client.query(
     `UPDATE lms_curriculum_logs
      SET log_date = $2,
-         chapter_id = $3,
-         updated_by_email = $4,
+         duration_minutes = $3,
+         chapter_id = $4,
+         updated_by_email = $5,
          updated_at = (NOW() AT TIME ZONE 'UTC')
      WHERE id = $1
        AND deleted_at IS NULL`,
-    [params.logId, params.logDate, params.chapterId, params.actorEmail]
+    [
+      params.logId,
+      params.logDate,
+      params.durationMinutes,
+      params.chapterId,
+      params.actorEmail,
+    ]
   );
   return updated.rowCount !== 0;
 }
@@ -748,7 +757,7 @@ export async function createCurriculumLog(params: {
     return {
       ok: false,
       status: 422,
-      error: "Log type must be Regular Class or Class Cancelled",
+      error: "Log type must be Regular Class, Class Cancelled, or Doubt Solving",
     };
   }
 
@@ -786,7 +795,16 @@ export async function createCurriculumLog(params: {
     scope.completeChapterIds.length > 0 ||
     scope.uncompleteChapterIds.length > 0;
   const isClassCancelled = logType === "class_cancelled";
-  if (!isClassCancelled && topicIds.length === 0 && !hasCompletionDeltas) {
+  const isDoubtSolving = logType === "doubt_solving";
+  const isChapterBacked = isClassCancelled || isDoubtSolving;
+  if (isDoubtSolving && hasCompletionDeltas) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Doubt Solving logs cannot include Chapter Completion changes",
+    };
+  }
+  if (!isChapterBacked && topicIds.length === 0 && !hasCompletionDeltas) {
     return { ok: false, status: 422, error: "Nothing to save" };
   }
 
@@ -794,15 +812,36 @@ export async function createCurriculumLog(params: {
   const durationMinutes = params.durationMinutes;
   const chapterId = normalizeChapterId(params.chapterId);
 
-  if (isClassCancelled) {
+  if (isChapterBacked) {
     if (topicIds.length > 0) {
-      return { ok: false, status: 422, error: "Class Cancelled logs cannot include topics" };
+      return {
+        ok: false,
+        status: 422,
+        error: `${isClassCancelled ? "Class Cancelled" : "Doubt Solving"} logs cannot include topics`,
+      };
     }
-    if (durationMinutes != null) {
+    if (isClassCancelled && durationMinutes != null) {
       return { ok: false, status: 422, error: "Class Cancelled logs cannot have a duration" };
     }
     if (chapterId == null) {
-      return { ok: false, status: 422, error: "Class Cancelled logs require exactly one Chapter" };
+      return {
+        ok: false,
+        status: 422,
+        error: `${isClassCancelled ? "Class Cancelled" : "Doubt Solving"} logs require exactly one Chapter`,
+      };
+    }
+    if (
+      isDoubtSolving &&
+      (durationMinutes == null ||
+        !Number.isInteger(durationMinutes) ||
+        durationMinutes <= 0 ||
+        durationMinutes > 720)
+    ) {
+      return {
+        ok: false,
+        status: 422,
+        error: "Duration must be greater than 0 and at most 720 minutes",
+      };
     }
     if (!logDate || !isPastOrTodayIST(logDate) || isFutureIST(logDate)) {
       return { ok: false, status: 422, error: "Log date cannot be in the future" };
@@ -822,17 +861,19 @@ export async function createCurriculumLog(params: {
       };
     }
 
-    const duplicate = await activeClassCancelledLogExists({
-      schoolCode: params.schoolCode,
-      programId: params.programId,
-      gradeId: scope.gradeId,
-      subjectId: scope.subjectId,
-      examTrack: scope.examTrack,
-      chapterId,
-      logDate,
-    });
-    if (duplicate) {
-      return { ok: false, status: 422, error: DUPLICATE_CLASS_CANCELLED_ERROR };
+    if (isClassCancelled) {
+      const duplicate = await activeClassCancelledLogExists({
+        schoolCode: params.schoolCode,
+        programId: params.programId,
+        gradeId: scope.gradeId,
+        subjectId: scope.subjectId,
+        examTrack: scope.examTrack,
+        chapterId,
+        logDate,
+      });
+      if (duplicate) {
+        return { ok: false, status: 422, error: DUPLICATE_CLASS_CANCELLED_ERROR };
+      }
     }
   } else if (chapterId != null) {
     return {
@@ -874,7 +915,7 @@ export async function createCurriculumLog(params: {
     }
   }
 
-  const shouldInsertLog = isClassCancelled || topicIds.length > 0;
+  const shouldInsertLog = isChapterBacked || topicIds.length > 0;
   const runMutation = () => withTransaction(async (client) => {
     const logId = shouldInsertLog
       ? await insertCurriculumLog(client, {
@@ -886,7 +927,7 @@ export async function createCurriculumLog(params: {
           logType,
           logDate: logDate as string,
           durationMinutes: isClassCancelled ? null : (durationMinutes as number),
-          chapterId: isClassCancelled ? chapterId : null,
+          chapterId: isChapterBacked ? chapterId : null,
           topicIds,
           actorEmail: params.actorEmail,
         })
@@ -998,9 +1039,10 @@ async function updateClassCancelledLogFields(params: {
   let updated: boolean;
   try {
     updated = await withTransaction((client) =>
-      updateClassCancelledLog(client, {
+      updateChapterBackedLog(client, {
         logId: params.id,
         logDate,
+        durationMinutes: null,
         chapterId: params.chapterId as number,
         actorEmail: params.actorEmail,
       })
@@ -1018,6 +1060,69 @@ async function updateClassCancelledLogFields(params: {
   const updatedLog = await getCurriculumLogById(params.id);
   if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");
 
+  return { ok: true, log: updatedLog };
+}
+
+async function updateDoubtSolvingLogFields(params: {
+  id: number;
+  log: LogMutationScopeRow;
+  logDate: string | null;
+  durationMinutes: number | null;
+  chapterId: number | null;
+  hasTopics: boolean;
+  actorEmail: string;
+}): Promise<CurriculumEditResult> {
+  if (params.hasTopics) {
+    return { ok: false, status: 422, error: "Doubt Solving logs cannot include topics" };
+  }
+  if (params.chapterId == null) {
+    return { ok: false, status: 422, error: "Doubt Solving logs require exactly one Chapter" };
+  }
+  if (!params.logDate || !isPastOrTodayIST(params.logDate) || isFutureIST(params.logDate)) {
+    return { ok: false, status: 422, error: "Log date cannot be in the future" };
+  }
+  if (
+    params.durationMinutes == null ||
+    !Number.isInteger(params.durationMinutes) ||
+    params.durationMinutes <= 0 ||
+    params.durationMinutes > 720
+  ) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Duration must be greater than 0 and at most 720 minutes",
+    };
+  }
+
+  const chapterInScope = await chapterIsInStoredScope({
+    chapterId: params.chapterId,
+    examTrack: params.log.exam_track,
+    gradeId: params.log.grade_id,
+    subjectId: params.log.subject_id,
+  });
+  if (!chapterInScope) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Chapter does not belong to the LMS Curriculum Log scope",
+    };
+  }
+
+  const updated = await withTransaction((client) =>
+    updateChapterBackedLog(client, {
+      logId: params.id,
+      logDate: params.logDate as string,
+      durationMinutes: params.durationMinutes,
+      chapterId: params.chapterId as number,
+      actorEmail: params.actorEmail,
+    })
+  );
+  if (!updated) {
+    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
+  }
+
+  const updatedLog = await getCurriculumLogById(params.id);
+  if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");
   return { ok: true, log: updatedLog };
 }
 
@@ -1073,6 +1178,19 @@ export async function updateCurriculumLog(params: {
       chapterId,
       hasTopics: normalizeTopicIds(patch.topic_ids).length > 0,
       hasDuration: patch.duration_minutes != null,
+      actorEmail: params.actorEmail,
+    });
+  }
+
+  if (log.log_type === "doubt_solving") {
+    return updateDoubtSolvingLogFields({
+      id: params.id,
+      log,
+      logDate,
+      durationMinutes:
+        typeof patch.duration_minutes === "number" ? patch.duration_minutes : null,
+      chapterId,
+      hasTopics: normalizeTopicIds(patch.topic_ids).length > 0,
       actorEmail: params.actorEmail,
     });
   }

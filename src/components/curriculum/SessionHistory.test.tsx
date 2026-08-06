@@ -46,6 +46,18 @@ function makeCancelledLog(
   });
 }
 
+function makeDoubtSolvingLog(): LmsCurriculumLog {
+  return makeLog({
+    id: 3,
+    logType: "doubt_solving",
+    logDate: "2026-01-21",
+    durationMinutes: 75,
+    chapterId: 7,
+    chapterName: "Thermodynamics",
+    topics: [],
+  });
+}
+
 describe("SessionHistory", () => {
   it("renders empty state when no LMS Curriculum Logs exist", () => {
     render(<SessionHistory logs={[]} />);
@@ -211,6 +223,16 @@ describe("SessionHistory", () => {
     expect(screen.getByText("Chapter")).toBeInTheDocument();
     expect(screen.getByText("Thermodynamics")).toBeInTheDocument();
     expect(screen.queryByText(/Duration:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Topics covered")).not.toBeInTheDocument();
+  });
+
+  it("shows only date, Chapter, and duration for a Doubt Solving entry", () => {
+    render(<SessionHistory logs={[makeDoubtSolvingLog()]} />);
+
+    expect(screen.getByText("Doubt Solving")).toBeInTheDocument();
+    expect(screen.getByText(/Jan/)).toBeInTheDocument();
+    expect(screen.getByText("Thermodynamics")).toBeInTheDocument();
+    expect(screen.getByText("Duration: 75m")).toBeInTheDocument();
     expect(screen.queryByText("Topics covered")).not.toBeInTheDocument();
   });
 

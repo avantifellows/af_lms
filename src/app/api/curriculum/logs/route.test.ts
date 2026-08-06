@@ -719,8 +719,183 @@ describe("/api/curriculum/logs", () => {
     });
   });
 
-  it("rejects an unknown log type", async () => {
-    mockQuery.mockResolvedValueOnce([]);
+  it("creates a Doubt Solving log from a date, one in-syllabus Chapter, and duration", async () => {
+    const clientQuery = vi.fn().mockResolvedValueOnce({ rows: [{ id: 22 }] });
+    mockWithTransaction.mockImplementation(async (fn) =>
+      fn({ query: clientQuery } as never)
+    );
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ chapter_id: 44 }])
+      .mockResolvedValueOnce([
+        {
+          id: 22,
+          log_date: "2026-02-15",
+          duration_minutes: 75,
+          log_type: "doubt_solving",
+          program_id: 1,
+          grade_id: 3,
+          subject_id: 4,
+          exam_track: "jee_main",
+          inserted_at: "2026-02-15T10:00:00.000Z",
+          updated_at: "2026-02-15T10:00:00.000Z",
+          topic_id: null,
+          topic_name: null,
+          chapter_id: null,
+          chapter_name: null,
+          topic_currently_in_syllabus: null,
+          log_chapter_id: 44,
+          log_chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+        },
+      ]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "doubt_solving",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+        duration_minutes: 75,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(clientQuery).toHaveBeenCalledOnce();
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO lms_curriculum_logs"),
+      [
+        "70705",
+        1,
+        3,
+        4,
+        "jee_main",
+        "doubt_solving",
+        "2026-02-15",
+        75,
+        44,
+        "teacher@avantifellows.org",
+      ]
+    );
+    await expect(res.json()).resolves.toMatchObject({
+      log: {
+        id: 22,
+        logType: "doubt_solving",
+        durationMinutes: 75,
+        chapterId: 44,
+        chapterName: "Kinematics",
+        topics: [],
+      },
+    });
+  });
+
+  it.each([
+    ["topics", { chapter_id: 44, duration_minutes: 60, topic_ids: [101] }, "Doubt Solving logs cannot include topics"],
+    ["no Chapter", { duration_minutes: 60 }, "Doubt Solving logs require exactly one Chapter"],
+    ["multiple Chapters", { chapter_id: [44, 55], duration_minutes: 60 }, "Doubt Solving logs require exactly one Chapter"],
+    ["no duration", { chapter_id: 44 }, "Duration must be greater than 0 and at most 720 minutes"],
+    ["zero duration", { chapter_id: 44, duration_minutes: 0 }, "Duration must be greater than 0 and at most 720 minutes"],
+    ["over-720 duration", { chapter_id: 44, duration_minutes: 721 }, "Duration must be greater than 0 and at most 720 minutes"],
+  ])("rejects a Doubt Solving log with %s", async (_label, extra, error) => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "doubt_solving",
+        log_date: "2026-02-15",
+        ...extra,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({ error });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a future-dated Doubt Solving log", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "doubt_solving",
+        log_date: "2999-01-01",
+        chapter_id: 44,
+        duration_minutes: 60,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Log date cannot be in the future",
+    });
+  });
+
+  it("rejects a Doubt Solving log for an out-of-syllabus Chapter", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "doubt_solving",
+        log_date: "2026-02-15",
+        chapter_id: 999,
+        duration_minutes: 60,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Chapter does not belong to the selected Grade, Subject, and Exam Track",
+    });
+  });
+
+  it("rejects Chapter Completion changes on a Doubt Solving log", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([
+        { chapter_id: 44, is_in_syllabus: true, active_completed_at: null },
+      ]);
 
     const res = await POST(
       jsonReq("/api/curriculum/logs", {
@@ -733,12 +908,37 @@ describe("/api/curriculum/logs", () => {
         log_date: "2026-02-15",
         chapter_id: 44,
         duration_minutes: 60,
+        complete_chapter_ids: [44],
       })
     );
 
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toEqual({
-      error: "Log type must be Regular Class or Class Cancelled",
+      error: "Doubt Solving logs cannot include Chapter Completion changes",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown log type", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "revision",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+        duration_minutes: 60,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Log type must be Regular Class, Class Cancelled, or Doubt Solving",
     });
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
