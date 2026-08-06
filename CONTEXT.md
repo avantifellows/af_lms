@@ -225,6 +225,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - When a Centre and Grade have no **Centre Exam Tracks**, Curriculum shows the missing configuration and blocks new LMS Curriculum Logs without falling back to other Exam Tracks
 - **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
 - A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
+- Initial **Centre Exam Track** mappings come from one approved import keyed by stable Centre identity and Grade; after import, Admins maintain them in Centre Management without live Sheet sync
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
 - In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
