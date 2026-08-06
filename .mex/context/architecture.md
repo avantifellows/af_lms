@@ -18,7 +18,7 @@ edges:
     condition: when a route or page needs to gate access
   - target: context/visits.md
     condition: when working on PM school visits or visit action types
-last_updated: 2026-06-25
+last_updated: 2026-08-07
 ---
 
 # Architecture
@@ -45,6 +45,7 @@ Every API route gates first: `getServerSession(authOptions)` → a permission ch
 - **`src/lib/permissions.ts`** — the access-control core: `getUserPermission`/`getResolvedPermission`, `getFeatureAccess` (feature×role matrix), `canAccessSchool*`, `isAdmin`. See `context/permissions.md`.
 - **`src/lib/visits-policy.ts`** — visit-specific gate (`requireVisitsAccess`, `enforceVisit*`, `buildVisitScopePredicate`, `apiError`). See `context/visits.md`.
 - **`src/lib/auth.ts`** — NextAuth v4 config: Google OAuth + passcode CredentialsProvider (+ dev-login personas in non-prod).
+- **`src/lib/centres.ts`** — admin-only Centre Management reads and direct writes, including current Grade 11/12 Centre Exam Track mappings. The API accepts only the shared fixed Exam Track codes; mapping unassignment is a hard delete.
 - **Visit action-type registry** — 7 action types, each a `src/lib/<type>.ts` config/validator + a `src/components/visits/<Type>Form.tsx`, dispatched by `ActionDetailForm.tsx`. Registered in `ACTION_TYPES` (`src/lib/visit-actions.ts`).
 - **Analytics clients** — `src/lib/bigquery.ts` (quiz analytics), `src/lib/dynamodb.ts` (performance), each a lazily-initialised singleton client.
 

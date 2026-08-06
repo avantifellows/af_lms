@@ -5,6 +5,7 @@ vi.mock("./db", () => ({ query: vi.fn() }));
 import { query } from "./db";
 import {
   createCentre,
+  checkCentreManagementSchema,
   createCentreOption,
   getCentreList,
   getCentreOptionSets,
@@ -285,6 +286,28 @@ describe("Centre option contracts", () => {
   });
 });
 
+describe("Centre schema contract", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetCentreSchemaCheckForTests();
+  });
+
+  it("requires the Centre Exam Track mapping table", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    await expect(checkCentreManagementSchema()).resolves.toEqual({ ok: true });
+    const params = mockQuery.mock.calls[0][1] as unknown[];
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "centre_exam_tracks",
+        "centre_id",
+        "grade_id",
+        "exam_track_code",
+      ])
+    );
+  });
+});
+
 describe("Centre grid contracts", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -313,6 +336,8 @@ describe("Centre grid contracts", () => {
             { code: "jee", label: "JEE", is_active: true },
             { code: "neet", label: "NEET", is_active: false },
           ],
+          grade_11_exam_track_codes: ["jee_main", "jee_advanced"],
+          grade_12_exam_track_codes: ["neet"],
           is_physical: true,
           is_active: true,
           program_id: "1",
@@ -368,6 +393,8 @@ describe("Centre grid contracts", () => {
             { code: "jee", label: "JEE", isActive: true },
             { code: "neet", label: "NEET", isActive: false },
           ],
+          grade11ExamTrackCodes: ["jee_main", "jee_advanced"],
+          grade12ExamTrackCodes: ["neet"],
           isPhysical: true,
           isActive: true,
           programId: 1,
@@ -493,6 +520,8 @@ describe("Centre grid contracts", () => {
           sub_category_is_active: null,
           stream_codes: ["jee"],
           stream_options: [{ code: "jee", label: "JEE", is_active: true }],
+          grade_11_exam_track_codes: ["jee_main", "jee_advanced"],
+          grade_12_exam_track_codes: ["neet"],
           is_physical: false,
           is_active: true,
           inserted_at: "2026-01-07T00:00:00.000Z",
@@ -515,6 +544,8 @@ describe("Centre grid contracts", () => {
         category_code: null,
         sub_category_code: null,
         stream_codes: ["jee"],
+        grade_11_exam_track_codes: ["jee_main", "jee_advanced"],
+        grade_12_exam_track_codes: ["neet"],
         is_physical: false,
         is_active: true,
       },
@@ -528,6 +559,8 @@ describe("Centre grid contracts", () => {
         schoolId: 44,
         typeCode: "coe",
         streamCodes: ["jee"],
+        grade11ExamTrackCodes: ["jee_main", "jee_advanced"],
+        grade12ExamTrackCodes: ["neet"],
         isPhysical: false,
         isActive: true,
       },
@@ -542,7 +575,11 @@ describe("Centre grid contracts", () => {
       false,
       true,
       null,
+      ["jee_main", "jee_advanced"],
+      ["neet"],
     ]);
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("DELETE FROM centre_exam_tracks");
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("ON CONFLICT");
   });
 
   it("updates Centres while allowing unchanged inactive options to remain", async () => {
@@ -641,7 +678,11 @@ describe("Centre grid contracts", () => {
       true,
       false,
       null,
+      [],
+      [],
     ]);
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("DELETE FROM centre_exam_tracks");
+    expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("NOT EXISTS");
   });
 
   it("rejects non-string single-select option codes on Centre updates", async () => {

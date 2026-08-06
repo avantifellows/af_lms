@@ -75,6 +75,8 @@ describe("GET /api/admin/centres", () => {
           sub_category_is_active: null,
           stream_codes: [],
           stream_options: [],
+          grade_11_exam_track_codes: ["jee_main"],
+          grade_12_exam_track_codes: ["neet", "cet"],
           is_physical: false,
           is_active: true,
           inserted_at: null,
@@ -118,6 +120,8 @@ describe("GET /api/admin/centres", () => {
           id: 91,
           name: "JNV Pune CoE",
           updatedAt: "2026-01-06T00:00:00.000Z",
+          grade11ExamTrackCodes: ["jee_main"],
+          grade12ExamTrackCodes: ["neet", "cet"],
         },
       ],
     });
@@ -146,6 +150,23 @@ describe("POST /api/admin/centres", () => {
     mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
     mockGetUserPermission.mockResolvedValue(adminPermission);
     mockQuery.mockResolvedValue([]);
+  });
+
+  it("rejects non-admin requests before touching Centre data", async () => {
+    mockGetUserPermission.mockResolvedValueOnce({
+      ...adminPermission,
+      role: "program_manager",
+    });
+
+    const res = await POST(
+      jsonRequest("http://localhost/api/admin/centres", {
+        method: "POST",
+        body: {},
+      }) as never
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it("returns 422 validation errors from the Centre service", async () => {
@@ -201,6 +222,31 @@ describe("POST /api/admin/centres", () => {
         type_code: "Centre option code must be a string or null",
         category_code: "Centre option code must be a string or null",
         sub_category_code: "Centre option code must be a string or null",
+      },
+    });
+  });
+
+  it("rejects unsupported Centre Exam Track codes and grades", async () => {
+    const res = await POST(
+      jsonRequest("http://localhost/api/admin/centres", {
+        method: "POST",
+        body: {
+          name: "Bad Track Payload",
+          stream_codes: [],
+          grade_11_exam_track_codes: ["jee_main", "sat"],
+          grade_10_exam_track_codes: ["neet"],
+          is_physical: false,
+          is_active: true,
+        },
+      }) as never
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Invalid Centre payload",
+      fields: {
+        grade_11_exam_track_codes: "Grade 11 Exam Tracks must use supported codes",
+        grade_10_exam_track_codes: "Only Grade 11 and Grade 12 Exam Tracks are supported",
       },
     });
   });

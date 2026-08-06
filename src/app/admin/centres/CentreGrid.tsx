@@ -35,6 +35,7 @@ import type {
   CentreSchoolLinkFilter,
   ProgramOption,
 } from "@/lib/centres";
+import { EXAM_TRACKS, formatExamTrack } from "@/lib/exam-tracks";
 
 interface CentreGridProps {
   initialRows: CentreListRow[];
@@ -71,6 +72,8 @@ interface CentreFormState {
   categoryCode: string;
   subCategoryCode: string;
   streamCodes: string[];
+  grade11ExamTrackCodes: string[];
+  grade12ExamTrackCodes: string[];
   isPhysical: boolean;
   isActive: boolean;
   programId: number | null;
@@ -292,6 +295,8 @@ export default function CentreGrid({
         categoryCode: row.categoryCode ?? "",
         subCategoryCode: row.subCategoryCode ?? "",
         streamCodes: row.streamCodes,
+        grade11ExamTrackCodes: row.grade11ExamTrackCodes,
+        grade12ExamTrackCodes: row.grade12ExamTrackCodes,
         isPhysical: row.isPhysical,
         isActive: row.isActive,
         programId: row.programId,
@@ -323,6 +328,19 @@ export default function CentreGrid({
       ? modal.form.streamCodes.filter((value) => value !== code)
       : [...modal.form.streamCodes, code];
     patchForm({ streamCodes });
+  };
+
+  const toggleExamTrack = (
+    field: "grade11ExamTrackCodes" | "grade12ExamTrackCodes",
+    code: string
+  ) => {
+    if (!modal) return;
+    const current = modal.form[field];
+    patchForm({
+      [field]: current.includes(code)
+        ? current.filter((value) => value !== code)
+        : [...current, code],
+    });
   };
 
   const toggleSearchTerm = async (value: string) => {
@@ -800,6 +818,26 @@ export default function CentreGrid({
                         <p className="mt-1 text-xs text-danger">{fieldErrors.stream_codes}</p>
                       )}
                     </div>
+
+                    <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
+                      <div className="mb-4 text-sm font-bold uppercase text-text-primary">
+                        Centre Exam Tracks
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <ExamTrackCheckboxes
+                          label="Grade 11 Exam Tracks"
+                          selected={modal.form.grade11ExamTrackCodes}
+                          error={fieldErrors.grade_11_exam_track_codes}
+                          onToggle={(code) => toggleExamTrack("grade11ExamTrackCodes", code)}
+                        />
+                        <ExamTrackCheckboxes
+                          label="Grade 12 Exam Tracks"
+                          selected={modal.form.grade12ExamTrackCodes}
+                          error={fieldErrors.grade_12_exam_track_codes}
+                          onToggle={(code) => toggleExamTrack("grade12ExamTrackCodes", code)}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <aside className="space-y-4">
@@ -1215,6 +1253,18 @@ function CentreCard({
                 <span className="text-text-muted/60">None</span>
               )}
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">Grade 11 Exam Tracks:</span>
+              <span className="font-medium text-text-primary">
+                {formatExamTracks(row.grade11ExamTrackCodes)}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">Grade 12 Exam Tracks:</span>
+              <span className="font-medium text-text-primary">
+                {formatExamTracks(row.grade12ExamTrackCodes)}
+              </span>
+            </div>
           </div>
 
           <div className="mt-3 flex items-center gap-2">
@@ -1333,6 +1383,8 @@ function emptyForm(): CentreFormState {
     categoryCode: "",
     subCategoryCode: "",
     streamCodes: [],
+    grade11ExamTrackCodes: [],
+    grade12ExamTrackCodes: [],
     isPhysical: false,
     isActive: true,
     programId: null,
@@ -1347,10 +1399,49 @@ function formToPayload(form: CentreFormState) {
     category_code: form.categoryCode || null,
     sub_category_code: form.subCategoryCode || null,
     stream_codes: form.streamCodes,
+    grade_11_exam_track_codes: form.grade11ExamTrackCodes,
+    grade_12_exam_track_codes: form.grade12ExamTrackCodes,
     is_physical: form.isPhysical,
     is_active: form.isActive,
     program_id: form.programId,
   };
+}
+
+function formatExamTracks(codes: string[]): string {
+  return codes.length > 0 ? codes.map(formatExamTrack).join(", ") : "None";
+}
+
+function ExamTrackCheckboxes({
+  label,
+  selected,
+  error,
+  onToggle,
+}: {
+  label: string;
+  selected: string[];
+  error?: string;
+  onToggle: (code: string) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="text-xs font-semibold uppercase text-text-muted">{label}</legend>
+      <div className="mt-1 grid gap-1">
+        {EXAM_TRACKS.map((code) => (
+          <label key={code} className="flex min-h-9 items-center gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              aria-label={`${label.replace(" Exam Tracks", "")} ${formatExamTrack(code)}`}
+              checked={selected.includes(code)}
+              onChange={() => onToggle(code)}
+              className="h-4 w-4 accent-[var(--color-accent)]"
+            />
+            {formatExamTrack(code)}
+          </label>
+        ))}
+      </div>
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </fieldset>
+  );
 }
 
 function selectOptions(params: {

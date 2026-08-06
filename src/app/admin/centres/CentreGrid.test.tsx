@@ -125,6 +125,8 @@ const rows: CentreListRow[] = [
     subCategoryOptionActive: null,
     streamCodes: ["jee"],
     streams: [{ code: "jee", label: "JEE", isActive: true }],
+    grade11ExamTrackCodes: ["jee_main"],
+    grade12ExamTrackCodes: ["neet"],
     isPhysical: true,
     isActive: true,
     programId: 1,
@@ -156,6 +158,8 @@ const rows: CentreListRow[] = [
     subCategoryOptionActive: null,
     streamCodes: [],
     streams: [],
+    grade11ExamTrackCodes: [],
+    grade12ExamTrackCodes: [],
     isPhysical: false,
     isActive: false,
     programId: null,
@@ -236,6 +240,10 @@ describe("CentreGrid", () => {
     expect(within(linkedCard).getByText("School")).toBeInTheDocument();
     expect(within(linkedCard).getByText("Physical")).toBeInTheDocument();
     expect(within(linkedCard).getByText("Active")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("Grade 11 Exam Tracks:")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("JEE Main")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("Grade 12 Exam Tracks:")).toBeInTheDocument();
+    expect(within(linkedCard).getByText("NEET")).toBeInTheDocument();
     // School metadata and streams stay behind the expand toggle
     expect(within(linkedCard).queryByText("SCH001")).not.toBeInTheDocument();
     expect(within(linkedCard).queryByText("JEE")).not.toBeInTheDocument();
@@ -455,6 +463,8 @@ describe("CentreGrid", () => {
     );
     await user.selectOptions(modalTypeSelect, "coe");
     await user.click(screen.getByRole("checkbox", { name: "JEE" }));
+    await user.click(screen.getByRole("checkbox", { name: "Grade 11 JEE Advanced" }));
+    await user.click(screen.getByRole("checkbox", { name: "Grade 12 CET" }));
 
     await user.type(screen.getByPlaceholderText("Search name, code, UDISE"), "080101");
     await user.click(await screen.findByRole("button", { name: /JNV Jaipur/ }));
@@ -484,6 +494,8 @@ describe("CentreGrid", () => {
           category_code: null,
           sub_category_code: null,
           stream_codes: ["jee"],
+          grade_11_exam_track_codes: ["jee_advanced"],
+          grade_12_exam_track_codes: ["cet"],
           is_physical: true,
           is_active: true,
           program_id: null,
@@ -529,6 +541,7 @@ describe("CentreGrid", () => {
     await user.clear(nameInput);
     await user.type(nameInput, "JNV Bhavnagar CoE Updated");
     await user.click(screen.getByRole("button", { name: "Unlink" }));
+    await user.click(screen.getByRole("checkbox", { name: "Grade 11 JEE Main" }));
     await user.click(screen.getByRole("checkbox", { name: "Active Centre" }));
     await user.click(screen.getByRole("button", { name: "Save Centre" }));
 
@@ -543,6 +556,8 @@ describe("CentreGrid", () => {
           category_code: "school",
           sub_category_code: null,
           stream_codes: ["jee"],
+          grade_11_exam_track_codes: [],
+          grade_12_exam_track_codes: ["neet"],
           is_physical: true,
           is_active: false,
           program_id: 1,
