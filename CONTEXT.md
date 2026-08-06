@@ -271,6 +271,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
 - **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
 - A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; it has no Done action
+- Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
