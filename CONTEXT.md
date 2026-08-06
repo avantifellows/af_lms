@@ -41,8 +41,16 @@ _Avoid_: PIN, access code
 ### Curriculum
 
 **LMS Curriculum Log**:
-A soft-deletable dated record of curriculum teaching for a school, program, grade, subject, and exam track, with duration and covered topics.
+A soft-deletable dated record of curriculum activity for a school, program, grade, subject, and exam track. A regular teaching entry has duration and covered topics; cancellation and doubt-solving entries have narrower data and do not change Curriculum Progress.
 _Avoid_: Teaching Session, Session, Class Log
+
+**Class Cancellation Log**:
+An LMS Curriculum Log that records only that a class was cancelled on a date within the selected curriculum scope.
+_Avoid_: Cancelled teaching, zero-hour class
+
+**Doubt Solving Log**:
+An LMS Curriculum Log that records doubt-solving duration for one chapter on a date within the selected curriculum scope.
+_Avoid_: Revision class, curriculum teaching log
 
 **Chapter Completion**:
 The current state that a chapter is complete for a school, program, and exam track.
@@ -220,6 +228,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Issue #252 replaces the legacy centre-level **Centre Stream** classification with grade-specific **Centre Exam Tracks**
 - A **Centre** can have multiple **Centre Exam Tracks** for one Grade
 - A **Centre** and Grade can have no **Centre Exam Tracks** assigned
+- In issue #252, **Centre Exam Tracks** are current Centre-and-Grade mappings and are not scoped by Academic Year; revisit this assumption only when mappings need to change between years
 - Curriculum resolves one active physical **Centre** from the selected School and Program, then loads **Centre Exam Tracks** for that Centre and Grade
 - Curriculum fails closed when School and Program resolve to zero or multiple active physical **Centres**
 - When a Centre and Grade have no **Centre Exam Tracks**, Curriculum shows the missing configuration and blocks new LMS Curriculum Logs without falling back to other Exam Tracks
@@ -250,12 +259,17 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - The initial Centre import requires a checked-in mapping file with one row per source Centre and explicit school-link status; unresolved or ambiguous mappings block apply mode
 - Yearly planning fields such as `plan_status_2627` are out of scope for Centre v1
 - Centre v1 should be delivered in slices: db-service schema, AF LMS option seed script, AF LMS Centre import script, admin Centre APIs, Centre grid UI, and Centre option config UI
-- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program** and **Exam Track**
-- An **LMS Curriculum Log** has many covered topics
+- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**, Grade, Subject, and **Exam Track**
+- A regular teaching **LMS Curriculum Log** has duration and one or more covered topics
+- A **Class Cancellation Log** has a date but no chapter, topics, or duration; it appears in log history but contributes no teaching time or curriculum progress
+- A **Doubt Solving Log** has a date, chapter, and duration but no covered topics; it appears in log history but contributes no Actual Hours, topic coverage, or curriculum progress
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
 - **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
 - Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
+- **Curriculum Summary** shows a mapped **Centre Exam Track** without LMS Chapter Exam Config as unavailable rather than hiding the operational track or creating empty chapter rows
+- Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
+- **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
