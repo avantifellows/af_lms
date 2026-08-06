@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-08-05
+last_updated: 2026-08-07
 ---
 
 # Session Bootstrap
@@ -56,6 +56,8 @@ Then read this file fully before doing anything else in this session.
 
 - Centre rollout is mid-migration: `PROGRAM_IDS` is still hand-maintained in `src/lib/constants.ts` (target is reading `program` from the DB); non-JNV centre programs are being onboarded.
 - Student Addition #197/#228/#231 follow-up is in progress. One-by-one, mixed-grade bulk, existing-Student Edit, audited NVS Dropout undo, combined Grade/Stream filtering, and NVS roster export use Centre-free NVS authorization. Program-specific Dropout keeps existing Centre-based programs working. Add/bulk serve the approved static workbook; example rows are removed before limits, validation, totals, rejected-row output, and writes; PEN accepts exact 11-digit text including a leading zero; empty dropout views return to Active. The final bulk error contract names duplicate identifiers on screen and in rejected CSVs, rejects every row sharing an in-file identifier, and aligns LMS and DB Service conflict messages. Blank formatting records are removed from uploaded worksheet XML before ExcelJS parsing, while the 200-nonblank-row limit remains unchanged. Bulk files are sent once, while DB Service processes independent rows concurrently after duplicate pre-scan to stay within the gateway timeout. The matching DB Service work is maintained in its own PR and must deploy with the LMS change.
+
+- Curriculum improvements #252 are in progress on `feat/issue-252-improvements-to-curriculum-logging-curriculum`. LMS Curriculum Logs now carry a `log_type` (`regular`, `class_cancelled`, `doubt_solving`) plus a nullable `chapter_id`, and `duration_minutes` is nullable. Class Cancelled is live end to end: the Add Log modal's type selector swaps to Date + one Chapter picker, validation lives in `src/lib/curriculum-logs.ts` (rejects topics/duration, requires one in-syllabus Chapter, blocks duplicates per scope + Chapter + date both proactively and on the partial unique index), a saved log's type is immutable, and Actual Hours / topic coverage / Chapter Completion filter on `log_type = 'regular'`. The production migration is owned by db-service; `e2e/fixtures/migrations/20260806120000_add_lms_curriculum_log_types.sql` mirrors it and the curriculum schema preflight (`log_type`, `chapter_id`) 503s until production catches up. Doubt Solving is a stored value the schema accepts but nothing writes yet.
 
 **Known issues:**
 

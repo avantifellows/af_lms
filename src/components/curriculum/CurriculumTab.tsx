@@ -11,6 +11,7 @@ import type {
   GradeNumber,
   LmsCurriculumLog,
   SubjectName,
+  WritableCurriculumLogType,
 } from "@/types/curriculum";
 import { formatExamTrack } from "@/lib/exam-tracks";
 import ChapterAccordion from "./ChapterAccordion";
@@ -295,8 +296,10 @@ export default function CurriculumTab({
   }
 
   async function handleSaveLog(payload: {
+    logType: WritableCurriculumLogType;
     date: string;
-    durationMinutes: number;
+    durationMinutes: number | null;
+    chapterId: number | null;
     topicIds: number[];
     completeChapterIds: number[];
     uncompleteChapterIds: number[];
@@ -316,27 +319,44 @@ export default function CurriculumTab({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
             isEditMode
-              ? {
-                  log_date: payload.date,
-                  duration_minutes: payload.durationMinutes,
-                  topic_ids: payload.topicIds,
-                }
-              : {
-                  school_code: schoolCode,
-                  program_id: selectedProgramId,
-                  exam_track: selectedExamTrack,
-                  grade: selectedGrade,
-                  subject: selectedSubject,
-                  ...(payload.topicIds.length > 0
-                    ? {
-                        log_date: payload.date,
-                        duration_minutes: payload.durationMinutes,
-                      }
-                    : {}),
-                  topic_ids: payload.topicIds,
-                  complete_chapter_ids: payload.completeChapterIds,
-                  uncomplete_chapter_ids: payload.uncompleteChapterIds,
-                }
+              ? payload.logType === "class_cancelled"
+                ? {
+                    log_date: payload.date,
+                    chapter_id: payload.chapterId,
+                  }
+                : {
+                    log_date: payload.date,
+                    duration_minutes: payload.durationMinutes,
+                    topic_ids: payload.topicIds,
+                  }
+              : payload.logType === "class_cancelled"
+                ? {
+                    school_code: schoolCode,
+                    program_id: selectedProgramId,
+                    exam_track: selectedExamTrack,
+                    grade: selectedGrade,
+                    subject: selectedSubject,
+                    log_type: "class_cancelled",
+                    log_date: payload.date,
+                    chapter_id: payload.chapterId,
+                  }
+                : {
+                    school_code: schoolCode,
+                    program_id: selectedProgramId,
+                    exam_track: selectedExamTrack,
+                    grade: selectedGrade,
+                    subject: selectedSubject,
+                    log_type: "regular",
+                    ...(payload.topicIds.length > 0
+                      ? {
+                          log_date: payload.date,
+                          duration_minutes: payload.durationMinutes,
+                        }
+                      : {}),
+                    topic_ids: payload.topicIds,
+                    complete_chapter_ids: payload.completeChapterIds,
+                    uncomplete_chapter_ids: payload.uncompleteChapterIds,
+                  }
           ),
         }
       );

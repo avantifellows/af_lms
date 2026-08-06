@@ -144,12 +144,15 @@ describe("/api/curriculum/logs", () => {
       logs: [
         {
           id: 10,
+          logType: "regular",
           logDate: "2026-02-15",
           durationMinutes: 90,
           programId: 1,
           gradeId: 3,
           subjectId: 4,
           examTrack: "jee_main",
+          chapterId: null,
+          chapterName: null,
           topics: [
             {
               topicId: 101,
@@ -249,7 +252,18 @@ describe("/api/curriculum/logs", () => {
     expect(clientQuery).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining("INSERT INTO lms_curriculum_logs"),
-      ["70705", 1, 3, 4, "jee_main", "2026-02-15", 90, "teacher@avantifellows.org"]
+      [
+        "70705",
+        1,
+        3,
+        4,
+        "jee_main",
+        "regular",
+        "2026-02-15",
+        90,
+        null,
+        "teacher@avantifellows.org",
+      ]
     );
     expect(String(clientQuery.mock.calls[0][0])).toContain("inserted_by_email");
     expect(clientQuery).toHaveBeenNthCalledWith(
@@ -386,7 +400,18 @@ describe("/api/curriculum/logs", () => {
     expect(clientQuery).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining("INSERT INTO lms_curriculum_logs"),
-      ["70705", 1, 3, 4, "jee_main", "2026-02-15", 90, "teacher@avantifellows.org"]
+      [
+        "70705",
+        1,
+        3,
+        4,
+        "jee_main",
+        "regular",
+        "2026-02-15",
+        90,
+        null,
+        "teacher@avantifellows.org",
+      ]
     );
     expect(String(clientQuery.mock.calls[0][0])).toContain("inserted_by_email");
     expect(clientQuery).toHaveBeenNthCalledWith(
@@ -401,6 +426,283 @@ describe("/api/curriculum/logs", () => {
       },
       completions: [{ chapterId: 44, active: true }],
     });
+  });
+
+  it("creates a Class Cancelled log from a date and one Chapter", async () => {
+    const clientQuery = vi.fn().mockResolvedValueOnce({ rows: [{ id: 21 }] });
+    mockWithTransaction.mockImplementation(async (fn) =>
+      fn({ query: clientQuery } as never)
+    );
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ chapter_id: 44 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 21,
+          log_date: "2026-02-15",
+          duration_minutes: null,
+          log_type: "class_cancelled",
+          program_id: 1,
+          grade_id: 3,
+          subject_id: 4,
+          exam_track: "jee_main",
+          inserted_at: "2026-02-15T10:00:00.000Z",
+          updated_at: "2026-02-15T10:00:00.000Z",
+          topic_id: null,
+          topic_name: null,
+          chapter_id: null,
+          chapter_name: null,
+          topic_currently_in_syllabus: null,
+          log_chapter_id: 44,
+          log_chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+        },
+      ]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(clientQuery).toHaveBeenCalledTimes(1);
+    expect(clientQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("INSERT INTO lms_curriculum_logs"),
+      [
+        "70705",
+        1,
+        3,
+        4,
+        "jee_main",
+        "class_cancelled",
+        "2026-02-15",
+        null,
+        44,
+        "teacher@avantifellows.org",
+      ]
+    );
+    await expect(res.json()).resolves.toEqual({
+      log: {
+        id: 21,
+        logType: "class_cancelled",
+        logDate: "2026-02-15",
+        durationMinutes: null,
+        programId: 1,
+        gradeId: 3,
+        subjectId: 4,
+        examTrack: "jee_main",
+        chapterId: 44,
+        chapterName: "Kinematics",
+        topics: [],
+        isEditable: true,
+        createdAt: "2026-02-15T10:00:00.000Z",
+        updatedAt: "2026-02-15T10:00:00.000Z",
+      },
+      completions: [],
+    });
+  });
+
+  it.each([
+    [
+      "topics",
+      { chapter_id: 44, topic_ids: [101] },
+      "Class Cancelled logs cannot include topics",
+    ],
+    [
+      "a duration",
+      { chapter_id: 44, duration_minutes: 60 },
+      "Class Cancelled logs cannot have a duration",
+    ],
+    [
+      "no Chapter",
+      {},
+      "Class Cancelled logs require exactly one Chapter",
+    ],
+  ])("rejects a Class Cancelled log with %s", async (_label, extra, error) => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2026-02-15",
+        ...extra,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({ error });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a future-dated Class Cancelled log", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2999-01-01",
+        chapter_id: 44,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Log date cannot be in the future",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Class Cancelled log for a Chapter outside the selected scope", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2026-02-15",
+        chapter_id: 999,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Chapter does not belong to the selected Grade, Subject, and Exam Track",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second active Class Cancelled log for the same Chapter and date", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ chapter_id: 44 }])
+      .mockResolvedValueOnce([{ id: 20 }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "A Class Cancelled log already exists for this Chapter and date",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining("WHERE log_type = 'class_cancelled'"),
+      ["70705", 1, 3, 4, "jee_main", 44, "2026-02-15", null]
+    );
+  });
+
+  it("maps a racing unique-index conflict onto the duplicate Class Cancelled error", async () => {
+    const conflict = Object.assign(new Error("duplicate key value"), {
+      code: "23505",
+    });
+    mockWithTransaction.mockRejectedValue(conflict);
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ chapter_id: 44 }])
+      .mockResolvedValueOnce([]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "A Class Cancelled log already exists for this Chapter and date",
+    });
+  });
+
+  it("rejects an unknown log type", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "doubt_solving",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+        duration_minutes: 60,
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Log type must be Regular Class or Class Cancelled",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
   it("rejects saves with no topics and no Chapter Completion deltas", async () => {

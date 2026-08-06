@@ -205,6 +205,54 @@ test.describe("Curriculum read path", () => {
     await expect(alphaEditRow.getByText(/Time: 1h/)).toBeVisible();
   });
 
+  test("admin can log a cancelled class without moving Curriculum Progress", async ({
+    adminPage,
+  }) => {
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await expect(
+      adminPage.getByRole("heading", { name: "JEE Main Curriculum Progress" })
+    ).toBeVisible();
+    await adminPage.getByLabel("Program").selectOption("2");
+
+    const alphaRow = adminPage
+      .locator("[data-chapter-row]")
+      .filter({ hasText: "Fixture Alpha Physics" });
+    await alphaRow.getByText("Fixture Alpha Physics").click();
+    const timeBefore = await alphaRow.getByText(/Time:/).textContent();
+
+    await adminPage.getByRole("button", { name: "+ Log a class" }).click();
+    await adminPage.getByLabel("Log type").selectOption("class_cancelled");
+    await expect(adminPage.getByText("Which class was cancelled?")).toBeVisible();
+    await adminPage
+      .getByRole("radio", { name: "Fixture Alpha Physics" })
+      .check();
+    await adminPage.getByRole("button", { name: "Save class log" }).click();
+
+    await expect(adminPage.getByText("Log a class", { exact: true })).toBeHidden();
+    await adminPage.getByRole("button", { name: "Logs" }).click();
+    const cancelledLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Class Cancelled" });
+    await expect(cancelledLog).toContainText("Fixture Alpha Physics");
+    await expect(cancelledLog).not.toContainText("Duration:");
+
+    // A second cancellation for the same Chapter and date is rejected.
+    await adminPage.getByRole("button", { name: "+ Log a class" }).click();
+    await adminPage.getByLabel("Log type").selectOption("class_cancelled");
+    await adminPage
+      .getByRole("radio", { name: "Fixture Alpha Physics" })
+      .check();
+    await adminPage.getByRole("button", { name: "Save class log" }).click();
+    await expect(
+      adminPage.getByText("A Class Cancelled log already exists for this Chapter and date")
+    ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Cancel" }).click();
+
+    await adminPage.getByRole("button", { name: "Chapters" }).click();
+    await alphaRow.getByText("Fixture Alpha Physics").click();
+    await expect(alphaRow.getByText(/Time:/)).toHaveText(String(timeBefore));
+  });
+
   test("admin can delete a log and it stays excluded after reload", async ({
     adminPage,
   }) => {

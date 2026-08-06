@@ -11,12 +11,15 @@ vi.mock("@/lib/curriculum-helpers", () => ({
 function makeLog(overrides: Partial<LmsCurriculumLog> = {}): LmsCurriculumLog {
   return {
     id: 1,
+    logType: "regular",
     logDate: "2026-01-15",
     durationMinutes: 45,
     programId: 1,
     gradeId: 3,
     subjectId: 4,
     examTrack: "jee_main",
+    chapterId: null,
+    chapterName: null,
     topics: [
       { topicId: 1, topicName: "Newton's Laws", chapterId: 1, chapterName: "Mechanics" },
       { topicId: 2, topicName: "Friction", chapterId: 1, chapterName: "Mechanics" },
@@ -26,6 +29,21 @@ function makeLog(overrides: Partial<LmsCurriculumLog> = {}): LmsCurriculumLog {
     updatedAt: "2026-01-15T10:00:00.000Z",
     ...overrides,
   };
+}
+
+function makeCancelledLog(
+  overrides: Partial<LmsCurriculumLog> = {}
+): LmsCurriculumLog {
+  return makeLog({
+    id: 2,
+    logType: "class_cancelled",
+    logDate: "2026-01-20",
+    durationMinutes: null,
+    chapterId: 7,
+    chapterName: "Thermodynamics",
+    topics: [],
+    ...overrides,
+  });
 }
 
 describe("SessionHistory", () => {
@@ -174,6 +192,26 @@ describe("SessionHistory", () => {
     await user.click(screen.getByRole("button", { name: /delete log/i }));
 
     expect(onDeleteLog).not.toHaveBeenCalled();
+  });
+
+  it("labels every entry with its log type in one chronological list", () => {
+    render(<SessionHistory logs={[makeCancelledLog(), makeLog()]} />);
+
+    const entries = screen.getAllByTestId("curriculum-log-type");
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      "Class Cancelled",
+      "Regular Class",
+    ]);
+  });
+
+  it("shows only the date and Chapter for a Class Cancelled entry", () => {
+    render(<SessionHistory logs={[makeCancelledLog()]} />);
+
+    expect(screen.getByText(/Jan/)).toBeInTheDocument();
+    expect(screen.getByText("Chapter")).toBeInTheDocument();
+    expect(screen.getByText("Thermodynamics")).toBeInTheDocument();
+    expect(screen.queryByText(/Duration:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Topics covered")).not.toBeInTheDocument();
   });
 
   it("hides edit and delete controls for read-only users", () => {

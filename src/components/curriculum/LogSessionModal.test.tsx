@@ -97,12 +97,82 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
+      logType: "regular",
+      chapterId: null,
       date: "2026-02-15",
       durationMinutes: 60,
       topicIds: [101],
       completeChapterIds: [],
       uncompleteChapterIds: [],
     });
+  });
+
+  it("swaps to Date and a single Chapter picker for a Class Cancelled log", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    renderModal({ onSave });
+
+    await user.selectOptions(
+      screen.getByLabelText("Log type"),
+      "class_cancelled"
+    );
+
+    expect(screen.queryByText("What did you teach?")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("spinbutton")).toHaveLength(0);
+    expect(screen.getByText("Which class was cancelled?")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Laws of Motion" }));
+    await user.click(screen.getByRole("button", { name: "Save class log" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      logType: "class_cancelled",
+      date: "2026-02-15",
+      durationMinutes: null,
+      chapterId: 2,
+      topicIds: [],
+      completeChapterIds: [],
+      uncompleteChapterIds: [],
+    });
+  });
+
+  it("keeps the Save button disabled until a cancelled Chapter is picked", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.selectOptions(
+      screen.getByLabelText("Log type"),
+      "class_cancelled"
+    );
+
+    expect(screen.getByRole("button", { name: "Save class log" })).toBeDisabled();
+    await user.click(screen.getByRole("radio", { name: "Kinematics" }));
+    expect(screen.getByRole("button", { name: "Save class log" })).toBeEnabled();
+  });
+
+  it("locks the type selector when editing a Class Cancelled log", () => {
+    renderModal({
+      editLog: {
+        id: 5,
+        logType: "class_cancelled",
+        logDate: "2026-02-10",
+        durationMinutes: null,
+        programId: 1,
+        gradeId: 3,
+        subjectId: 4,
+        examTrack: "jee_main",
+        chapterId: 2,
+        chapterName: "Laws of Motion",
+        topics: [],
+        isEditable: true,
+        createdAt: "2026-02-10T10:00:00.000Z",
+        updatedAt: "2026-02-10T10:00:00.000Z",
+      },
+    });
+
+    const selector = screen.getByLabelText("Log type");
+    expect(selector).toBeDisabled();
+    expect(selector).toHaveValue("class_cancelled");
+    expect(screen.getByRole("radio", { name: "Laws of Motion" })).toBeChecked();
   });
 
   it("calculates duration from hours and minutes", async () => {
@@ -122,6 +192,8 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
+      logType: "regular",
+      chapterId: null,
       date: "2026-02-15",
       durationMinutes: 150,
       topicIds: [201],
@@ -148,6 +220,8 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
+      logType: "regular",
+      chapterId: null,
       date: "2026-02-15",
       durationMinutes: 90,
       topicIds: [101],
@@ -174,6 +248,8 @@ describe("LogSessionModal", () => {
     await user.click(screen.getByRole("button", { name: "Save class log" }));
 
     expect(onSave).toHaveBeenCalledWith({
+      logType: "regular",
+      chapterId: null,
       date: "2026-02-15",
       durationMinutes: 0,
       topicIds: [],
@@ -210,12 +286,15 @@ describe("LogSessionModal", () => {
       onSave,
       editLog: {
         id: 12,
+        logType: "regular",
         logDate: "2026-02-12",
         durationMinutes: 90,
         programId: 1,
         gradeId: 3,
         subjectId: 4,
         examTrack: "jee_main",
+        chapterId: null,
+        chapterName: null,
         topics: [
           {
             topicId: 102,
@@ -243,6 +322,8 @@ describe("LogSessionModal", () => {
 
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(onSave).toHaveBeenCalledWith({
+      logType: "regular",
+      chapterId: null,
       date: "2026-02-12",
       durationMinutes: 90,
       topicIds: [102],

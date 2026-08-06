@@ -56,6 +56,8 @@ export async function getCurriculumProgress(params: {
   if (!scope.ok) return scope;
 
   const totalRows = await query<SubjectTotalRow>(
+    // Only Regular Class logs are teaching time; cancellations and doubt solving
+    // never move Actual Hours.
     `SELECT COALESCE(SUM(duration_minutes), 0) AS subject_total_time_minutes
      FROM lms_curriculum_logs
      WHERE school_code = $1
@@ -63,6 +65,7 @@ export async function getCurriculumProgress(params: {
        AND grade_id = $3
        AND subject_id = $4
        AND exam_track = $5
+       AND log_type = 'regular'
        AND deleted_at IS NULL`,
     [
       params.schoolCode,
@@ -91,6 +94,7 @@ export async function getCurriculumProgress(params: {
          AND l.grade_id = $3
          AND l.subject_id = $4
          AND l.exam_track = $5
+         AND l.log_type = 'regular'
          AND l.deleted_at IS NULL
      )
      SELECT

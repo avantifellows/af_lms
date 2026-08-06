@@ -193,6 +193,29 @@ describe("GET /api/curriculum/progress", () => {
     );
   });
 
+  it("aggregates Actual Hours and topic coverage from Regular Class logs only", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ subject_total_time_minutes: "0" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await GET(
+      nextReq(
+        "/api/curriculum/progress?school_code=70705&program_id=1&exam_track=jee_main&grade=11&subject=Physics"
+      )
+    );
+
+    const totalSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
+    expect(totalSql).toContain("log_type = 'regular'");
+    const coverageSql = String(mockQuery.mock.calls[4][0]).replace(/\s+/g, " ");
+    expect(coverageSql).toContain("l.log_type = 'regular'");
+  });
+
   it("returns 403 for passcode users", async () => {
     mockSession.mockResolvedValue(PASSCODE_SESSION);
 

@@ -10,7 +10,15 @@ type CurriculumSession = {
   isPasscodeUser?: boolean;
 } | null;
 
-const ALLOWED_PATCH_FIELDS = new Set(["log_date", "duration_minutes", "topic_ids"]);
+// The effective allowlist is type-aware: `curriculum-logs` rejects the fields that
+// do not belong to the stored log's type (and rejects any type change outright).
+const ALLOWED_PATCH_FIELDS = new Set([
+  "log_type",
+  "log_date",
+  "duration_minutes",
+  "topic_ids",
+  "chapter_id",
+]);
 
 async function requireCurriculumEditAccess(session: CurriculumSession) {
   if (!session?.user?.email) {
@@ -67,17 +75,17 @@ export async function PATCH(
   }
   if (!hasOnlyPatchFields(body)) {
     return NextResponse.json(
-      { error: "Only log_date, duration_minutes, and topic_ids can be updated" },
+      {
+        error:
+          "Only log_date, duration_minutes, topic_ids, and chapter_id can be updated",
+      },
       { status: 422 }
     );
   }
 
   const result = await updateCurriculumLog({
     id,
-    logDate: typeof body.log_date === "string" ? body.log_date : null,
-    durationMinutes:
-      typeof body.duration_minutes === "number" ? body.duration_minutes : null,
-    topicIds: body.topic_ids,
+    patch: body,
     permission: access.permission,
     actorEmail: access.email,
   });

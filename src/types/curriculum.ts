@@ -33,14 +33,53 @@ export interface LmsCurriculumLogTopic {
   chapterName: string;
 }
 
+// A saved log's type never changes — a wrong type is fixed by soft-deleting and recreating.
+export const CURRICULUM_LOG_TYPES = [
+  "regular",
+  "class_cancelled",
+  "doubt_solving",
+] as const;
+
+export type CurriculumLogType = (typeof CURRICULUM_LOG_TYPES)[number];
+
+// The types a user can create today. `doubt_solving` is a stored value the schema
+// already accepts, but nothing writes it until that slice lands.
+export const WRITABLE_CURRICULUM_LOG_TYPES = [
+  "regular",
+  "class_cancelled",
+] as const satisfies readonly CurriculumLogType[];
+
+export type WritableCurriculumLogType =
+  (typeof WRITABLE_CURRICULUM_LOG_TYPES)[number];
+
+export const CURRICULUM_LOG_TYPE_LABELS: Record<CurriculumLogType, string> = {
+  regular: "Regular Class",
+  class_cancelled: "Class Cancelled",
+  doubt_solving: "Doubt Solving",
+};
+
+export function isWritableCurriculumLogType(
+  value: unknown
+): value is WritableCurriculumLogType {
+  return (
+    typeof value === "string" &&
+    (WRITABLE_CURRICULUM_LOG_TYPES as readonly string[]).includes(value)
+  );
+}
+
 export interface LmsCurriculumLog {
   id: number;
+  logType: CurriculumLogType;
   logDate: string;
-  durationMinutes: number;
+  // Null only for Class Cancelled logs, which record no teaching time.
+  durationMinutes: number | null;
   programId: number;
   gradeId: number;
   subjectId: number;
   examTrack: ExamTrack;
+  // Set only by the non-regular types; Regular Class derives chapters from topics.
+  chapterId: number | null;
+  chapterName: string | null;
   topics: LmsCurriculumLogTopic[];
   isEditable: boolean;
   createdAt: string;

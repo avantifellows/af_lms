@@ -1,6 +1,7 @@
 "use client";
 
 import type { LmsCurriculumLog } from "@/types/curriculum";
+import { CURRICULUM_LOG_TYPE_LABELS } from "@/types/curriculum";
 import { formatDuration } from "@/lib/curriculum-helpers";
 
 interface SessionHistoryProps {
@@ -69,6 +70,7 @@ export default function SessionHistory({
     <div className="space-y-4">
       {logs.map((log) => {
         const groupedTopics = groupTopicsByChapter(log.topics);
+        const isRegular = log.logType === "regular";
 
         return (
           <div
@@ -78,8 +80,16 @@ export default function SessionHistory({
           >
             {/* Session Header */}
             <div className="px-4 py-3 bg-bg-card-alt border-b border-border flex items-center justify-between gap-3">
-              <div className="font-medium text-gray-900">
-                {formatSessionDate(log.logDate)}
+              <div className="flex items-center gap-3">
+                <div className="font-medium text-gray-900">
+                  {formatSessionDate(log.logDate)}
+                </div>
+                <span
+                  data-testid="curriculum-log-type"
+                  className="rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700"
+                >
+                  {CURRICULUM_LOG_TYPE_LABELS[log.logType]}
+                </span>
               </div>
               <div className="flex items-center gap-3">
                 {!log.isEditable && (
@@ -87,9 +97,11 @@ export default function SessionHistory({
                     Historical log
                   </span>
                 )}
-                <div className="text-sm text-gray-600">
-                  Duration: {formatDuration(log.durationMinutes)}
-                </div>
+                {log.durationMinutes != null && (
+                  <div className="text-sm text-gray-600">
+                    Duration: {formatDuration(log.durationMinutes)}
+                  </div>
+                )}
                 {canEdit && (
                   <>
                     <button
@@ -112,29 +124,40 @@ export default function SessionHistory({
               </div>
             </div>
 
-            {/* Topics Covered */}
-            <div className="px-4 py-3">
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
-                Topics covered
-              </div>
-              <div className="space-y-2">
-                {Object.entries(groupedTopics).map(([chapterName, topicNames]) => (
-                  <div key={chapterName}>
-                    <div className="text-sm font-medium text-gray-700">
-                      {chapterName}
+            {/* Body — only the fields that belong to this log's type */}
+            {isRegular ? (
+              <div className="px-4 py-3">
+                <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                  Topics covered
+                </div>
+                <div className="space-y-2">
+                  {Object.entries(groupedTopics).map(([chapterName, topicNames]) => (
+                    <div key={chapterName}>
+                      <div className="text-sm font-medium text-gray-700">
+                        {chapterName}
+                      </div>
+                      <ul className="mt-1 ml-4 text-sm text-gray-600">
+                        {topicNames.map((topicName, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="text-gray-400 mt-0.5">•</span>
+                            <span>{topicName}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                    <ul className="mt-1 ml-4 text-sm text-gray-600">
-                      {topicNames.map((topicName, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="text-gray-400 mt-0.5">•</span>
-                          <span>{topicName}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="px-4 py-3">
+                <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                  Chapter
+                </div>
+                <div className="text-sm font-medium text-gray-700">
+                  {log.chapterName ?? "—"}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

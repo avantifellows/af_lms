@@ -53,6 +53,21 @@ describe("curriculum schema preflight", () => {
     );
   });
 
+  it("checks the log type and Chapter columns the new log types need", async () => {
+    mockQuery.mockResolvedValue([]);
+
+    await checkCurriculumSchema();
+
+    const [, params] = mockQuery.mock.calls[0] as [string, string[]];
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "lms_curriculum_logs",
+        "log_type",
+        "chapter_id",
+      ])
+    );
+  });
+
   it("checks config-management id and audit columns separately", async () => {
     mockQuery.mockResolvedValue([
       { table_name: "lms_chapter_exam_configs", column_name: "id" },

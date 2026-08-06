@@ -534,6 +534,7 @@ function buildComputedRowsSql(): string {
        AND l.grade_id = fr.grade_id
        AND l.subject_id = fr.subject_id
        AND l.exam_track = fr.exam_track
+       AND l.log_type = 'regular'
        AND l.deleted_at IS NULL
        AND ($15::date IS NULL OR l.log_date >= $15::date)
        AND ($16::date IS NULL OR l.log_date <= $16::date)
@@ -830,6 +831,7 @@ function buildChapterRowsSql(
        AND l.grade_id = cpr.grade_id
        AND l.subject_id = cpr.subject_id
        AND l.exam_track = cpr.exam_track
+       AND l.log_type = 'regular'
        AND l.deleted_at IS NULL
        AND ($15::date IS NULL OR l.log_date >= $15::date)
        AND ($16::date IS NULL OR l.log_date <= $16::date)

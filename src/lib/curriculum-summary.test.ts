@@ -256,6 +256,51 @@ describe("curriculum summary", () => {
     });
   });
 
+  it("counts only Regular Class logs toward Actual Hours and chapter coverage", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+          states: [],
+          districts: [],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(1))
+      .mockResolvedValueOnce([
+        {
+          total_rows: 1,
+          flagged_rows: 0,
+          completed_chapters: 0,
+          total_configured_chapters: 1,
+          prescribed_chapters: 1,
+          actual_minutes: 0,
+          prescribed_minutes: 60,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    const rowsSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
+    expect(rowsSql).toContain("l.log_type = 'regular'");
+    const statsSql = String(mockQuery.mock.calls[2][0]).replace(/\s+/g, " ");
+    expect(statsSql).toContain("l.log_type = 'regular'");
+  });
+
   it("keeps zero-prescribed delta blank while surfacing actual-time flag reasons", async () => {
     mockQuery
       .mockResolvedValueOnce([
