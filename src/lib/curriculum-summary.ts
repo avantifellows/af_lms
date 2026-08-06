@@ -135,6 +135,8 @@ export interface CurriculumSummaryChapterRow {
   prescribedCount: 0 | 1;
   actualMinutes: number;
   prescribedMinutes: number;
+  classCancellationCount: number;
+  doubtSolvingMinutes: number;
   deltaPercent: number | null;
   flagged: boolean;
   flagReasons: string[];
@@ -218,6 +220,8 @@ interface ChapterQueryRow {
   prescribed_count: string | number | null;
   actual_minutes: string | number | null;
   prescribed_minutes: string | number | null;
+  class_cancellation_count: string | number | null;
+  doubt_solving_minutes: string | number | null;
   delta_percent: string | number | null;
   flagged: boolean | string | null;
   flag_reasons: unknown;
@@ -967,6 +971,30 @@ function buildChapterRowsSql(
       FROM chapter_log_allocations
       GROUP BY school_code, program_id, grade_id, subject_id, exam_track, chapter_id
     ),
+    chapter_activity_metrics AS (
+      SELECT
+        cpr.school_code,
+        cpr.program_id,
+        cpr.grade_id,
+        cpr.subject_id,
+        cpr.exam_track,
+        ch.id AS chapter_id,
+        COUNT(*) FILTER (WHERE l.log_type = 'class_cancelled')::int AS class_cancellation_count,
+        COALESCE(SUM(l.duration_minutes) FILTER (WHERE l.log_type = 'doubt_solving'), 0)::int AS doubt_solving_minutes
+      FROM current_page_rows cpr
+      JOIN lms_curriculum_logs l
+        ON l.school_code = cpr.school_code
+       AND l.program_id = cpr.program_id
+       AND l.grade_id = cpr.grade_id
+       AND l.subject_id = cpr.subject_id
+       AND l.exam_track = cpr.exam_track
+       AND l.log_type IN ('class_cancelled', 'doubt_solving')
+       AND l.deleted_at IS NULL
+       AND ($15::date IS NULL OR l.log_date >= $15::date)
+       AND ($16::date IS NULL OR l.log_date <= $16::date)
+      JOIN chapter ch ON l.chapter_id = ch.id
+      GROUP BY cpr.school_code, cpr.program_id, cpr.grade_id, cpr.subject_id, cpr.exam_track, ch.id
+    ),
     chapter_metric_rows AS (
       SELECT
         CONCAT(
@@ -999,6 +1027,8 @@ function buildChapterRowsSql(
         CASE WHEN cfg.prescribed_minutes > 0 THEN 1 ELSE 0 END AS prescribed_count,
         COALESCE(cam.actual_minutes, 0)::int AS actual_minutes,
         COALESCE(cfg.prescribed_minutes, 0)::int AS prescribed_minutes,
+        COALESCE(activity.class_cancellation_count, 0)::int AS class_cancellation_count,
+        COALESCE(activity.doubt_solving_minutes, 0)::int AS doubt_solving_minutes,
         CASE
           WHEN COALESCE(cfg.prescribed_minutes, 0) > 0
             THEN ((COALESCE(cam.actual_minutes, 0) - cfg.prescribed_minutes)::numeric / cfg.prescribed_minutes::numeric) * 100
@@ -1025,6 +1055,13 @@ function buildChapterRowsSql(
        AND cam.subject_id = cpr.subject_id
        AND cam.exam_track = cpr.exam_track
        AND cam.chapter_id = ch.id
+      LEFT JOIN chapter_activity_metrics activity
+        ON activity.school_code = cpr.school_code
+       AND activity.program_id = cpr.program_id
+       AND activity.grade_id = cpr.grade_id
+       AND activity.subject_id = cpr.subject_id
+       AND activity.exam_track = cpr.exam_track
+       AND activity.chapter_id = ch.id
     ),
     chapter_computed_rows AS (
       SELECT
@@ -1063,6 +1100,8 @@ function buildChapterRowsSql(
       prescribed_count,
       actual_minutes,
       prescribed_minutes,
+      class_cancellation_count,
+      doubt_solving_minutes,
       delta_percent,
       CARDINALITY(flag_reasons) > 0 AS flagged,
       flag_reasons
@@ -1210,6 +1249,8 @@ function mapChapterRow(row: ChapterQueryRow): CurriculumSummaryChapterRow {
     prescribedCount,
     actualMinutes: numberFromDb(row.actual_minutes),
     prescribedMinutes: numberFromDb(row.prescribed_minutes),
+    classCancellationCount: numberFromDb(row.class_cancellation_count),
+    doubtSolvingMinutes: numberFromDb(row.doubt_solving_minutes),
     deltaPercent:
       row.delta_percent === null || row.delta_percent === undefined
         ? null

@@ -1132,6 +1132,8 @@ describe("curriculum summary", () => {
           prescribed_count: 1,
           actual_minutes: 95,
           prescribed_minutes: 90,
+          class_cancellation_count: 2,
+          doubt_solving_minutes: 135,
           delta_percent: 5.5555555556,
           flagged: false,
           flag_reasons: [],
@@ -1163,6 +1165,8 @@ describe("curriculum summary", () => {
             prescribedCount: 1,
             actualMinutes: 95,
             prescribedMinutes: 90,
+            classCancellationCount: 2,
+            doubtSolvingMinutes: 135,
             deltaPercent: 5.5555555556,
             flagged: false,
             flagReasons: [],
@@ -1181,6 +1185,10 @@ describe("curriculum summary", () => {
       "ROUND( duration_minutes::numeric * (topics_in_chapter_for_log::numeric / NULLIF(total_topics_in_log, 0)::numeric) )"
     );
     expect(chapterSql).toContain("cc.deleted_at IS NULL");
+    expect(chapterSql).toContain("l.log_type = 'class_cancelled'");
+    expect(chapterSql).toContain("l.log_type = 'doubt_solving'");
+    expect(chapterSql).toContain("l.chapter_id = ch.id");
+    expect(chapterSql).toContain("l.deleted_at IS NULL");
     expect(chapterSql).toContain("cmr.delta_percent < -10");
     expect(chapterSql).toContain("cmr.delta_percent > 10");
     expect(chapterSql).toContain("cmr.prescribed_minutes > 0 AND cmr.completed_count = 0");
@@ -1188,6 +1196,7 @@ describe("curriculum summary", () => {
     expect(chapterSql).toContain(
       "ORDER BY page_row_order ASC, coverage_sequence ASC NULLS LAST, chapter_code ASC, chapter_sort_name ASC, chapter_id ASC"
     );
+    expect(mockQuery.mock.calls[4][1].slice(14, 16)).toEqual(["2026-04-01", "2026-05-30"]);
     expect(mockQuery.mock.calls[4][1].slice(-2)).toEqual([10, 10]);
   });
 });

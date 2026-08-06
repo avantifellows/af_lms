@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -562,6 +562,8 @@ describe("CurriculumSummaryPage", () => {
             prescribedCount: 1,
             actualMinutes: 95,
             prescribedMinutes: 90,
+            classCancellationCount: 2,
+            doubtSolvingMinutes: 135,
             deltaPercent: 5.555555555555555,
             flagged: false,
             flagReasons: [],
@@ -576,6 +578,8 @@ describe("CurriculumSummaryPage", () => {
             prescribedCount: 0,
             actualMinutes: 25,
             prescribedMinutes: 0,
+            classCancellationCount: 0,
+            doubtSolvingMinutes: 0,
             deltaPercent: null,
             flagged: true,
             flagReasons: ["actual_time_on_zero_prescribed_minutes"],
@@ -599,6 +603,8 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.queryByText("Chapter expansion")).not.toBeInTheDocument();
     expect(screen.queryByText("Kinematics")).not.toBeInTheDocument();
     expect(screen.queryByText("Vectors")).not.toBeInTheDocument();
+    expect(screen.queryByText("Class Cancellation Count")).not.toBeInTheDocument();
+    expect(screen.queryByText("Doubt Solving Hours")).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", {
@@ -619,6 +625,11 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByText("11P1")).toBeInTheDocument();
     expect(screen.getByText("Vectors")).toBeInTheDocument();
     expect(screen.getByText("11P2")).toBeInTheDocument();
+    expect(screen.getByText("Class Cancellation Count")).toBeInTheDocument();
+    expect(screen.getByText("Doubt Solving Hours")).toBeInTheDocument();
+    const kinematicsRow = screen.getByText("Kinematics").closest("tr")!;
+    expect(within(kinematicsRow).getByRole("cell", { name: "2" })).toBeInTheDocument();
+    expect(within(kinematicsRow).getByRole("cell", { name: "2h 15m" })).toBeInTheDocument();
     expect(screen.getAllByRole("cell", { name: "1/1" }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole("cell", { name: "0/1" }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("25m / 0h")).toBeInTheDocument();

@@ -197,6 +197,12 @@ function ChapterExpansionTable({
                   Lecture vs prescribed
                 </th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Class Cancellation Count
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
+                  Doubt Solving Hours
+                </th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-text-muted">
                   Flagged
                 </th>
               </tr>
@@ -224,6 +230,12 @@ function ChapterExpansionTable({
                       actualMinutes={chapter.actualMinutes}
                       prescribedMinutes={chapter.prescribedMinutes}
                     />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {chapter.classCancellationCount}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-primary">
+                    {formatHours(chapter.doubtSolvingMinutes)}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-text-primary">
                     <FlagReasons flagged={chapter.flagged} reasons={chapter.flagReasons} />

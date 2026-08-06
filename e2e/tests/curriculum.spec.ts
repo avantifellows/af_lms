@@ -251,6 +251,15 @@ test.describe("Curriculum read path", () => {
     await adminPage.getByRole("button", { name: "Chapters" }).click();
     await alphaRow.getByText("Fixture Alpha Physics").click();
     await expect(alphaRow.getByText(/Time:/)).toHaveText(String(timeBefore));
+
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
+    );
+    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
+    const alphaSummaryRow = adminPage
+      .getByRole("cell", { name: "Fixture Alpha Physics" })
+      .locator("..");
+    await expect(alphaSummaryRow.getByRole("cell").nth(6)).toHaveText("1");
   });
 
   test("admin can create, edit, and delete a Doubt Solving log without moving Curriculum Progress", async ({
@@ -303,10 +312,33 @@ test.describe("Curriculum read path", () => {
       .locator("..");
     await expect(doubtSolvingMetric).toContainText("1h 30m");
 
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
+    );
+    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
+    let alphaSummaryRow = adminPage
+      .getByRole("cell", { name: "Fixture Alpha Physics" })
+      .locator("..");
+    await expect(alphaSummaryRow.getByRole("cell").nth(7)).toHaveText("1h 30m");
+
+    await adminPage.goto("/school/75000000075?tab=curriculum");
+    await adminPage.getByLabel("Program").selectOption("2");
     await adminPage.getByRole("button", { name: "Logs" }).click();
+    const persistedDoubtLog = adminPage
+      .locator("[data-curriculum-log-row]")
+      .filter({ hasText: "Doubt Solving" });
     adminPage.once("dialog", (dialog) => dialog.accept());
-    await doubtLog.getByRole("button", { name: "Delete log" }).click();
-    await expect(doubtLog).toBeHidden();
+    await persistedDoubtLog.getByRole("button", { name: "Delete log" }).click();
+    await expect(persistedDoubtLog).toBeHidden();
+
+    await adminPage.goto(
+      "/curriculum-summary?schools=LMS75&programs=2&grades=11&subjects=4&exam_tracks=jee_main"
+    );
+    await adminPage.getByRole("button", { name: /Show chapters for.*JNV Nodal.*JEE Main/ }).click();
+    alphaSummaryRow = adminPage
+      .getByRole("cell", { name: "Fixture Alpha Physics" })
+      .locator("..");
+    await expect(alphaSummaryRow.getByRole("cell").nth(7)).toHaveText("0h");
   });
 
   test("admin can delete a log and it stays excluded after reload", async ({
