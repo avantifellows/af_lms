@@ -285,6 +285,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - An unavailable **Centre Exam Track** appears as one non-expandable top-level row with School, Program, Grade, and Exam Track; Subject and metrics are blank and the row explains that Curriculum configuration is unavailable
 - When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
 - Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
+- Issue #252 keeps the Region filter in **Curriculum Summary** and removes the State and District filters
 - **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
 - A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; its footer has Clear and Done actions for clearing or confirming that filter's selections
 - A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
