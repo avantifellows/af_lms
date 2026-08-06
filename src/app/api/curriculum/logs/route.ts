@@ -114,7 +114,11 @@ export async function POST(request: NextRequest) {
   }
 
   const durationMinutes =
-    typeof body.duration_minutes === "number" ? body.duration_minutes : null;
+    body.duration_minutes == null
+      ? null
+      : typeof body.duration_minutes === "number"
+        ? body.duration_minutes
+        : Number.NaN;
   const logDate = typeof body.log_date === "string" ? body.log_date : null;
 
   const result = await createCurriculumLog({

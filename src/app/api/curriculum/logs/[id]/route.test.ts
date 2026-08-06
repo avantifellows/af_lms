@@ -308,6 +308,7 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
 
   it.each([
     ["topics", { chapter_id: 55, duration_minutes: 60, topic_ids: [102] }, "Doubt Solving logs cannot include topics"],
+    ["malformed topics", { chapter_id: 55, duration_minutes: 60, topic_ids: ["invalid"] }, "Doubt Solving logs cannot include topics"],
     ["no Chapter", { duration_minutes: 60 }, "Doubt Solving logs require exactly one Chapter"],
     ["no duration", { chapter_id: 55 }, "Duration must be greater than 0 and at most 720 minutes"],
     ["zero duration", { chapter_id: 55, duration_minutes: 0 }, "Duration must be greater than 0 and at most 720 minutes"],
@@ -378,6 +379,11 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
     [
       "topics",
       { chapter_id: 55, topic_ids: [102] },
+      "Class Cancelled logs cannot include topics",
+    ],
+    [
+      "malformed topics",
+      { chapter_id: 55, topic_ids: ["invalid"] },
       "Class Cancelled logs cannot include topics",
     ],
     [

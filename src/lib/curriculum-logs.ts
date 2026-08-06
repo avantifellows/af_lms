@@ -128,6 +128,10 @@ function normalizeTopicIds(topicIds: unknown): number[] {
   );
 }
 
+function hasProvidedTopics(topicIds: unknown): boolean {
+  return topicIds != null && (!Array.isArray(topicIds) || topicIds.length > 0);
+}
+
 function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
   const logsById = new Map<number, LmsCurriculumLog & { _editable: boolean }>();
 
@@ -827,7 +831,7 @@ export async function createCurriculumLog(params: {
   const chapterId = normalizeChapterId(params.chapterId);
 
   if (isChapterBacked) {
-    if (topicIds.length > 0) {
+    if (hasProvidedTopics(params.topicIds)) {
       return {
         ok: false,
         status: 422,
@@ -1197,7 +1201,7 @@ export async function updateCurriculumLog(params: {
       log,
       logDate,
       chapterId,
-      hasTopics: normalizeTopicIds(patch.topic_ids).length > 0,
+      hasTopics: hasProvidedTopics(patch.topic_ids),
       hasDuration: patch.duration_minutes != null,
       actorEmail: params.actorEmail,
     });
@@ -1211,7 +1215,7 @@ export async function updateCurriculumLog(params: {
       durationMinutes:
         typeof patch.duration_minutes === "number" ? patch.duration_minutes : null,
       chapterId,
-      hasTopics: normalizeTopicIds(patch.topic_ids).length > 0,
+      hasTopics: hasProvidedTopics(patch.topic_ids),
       actorEmail: params.actorEmail,
     });
   }

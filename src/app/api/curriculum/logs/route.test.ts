@@ -560,8 +560,18 @@ describe("/api/curriculum/logs", () => {
       "Class Cancelled logs cannot include topics",
     ],
     [
+      "malformed topics",
+      { chapter_id: 44, topic_ids: ["invalid"] },
+      "Class Cancelled logs cannot include topics",
+    ],
+    [
       "a duration",
       { chapter_id: 44, duration_minutes: 60 },
+      "Class Cancelled logs cannot have a duration",
+    ],
+    [
+      "a malformed duration",
+      { chapter_id: 44, duration_minutes: "invalid" },
       "Class Cancelled logs cannot have a duration",
     ],
     [
@@ -830,6 +840,7 @@ describe("/api/curriculum/logs", () => {
 
   it.each([
     ["topics", { chapter_id: 44, duration_minutes: 60, topic_ids: [101] }, "Doubt Solving logs cannot include topics"],
+    ["malformed topics", { chapter_id: 44, duration_minutes: 60, topic_ids: ["invalid"] }, "Doubt Solving logs cannot include topics"],
     ["no Chapter", { duration_minutes: 60 }, "Doubt Solving logs require exactly one Chapter"],
     ["multiple Chapters", { chapter_id: [44, 55], duration_minutes: 60 }, "Doubt Solving logs require exactly one Chapter"],
     ["no duration", { chapter_id: 44 }, "Duration must be greater than 0 and at most 720 minutes"],
