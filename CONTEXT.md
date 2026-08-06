@@ -239,6 +239,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
 - Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
+- Centre Admins assign the five fixed **Exam Track** choices but cannot create additional Track types; adding a Track requires coordinated Curriculum and CMS support
 - In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
 - In v1, **Centre** administration displays linked School metadata such as school name, code, UDISE, region, state, and district as read-only values derived from School
 - In v1, unlinked **Centres** do not store centre-level location fields; location columns remain blank until the Centre is linked to a School or a later feature adds centre-level location
@@ -265,14 +266,18 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - A regular teaching **LMS Curriculum Log** has duration and one or more covered topics
 - A **Class Cancellation Log** has a date but no chapter, topics, or duration; it appears in log history but contributes no teaching time or curriculum progress
 - A **Doubt Solving Log** has a date, chapter, and duration but no covered topics; it appears in log history but contributes no Actual Hours, topic coverage, or curriculum progress
+- **Class Cancellation Logs** and **Doubt Solving Logs** use the same edit and soft-delete lifecycle as regular teaching LMS Curriculum Logs
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
 - **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
 - Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
 - **Curriculum Summary** shows a mapped **Centre Exam Track** without LMS Chapter Exam Config as unavailable rather than hiding the operational track or creating empty chapter rows
+- An unavailable **Centre Exam Track** appears as one non-expandable top-level row with School, Program, Grade, and Exam Track; Subject and metrics are blank and the row explains that Curriculum configuration is unavailable
+- When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
 - Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
 - **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
 - A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; it has no Done action
+- A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
 - An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
 - With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
 - Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
