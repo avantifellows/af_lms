@@ -234,9 +234,11 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - When a Centre and Grade have no **Centre Exam Tracks**, Curriculum shows the missing configuration and blocks new LMS Curriculum Logs without falling back to other Exam Tracks
 - **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
 - A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
+- Removing a **Centre Exam Track** blocks new logs and removes that track from the current **Curriculum Summary**, while existing logs remain stored for audit
 - Initial **Centre Exam Track** mappings come from one approved import keyed by stable Centre identity and Grade; after import, Admins maintain them in Centre Management without live Sheet sync
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
+- Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
 - In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
 - In v1, **Centre** administration displays linked School metadata such as school name, code, UDISE, region, state, and district as read-only values derived from School
 - In v1, unlinked **Centres** do not store centre-level location fields; location columns remain blank until the Centre is linked to a School or a later feature adds centre-level location
@@ -271,11 +273,15 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
 - **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
 - A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; it has no Done action
+- An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
+- With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
+- Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
 - Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
 - A chapter has one **LMS Chapter Exam Config** per configured exam track
+- Curriculum rejects Biology for JEE Main or JEE Advanced and Maths for NEET even if an invalid LMS Chapter Exam Config exists; Curriculum Config Management prevents creating those invalid pairs
 - **LMS Chapter Exam Config** is global per chapter and exam track, not scoped to a school or program
 - **Curriculum Config Management** changes global **LMS Chapter Exam Config** values and is restricted to **Admins**
 - In v1, **Curriculum Config Management** edits the live **LMS Chapter Exam Config** rows directly rather than using draft or versioned configs
