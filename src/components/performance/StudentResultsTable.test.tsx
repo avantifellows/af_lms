@@ -10,6 +10,7 @@ const STUDENTS: StudentDeepDiveRow[] = [
     gender: "F",
     category: "OBC",
     academic_level: "Not Qualified",
+    qualification_status: "Not Qualified",
     marks_scored: 40,
     max_marks: 100,
     percentage: 40,
@@ -114,14 +115,42 @@ describe("StudentResultsTable", () => {
     expect(screen.getByText("M1")).toBeInTheDocument();
   });
 
-  it("renders an em-dash for a test with no AL (e.g. a chapter test)", () => {
+  it("shows NA for a test with no AL (e.g. a chapter test)", () => {
     render(
       <StudentResultsTable
         {...props}
         students={[{ ...STUDENTS[0], academic_level: null }]}
       />
     );
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByText("NA")).toBeInTheDocument();
+  });
+
+  it("flags on-track / off-track from qualification_status (#28 item 2)", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], qualification_status: "Qualified" }]}
+      />
+    );
+    expect(screen.getByText("On Track")).toBeInTheDocument();
+    expect(screen.getByText("On track")).toBeInTheDocument();
+  });
+
+  it("shows Off track for a Not Qualified student", () => {
+    render(<StudentResultsTable {...props} />);
+    expect(screen.getByText("Off track")).toBeInTheDocument();
+  });
+
+  it("shows NA rather than guessing when qualification_status is absent", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], qualification_status: null }]}
+      />
+    );
+    expect(screen.getByText("NA")).toBeInTheDocument();
+    expect(screen.queryByText("On track")).not.toBeInTheDocument();
+    expect(screen.queryByText("Off track")).not.toBeInTheDocument();
   });
 
   it("fetches question detail once on first student expand and drills down to question level (0-based index -> Q1)", async () => {

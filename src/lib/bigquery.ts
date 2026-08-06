@@ -9,6 +9,7 @@ import type {
   StudentQuestionRow,
 } from "@/types/quiz";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { AL_RANK } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
 
@@ -250,18 +251,6 @@ export async function getBatchOverviewData(
     streams: [...streamsSet].sort(),
   };
 }
-
-// Unified AL rank — M and B are stream-specific parallel scales.
-// M1 (engineering top) and B1 (medical top) share rank 3, M2/B2 share rank 2,
-// NQ rank 1, NE rank 0. Used for sorting + mode AL tie-break.
-export const AL_RANK: Record<string, number> = {
-  M1: 3,
-  B1: 3,
-  M2: 2,
-  B2: 2,
-  "Not Qualified": 1,
-  "Not Eligible for Academic Level": 0,
-};
 
 function alRank(al: string | null | undefined): number {
   if (!al) return -1;
@@ -527,68 +516,6 @@ export async function getTestQuestionLevelData(
         attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
     };
   });
-}
-
-/**
- * Academic Level per student for a single test, keyed by enrollment_user_id —
- * the AL column in Student Results (#28, #248).
- *
- * Deliberately NOT filtered by MAJOR_TEST_FORMATS: the caller already pins one
- * session_id, and filtering by format here would silently return an empty map
- * for a chapter test instead of letting the column render "—". Chapter tests
- * legitimately have no AL (see MAJOR_TEST_FORMATS above).
- *
- * Returns a Map rather than rows because the only consumer joins it onto
- * DynamoDB-sourced student rows.
- */
-export async function getTestALsByUser(
-  udise: string,
-  grade: number,
-  sessionId: string,
-  program?: string,
-  stream?: string
-): Promise<Map<string, string>> {
-  const client = getBigQueryClient();
-  const programFilter = program ? `AND student_program = @program` : "";
-  const streamFilter = stream ? `AND LOWER(student_stream) = @stream` : "";
-
-  const params: Record<string, string | number> = { udise, grade, sessionId };
-  if (program) params.program = program;
-  if (stream) params.stream = stream;
-
-  const alList = REAL_AL_VALUES.map((v) => `'${v.replace(/'/g, "\\'")}'`).join(",");
-
-  const sql = `
-    SELECT
-      enrollment_user_id,
-      ANY_VALUE(academic_level) AS academic_level
-    FROM ${FACT_TABLE}
-    WHERE student_school_udise_code = @udise
-      AND student_grade = @grade
-      AND session_id = @sessionId
-      AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
-      AND LOWER(section) = 'overall'
-      AND academic_level IN (${alList})
-      AND enrollment_user_id IS NOT NULL
-      ${programFilter}
-      ${streamFilter}
-    GROUP BY enrollment_user_id
-  `;
-
-  interface RawRow {
-    enrollment_user_id: number | string | null;
-    academic_level: string | null;
-  }
-
-  const [rows] = await client.query({ query: sql, params });
-  const byUser = new Map<string, string>();
-  for (const r of rows as RawRow[]) {
-    // Stringified to match StudentDeepDiveRow.enrollment_user_id, which the
-    // DynamoDB side also stringifies (BQ hands back INT64 as number|string).
-    const key = String(r.enrollment_user_id ?? "");
-    if (key && r.academic_level) byUser.set(key, r.academic_level);
-  }
-  return byUser;
 }
 
 /**

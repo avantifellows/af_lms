@@ -155,10 +155,14 @@ export interface StudentDeepDiveRow {
   // Social category from the LMS Postgres roster (student.category), carried
   // through from the matched roster student — not from the report doc.
   category: string | null;
-  // AL earned on *this* test, joined from BigQuery on enrollment_user_id.
-  // Null for chapter tests (which carry no AL) and for any student with no
-  // section='overall' row for the session.
+  // AL earned on *this* test, read straight off the report doc's
+  // overall_performance (etl-next copies it there from BigQuery). Null where the
+  // doc carries none — e.g. chapter tests, which have no AL — and the UI shows
+  // "NA" rather than inventing a level.
   academic_level: string | null;
+  // On-track signal for the same test: "Qualified" / "Not Qualified", also off
+  // the report doc. Null when the doc has no status (no applicable cutoff).
+  qualification_status: string | null;
   marks_scored: number;
   max_marks: number;
   percentage: number;

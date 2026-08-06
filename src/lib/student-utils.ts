@@ -1,4 +1,7 @@
-export interface Student {
+// Minimal shape needed to display/choose a student. Named *Ref (matching
+// IndividualStudentRef) so it cannot be confused with StudentTable's much
+// larger roster `Student` — both were exported as `Student` before.
+export interface StudentRef {
   id: number;
   full_name: string | null;
   student_id: string | null;
@@ -22,7 +25,7 @@ export function getCategoryColor(category: string | null): string {
   }
 }
 
-export function getStudentDisplayName(student: Student): string {
+export function getStudentDisplayName(student: StudentRef): string {
   const trimmed = student.full_name?.trim();
   if (trimmed) return trimmed;
   if (student.student_id) return student.student_id;

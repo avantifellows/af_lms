@@ -8,25 +8,17 @@ vi.mock("@/lib/api-auth", () => ({
 vi.mock("@/lib/dynamodb", () => ({
   getTestDeepDiveFromDynamo: vi.fn(),
 }));
-vi.mock("@/lib/bigquery", () => ({
-  getTestALsByUser: vi.fn(),
-}));
 
 import { authorizeSchoolAccess } from "@/lib/api-auth";
 import { getTestDeepDiveFromDynamo } from "@/lib/dynamodb";
-import { getTestALsByUser } from "@/lib/bigquery";
 import { GET } from "./route";
 import { routeParams } from "../../../__test-utils__/api-test-helpers";
 
 const mockAuth = vi.mocked(authorizeSchoolAccess);
 const mockGetDeepDive = vi.mocked(getTestDeepDiveFromDynamo);
-const mockGetALs = vi.mocked(getTestALsByUser);
 
 beforeEach(() => {
   vi.resetAllMocks();
-  // Default: no AL rows. Individual tests override. Without this the route
-  // would reach the real BigQuery client.
-  mockGetALs.mockResolvedValue(new Map());
 });
 
 const SCHOOL = { id: "42", code: "70705", name: "Test School", region: "North" };
@@ -152,6 +144,7 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
           gender: "F",
           category: "SC",
           academic_level: null,
+          qualification_status: null,
           marks_scored: 85,
           max_marks: 100,
           percentage: 85,
@@ -192,83 +185,5 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
     );
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: "Failed to fetch test deep dive data" });
-  });
-
-  // --- AL join (BigQuery) onto the DynamoDB-sourced student rows ---
-
-  function deepDiveWithStudents(
-    students: Array<{ student_name: string; enrollment_user_id: string | null }>
-  ) {
-    return {
-      summary: {},
-      subjects: [],
-      chapters: [],
-      students: students.map((s) => ({
-        ...s,
-        gender: null,
-        category: null,
-        academic_level: null,
-        marks_scored: 0,
-        max_marks: 0,
-        percentage: 0,
-        accuracy: 0,
-        attempt_rate: 0,
-        subject_scores: [],
-      })),
-    } as unknown as TestDeepDiveData;
-  }
-
-  it("joins each student's AL from BigQuery on enrollment_user_id", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
-    mockGetDeepDive.mockResolvedValue(
-      deepDiveWithStudents([
-        { student_name: "Alice", enrollment_user_id: "111" },
-        { student_name: "Bob", enrollment_user_id: "222" },
-        // No AL row for this session -> stays null.
-        { student_name: "Chandni", enrollment_user_id: "333" },
-        // No usable id at all -> cannot be joined.
-        { student_name: "Deepak", enrollment_user_id: null },
-      ])
-    );
-    mockGetALs.mockResolvedValue(
-      new Map([
-        ["111", "M1"],
-        ["222", "Not Qualified"],
-      ])
-    );
-
-    const res = await GET(
-      makeRequest({ grade: "10", sessionId: "sess-123" }),
-      routeParams({ udise: "1234" })
-    );
-    expect(res.status).toBe(200);
-    const json = await res.json();
-
-    expect(json.students.map((s: { academic_level: string | null }) => s.academic_level)).toEqual([
-      "M1",
-      "Not Qualified",
-      null,
-      null,
-    ]);
-    expect(mockGetALs).toHaveBeenCalledWith("1234", 10, "sess-123", undefined, undefined);
-  });
-
-  it("degrades AL to null instead of failing the request when BigQuery throws", async () => {
-    mockAuth.mockResolvedValue({ authorized: true, school: SCHOOL });
-    mockGetDeepDive.mockResolvedValue(
-      deepDiveWithStudents([{ student_name: "Alice", enrollment_user_id: "111" }])
-    );
-    mockGetALs.mockRejectedValue(new Error("BQ outage"));
-
-    const res = await GET(
-      makeRequest({ grade: "10", sessionId: "sess-123" }),
-      routeParams({ udise: "1234" })
-    );
-
-    // The deep-dive is DynamoDB-sourced; one missing column must not 500 it.
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.students).toHaveLength(1);
-    expect(json.students[0].academic_level).toBeNull();
   });
 });
