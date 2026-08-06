@@ -265,6 +265,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**, Grade, Subject, and **Exam Track**
 - A regular teaching **LMS Curriculum Log** has duration and one or more covered topics
 - A **Class Cancellation Log** has a date but no chapter, topics, or duration; it appears in log history but contributes no teaching time or curriculum progress
+- At most one active **Class Cancellation Log** exists for each School, Program, Grade, Subject, Exam Track, and date
 - A **Doubt Solving Log** has a date, chapter, and duration but no covered topics; it appears in log history but contributes no Actual Hours, topic coverage, or curriculum progress
 - **Class Cancellation Logs** and **Doubt Solving Logs** use the same edit and soft-delete lifecycle as regular teaching LMS Curriculum Logs
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
