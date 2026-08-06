@@ -168,7 +168,7 @@ describe("curriculum config list helpers", () => {
 
     expect(
       normalizeCurriculumConfigListParams({
-        exam_track: "neet",
+        exam_track: "math_foundation",
         grade: "12",
         chapter_id: "89",
         subject: "Biology",
@@ -180,7 +180,7 @@ describe("curriculum config list helpers", () => {
       })
     ).toMatchObject({
       filters: {
-        examTrack: "neet",
+        examTrack: "math_foundation",
         grade: 12,
         subject: "Biology",
         chapterId: 89,

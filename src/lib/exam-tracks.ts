@@ -4,13 +4,21 @@
 
 // Order is curriculum order: summary and options listings sort by this array's index, so
 // changing the order changes how tracks are listed.
-export const EXAM_TRACKS = ["jee_main", "jee_advanced", "neet"] as const;
+export const EXAM_TRACKS = [
+  "jee_main",
+  "jee_advanced",
+  "neet",
+  "cet",
+  "math_foundation",
+] as const;
 export type ExamTrack = (typeof EXAM_TRACKS)[number];
 
 const EXAM_TRACK_LABELS: Record<ExamTrack, string> = {
   jee_main: "JEE Main",
   jee_advanced: "JEE Advanced",
   neet: "NEET",
+  cet: "CET",
+  math_foundation: "Math Foundation",
 };
 
 // Narrow an arbitrary value to a supported exam track code.

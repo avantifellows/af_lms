@@ -730,6 +730,34 @@ describe("/api/curriculum/logs", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("returns a validation error when the Exam Track has no curriculum content", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "cet",
+        grade: 11,
+        subject: "Physics",
+        log_date: "2026-02-15",
+        duration_minutes: 60,
+        topic_ids: [101],
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Curriculum configuration is not available for CET",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("rejects saves with no topics and no Chapter Completion deltas", async () => {
     mockQuery
       .mockResolvedValueOnce([])

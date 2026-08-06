@@ -7,7 +7,7 @@ import {
   resolveCurriculumProgramScope,
   type CurriculumValidationFailure,
 } from "./curriculum-options";
-import { isExamTrack } from "./exam-tracks";
+import { formatExamTrack, isExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { isFutureIST, isPastOrTodayIST } from "./curriculum-date-helpers";
 import {
@@ -221,6 +221,15 @@ export async function validateSelectedScope(params: {
     return { ok: false, status: 403, error: "Forbidden" };
   }
 
+  const curriculumId = curriculumIdForExamTrack(params.examTrack);
+  if (curriculumId === null) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Curriculum configuration is not available for ${formatExamTrack(params.examTrack)}`,
+    };
+  }
+
   return {
     ok: true,
     examTrack: params.examTrack,
@@ -228,7 +237,7 @@ export async function validateSelectedScope(params: {
     subject: params.subject,
     gradeId: GRADE_IDS[params.grade],
     subjectId: SUBJECT_IDS[params.subject],
-    curriculumId: curriculumIdForExamTrack(params.examTrack),
+    curriculumId,
   };
 }
 
@@ -237,6 +246,7 @@ async function loadValidTopics(params: {
   examTrack: ExamTrack;
   grade: GradeNumber;
   subjectId: number;
+  curriculumId: number;
 }): Promise<ValidTopicRow[]> {
   return query<ValidTopicRow>(
     `SELECT
@@ -262,7 +272,7 @@ async function loadValidTopics(params: {
       params.topicIds,
       params.grade,
       params.subjectId,
-      curriculumIdForExamTrack(params.examTrack),
+      params.curriculumId,
     ]
   );
 }
@@ -272,6 +282,7 @@ async function loadValidTopicsForStoredScope(params: {
   examTrack: ExamTrack;
   gradeId: number;
   subjectId: number;
+  curriculumId: number;
 }): Promise<ValidTopicRow[]> {
   return query<ValidTopicRow>(
     `SELECT
@@ -296,7 +307,7 @@ async function loadValidTopicsForStoredScope(params: {
       params.topicIds,
       params.gradeId,
       params.subjectId,
-      curriculumIdForExamTrack(params.examTrack),
+      params.curriculumId,
     ]
   );
 }
@@ -753,6 +764,15 @@ export async function createCurriculumLog(params: {
   });
   if (!scope.ok) return scope;
 
+  const curriculumId = curriculumIdForExamTrack(scope.examTrack);
+  if (curriculumId === null) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Curriculum configuration is not available for ${formatExamTrack(scope.examTrack)}`,
+    };
+  }
+
   const hasCompletionDeltas =
     scope.completeChapterIds.length > 0 ||
     scope.uncompleteChapterIds.length > 0;
@@ -834,6 +854,7 @@ export async function createCurriculumLog(params: {
       examTrack: scope.examTrack,
       grade: scope.grade,
       subjectId: scope.subjectId,
+      curriculumId,
     });
     if (validTopics.length !== topicIds.length) {
       return {
@@ -1079,11 +1100,21 @@ export async function updateCurriculumLog(params: {
     };
   }
 
+  const curriculumId = curriculumIdForExamTrack(log.exam_track);
+  if (curriculumId === null) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Curriculum configuration is not available for ${formatExamTrack(log.exam_track)}`,
+    };
+  }
+
   const validTopics = await loadValidTopicsForStoredScope({
     topicIds,
     examTrack: log.exam_track,
     gradeId: log.grade_id,
     subjectId: log.subject_id,
+    curriculumId,
   });
   if (validTopics.length !== topicIds.length) {
     return {

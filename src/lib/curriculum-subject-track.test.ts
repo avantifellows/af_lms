@@ -7,12 +7,14 @@ import type { SubjectName } from "@/types/curriculum";
 describe("getSubjectExamTrackCompatibilityError", () => {
   it("covers the full Curriculum Subject and Exam Track matrix", () => {
     const expected: Record<SubjectName, Array<string | null>> = {
-      Physics: [null, null, null],
-      Chemistry: [null, null, null],
-      Maths: [null, null, "Maths is not valid with NEET"],
+      Physics: [null, null, null, null, null],
+      Chemistry: [null, null, null, null, null],
+      Maths: [null, null, "Maths is not valid with NEET", null, null],
       Biology: [
         "Biology is not valid with JEE Main",
         "Biology is not valid with JEE Advanced",
+        null,
+        null,
         null,
       ],
     };

@@ -2,7 +2,7 @@ import {
   checkCurriculumConfigManagementSchema,
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
-import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
+import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
@@ -164,6 +164,7 @@ export type CurriculumConfigChapterOptionsResult =
       ok: true;
       options: CurriculumConfigChapterOption[];
     }
+  | CurriculumConfigValidationFailure
   | CurriculumSchemaUnavailable;
 
 export interface CurriculumConfigEditPayload {
@@ -295,7 +296,7 @@ interface RemoveMutationRow extends CurriculumConfigQueryRow {
   failure_reason: "stale" | "missing" | "already_out_of_syllabus" | null;
 }
 
-const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
+const EXAM_TRACK_CURRICULUM_IDS: Partial<Record<ExamTrack, number>> = {
   jee_main: 1,
   jee_advanced: 9,
   neet: 2,
@@ -656,11 +657,21 @@ export async function getCurriculumConfigChapterOptions(
     return schema;
   }
 
+  const curriculumId = EXAM_TRACK_CURRICULUM_IDS[params.examTrack];
+  if (curriculumId == null) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Curriculum configuration is not available for ${formatExamTrack(params.examTrack)}`,
+      fields: { exam_track: "Curriculum configuration is not available" },
+    };
+  }
+
   const rows = await query<CurriculumConfigChapterOptionQueryRow>(
     buildChapterOptionsSql(),
     [
       params.examTrack,
-      EXAM_TRACK_CURRICULUM_IDS[params.examTrack],
+      curriculumId,
       params.grade,
       params.subject,
       params.search ? `%${params.search.toLowerCase()}%` : null,

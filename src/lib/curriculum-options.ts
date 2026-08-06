@@ -1,5 +1,5 @@
 import { compareCurriculumCodes } from "./curriculum-code-sort";
-import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
+import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
@@ -22,11 +22,12 @@ import type {
 // intersect to empty and their curriculum tab loads blank.
 const CURRICULUM_PROGRAM_IDS: number[] = PHYSICAL_CENTRE_PROGRAM_IDS;
 const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"];
-const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
+const EXAM_TRACK_CURRICULUM_IDS = {
   jee_main: 1,
   jee_advanced: 9,
   neet: 2,
-};
+} as const satisfies Partial<Record<ExamTrack, number>>;
+type ContentExamTrack = keyof typeof EXAM_TRACK_CURRICULUM_IDS;
 interface SchoolScopeRow {
   code: string;
   region: string | null;
@@ -117,20 +118,24 @@ export function isSubjectName(value: string): value is SubjectName {
   return SUBJECT_ORDER.includes(value as SubjectName);
 }
 
-export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
-  return EXAM_TRACK_CURRICULUM_IDS[examTrack];
+export function curriculumIdForExamTrack(examTrack: ContentExamTrack): number;
+export function curriculumIdForExamTrack(examTrack: ExamTrack): number | null;
+export function curriculumIdForExamTrack(examTrack: ExamTrack): number | null {
+  return examTrack in EXAM_TRACK_CURRICULUM_IDS
+    ? EXAM_TRACK_CURRICULUM_IDS[examTrack as ContentExamTrack]
+    : null;
 }
 
 // The batch stream (as produced by parseBatchStream: "engineering" | "medical") each exam
 // track targets. Used to reject mismatched pairings (e.g. a NEET test on an engineering
 // batch), which would otherwise put a wrong-subject test live for those students.
-const EXAM_TRACK_STREAMS: Record<ExamTrack, string> = {
+const EXAM_TRACK_STREAMS: Record<ContentExamTrack, string> = {
   jee_main: "engineering",
   jee_advanced: "engineering",
   neet: "medical",
 };
 
-export function streamForExamTrack(examTrack: ExamTrack): string {
+export function streamForExamTrack(examTrack: ContentExamTrack): string {
   return EXAM_TRACK_STREAMS[examTrack];
 }
 
@@ -326,13 +331,20 @@ export async function getCurriculumChapters(params: {
     };
   }
 
+  const curriculumId = curriculumIdForExamTrack(params.examTrack);
+  if (curriculumId === null) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Curriculum configuration is not available for ${formatExamTrack(params.examTrack)}`,
+    };
+  }
+
   const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
   if (!scope.ok) return scope;
   if (!scope.allowedProgramIds.includes(params.programId)) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
-  const curriculumId = curriculumIdForExamTrack(params.examTrack);
-
   const rows = await query<ChapterScopeRow>(
     `SELECT
        ch.id AS chapter_id,
