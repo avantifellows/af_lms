@@ -444,6 +444,76 @@ describe("CurriculumSummaryPage", () => {
     expect(screen.getByText("83.3%")).toBeInTheDocument();
   });
 
+  it("renders unavailable and Centre configuration-error rows as non-expandable explanations", async () => {
+    mockGetServerSession.mockResolvedValue(pmSession);
+    mockGetUserPermission.mockResolvedValue(pmPermission);
+    mockGetFeatureAccess.mockReturnValue({ access: "view", canView: true, canEdit: false });
+    mockGetProgramContextSync.mockReturnValue(coeNodalProgramContext);
+    mockGetCurriculumSummary.mockResolvedValue({
+      ...emptySummaryResult,
+      rows: [
+        {
+          rowKind: "unavailable",
+          rowKey: "70705:1:11:cet:unavailable",
+          schoolCode: "70705",
+          schoolName: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          programId: 1,
+          programName: "JNV CoE",
+          grade: 11,
+          subjectId: null,
+          subjectName: null,
+          examTrack: "cet",
+          explanation: "Curriculum configuration is unavailable",
+          completedChapters: 0,
+          totalConfiguredChapters: 0,
+          prescribedChapters: 0,
+          actualMinutes: 0,
+          prescribedMinutes: 0,
+          deltaPercent: null,
+          flagged: false,
+          flagReasons: [],
+        },
+        {
+          rowKind: "configuration_error",
+          rowKey: "99999:1:configuration_error",
+          schoolCode: "99999",
+          schoolName: "JNV Missing",
+          region: "West",
+          state: "Gujarat",
+          district: "Nowhere",
+          programId: 1,
+          programName: "JNV CoE",
+          grade: null,
+          subjectId: null,
+          subjectName: null,
+          examTrack: null,
+          explanation: "No active physical Centre is configured for this School and Program",
+          completedChapters: 0,
+          totalConfiguredChapters: 0,
+          prescribedChapters: 0,
+          actualMinutes: 0,
+          prescribedMinutes: 0,
+          deltaPercent: null,
+          flagged: false,
+          flagReasons: [],
+        },
+      ],
+      totalRowCount: 2,
+      totalPages: 1,
+    });
+
+    const jsx = await CurriculumSummaryPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.getByText("Curriculum configuration is unavailable")).toBeInTheDocument();
+    expect(screen.getByText("No active physical Centre is configured for this School and Program")).toBeInTheDocument();
+    expect(screen.getAllByRole("cell", { name: "-" }).length).toBeGreaterThanOrEqual(8);
+    expect(screen.queryByRole("button", { name: /chapters for/i })).not.toBeInTheDocument();
+  });
+
   it("keeps chapter expansion collapsed by default and expands it on demand", async () => {
     const user = userEvent.setup();
     mockGetServerSession.mockResolvedValue(pmSession);

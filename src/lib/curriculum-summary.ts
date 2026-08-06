@@ -2,6 +2,10 @@ import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curri
 import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getProgramContextSync, type UserPermission } from "./permissions";
+import {
+  BIOLOGY_INCOMPATIBLE_EXAM_TRACKS,
+  MATHS_INCOMPATIBLE_EXAM_TRACKS,
+} from "./curriculum-subject-track";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumSummarySortKey =
@@ -86,6 +90,7 @@ export interface CurriculumSummaryStats {
 }
 
 export interface CurriculumSummaryRow {
+  rowKind: "normal" | "unavailable" | "configuration_error";
   rowKey: string;
   schoolCode: string;
   schoolName: string;
@@ -94,10 +99,11 @@ export interface CurriculumSummaryRow {
   district: string | null;
   programId: number;
   programName: string;
-  grade: number;
-  subjectId: number;
-  subjectName: string;
-  examTrack: ExamTrack;
+  grade: number | null;
+  subjectId: number | null;
+  subjectName: string | null;
+  examTrack: ExamTrack | null;
+  explanation: string | null;
   completedChapters: number;
   totalConfiguredChapters: number;
   prescribedChapters: number;
@@ -166,6 +172,8 @@ interface OptionsQueryRow {
 }
 
 interface SummaryQueryRow {
+  row_kind?: "normal" | "unavailable" | "configuration_error";
+  configuration_error?: string | null;
   total_count: string | number | null;
   school_code: string;
   school_name: string | null;
@@ -174,10 +182,10 @@ interface SummaryQueryRow {
   district: string | null;
   program_id: string | number;
   program_name: string;
-  grade: string | number;
-  subject_id: string | number;
+  grade: string | number | null;
+  subject_id: string | number | null;
   subject_name: unknown;
-  exam_track: ExamTrack;
+  exam_track: ExamTrack | null;
   completed_chapters: string | number | null;
   total_configured_chapters: string | number | null;
   prescribed_chapters: string | number | null;
@@ -398,6 +406,8 @@ export function buildCommonQueryParams(
     filters.subjects.length ? filters.subjects : null,
     filters.examTracks.length ? filters.examTracks : null,
     filters.regions.length ? filters.regions : null,
+    [...BIOLOGY_INCOMPATIBLE_EXAM_TRACKS],
+    [...MATHS_INCOMPATIBLE_EXAM_TRACKS],
   ];
 }
 
@@ -416,7 +426,7 @@ function buildMetricQueryParams(
 function buildScopedUniverseSql(): string {
   return `
     WITH scoped_schools AS (
-      SELECT s.code, s.name, s.region, s.state, s.district
+      SELECT s.id, s.code, s.name, s.region, s.state, s.district
       FROM school s
       WHERE s.af_school_category = 'JNV'
         AND (
@@ -428,6 +438,7 @@ function buildScopedUniverseSql(): string {
     scoped_school_programs AS (
       SELECT
         ss.code AS school_code,
+        ss.id AS school_id,
         ss.name AS school_name,
         ss.region,
         ss.state,
@@ -439,54 +450,125 @@ function buildScopedUniverseSql(): string {
       JOIN program p ON p.id = ANY($4::int[])
       WHERE ($5::boolean OR p.id = ANY($6::int[]))
     ),
-    configured_rows AS (
-      SELECT DISTINCT
-        g.id AS grade_id,
-        g.number AS grade,
-        s.id AS subject_id,
-        COALESCE(
-          (
-            SELECT item->>'subject'
-            FROM jsonb_array_elements(s.name::jsonb) item
-            WHERE item->>'lang_code' = 'en'
-            LIMIT 1
-          ),
-          'Unknown subject'
-        ) AS subject_name,
-        cfg.exam_track
-      FROM lms_chapter_exam_configs cfg
-      JOIN chapter ch ON ch.id = cfg.chapter_id
-      JOIN grade g ON g.id = ch.grade_id
-      JOIN subject s ON s.id = ch.subject_id
-      WHERE cfg.is_in_syllabus = true
-    ),
-    expected_rows AS (
+    centre_resolution AS (
       SELECT
+        ssp.*,
+        COUNT(centres.id)::int AS centre_count,
+        MIN(centres.id)::int AS resolved_centre_id
+      FROM scoped_school_programs ssp
+      LEFT JOIN centres
+        ON centres.school_id = ssp.school_id
+       AND centres.program_id = ssp.program_id
+       AND centres.is_active = true
+       AND centres.is_physical = true
+      GROUP BY
         ssp.school_code,
+        ssp.school_id,
         ssp.school_name,
         ssp.region,
         ssp.state,
         ssp.district,
         ssp.program_id,
         ssp.program_name,
-        ssp.program_order,
-        cr.grade_id,
-        cr.grade,
-        cr.subject_id,
-        cr.subject_name,
-        cr.exam_track
-      FROM scoped_school_programs ssp
-      CROSS JOIN configured_rows cr
+        ssp.program_order
+    ),
+    configured_rows AS (
+      SELECT *
+      FROM (
+        SELECT DISTINCT
+          g.id AS grade_id,
+          g.number AS grade,
+          s.id AS subject_id,
+          COALESCE(
+            (
+              SELECT item->>'subject'
+              FROM jsonb_array_elements(s.name::jsonb) item
+              WHERE item->>'lang_code' = 'en'
+              LIMIT 1
+            ),
+            'Unknown subject'
+          ) AS subject_name,
+          cfg.exam_track
+        FROM lms_chapter_exam_configs cfg
+        JOIN chapter ch ON ch.id = cfg.chapter_id
+        JOIN grade g ON g.id = ch.grade_id
+        JOIN subject s ON s.id = ch.subject_id
+        WHERE cfg.is_in_syllabus = true
+      ) configured
+      WHERE NOT (
+        (configured.subject_name = 'Biology' AND configured.exam_track = ANY($13::text[]))
+        OR (configured.subject_name = 'Maths' AND configured.exam_track = ANY($14::text[]))
+      )
+    ),
+    mapped_rows AS (
+      SELECT
+        cr.school_code,
+        cr.school_name,
+        cr.region,
+        cr.state,
+        cr.district,
+        cr.program_id,
+        cr.program_name,
+        cr.program_order,
+        CASE WHEN configured.grade_id IS NULL THEN 'unavailable' ELSE 'normal' END AS row_kind,
+        NULL::text AS configuration_error,
+        grade.id AS grade_id,
+        grade.number AS grade,
+        configured.subject_id,
+        configured.subject_name,
+        mapping.exam_track_code AS exam_track
+      FROM centre_resolution cr
+      JOIN centre_exam_tracks mapping
+        ON mapping.centre_id = cr.resolved_centre_id
+       AND cr.centre_count = 1
+      JOIN grade ON grade.id = mapping.grade_id
+      LEFT JOIN configured_rows configured
+        ON configured.grade_id = mapping.grade_id
+       AND configured.exam_track = mapping.exam_track_code
+    ),
+    configuration_error_rows AS (
+      SELECT
+        cr.school_code,
+        cr.school_name,
+        cr.region,
+        cr.state,
+        cr.district,
+        cr.program_id,
+        cr.program_name,
+        cr.program_order,
+        'configuration_error'::text AS row_kind,
+        CASE
+          WHEN cr.centre_count = 0
+            THEN 'No active physical Centre is configured for this School and Program'
+          ELSE 'Multiple active physical Centres are configured for this School and Program'
+        END AS configuration_error,
+        NULL::int AS grade_id,
+        NULL::int AS grade,
+        NULL::int AS subject_id,
+        NULL::text AS subject_name,
+        NULL::text AS exam_track
+      FROM centre_resolution cr
+      WHERE cr.centre_count <> 1
+    ),
+    expected_rows AS (
+      SELECT * FROM mapped_rows
+      UNION ALL
+      SELECT * FROM configuration_error_rows
     ),
     filtered_rows AS (
       SELECT *
       FROM expected_rows
       WHERE ($7::text[] IS NULL OR school_code = ANY($7::text[]))
         AND ($8::int[] IS NULL OR program_id = ANY($8::int[]))
-        AND ($9::int[] IS NULL OR grade = ANY($9::int[]))
-        AND ($10::int[] IS NULL OR subject_id = ANY($10::int[]))
-        AND ($11::text[] IS NULL OR exam_track = ANY($11::text[]))
         AND ($12::text[] IS NULL OR region = ANY($12::text[]))
+        AND (
+          row_kind = 'configuration_error'
+          OR (
+            ($9::int[] IS NULL OR grade = ANY($9::int[]))
+            AND ($11::text[] IS NULL OR exam_track = ANY($11::text[]))
+            AND (row_kind = 'unavailable' OR $10::int[] IS NULL OR subject_id = ANY($10::int[]))
+          )
+        )
     )`;
 }
 
@@ -524,8 +606,8 @@ function buildComputedRowsSql(): string {
        AND l.exam_track = fr.exam_track
        AND l.log_type = 'regular'
        AND l.deleted_at IS NULL
-       AND ($13::date IS NULL OR l.log_date >= $13::date)
-       AND ($14::date IS NULL OR l.log_date <= $14::date)
+       AND ($15::date IS NULL OR l.log_date >= $15::date)
+       AND ($16::date IS NULL OR l.log_date <= $16::date)
       GROUP BY fr.school_code, fr.program_id, fr.grade_id, fr.subject_id, fr.exam_track
     ),
     completion_counts AS (
@@ -632,7 +714,7 @@ function buildComputedRowsSql(): string {
           ELSE 2
         END AS flag_priority
       FROM computed_rows cr
-      WHERE ($15::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
+      WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
     )`;
 }
 
@@ -757,6 +839,8 @@ function buildRowsSql(
       district,
       program_id,
       program_name,
+      row_kind,
+      configuration_error,
       grade,
       subject_id,
       subject_name,
@@ -771,7 +855,7 @@ function buildRowsSql(
       flag_reasons
     FROM computed_filtered_rows
     ORDER BY ${buildOrderClause(sort, dir)}
-    LIMIT $16 OFFSET $17`;
+    LIMIT $18 OFFSET $19`;
 }
 
 function buildChapterRowsSql(
@@ -785,7 +869,7 @@ function buildChapterRowsSql(
         ROW_NUMBER() OVER (ORDER BY ${buildOrderClause(sort, dir)}) AS page_row_order
       FROM computed_filtered_rows
       ORDER BY ${buildOrderClause(sort, dir)}
-      LIMIT $16 OFFSET $17
+      LIMIT $18 OFFSET $19
     ),
     scoped_log_topics AS (
       SELECT
@@ -815,8 +899,8 @@ function buildChapterRowsSql(
        AND l.exam_track = cpr.exam_track
        AND l.log_type = 'regular'
        AND l.deleted_at IS NULL
-       AND ($13::date IS NULL OR l.log_date >= $13::date)
-       AND ($14::date IS NULL OR l.log_date <= $14::date)
+       AND ($15::date IS NULL OR l.log_date >= $15::date)
+       AND ($16::date IS NULL OR l.log_date <= $16::date)
       JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
     ),
     chapter_log_allocations AS (
@@ -1030,12 +1114,20 @@ function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFi
 function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
   const schoolCode = String(row.school_code);
   const programId = Number(row.program_id);
-  const grade = Number(row.grade);
-  const subjectId = Number(row.subject_id);
+  const rowKind = row.row_kind ?? "normal";
+  const grade = row.grade === null ? null : Number(row.grade);
+  const subjectId = row.subject_id === null ? null : Number(row.subject_id);
   const examTrack = row.exam_track;
+  const rowKey =
+    rowKind === "configuration_error"
+      ? `${schoolCode}:${programId}:configuration_error`
+      : rowKind === "unavailable"
+        ? `${schoolCode}:${programId}:${grade}:${examTrack}:unavailable`
+        : `${schoolCode}:${programId}:${grade}:${subjectId}:${examTrack}`;
 
   return {
-    rowKey: `${schoolCode}:${programId}:${grade}:${subjectId}:${examTrack}`,
+    rowKind,
+    rowKey,
     schoolCode,
     schoolName: row.school_name ?? schoolCode,
     region: row.region,
@@ -1045,8 +1137,12 @@ function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
     programName: row.program_name,
     grade,
     subjectId,
-    subjectName: normalizeSubjectName(row.subject_name),
+    subjectName: subjectId === null ? null : normalizeSubjectName(row.subject_name),
     examTrack,
+    explanation:
+      rowKind === "unavailable"
+        ? "Curriculum configuration is unavailable"
+        : row.configuration_error ?? null,
     completedChapters: numberFromDb(row.completed_chapters),
     totalConfiguredChapters: numberFromDb(row.total_configured_chapters),
     prescribedChapters: numberFromDb(row.prescribed_chapters),

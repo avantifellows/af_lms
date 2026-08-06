@@ -37,6 +37,10 @@ export default function CurriculumSummaryTableRows({
   return (
     <tbody className="divide-y divide-border bg-bg-card">
       {rows.map((row) => {
+        if (row.rowKind === "unavailable" || row.rowKind === "configuration_error") {
+          return <UnavailableSummaryRow key={row.rowKey} row={row} />;
+        }
+
         const chapterRows = chapterRowsByParentKey[row.rowKey] ?? [];
         const isExpanded = expandedRowKeys.has(row.rowKey);
         const expansionId = `curriculum-summary-chapters-${row.rowKey.replaceAll(
@@ -47,7 +51,7 @@ export default function CurriculumSummaryTableRows({
           row.schoolName
         } ${row.schoolCode} ${row.programName} Grade ${row.grade} ${
           row.subjectName
-        } ${formatExamTrack(row.examTrack)}`;
+        } ${formatExamTrack(row.examTrack!)}`;
 
         return (
           <Fragment key={row.rowKey}>
@@ -80,7 +84,7 @@ export default function CurriculumSummaryTableRows({
                 {row.subjectName}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
-                {formatExamTrack(row.examTrack)}
+                {formatExamTrack(row.examTrack!)}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-text-primary">
                 {formatCoverage(row.completedChapters, row.totalConfiguredChapters)}
@@ -109,7 +113,7 @@ export default function CurriculumSummaryTableRows({
                       rowContext={`${row.schoolName} ${row.schoolCode} / ${
                         row.programName
                       } / Grade ${row.grade} ${row.subjectName} / ${formatExamTrack(
-                        row.examTrack
+                        row.examTrack!
                       )}`}
                       chapterRows={chapterRows}
                     />
@@ -121,6 +125,28 @@ export default function CurriculumSummaryTableRows({
         );
       })}
     </tbody>
+  );
+}
+
+function UnavailableSummaryRow({ row }: { row: CurriculumSummaryRow }) {
+  return (
+    <tr className="bg-warning-bg">
+      <td className="whitespace-nowrap px-4 py-3 font-medium text-text-primary">
+        <span>{row.schoolName}</span>{" "}
+        <span className="text-text-muted">{row.schoolCode}</span>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">{row.programName}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">{row.grade ?? "-"}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">
+        {row.examTrack ? formatExamTrack(row.examTrack) : "-"}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="whitespace-nowrap px-4 py-3 text-text-primary">-</td>
+      <td className="min-w-72 px-4 py-3 text-warning-text">{row.explanation}</td>
+    </tr>
   );
 }
 
