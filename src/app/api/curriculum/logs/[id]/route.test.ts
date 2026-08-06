@@ -518,6 +518,35 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("rejects updating a Biology JEE Advanced LMS Curriculum Log", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          ...editableLogRow,
+          subject_id: 3,
+          exam_track: "jee_advanced",
+        },
+      ])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await PATCH(
+      jsonReq({
+        log_date: "2026-02-16",
+        duration_minutes: 120,
+        topic_ids: [],
+      }),
+      routeParams({ id: "12" })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Biology is not valid with JEE Advanced",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("rejects replacement topics outside the loaded log Exam Track and scope", async () => {
     mockQuery
       .mockResolvedValueOnce([])

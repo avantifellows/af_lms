@@ -8,6 +8,7 @@ import {
   type CurriculumValidationFailure,
 } from "./curriculum-options";
 import { isExamTrack } from "./exam-tracks";
+import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { isFutureIST, isPastOrTodayIST } from "./curriculum-date-helpers";
 import {
   markChapterComplete,
@@ -1005,6 +1006,16 @@ export async function updateCurriculumLog(params: {
   if (!scope.ok) return scope;
   if (!scope.allowedProgramIds.includes(log.program_id)) {
     return { ok: false, status: 403, error: "Forbidden" };
+  }
+
+  const subject = (Object.keys(SUBJECT_IDS) as SubjectName[]).find(
+    (name) => SUBJECT_IDS[name] === log.subject_id
+  );
+  const compatibilityError = subject
+    ? getSubjectExamTrackCompatibilityError(subject, log.exam_track)
+    : null;
+  if (compatibilityError) {
+    return { ok: false, status: 422, error: compatibilityError };
   }
 
   if (!log.is_editable) {

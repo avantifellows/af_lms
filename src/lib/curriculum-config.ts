@@ -3,9 +3,10 @@ import {
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
 import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
+import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
-import type { ExamTrack } from "@/types/curriculum";
+import { SUBJECT_IDS, type ExamTrack, type SubjectName } from "@/types/curriculum";
 
 export type CurriculumConfigSession = {
   user?: { email?: string | null } | null;
@@ -315,6 +316,14 @@ const SORT_KEYS: CurriculumConfigSortKey[] = [
   "updated_at",
 ];
 const PAGE_SIZES = [10, 20, 50, 100];
+
+function subjectNameForId(subjectId: number): SubjectName | null {
+  return (
+    (Object.keys(SUBJECT_IDS) as SubjectName[]).find(
+      (subject) => SUBJECT_IDS[subject] === subjectId
+    ) ?? null
+  );
+}
 
 export async function requireCurriculumConfigAdmin(
   session: CurriculumConfigSession
@@ -711,6 +720,31 @@ export async function createCurriculumConfigRow(params: {
   }
 
   const payload = payloadResult.payload;
+  const chapterRows = await query<{ subject_id: number }>(
+    "SELECT subject_id FROM chapter WHERE id = $1 LIMIT 1",
+    [payload.chapterId]
+  );
+  const subject = subjectNameForId(Number(chapterRows[0]?.subject_id));
+  if (!subject) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config create payload",
+      fields: { chapter_id: "Chapter was not found" },
+    };
+  }
+  const compatibilityError = getSubjectExamTrackCompatibilityError(
+    subject,
+    payload.examTrack
+  );
+  if (compatibilityError) {
+    return {
+      ok: false,
+      status: 422,
+      error: compatibilityError,
+      fields: { exam_track: compatibilityError },
+    };
+  }
 
   try {
     const rows = await query<CreateMutationRow>(buildCreateSql(), [
@@ -798,6 +832,31 @@ export async function editCurriculumConfigRow(params: {
   }
 
   const payload = payloadResult.payload;
+  const identityRows = await query<{ exam_track: ExamTrack; subject_id: number }>(
+    `SELECT cfg.exam_track, ch.subject_id
+     FROM lms_chapter_exam_configs cfg
+     JOIN chapter ch ON ch.id = cfg.chapter_id
+     WHERE cfg.id = $1
+     LIMIT 1`,
+    [params.id]
+  );
+  const identity = identityRows[0];
+  if (!identity) {
+    return { ok: false, status: 404, error: "Curriculum Config row not found" };
+  }
+  const subject = subjectNameForId(Number(identity.subject_id));
+  const compatibilityError = subject
+    ? getSubjectExamTrackCompatibilityError(subject, identity.exam_track)
+    : null;
+  if (compatibilityError) {
+    return {
+      ok: false,
+      status: 422,
+      error: compatibilityError,
+      fields: { exam_track: compatibilityError },
+    };
+  }
+
   const rows = await query<EditMutationRow>(buildEditSql(), [
     params.id,
     payload.isInSyllabus,

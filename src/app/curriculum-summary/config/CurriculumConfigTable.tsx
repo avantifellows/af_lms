@@ -11,6 +11,7 @@ import type {
   CurriculumConfigRow,
   CurriculumConfigWarning,
 } from "@/lib/curriculum-config";
+import { getSubjectExamTrackCompatibilityError } from "@/lib/curriculum-subject-track";
 import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "@/lib/exam-tracks";
 
 interface CurriculumConfigTableProps {
@@ -429,7 +430,15 @@ function AddPanel({
       .then((response) => response.json())
       .then((json) => {
         if (!cancelled) {
-          setOptions(json.options ?? []);
+          const nextOptions = Array.isArray(json.options)
+            ? (json.options as CurriculumConfigChapterOption[])
+            : [];
+          setOptions(
+            nextOptions.filter(
+              (option) =>
+                !getSubjectExamTrackCompatibilityError(option.subjectName, examTrack)
+            )
+          );
           setActiveChapterIndex(0);
         }
       })

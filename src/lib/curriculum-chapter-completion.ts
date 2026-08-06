@@ -7,6 +7,7 @@ import {
   type CurriculumValidationFailure,
 } from "./curriculum-options";
 import { isExamTrack } from "./exam-tracks";
+import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import type { ExamTrack, GradeNumber, SubjectName } from "@/types/curriculum";
 import { GRADE_IDS, SUBJECT_IDS } from "@/types/curriculum";
 import type { UserPermission } from "./permissions";
@@ -81,6 +82,14 @@ export async function validateChapterCompletionDeltas(params: {
       status: 422,
       error: "Subject must be Physics, Chemistry, Maths, or Biology",
     };
+  }
+
+  const compatibilityError = getSubjectExamTrackCompatibilityError(
+    params.subject,
+    params.examTrack
+  );
+  if (compatibilityError) {
+    return { ok: false, status: 422, error: compatibilityError };
   }
 
   const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);

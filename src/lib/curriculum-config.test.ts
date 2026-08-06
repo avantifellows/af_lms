@@ -516,6 +516,7 @@ describe("curriculum config create helpers", () => {
 
   it("creates a unique config row with admin audit fields and no log/completion mutation", async () => {
     mockQuery
+      .mockResolvedValueOnce([{ subject_id: 4 }])
       .mockResolvedValueOnce([
         {
           failure_reason: null,
@@ -572,14 +573,14 @@ describe("curriculum config create helpers", () => {
       warnings: [{ code: "duplicate_coverage_sequence" }],
     });
 
-    const insertSql = mockQuery.mock.calls[0][0] as string;
+    const insertSql = mockQuery.mock.calls[1][0] as string;
     expect(insertSql).toContain("INSERT INTO lms_chapter_exam_configs");
     expect(insertSql).toContain("inserted_by_email");
     expect(insertSql).toContain("updated_by_email");
     expect(insertSql).toContain("NOW() AT TIME ZONE 'UTC'");
     expect(insertSql).not.toMatch(/UPDATE\s+lms_curriculum_logs/i);
     expect(insertSql).not.toMatch(/UPDATE\s+lms_curriculum_chapter_completions/i);
-    expect(mockQuery.mock.calls[0][1]).toEqual([
+    expect(mockQuery.mock.calls[1][1]).toEqual([
       7,
       "jee_main",
       true,
@@ -590,7 +591,9 @@ describe("curriculum config create helpers", () => {
   });
 
   it("maps database unique-constraint races to duplicate conflicts", async () => {
-    mockQuery.mockRejectedValueOnce({ code: "23505" });
+    mockQuery
+      .mockResolvedValueOnce([{ subject_id: 4 }])
+      .mockRejectedValueOnce({ code: "23505" });
 
     await expect(
       createCurriculumConfigRow({
@@ -733,6 +736,7 @@ describe("curriculum config edit helpers", () => {
 
   it("updates an existing config row with optimistic concurrency and audit fields only", async () => {
     mockQuery
+      .mockResolvedValueOnce([{ exam_track: "jee_main", subject_id: 4 }])
       .mockResolvedValueOnce([
         {
           failure_reason: null,
@@ -783,14 +787,14 @@ describe("curriculum config edit helpers", () => {
       warnings: [],
     });
 
-    const updateSql = mockQuery.mock.calls[0][0] as string;
+    const updateSql = mockQuery.mock.calls[1][0] as string;
     expect(updateSql).toContain("UPDATE lms_chapter_exam_configs cfg");
     expect(updateSql).toContain("cfg.xmin::text = $5");
     expect(updateSql).toContain("updated_by_email = $6");
     expect(updateSql).toContain("updated_at = (NOW() AT TIME ZONE 'UTC')");
     expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_logs/i);
     expect(updateSql).not.toMatch(/UPDATE\s+lms_curriculum_chapter_completions/i);
-    expect(mockQuery.mock.calls[0][1]).toEqual([
+    expect(mockQuery.mock.calls[1][1]).toEqual([
       42,
       true,
       120,
@@ -801,24 +805,26 @@ describe("curriculum config edit helpers", () => {
   });
 
   it("returns conflict for stale writes and rejects normal in-syllabus removal", async () => {
-    mockQuery.mockResolvedValueOnce([
-      {
-        failure_reason: "stale",
-        config_id: null,
-        chapter_id: null,
-        chapter_code: null,
-        chapter_name: null,
-        grade: null,
-        subject_id: null,
-        subject_name: null,
-        exam_track: null,
-        is_in_syllabus: null,
-        prescribed_minutes: null,
-        coverage_sequence: null,
-        updated_by_email: null,
-        updated_at: null,
-      },
-    ]);
+    mockQuery
+      .mockResolvedValueOnce([{ exam_track: "jee_main", subject_id: 4 }])
+      .mockResolvedValueOnce([
+        {
+          failure_reason: "stale",
+          config_id: null,
+          chapter_id: null,
+          chapter_code: null,
+          chapter_name: null,
+          grade: null,
+          subject_id: null,
+          subject_name: null,
+          exam_track: null,
+          is_in_syllabus: null,
+          prescribed_minutes: null,
+          coverage_sequence: null,
+          updated_by_email: null,
+          updated_at: null,
+        },
+      ]);
 
     await expect(
       editCurriculumConfigRow({
@@ -837,24 +843,26 @@ describe("curriculum config edit helpers", () => {
       error: "Curriculum Config row is stale",
     });
 
-    mockQuery.mockResolvedValueOnce([
-      {
-        failure_reason: "removal_not_allowed",
-        config_id: null,
-        chapter_id: null,
-        chapter_code: null,
-        chapter_name: null,
-        grade: null,
-        subject_id: null,
-        subject_name: null,
-        exam_track: null,
-        is_in_syllabus: null,
-        prescribed_minutes: null,
-        coverage_sequence: null,
-        updated_by_email: null,
-        updated_at: null,
-      },
-    ]);
+    mockQuery
+      .mockResolvedValueOnce([{ exam_track: "jee_main", subject_id: 4 }])
+      .mockResolvedValueOnce([
+        {
+          failure_reason: "removal_not_allowed",
+          config_id: null,
+          chapter_id: null,
+          chapter_code: null,
+          chapter_name: null,
+          grade: null,
+          subject_id: null,
+          subject_name: null,
+          exam_track: null,
+          is_in_syllabus: null,
+          prescribed_minutes: null,
+          coverage_sequence: null,
+          updated_by_email: null,
+          updated_at: null,
+        },
+      ]);
 
     await expect(
       editCurriculumConfigRow({
