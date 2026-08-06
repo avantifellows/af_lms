@@ -7,6 +7,9 @@ vi.mock("@/lib/db", () => ({
   query: vi.fn(),
   withTransaction: vi.fn(),
 }));
+vi.mock("@/lib/centre-resolver", () => ({
+  validateCentreExamTrackMapping: vi.fn(),
+}));
 vi.mock("@/lib/permissions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/permissions")>();
   const getUserPermission = vi.fn();
@@ -32,6 +35,7 @@ import {
   TEACHER_SESSION,
 } from "../../__test-utils__/api-test-helpers";
 import { resetCurriculumSchemaCheckForTests } from "@/lib/curriculum-schema";
+import { validateCentreExamTrackMapping } from "@/lib/centre-resolver";
 
 const mockSession = vi.mocked(getServerSession);
 const mockQuery = vi.mocked(query);
@@ -39,6 +43,7 @@ const mockWithTransaction = vi.mocked(withTransaction);
 const mockGetUserPermission = vi.mocked(getUserPermission);
 const mockGetFeatureAccess = vi.mocked(getFeatureAccess);
 const mockCanAccessSchoolSync = vi.mocked(canAccessSchoolSync);
+const mockValidateCentreExamTrackMapping = vi.mocked(validateCentreExamTrackMapping);
 
 function nextReq(url: string, init?: RequestInit) {
   return new NextRequest(new URL(url, "http://localhost"), init);
@@ -72,7 +77,40 @@ describe("/api/curriculum/logs", () => {
       canEdit: true,
     });
     mockCanAccessSchoolSync.mockReturnValue(true);
+    mockValidateCentreExamTrackMapping.mockResolvedValue({ ok: true });
     mockWithTransaction.mockImplementation(async (fn) => fn({ query: vi.fn() } as never));
+  });
+
+  it("rejects a new log when the Exam Track is not mapped to the resolved Centre and Grade", async () => {
+    mockValidateCentreExamTrackMapping.mockResolvedValue({
+      ok: false,
+      error: "No Exam Tracks configured for this Centre and Grade",
+    });
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ code: "70705", region: "AHMEDABAD" }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ id: 3 }]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "regular",
+        log_date: "2026-02-15",
+        duration_minutes: 90,
+        topic_ids: [101],
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "No Exam Tracks configured for this Centre and Grade",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
   it("lists non-deleted LMS Curriculum Logs with backend-shaped topics and historical editability", async () => {

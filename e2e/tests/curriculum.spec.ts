@@ -77,15 +77,15 @@ test.describe("Curriculum read path", () => {
     await expect(adminPage.getByLabel("Exam Track").locator("option")).toHaveText([
       "JEE Main",
       "JEE Advanced",
-      "NEET",
     ]);
     await expect(adminPage.getByText("1. Fixture Alpha Physics")).toBeVisible();
     await expect(adminPage.getByText("2. Fixture Beta Physics")).toBeVisible();
     await expect(adminPage.getByText(/Prescribed: 1h 30m/)).toBeVisible();
 
-    await adminPage.getByLabel("Exam Track").selectOption("neet");
+    await adminPage.getByLabel("Grade").selectOption("12");
 
     await expect(adminPage.getByLabel("Grade")).toHaveValue("12");
+    await expect(adminPage.getByLabel("Exam Track")).toHaveValue("neet");
     await expect(adminPage.getByLabel("Subject")).toHaveValue("Biology");
     await expect(
       adminPage.getByRole("heading", { name: "NEET Curriculum Progress" })

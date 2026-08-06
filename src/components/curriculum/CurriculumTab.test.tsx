@@ -136,10 +136,15 @@ const optionsResponse = {
     { id: 2, name: "JNV Nodal" },
   ],
   examTracks: ["jee_main", "neet"],
+  centreExamTracks: [
+    { examTrack: "jee_main", grade: 11, hasCurriculumConfig: true },
+    { examTrack: "neet", grade: 12, hasCurriculumConfig: true },
+  ],
   gradeSubjects: [
     { examTrack: "jee_main", grade: 11, gradeId: 3, subject: "Physics", subjectId: 4 },
     { examTrack: "neet", grade: 12, gradeId: 4, subject: "Biology", subjectId: 3 },
   ],
+  configurationError: null,
   defaults: {
     programId: 1,
     examTrack: "jee_main",
@@ -356,7 +361,7 @@ describe("CurriculumTab", () => {
     renderTab();
 
     await screen.findByTestId("chapter-accordion");
-    await user.selectOptions(screen.getByLabelText("Exam Track"), "neet");
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
 
     await waitFor(() => {
       expect(screen.getByLabelText("Grade")).toHaveValue("12");
@@ -382,12 +387,79 @@ describe("CurriculumTab", () => {
     );
   });
 
+  it("changes Exam Track options with Grade and blocks logging when mapped content is unavailable", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(
+      await mockOkJson({
+        ...optionsResponse,
+        examTracks: ["jee_main"],
+        centreExamTracks: [
+          { examTrack: "jee_main", grade: 11, hasCurriculumConfig: true },
+          { examTrack: "neet", grade: 12, hasCurriculumConfig: true },
+          { examTrack: "math_foundation", grade: 12, hasCurriculumConfig: false },
+        ],
+      })
+    );
+    renderTab();
+
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
+
+    expect(screen.getByLabelText("Exam Track").querySelectorAll("option")).toHaveLength(2);
+    await user.selectOptions(screen.getByLabelText("Exam Track"), "math_foundation");
+    expect(
+      await screen.findByText("Curriculum configuration is not available")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
+  });
+
+  it("reloads mapped Tracks when Program changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockImplementation((url: string) => {
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(optionsResponse);
+      }
+      if (url === "/api/curriculum/options?school_code=70705&program_id=2") {
+        return mockOkJson({
+          ...optionsResponse,
+          examTracks: ["cet"],
+          centreExamTracks: [
+            { examTrack: "cet", grade: 11, hasCurriculumConfig: false },
+          ],
+          gradeSubjects: [],
+          defaults: {
+            ...optionsResponse.defaults,
+            programId: 2,
+            examTrack: "cet",
+            subject: null,
+            subjectId: null,
+          },
+        });
+      }
+      if (url.includes("/api/curriculum/logs?")) return mockOkJson(logsResponse);
+      if (url.includes("/api/curriculum/progress?")) return mockOkJson(progressResponse);
+      return mockOkJson({ chapters: physicsChapters });
+    });
+    renderTab();
+
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Program"), "2");
+
+    expect(
+      await screen.findByText("Curriculum configuration is not available")
+    ).toBeInTheDocument();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/curriculum/options?school_code=70705&program_id=2"
+    );
+    expect(screen.getByLabelText("Exam Track")).toHaveValue("cet");
+  });
+
   it("opens Add Log with chapters from the active filter scope", async () => {
     const user = userEvent.setup();
     renderTab({ canEdit: true });
 
     await screen.findByTestId("chapter-accordion");
-    await user.selectOptions(screen.getByLabelText("Exam Track"), "neet");
+    await user.selectOptions(screen.getByLabelText("Grade"), "12");
     await waitFor(() =>
       expect(screen.getByTestId("chapter-accordion")).toHaveAttribute(
         "data-chapters",
@@ -822,6 +894,7 @@ describe("CurriculumTab", () => {
       await mockOkJson({
         ...optionsResponse,
         examTracks: [],
+        centreExamTracks: [],
         gradeSubjects: [],
         defaults: {
           programId: 1,
@@ -836,7 +909,33 @@ describe("CurriculumTab", () => {
 
     renderTab();
 
-    expect(await screen.findByText("No Curriculum configuration is available for this school.")).toBeInTheDocument();
+    expect(await screen.findByText("No Exam Tracks configured for this Centre and Grade")).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/curriculum/chapters"));
+  });
+
+  it("shows the Centre configuration error and blocks logging", async () => {
+    mockFetch.mockResolvedValueOnce(
+      await mockOkJson({
+        ...optionsResponse,
+        examTracks: [],
+        centreExamTracks: [],
+        gradeSubjects: [],
+        configurationError:
+          "Curriculum Centre configuration error: multiple active physical Centres are configured for this School and Program",
+        defaults: {
+          ...optionsResponse.defaults,
+          examTrack: null,
+          subject: null,
+          subjectId: null,
+        },
+      })
+    );
+
+    renderTab();
+
+    expect(
+      await screen.findByText(/multiple active physical Centres are configured/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
   });
 });

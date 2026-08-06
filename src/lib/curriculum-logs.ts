@@ -7,6 +7,7 @@ import {
   resolveCurriculumProgramScope,
   type CurriculumValidationFailure,
 } from "./curriculum-options";
+import { validateCentreExamTrackMapping } from "./centre-resolver";
 import { formatExamTrack, isExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { isFutureIST, isPastOrTodayIST } from "./curriculum-date-helpers";
@@ -763,6 +764,14 @@ export async function createCurriculumLog(params: {
     permission: params.permission,
   });
   if (!scope.ok) return scope;
+
+  const mapping = await validateCentreExamTrackMapping({
+    schoolCode: params.schoolCode,
+    programId: params.programId,
+    grade: scope.grade,
+    examTrack: scope.examTrack,
+  });
+  if (!mapping.ok) return { ok: false, status: 422, error: mapping.error };
 
   const curriculumId = curriculumIdForExamTrack(scope.examTrack);
   if (curriculumId === null) {

@@ -68,6 +68,27 @@ describe("curriculum schema preflight", () => {
     );
   });
 
+  it("checks the Centre mapping columns required by Curriculum options", async () => {
+    mockQuery.mockResolvedValue([]);
+
+    await checkCurriculumSchema();
+
+    const [, params] = mockQuery.mock.calls[0] as [string, string[]];
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "centres",
+        "school_id",
+        "program_id",
+        "is_active",
+        "is_physical",
+        "centre_exam_tracks",
+        "centre_id",
+        "grade_id",
+        "exam_track_code",
+      ])
+    );
+  });
+
   it("checks config-management id and audit columns separately", async () => {
     mockQuery.mockResolvedValue([
       { table_name: "lms_chapter_exam_configs", column_name: "id" },

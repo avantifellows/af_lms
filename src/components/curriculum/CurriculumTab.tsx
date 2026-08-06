@@ -240,16 +240,16 @@ export default function CurriculumTab({
     setSubjectTotalTimeMinutes(progressData.subjectTotalTimeMinutes);
   }, [schoolCode, selectedProgramId, selectedExamTrack, selectedGrade, selectedSubject]);
 
-  const gradeOptions = useMemo(() => {
-    if (!options || !selectedExamTrack) return [];
-    return Array.from(
-      new Map(
-        options.gradeSubjects
-          .filter((option) => option.examTrack === selectedExamTrack)
-          .map((option) => [option.grade, option])
-      ).values()
-    );
-  }, [options, selectedExamTrack]);
+  const gradeOptions: GradeNumber[] = [11, 12];
+
+  const examTrackOptions = useMemo(
+    () =>
+      options?.centreExamTracks.filter((option) => option.grade === selectedGrade) ?? [],
+    [options, selectedGrade]
+  );
+  const selectedTrackOption = examTrackOptions.find(
+    (option) => option.examTrack === selectedExamTrack
+  );
 
   const subjectOptions = useMemo(() => {
     if (!options || !selectedExamTrack || !selectedGrade) return [];
@@ -277,22 +277,52 @@ export default function CurriculumTab({
   }, []);
 
   function handleExamTrackChange(track: ExamTrack) {
-    const first = selectFirstGradeSubject(options?.gradeSubjects ?? [], track);
+    const first = selectFirstGradeSubject(
+      options?.gradeSubjects ?? [],
+      track,
+      selectedGrade
+    );
     resetScopeInteractionState();
     setSelectedExamTrack(track);
-    setSelectedGrade(first?.grade ?? null);
     setSelectedSubject(first?.subject ?? null);
   }
 
   function handleGradeChange(grade: GradeNumber) {
+    const trackOption =
+      options?.centreExamTracks.find(
+        (option) => option.grade === grade && option.hasCurriculumConfig
+      ) ?? options?.centreExamTracks.find((option) => option.grade === grade) ?? null;
     const first = selectFirstGradeSubject(
       options?.gradeSubjects ?? [],
-      selectedExamTrack,
+      trackOption?.examTrack ?? null,
       grade
     );
     resetScopeInteractionState();
     setSelectedGrade(grade);
+    setSelectedExamTrack(trackOption?.examTrack ?? null);
     setSelectedSubject(first?.subject ?? null);
+  }
+
+  async function handleProgramChange(programId: number) {
+    resetScopeInteractionState();
+    setIsOptionsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/curriculum/options?school_code=${encodeURIComponent(schoolCode)}&program_id=${programId}`
+      );
+      if (!response.ok) throw new Error("Failed to fetch Curriculum options");
+      const data = (await response.json()) as CurriculumOptionsResponse;
+      setOptions(data);
+      setSelectedProgramId(data.defaults.programId);
+      setSelectedExamTrack(data.defaults.examTrack);
+      setSelectedGrade(data.defaults.grade);
+      setSelectedSubject(data.defaults.subject);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setIsOptionsLoading(false);
+    }
   }
 
   async function handleSaveLog(payload: {
@@ -461,11 +491,13 @@ export default function CurriculumTab({
     }
   }
 
-  const hasEmptyConfig =
+  const hasNoMappedTracks =
     !isOptionsLoading &&
     options != null &&
     options.programs.length > 0 &&
-    options.examTracks.length === 0;
+    examTrackOptions.length === 0 &&
+    options.configurationError == null;
+  const hasUnavailableTrack = selectedTrackOption?.hasCurriculumConfig === false;
   const hasNoPrograms =
     !isOptionsLoading && options != null && options.programs.length === 0;
 
@@ -501,8 +533,7 @@ export default function CurriculumTab({
                 id="curriculum-program"
                 value={selectedProgramId ?? ""}
                 onChange={(event) => {
-                  resetScopeInteractionState();
-                  setSelectedProgramId(Number(event.target.value));
+                  void handleProgramChange(Number(event.target.value));
                 }}
                 className="block w-36 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20"
               >
@@ -517,28 +548,6 @@ export default function CurriculumTab({
 
           <div>
             <label
-              htmlFor="exam-track"
-              className="block text-xs font-medium text-gray-700 mb-1"
-            >
-              Exam Track
-            </label>
-            <select
-              id="exam-track"
-              value={selectedExamTrack ?? ""}
-              disabled={!options || options.examTracks.length === 0}
-              onChange={(event) => handleExamTrackChange(event.target.value as ExamTrack)}
-              className="block w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
-            >
-              {options?.examTracks.map((track) => (
-                <option key={track} value={track}>
-                  {examTrackLabel(track)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label
               htmlFor="grade"
               className="block text-xs font-medium text-gray-700 mb-1"
             >
@@ -547,15 +556,37 @@ export default function CurriculumTab({
             <select
               id="grade"
               value={selectedGrade ?? ""}
-              disabled={gradeOptions.length === 0}
+              disabled={!options || options.programs.length === 0}
               onChange={(event) =>
                 handleGradeChange(Number(event.target.value) as GradeNumber)
               }
               className="block w-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
             >
-              {gradeOptions.map((option) => (
-                <option key={option.grade} value={option.grade}>
-                  {option.grade}
+              {gradeOptions.map((grade) => (
+                <option key={grade} value={grade}>
+                  {grade}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="exam-track"
+              className="block text-xs font-medium text-gray-700 mb-1"
+            >
+              Exam Track
+            </label>
+            <select
+              id="exam-track"
+              value={selectedExamTrack ?? ""}
+              disabled={examTrackOptions.length === 0}
+              onChange={(event) => handleExamTrackChange(event.target.value as ExamTrack)}
+              className="block w-40 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
+            >
+              {examTrackOptions.map((option) => (
+                <option key={option.examTrack} value={option.examTrack}>
+                  {examTrackLabel(option.examTrack)}
                 </option>
               ))}
             </select>
@@ -624,9 +655,17 @@ export default function CurriculumTab({
         <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
           No curriculum-enabled Programs are available for this school.
         </div>
-      ) : hasEmptyConfig ? (
+      ) : options?.configurationError ? (
+        <div className="bg-red-50 text-red-700 p-4 rounded-lg">
+          {options.configurationError}
+        </div>
+      ) : hasNoMappedTracks ? (
         <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
-          No Curriculum configuration is available for this school.
+          No Exam Tracks configured for this Centre and Grade
+        </div>
+      ) : hasUnavailableTrack ? (
+        <div className="bg-bg-card border border-border rounded-lg shadow-sm p-8 text-center text-gray-500">
+          Curriculum configuration is not available
         </div>
       ) : (
         <>

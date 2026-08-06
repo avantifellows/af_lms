@@ -112,10 +112,18 @@ export interface CurriculumGradeSubjectOption {
   subjectId: number;
 }
 
+export interface CurriculumCentreExamTrackOption {
+  examTrack: ExamTrack;
+  grade: GradeNumber;
+  hasCurriculumConfig: boolean;
+}
+
 export interface CurriculumOptionsResponse {
   programs: CurriculumProgramOption[];
   examTracks: ExamTrack[];
+  centreExamTracks: CurriculumCentreExamTrackOption[];
   gradeSubjects: CurriculumGradeSubjectOption[];
+  configurationError: string | null;
   defaults: {
     programId: number | null;
     examTrack: ExamTrack | null;

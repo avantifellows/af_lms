@@ -16,6 +16,13 @@ export type CurriculumSchemaStatus =
   | CurriculumSchemaUnavailable;
 
 const REQUIRED_COLUMNS: Array<{ table: string; column: string }> = [
+  { table: "centres", column: "school_id" },
+  { table: "centres", column: "program_id" },
+  { table: "centres", column: "is_active" },
+  { table: "centres", column: "is_physical" },
+  { table: "centre_exam_tracks", column: "centre_id" },
+  { table: "centre_exam_tracks", column: "grade_id" },
+  { table: "centre_exam_tracks", column: "exam_track_code" },
   { table: "lms_chapter_exam_configs", column: "chapter_id" },
   { table: "lms_chapter_exam_configs", column: "exam_track" },
   { table: "lms_chapter_exam_configs", column: "is_in_syllabus" },

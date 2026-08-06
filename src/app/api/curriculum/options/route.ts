@@ -67,7 +67,9 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     programs: result.programs,
     examTracks: result.examTracks,
+    centreExamTracks: result.centreExamTracks,
     gradeSubjects: result.gradeSubjects,
+    configurationError: result.configurationError,
     defaults: result.defaults,
   });
 }

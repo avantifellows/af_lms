@@ -1,6 +1,8 @@
 import { compareCurriculumCodes } from "./curriculum-code-sort";
 import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
+import { resolveActivePhysicalCentre } from "./centre-resolver";
+import { GRADE_IDS } from "@/types/curriculum";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
   canAccessSchoolSync,
@@ -43,6 +45,11 @@ interface ConfigScopeRow {
   grade: number;
   subject_id: number;
   subject: unknown;
+}
+
+interface CentreExamTrackRow {
+  exam_track: ExamTrack;
+  grade: number;
 }
 
 interface ChapterScopeRow {
@@ -241,7 +248,9 @@ export async function getCurriculumOptions(params: {
       ok: true,
       programs: [],
       examTracks: [],
+      centreExamTracks: [],
       gradeSubjects: [],
+      configurationError: null,
       defaults: {
         programId: null,
         examTrack: null,
@@ -252,6 +261,47 @@ export async function getCurriculumOptions(params: {
       },
     };
   }
+
+  const overrideProgramId =
+    params.programIdOverride != null &&
+    scope.allowedProgramIds.includes(params.programIdOverride)
+      ? params.programIdOverride
+      : null;
+  const selectedProgramId =
+    overrideProgramId ?? scope.preferredProgramId ?? scope.programs[0]?.id ?? null;
+  const centre = await resolveActivePhysicalCentre({
+    schoolCode: params.schoolCode,
+    programId: selectedProgramId as number,
+  });
+
+  if (!centre.ok) {
+    return {
+      ok: true,
+      programs: scope.programs,
+      examTracks: [],
+      centreExamTracks: [],
+      gradeSubjects: [],
+      configurationError: centre.error,
+      defaults: {
+        programId: selectedProgramId,
+        examTrack: null,
+        grade: 11,
+        gradeId: GRADE_IDS[11],
+        subject: null,
+        subjectId: null,
+      },
+    };
+  }
+
+  const mappedRows = await query<CentreExamTrackRow>(
+    `SELECT mapping.exam_track_code AS exam_track, grade.number AS grade
+     FROM centre_exam_tracks mapping
+     JOIN grade ON grade.id = mapping.grade_id
+     WHERE mapping.centre_id = $1
+       AND grade.number = ANY($2::int[])
+     ORDER BY grade.number, mapping.exam_track_code`,
+    [centre.centre.id, [11, 12]]
+  );
 
   const configRows = await query<ConfigScopeRow>(
     `SELECT DISTINCT
@@ -267,7 +317,12 @@ export async function getCurriculumOptions(params: {
      WHERE cfg.is_in_syllabus = true`,
   );
 
-  const gradeSubjects = sortByCurriculumOrder(
+  const mappedKeys = new Set(
+    mappedRows
+      .filter((row) => isExamTrack(row.exam_track) && isGradeNumber(row.grade))
+      .map((row) => `${row.exam_track}:${row.grade}`)
+  );
+  const allGradeSubjects = sortByCurriculumOrder(
     configRows
       .map((row) => ({
         examTrack: row.exam_track,
@@ -283,26 +338,52 @@ export async function getCurriculumOptions(params: {
           isSubjectName(row.subject)
       )
   );
-
-  const configuredTracks = new Set(gradeSubjects.map((row) => row.examTrack));
-  const examTracks = EXAM_TRACKS.filter((track) => configuredTracks.has(track));
-  const firstGradeSubject = gradeSubjects[0] ?? null;
-  const overrideProgramId =
-    params.programIdOverride != null &&
-    scope.allowedProgramIds.includes(params.programIdOverride)
-      ? params.programIdOverride
-      : null;
+  const gradeSubjects = allGradeSubjects.filter((row) =>
+    mappedKeys.has(`${row.examTrack}:${row.grade}`)
+  );
+  const configuredKeys = new Set(
+    gradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
+  );
+  const centreExamTracks = mappedRows
+    .filter(
+      (row): row is CentreExamTrackRow & { grade: GradeNumber } =>
+        isExamTrack(row.exam_track) && isGradeNumber(row.grade)
+    )
+    .map((row) => ({
+      examTrack: row.exam_track,
+      grade: row.grade,
+      hasCurriculumConfig: configuredKeys.has(`${row.exam_track}:${row.grade}`),
+    }))
+    .sort((a, b) =>
+      a.grade === b.grade
+        ? EXAM_TRACKS.indexOf(a.examTrack) - EXAM_TRACKS.indexOf(b.examTrack)
+        : a.grade - b.grade
+    );
+  const defaultGrade = centreExamTracks[0]?.grade ?? 11;
+  const defaultTrackOption =
+    centreExamTracks.find(
+      (option) => option.grade === defaultGrade && option.hasCurriculumConfig
+    ) ?? centreExamTracks.find((option) => option.grade === defaultGrade) ?? null;
+  const examTracks = centreExamTracks
+    .filter((option) => option.grade === defaultGrade)
+    .map((option) => option.examTrack);
+  const firstGradeSubject = gradeSubjects.find(
+    (row) =>
+      row.grade === defaultGrade && row.examTrack === defaultTrackOption?.examTrack
+  ) ?? null;
 
   return {
     ok: true,
     programs: scope.programs,
     examTracks,
+    centreExamTracks,
     gradeSubjects,
+    configurationError: null,
     defaults: {
-      programId: overrideProgramId ?? scope.preferredProgramId ?? scope.programs[0]?.id ?? null,
-      examTrack: examTracks[0] ?? null,
-      grade: firstGradeSubject?.grade ?? null,
-      gradeId: firstGradeSubject?.gradeId ?? null,
+      programId: selectedProgramId,
+      examTrack: defaultTrackOption?.examTrack ?? null,
+      grade: defaultGrade,
+      gradeId: GRADE_IDS[defaultGrade],
       subject: firstGradeSubject?.subject ?? null,
       subjectId: firstGradeSubject?.subjectId ?? null,
     },
