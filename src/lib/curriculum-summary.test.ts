@@ -65,8 +65,6 @@ describe("curriculum summary", () => {
           subjects: [{ id: 4, name: "Physics" }],
           exam_tracks: ["jee_main"],
           regions: ["West"],
-          states: ["Gujarat"],
-          districts: ["Bhavnagar"],
         },
       ])
       .mockResolvedValueOnce(guardRows())
@@ -138,8 +136,6 @@ describe("curriculum summary", () => {
         subjects: [{ id: 4, name: "Physics" }],
         examTracks: ["jee_main"],
         regions: ["West"],
-        states: ["Gujarat"],
-        districts: ["Bhavnagar"],
       },
       rows: [
         {
@@ -176,8 +172,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(2))
@@ -266,8 +260,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(1))
@@ -311,8 +303,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(0))
@@ -425,6 +415,31 @@ describe("curriculum summary", () => {
     });
   });
 
+  it("ignores retired State and District URL parameters", () => {
+    const filters = normalizeCurriculumSummarySearchParams(
+      { regions: "West", states: "Gujarat", districts: "Bhavnagar" },
+      "2026-05-30"
+    );
+
+    expect(filters.regions).toEqual(["West"]);
+    expect(filters).not.toHaveProperty("states");
+    expect(filters).not.toHaveProperty("districts");
+    expect(buildCommonQueryParams(pmPermission, filters)).toEqual([
+      true,
+      null,
+      null,
+      [1, 2, 74, 94, 78, 88],
+      false,
+      [1, 2],
+      null,
+      null,
+      null,
+      null,
+      null,
+      ["West"],
+    ]);
+  });
+
   it("normalizes supported sort keys with a safe deterministic default", () => {
     expect(normalizeCurriculumSummarySort(undefined, undefined)).toEqual({
       sort: "flagged",
@@ -472,8 +487,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: ["West"],
-          states: ["Gujarat"],
-          districts: ["Bhavnagar"],
         },
       ])
       .mockResolvedValueOnce(guardRows(0))
@@ -549,8 +562,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]);
 
@@ -602,8 +613,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
       {
@@ -659,8 +668,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
       {
@@ -690,14 +697,14 @@ describe("curriculum summary", () => {
 
     const statsCall = mockQuery.mock.calls[2];
     const rowsCall = mockQuery.mock.calls[3];
-    expect(statsCall[1].slice(14)).toEqual(["2026-05-01", "2026-05-30", true]);
-    expect(rowsCall[1].slice(14, 17)).toEqual([
+    expect(statsCall[1].slice(12)).toEqual(["2026-05-01", "2026-05-30", true]);
+    expect(rowsCall[1].slice(12, 15)).toEqual([
       "2026-05-01",
       "2026-05-30",
       true,
     ]);
     expect(String(rowsCall[0])).toContain(
-      "WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)"
+      "WHERE ($15::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)"
     );
   });
 
@@ -710,8 +717,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(20)).mockResolvedValueOnce([
       {
@@ -740,7 +745,7 @@ describe("curriculum summary", () => {
     expect(rowsSql).toContain(
       "ORDER BY flagged DESC, flag_priority ASC, delta_percent ASC NULLS LAST, school_name ASC, program_order ASC, grade ASC, subject_name ASC, exam_track ASC, school_code ASC"
     );
-    expect(rowsSql.indexOf("ORDER BY")).toBeLessThan(rowsSql.indexOf("LIMIT $18 OFFSET $19"));
+    expect(rowsSql.indexOf("ORDER BY")).toBeLessThan(rowsSql.indexOf("LIMIT $16 OFFSET $17"));
     expect(mockQuery.mock.calls[3][1].slice(-2)).toEqual([10, 10]);
   });
 
@@ -753,8 +758,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(2)).mockResolvedValueOnce([
       {
@@ -794,8 +797,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(10001));
@@ -832,8 +833,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(11))
@@ -879,8 +878,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(12))

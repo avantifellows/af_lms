@@ -31,8 +31,6 @@ export interface CurriculumSummaryFilters {
   subjects: number[];
   examTracks: ExamTrack[];
   regions: string[];
-  states: string[];
-  districts: string[];
   preset: CurriculumSummaryDatePreset;
   from?: string;
   to?: string;
@@ -76,8 +74,6 @@ export interface CurriculumSummaryFilterOptions {
   subjects: CurriculumSummarySubjectOption[];
   examTracks: ExamTrack[];
   regions: string[];
-  states: string[];
-  districts: string[];
 }
 
 export interface CurriculumSummaryStats {
@@ -167,8 +163,6 @@ interface OptionsQueryRow {
   subjects: unknown;
   exam_tracks: unknown;
   regions: unknown;
-  states: unknown;
-  districts: unknown;
 }
 
 interface SummaryQueryRow {
@@ -259,8 +253,6 @@ export function normalizeCurriculumSummarySearchParams(
     subjects: parseNumberList(searchParams.subjects),
     examTracks: parseStringList(searchParams.exam_tracks, isExamTrack),
     regions: parseStringList(searchParams.regions),
-    states: parseStringList(searchParams.states),
-    districts: parseStringList(searchParams.districts),
     preset,
     from,
     to,
@@ -406,8 +398,6 @@ export function buildCommonQueryParams(
     filters.subjects.length ? filters.subjects : null,
     filters.examTracks.length ? filters.examTracks : null,
     filters.regions.length ? filters.regions : null,
-    filters.states.length ? filters.states : null,
-    filters.districts.length ? filters.districts : null,
   ];
 }
 
@@ -497,8 +487,6 @@ function buildScopedUniverseSql(): string {
         AND ($10::int[] IS NULL OR subject_id = ANY($10::int[]))
         AND ($11::text[] IS NULL OR exam_track = ANY($11::text[]))
         AND ($12::text[] IS NULL OR region = ANY($12::text[]))
-        AND ($13::text[] IS NULL OR state = ANY($13::text[]))
-        AND ($14::text[] IS NULL OR district = ANY($14::text[]))
     )`;
 }
 
@@ -536,8 +524,8 @@ function buildComputedRowsSql(): string {
        AND l.exam_track = fr.exam_track
        AND l.log_type = 'regular'
        AND l.deleted_at IS NULL
-       AND ($15::date IS NULL OR l.log_date >= $15::date)
-       AND ($16::date IS NULL OR l.log_date <= $16::date)
+       AND ($13::date IS NULL OR l.log_date >= $13::date)
+       AND ($14::date IS NULL OR l.log_date <= $14::date)
       GROUP BY fr.school_code, fr.program_id, fr.grade_id, fr.subject_id, fr.exam_track
     ),
     completion_counts AS (
@@ -644,7 +632,7 @@ function buildComputedRowsSql(): string {
           ELSE 2
         END AS flag_priority
       FROM computed_rows cr
-      WHERE ($17::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
+      WHERE ($15::boolean = false OR CARDINALITY(cr.flag_reasons) > 0)
     )`;
 }
 
@@ -677,8 +665,6 @@ function buildOptionsSql(): string {
       WHERE ($7::text[] IS NULL OR school_code = ANY($7::text[]))
         AND ($8::int[] IS NULL OR program_id = ANY($8::int[]))
         AND ($12::text[] IS NULL OR region = ANY($12::text[]))
-        AND ($13::text[] IS NULL OR state = ANY($13::text[]))
-        AND ($14::text[] IS NULL OR district = ANY($14::text[]))
     ),
     subject_filter_option_rows AS (
       SELECT *
@@ -707,9 +693,7 @@ function buildOptionsSql(): string {
     ),
     geo_options AS (
       SELECT
-        COALESCE(jsonb_agg(DISTINCT region) FILTER (WHERE region IS NOT NULL), '[]'::jsonb) AS regions,
-        COALESCE(jsonb_agg(DISTINCT state) FILTER (WHERE state IS NOT NULL), '[]'::jsonb) AS states,
-        COALESCE(jsonb_agg(DISTINCT district) FILTER (WHERE district IS NOT NULL), '[]'::jsonb) AS districts
+        COALESCE(jsonb_agg(DISTINCT region) FILTER (WHERE region IS NOT NULL), '[]'::jsonb) AS regions
       FROM scoped_schools
     )
     SELECT
@@ -745,9 +729,7 @@ function buildOptionsSql(): string {
         SELECT COALESCE(jsonb_agg(exam_track ORDER BY exam_track), '[]'::jsonb)
         FROM exam_track_options
       ) AS exam_tracks,
-      geo_options.regions,
-      geo_options.states,
-      geo_options.districts
+      geo_options.regions
     FROM geo_options`;
 }
 
@@ -789,7 +771,7 @@ function buildRowsSql(
       flag_reasons
     FROM computed_filtered_rows
     ORDER BY ${buildOrderClause(sort, dir)}
-    LIMIT $18 OFFSET $19`;
+    LIMIT $16 OFFSET $17`;
 }
 
 function buildChapterRowsSql(
@@ -803,7 +785,7 @@ function buildChapterRowsSql(
         ROW_NUMBER() OVER (ORDER BY ${buildOrderClause(sort, dir)}) AS page_row_order
       FROM computed_filtered_rows
       ORDER BY ${buildOrderClause(sort, dir)}
-      LIMIT $18 OFFSET $19
+      LIMIT $16 OFFSET $17
     ),
     scoped_log_topics AS (
       SELECT
@@ -833,8 +815,8 @@ function buildChapterRowsSql(
        AND l.exam_track = cpr.exam_track
        AND l.log_type = 'regular'
        AND l.deleted_at IS NULL
-       AND ($15::date IS NULL OR l.log_date >= $15::date)
-       AND ($16::date IS NULL OR l.log_date <= $16::date)
+       AND ($13::date IS NULL OR l.log_date >= $13::date)
+       AND ($14::date IS NULL OR l.log_date <= $14::date)
       JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
     ),
     chapter_log_allocations AS (
@@ -1042,8 +1024,6 @@ function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFi
       parseJsonArray<string>(row?.exam_tracks).includes(track)
     ),
     regions: parseJsonArray<string>(row?.regions).map(String).sort(),
-    states: parseJsonArray<string>(row?.states).map(String).sort(),
-    districts: parseJsonArray<string>(row?.districts).map(String).sort(),
   };
 }
 
