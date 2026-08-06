@@ -52,6 +52,8 @@ interface CentreExamTrackRow {
   grade: number;
 }
 
+type HistoricalLogScopeRow = ConfigScopeRow;
+
 interface ChapterScopeRow {
   chapter_id: number;
   chapter_code: string;
@@ -316,6 +318,21 @@ export async function getCurriculumOptions(params: {
      JOIN subject s ON s.id = ch.subject_id
      WHERE cfg.is_in_syllabus = true`,
   );
+  const historicalLogRows = await query<HistoricalLogScopeRow>(
+    `SELECT DISTINCT
+       logs.exam_track,
+       grade.id AS grade_id,
+       grade.number AS grade,
+       subject.id AS subject_id,
+       subject.name AS subject
+     FROM lms_curriculum_logs logs
+     JOIN grade ON grade.id = logs.grade_id
+     JOIN subject ON subject.id = logs.subject_id
+     WHERE logs.school_code = $1
+       AND logs.program_id = $2
+       AND logs.deleted_at IS NULL`,
+    [params.schoolCode, selectedProgramId]
+  );
 
   const mappedKeys = new Set(
     mappedRows
@@ -338,32 +355,79 @@ export async function getCurriculumOptions(params: {
           isSubjectName(row.subject)
       )
   );
-  const gradeSubjects = allGradeSubjects.filter((row) =>
+  const mappedGradeSubjects = allGradeSubjects.filter((row) =>
     mappedKeys.has(`${row.examTrack}:${row.grade}`)
   );
   const configuredKeys = new Set(
-    gradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
+    allGradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
   );
-  const centreExamTracks = mappedRows
+  const historicalGradeSubjects = sortByCurriculumOrder(
+    historicalLogRows
+      .map((row) => ({
+        examTrack: row.exam_track,
+        grade: row.grade as GradeNumber,
+        gradeId: Number(row.grade_id),
+        subject: normalizeSubjectName(row.subject),
+        subjectId: Number(row.subject_id),
+      }))
+      .filter(
+        (row) =>
+          isExamTrack(row.examTrack) &&
+          isGradeNumber(row.grade) &&
+          isSubjectName(row.subject)
+      )
+  );
+  const gradeSubjects = sortByCurriculumOrder(
+    [...mappedGradeSubjects, ...historicalGradeSubjects].filter(
+      (row, index, rows) =>
+        rows.findIndex(
+          (candidate) =>
+            candidate.examTrack === row.examTrack &&
+            candidate.grade === row.grade &&
+            candidate.subjectId === row.subjectId
+        ) === index
+    )
+  );
+  const historicalKeys = new Set(
+    historicalGradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
+  );
+  const centreExamTracks = [...mappedKeys, ...historicalKeys]
+    .map((key) => {
+      const [examTrack, rawGrade] = key.split(":");
+      return { examTrack, grade: Number(rawGrade) };
+    })
     .filter(
-      (row): row is CentreExamTrackRow & { grade: GradeNumber } =>
-        isExamTrack(row.exam_track) && isGradeNumber(row.grade)
+      (row): row is { examTrack: ExamTrack; grade: GradeNumber } =>
+        isExamTrack(row.examTrack) && isGradeNumber(row.grade)
     )
     .map((row) => ({
-      examTrack: row.exam_track,
+      examTrack: row.examTrack,
       grade: row.grade,
-      hasCurriculumConfig: configuredKeys.has(`${row.exam_track}:${row.grade}`),
+      hasCurriculumConfig: configuredKeys.has(`${row.examTrack}:${row.grade}`),
+      isMapped: mappedKeys.has(`${row.examTrack}:${row.grade}`),
+      hasHistoricalLogs: historicalKeys.has(`${row.examTrack}:${row.grade}`),
     }))
     .sort((a, b) =>
       a.grade === b.grade
-        ? EXAM_TRACKS.indexOf(a.examTrack) - EXAM_TRACKS.indexOf(b.examTrack)
+        ? Number(b.isMapped) - Number(a.isMapped) ||
+          EXAM_TRACKS.indexOf(a.examTrack) - EXAM_TRACKS.indexOf(b.examTrack)
         : a.grade - b.grade
     );
-  const defaultGrade = centreExamTracks[0]?.grade ?? 11;
+  const defaultGrade = centreExamTracks.find((option) => option.isMapped)?.grade ??
+    centreExamTracks[0]?.grade ??
+    11;
   const defaultTrackOption =
     centreExamTracks.find(
-      (option) => option.grade === defaultGrade && option.hasCurriculumConfig
-    ) ?? centreExamTracks.find((option) => option.grade === defaultGrade) ?? null;
+      (option) =>
+        option.grade === defaultGrade &&
+        option.isMapped &&
+        option.hasCurriculumConfig
+    ) ??
+    centreExamTracks.find(
+      (option) => option.grade === defaultGrade && option.isMapped
+    ) ??
+    centreExamTracks.find((option) => option.grade === defaultGrade) ??
+    null;
   const examTracks = centreExamTracks
     .filter((option) => option.grade === defaultGrade)
     .map((option) => option.examTrack);

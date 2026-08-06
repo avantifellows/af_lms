@@ -161,8 +161,20 @@ const optionsResponse = {
   ],
   examTracks: ["jee_main", "neet"],
   centreExamTracks: [
-    { examTrack: "jee_main", grade: 11, hasCurriculumConfig: true },
-    { examTrack: "neet", grade: 12, hasCurriculumConfig: true },
+    {
+      examTrack: "jee_main",
+      grade: 11,
+      hasCurriculumConfig: true,
+      isMapped: true,
+      hasHistoricalLogs: false,
+    },
+    {
+      examTrack: "neet",
+      grade: 12,
+      hasCurriculumConfig: true,
+      isMapped: true,
+      hasHistoricalLogs: false,
+    },
   ],
   gradeSubjects: [
     { examTrack: "jee_main", grade: 11, gradeId: 3, subject: "Physics", subjectId: 4 },
@@ -418,9 +430,27 @@ describe("CurriculumTab", () => {
         ...optionsResponse,
         examTracks: ["jee_main"],
         centreExamTracks: [
-          { examTrack: "jee_main", grade: 11, hasCurriculumConfig: true },
-          { examTrack: "neet", grade: 12, hasCurriculumConfig: true },
-          { examTrack: "math_foundation", grade: 12, hasCurriculumConfig: false },
+          {
+            examTrack: "jee_main",
+            grade: 11,
+            hasCurriculumConfig: true,
+            isMapped: true,
+            hasHistoricalLogs: false,
+          },
+          {
+            examTrack: "neet",
+            grade: 12,
+            hasCurriculumConfig: true,
+            isMapped: true,
+            hasHistoricalLogs: false,
+          },
+          {
+            examTrack: "math_foundation",
+            grade: 12,
+            hasCurriculumConfig: false,
+            isMapped: true,
+            hasHistoricalLogs: false,
+          },
         ],
       })
     );
@@ -437,6 +467,62 @@ describe("CurriculumTab", () => {
     expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
   });
 
+  it("shows retained history for an unmapped Track without allowing changes", async () => {
+    const user = userEvent.setup();
+    const historicalOptions = {
+      ...optionsResponse,
+      examTracks: ["jee_main", "jee_advanced"],
+      centreExamTracks: [
+        optionsResponse.centreExamTracks[0],
+        {
+          examTrack: "jee_advanced",
+          grade: 11,
+          hasCurriculumConfig: true,
+          isMapped: false,
+          hasHistoricalLogs: true,
+        },
+      ],
+      gradeSubjects: [
+        ...optionsResponse.gradeSubjects,
+        {
+          examTrack: "jee_advanced",
+          grade: 11,
+          gradeId: 3,
+          subject: "Physics",
+          subjectId: 4,
+        },
+      ],
+    };
+    mockFetch.mockImplementation((url: string) => {
+      if (url === "/api/curriculum/options?school_code=70705") {
+        return mockOkJson(historicalOptions);
+      }
+      if (url.includes("/api/curriculum/logs?")) return mockOkJson(logsResponse);
+      if (url.includes("/api/curriculum/progress?")) return mockOkJson(progressResponse);
+      return mockOkJson({ chapters: physicsChapters });
+    });
+
+    renderTab({ canEdit: true });
+    await screen.findByTestId("chapter-accordion");
+    await user.selectOptions(screen.getByLabelText("Exam Track"), "jee_advanced");
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("exam_track=jee_advanced")
+      );
+    });
+    expect(
+      screen.getByRole("option", { name: "JEE Advanced (history only)" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Log a class" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Mark Chapter Row" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Logs" }));
+    expect(screen.getByTestId("session-history")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit log 10" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete log 10" })).not.toBeInTheDocument();
+  });
+
   it("reloads mapped Tracks when Program changes", async () => {
     const user = userEvent.setup();
     mockFetch.mockImplementation((url: string) => {
@@ -448,7 +534,13 @@ describe("CurriculumTab", () => {
           ...optionsResponse,
           examTracks: ["cet"],
           centreExamTracks: [
-            { examTrack: "cet", grade: 11, hasCurriculumConfig: false },
+            {
+              examTrack: "cet",
+              grade: 11,
+              hasCurriculumConfig: false,
+              isMapped: true,
+              hasHistoricalLogs: false,
+            },
           ],
           gradeSubjects: [],
           defaults: {

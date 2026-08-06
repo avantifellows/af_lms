@@ -115,6 +115,8 @@ export interface CurriculumCentreExamTrackOption {
   examTrack: ExamTrack;
   grade: GradeNumber;
   hasCurriculumConfig: boolean;
+  isMapped: boolean;
+  hasHistoricalLogs: boolean;
 }
 
 export interface CurriculumOptionsResponse {

@@ -797,11 +797,11 @@ export async function createCurriculumLog(params: {
   const isClassCancelled = logType === "class_cancelled";
   const isDoubtSolving = logType === "doubt_solving";
   const isChapterBacked = isClassCancelled || isDoubtSolving;
-  if (isDoubtSolving && hasCompletionDeltas) {
+  if (isChapterBacked && hasCompletionDeltas) {
     return {
       ok: false,
       status: 422,
-      error: "Doubt Solving logs cannot include Chapter Completion changes",
+      error: `${isClassCancelled ? "Class Cancelled" : "Doubt Solving"} logs cannot include Chapter Completion changes`,
     };
   }
   if (!isChapterBacked && topicIds.length === 0 && !hasCompletionDeltas) {

@@ -303,8 +303,14 @@ export default function CurriculumTab({
   function handleGradeChange(grade: GradeNumber) {
     const trackOption =
       options?.centreExamTracks.find(
-        (option) => option.grade === grade && option.hasCurriculumConfig
-      ) ?? options?.centreExamTracks.find((option) => option.grade === grade) ?? null;
+        (option) =>
+          option.grade === grade && option.isMapped && option.hasCurriculumConfig
+      ) ??
+      options?.centreExamTracks.find(
+        (option) => option.grade === grade && option.isMapped
+      ) ??
+      options?.centreExamTracks.find((option) => option.grade === grade) ??
+      null;
     const first = selectFirstGradeSubject(
       options?.gradeSubjects ?? [],
       trackOption?.examTrack ?? null,
@@ -516,7 +522,11 @@ export default function CurriculumTab({
     options.programs.length > 0 &&
     examTrackOptions.length === 0 &&
     options.configurationError == null;
-  const hasUnavailableTrack = selectedTrackOption?.hasCurriculumConfig === false;
+  const isHistoricalTrack = selectedTrackOption?.isMapped === false;
+  const canMutateScope = canEdit && !isHistoricalTrack;
+  const hasUnavailableTrack =
+    selectedTrackOption?.hasCurriculumConfig === false &&
+    !selectedTrackOption.hasHistoricalLogs;
   const hasNoPrograms =
     !isOptionsLoading && options != null && options.programs.length === 0;
 
@@ -606,6 +616,7 @@ export default function CurriculumTab({
               {examTrackOptions.map((option) => (
                 <option key={option.examTrack} value={option.examTrack}>
                   {examTrackLabel(option.examTrack)}
+                  {!option.isMapped ? " (history only)" : ""}
                 </option>
               ))}
             </select>
@@ -646,7 +657,12 @@ export default function CurriculumTab({
                 Log
               </span>
               <button
-                disabled={!selectedProgramId || isDataLoading || chapters.length === 0}
+                disabled={
+                  !canMutateScope ||
+                  !selectedProgramId ||
+                  isDataLoading ||
+                  chapters.length === 0
+                }
                 onClick={() => {
                   setLogError(null);
                   setEditingLog(null);
@@ -729,7 +745,7 @@ export default function CurriculumTab({
                   {completionError}
                 </div>
               )}
-              {canEdit &&
+              {canMutateScope &&
                 chapters.length > 0 &&
                 (() => {
                   const stats = calculateStats(chapters, progress);
@@ -755,7 +771,7 @@ export default function CurriculumTab({
                 progress={progress}
                 expandedChapterIds={expandedChapterIds}
                 onToggleChapter={toggleChapter}
-                canEdit={canEdit}
+                canEdit={canMutateScope}
                 onToggleChapterCompletion={handleToggleChapterCompletion}
                 updatingChapterId={updatingCompletionChapterId}
               />
@@ -764,7 +780,7 @@ export default function CurriculumTab({
             <>
               <SessionHistory
                 logs={logs}
-                canEdit={canEdit}
+                canEdit={canMutateScope}
                 onEditLog={(log) => {
                   setLogError(null);
                   setEditingLog(log);

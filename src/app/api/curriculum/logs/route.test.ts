@@ -652,6 +652,38 @@ describe("/api/curriculum/logs", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("rejects Chapter Completion changes on a Class Cancelled log", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { code: "70705", region: "AHMEDABAD", program_ids: [1] },
+      ])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([
+        { chapter_id: 44, is_in_syllabus: true, active_completed_at: null },
+      ]);
+
+    const res = await POST(
+      jsonReq("/api/curriculum/logs", {
+        school_code: "70705",
+        program_id: 1,
+        exam_track: "jee_main",
+        grade: 11,
+        subject: "Physics",
+        log_type: "class_cancelled",
+        log_date: "2026-02-15",
+        chapter_id: 44,
+        complete_chapter_ids: [44],
+      })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error: "Class Cancelled logs cannot include Chapter Completion changes",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("rejects a second active Class Cancelled log for the same Chapter and date", async () => {
     mockQuery
       .mockResolvedValueOnce([])
