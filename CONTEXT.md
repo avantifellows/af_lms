@@ -220,6 +220,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Issue #252 replaces the legacy centre-level **Centre Stream** classification with grade-specific **Centre Exam Tracks**
 - A **Centre** can have multiple **Centre Exam Tracks** for one Grade
 - A **Centre** and Grade can have no **Centre Exam Tracks** assigned
+- Curriculum resolves one active physical **Centre** from the selected School and Program, then loads **Centre Exam Tracks** for that Centre and Grade
+- Curriculum fails closed when School and Program resolve to zero or multiple active physical **Centres**
 - **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
 - A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
