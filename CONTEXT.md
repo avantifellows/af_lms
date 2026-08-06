@@ -26,9 +26,9 @@ _Avoid_: Cohort, section
 An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
 _Avoid_: Course, stream
 
-**Centre Stream**:
-One or more academic delivery streams attached to a Centre, such as JEE, NEET, or Math Foundation.
-_Avoid_: Program, Exam Track, comma-separated stream
+**Centre Exam Track**:
+An Exam Track assigned to one Centre for one Grade. A Centre and Grade can have one or more Centre Exam Tracks.
+_Avoid_: Centre Stream, Program, generic JEE
 
 **UDISE Code**:
 A unique government-issued identifier for a school.
@@ -57,7 +57,7 @@ A top-level read-only dashboard for reviewing curriculum progress across schools
 _Avoid_: Curriculum tab, curriculum report, curriculum overview
 
 **Exam Track**:
-The exam-specific curriculum lens selected by a user, such as JEE Main, JEE Advanced, or NEET.
+The exam-specific curriculum lens used by a Centre, such as JEE Main, JEE Advanced, NEET, CET, or Math Foundation.
 _Avoid_: Stream, orientation
 
 **LMS Chapter Exam Config**:
@@ -217,8 +217,11 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, **Centre** classification fields are current-state fields on the Centre itself, not separate academic-year history records
 - In v1, **Centre** rows use normal inserted/updated timestamps without a dedicated audit actor or changelog model
 - In v1, **Centre** type, category, and sub-category can be null so incomplete source rows can be imported and cleaned later
-- A **Centre** can have multiple **Centre Streams**
-- In v1, a **Centre** can have no Centre Streams assigned; empty streams are valid for special rows such as bench teacher buckets
+- Issue #252 replaces the legacy centre-level **Centre Stream** classification with grade-specific **Centre Exam Tracks**
+- A **Centre** can have multiple **Centre Exam Tracks** for one Grade
+- A **Centre** and Grade can have no **Centre Exam Tracks** assigned
+- **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
+- A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
 - In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
@@ -524,7 +527,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
 - "center/centre" in the imported CRUD export means **Centre**, not **School**.
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
-- The source `program` column maps to **Centre Stream**, not **Program** or **Exam Track**; it should be stored as an array, not a comma-separated string.
+- The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** from the approved mapping.
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. An `admin` may manage any scoped Visit; a `program_admin` may manage only their own in-progress Visits and otherwise has scoped read access. Feature permissions vary: for #155 Student Addition, `program_admin` is intentionally allowed to write student data. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
