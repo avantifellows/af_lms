@@ -78,6 +78,7 @@ const editableLogRow = {
   exam_track: "jee_main",
   log_type: "regular",
   is_editable: true,
+  is_currently_mapped: true,
 };
 
 const cancelledLogRow = {
@@ -523,6 +524,32 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it("rejects edits after the stored Track mapping is removed", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { ...editableLogRow, is_currently_mapped: false },
+      ])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await PATCH(
+      jsonReq({
+        log_date: "2026-02-16",
+        duration_minutes: 120,
+        topic_ids: [102],
+      }),
+      routeParams({ id: "12" })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
   it("rejects users without Curriculum edit access before loading the log", async () => {
     mockGetFeatureAccess.mockReturnValue({
       access: "view",
@@ -845,6 +872,25 @@ describe("DELETE /api/curriculum/logs/[id]", () => {
       expect.stringContaining("SET deleted_at = (NOW() AT TIME ZONE 'UTC')"),
       [12, "teacher@avantifellows.org"]
     );
+  });
+
+  it("rejects deletes after the stored Track mapping is removed", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { ...editableLogRow, is_currently_mapped: false },
+      ])
+      .mockResolvedValueOnce([{ code: "70705", region: "North", program_ids: [1] }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }]);
+
+    const res = await DELETE(deleteReq(), routeParams({ id: "12" }));
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
+    });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
   it("rejects users without Curriculum edit access before loading the log", async () => {

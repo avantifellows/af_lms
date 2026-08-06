@@ -69,6 +69,7 @@ interface LogMutationScopeRow {
   exam_track: ExamTrack;
   log_type: CurriculumLogType;
   is_editable: boolean;
+  is_currently_mapped: boolean;
 }
 
 type CurriculumMutationResult =
@@ -424,6 +425,19 @@ async function loadLogMutationScope(id: number): Promise<LogMutationScopeRow | n
        l.subject_id,
        l.exam_track,
        l.log_type,
+       (
+         SELECT COUNT(*) = 1 AND COUNT(mapping.centre_id) = 1
+         FROM centres centre
+         JOIN school ON school.id = centre.school_id
+         LEFT JOIN centre_exam_tracks mapping
+           ON mapping.centre_id = centre.id
+          AND mapping.grade_id = l.grade_id
+          AND mapping.exam_track_code = l.exam_track
+         WHERE school.code = l.school_code
+           AND centre.program_id = l.program_id
+           AND centre.is_active = true
+           AND centre.is_physical = true
+       ) AS is_currently_mapped,
        COALESCE(
          bool_and(
            lt.topic_id IS NULL
@@ -1142,6 +1156,13 @@ export async function updateCurriculumLog(params: {
   if (!scope.allowedProgramIds.includes(log.program_id)) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
+  if (!log.is_currently_mapped) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
+    };
+  }
 
   const subject = (Object.keys(SUBJECT_IDS) as SubjectName[]).find(
     (name) => SUBJECT_IDS[name] === log.subject_id
@@ -1284,6 +1305,13 @@ export async function deleteCurriculumLog(params: {
   if (!scope.ok) return scope;
   if (!scope.allowedProgramIds.includes(log.program_id)) {
     return { ok: false, status: 403, error: "Forbidden" };
+  }
+  if (!log.is_currently_mapped) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
+    };
   }
 
   await withTransaction(async (client) => {
