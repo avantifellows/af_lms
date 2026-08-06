@@ -391,7 +391,7 @@ export async function getCurriculumOptions(params: {
   const historicalKeys = new Set(
     historicalGradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
   );
-  const centreExamTracks = [...mappedKeys, ...historicalKeys]
+  const centreExamTracks = [...new Set([...mappedKeys, ...historicalKeys])]
     .map((key) => {
       const [examTrack, rawGrade] = key.split(":");
       return { examTrack, grade: Number(rawGrade) };
