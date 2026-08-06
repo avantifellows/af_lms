@@ -15,8 +15,8 @@
 
 import { Pool, type PoolClient } from "pg";
 import * as dotenv from "dotenv";
+import type { ExamTrack } from "../src/lib/exam-tracks";
 
-type ExamTrack = "jee_main" | "jee_advanced" | "neet";
 type Mode = "seed" | "cleanup";
 
 interface CliOptions {

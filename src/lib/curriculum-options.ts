@@ -1,4 +1,5 @@
 import { compareCurriculumCodes } from "./curriculum-code-sort";
+import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
@@ -16,7 +17,6 @@ import type {
   Topic,
 } from "@/types/curriculum";
 
-export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 // Curriculum applies to every physical-centre program (all non-NVS programs),
 // not just JNV CoE/Nodal — otherwise a Punjab/EMRS/RGNV teacher's programs
 // intersect to empty and their curriculum tab loads blank.
@@ -107,10 +107,6 @@ function extractEnglishName(jsonbData: unknown, field: string): string {
 function normalizeSubjectName(value: unknown): SubjectName {
   const subject = extractEnglishName(value, "subject");
   return subject === "Mathematics" ? "Maths" : (subject as SubjectName);
-}
-
-export function isExamTrack(value: string): value is ExamTrack {
-  return EXAM_TRACKS.includes(value as ExamTrack);
 }
 
 export function isGradeNumber(value: number): value is GradeNumber {

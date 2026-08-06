@@ -8,11 +8,11 @@ import {
 } from "@/lib/quiz-session-access";
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
 import {
-  EXAM_TRACKS,
   curriculumIdForExamTrack,
   resolveGradeId,
   streamForExamTrack,
 } from "@/lib/curriculum-options";
+import { isExamTrack } from "@/lib/exam-tracks";
 import { CMS_SOURCE, isCmsTestType } from "@/lib/cms-tests";
 import type { ExamTrack } from "@/types/curriculum";
 
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
   if (!body.cmsTestId || Number.isNaN(Number(body.cmsTestId))) {
     return NextResponse.json({ error: "cmsTestId is required" }, { status: 400 });
   }
-  if (!body.examTrack || !EXAM_TRACKS.includes(body.examTrack)) {
+  if (!isExamTrack(body.examTrack)) {
     return NextResponse.json({ error: "Valid examTrack is required" }, { status: 400 });
   }
   if (body.grade !== 11 && body.grade !== 12) {

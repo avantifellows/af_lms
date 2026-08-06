@@ -1,5 +1,11 @@
 // Types for the Curriculum Tracker feature
 
+import type { ExamTrack } from "@/lib/exam-tracks";
+
+// Re-exported so the many existing `@/types/curriculum` importers keep one import site,
+// while @/lib/exam-tracks stays the single place the track codes are declared.
+export type { ExamTrack };
+
 export interface Topic {
   id: number;
   code: string;
@@ -53,7 +59,6 @@ export interface ChapterProgress {
 
 export type SubjectName = "Physics" | "Chemistry" | "Maths" | "Biology";
 export type GradeNumber = 11 | 12;
-export type ExamTrack = "jee_main" | "jee_advanced" | "neet";
 
 export interface CurriculumProgramOption {
   id: number;

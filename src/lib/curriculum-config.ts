@@ -2,6 +2,7 @@ import {
   checkCurriculumConfigManagementSchema,
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
+import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
@@ -293,7 +294,6 @@ interface RemoveMutationRow extends CurriculumConfigQueryRow {
   failure_reason: "stale" | "missing" | "already_out_of_syllabus" | null;
 }
 
-const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_main: 1,
   jee_advanced: 9,
@@ -920,10 +920,6 @@ export async function removeCurriculumConfigRowFromSyllabus(params: {
           activeChapterCompletions: 0,
         },
   };
-}
-
-function isExamTrack(value: unknown): value is ExamTrack {
-  return typeof value === "string" && EXAM_TRACKS.includes(value as ExamTrack);
 }
 
 function isSyllabusStatus(value: unknown): value is CurriculumConfigSyllabusStatus {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
-import { EXAM_TRACKS } from "@/lib/curriculum-options";
+import { isExamTrack } from "@/lib/exam-tracks";
 import { query } from "@/lib/db";
 import { SUBJECT_IDS, type SubjectName, type ExamTrack } from "@/types/curriculum";
 
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   const grade = Number((searchParams.get("grade") || "").trim());
   const subject = (searchParams.get("subject") || "").trim();
 
-  if (!EXAM_TRACKS.includes(examTrack)) {
+  if (!isExamTrack(examTrack)) {
     return NextResponse.json(
       { error: "Invalid or missing exam_track" },
       { status: 400 }

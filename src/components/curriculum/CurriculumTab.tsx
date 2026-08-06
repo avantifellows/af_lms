@@ -12,6 +12,7 @@ import type {
   LmsCurriculumLog,
   SubjectName,
 } from "@/types/curriculum";
+import { formatExamTrack } from "@/lib/exam-tracks";
 import ChapterAccordion from "./ChapterAccordion";
 import LogSessionModal from "./LogSessionModal";
 import ProgressSummary from "./ProgressSummary";
@@ -24,17 +25,10 @@ interface CurriculumTabProps {
   canEdit: boolean;
 }
 
+// Headings and the log-modal scope label render before a track is selected, so the null
+// case falls back to the generic "Curriculum" wording rather than an empty string.
 function examTrackLabel(track: ExamTrack | null): string {
-  switch (track) {
-    case "jee_main":
-      return "JEE Main";
-    case "jee_advanced":
-      return "JEE Advanced";
-    case "neet":
-      return "NEET";
-    default:
-      return "Curriculum";
-  }
+  return track ? formatExamTrack(track) : "Curriculum";
 }
 
 function selectFirstGradeSubject(

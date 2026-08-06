@@ -1,4 +1,5 @@
 import { checkCurriculumSchema, type CurriculumSchemaUnavailable } from "./curriculum-schema";
+import { EXAM_TRACKS, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getProgramContextSync, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
@@ -225,7 +226,6 @@ interface GuardQueryRow {
 // The summary spans every physical-centre program (all non-NVS programs), so
 // Punjab/EMRS/RGNV curriculum rows appear rather than being restricted to JNV 1/2.
 const CURRICULUM_PROGRAM_IDS = PHYSICAL_CENTRE_PROGRAM_IDS;
-const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
 const SORT_SQL: Record<CurriculumSummarySortKey, string> = {
   school: "school_name",
   program: "program_order",
@@ -1227,10 +1227,6 @@ function parseNumberList(value: string | undefined): number[] {
 
 function isSchoolCode(value: string): value is string {
   return /^[A-Za-z0-9_-]+$/.test(value);
-}
-
-function isExamTrack(value: string): value is ExamTrack {
-  return EXAM_TRACKS.includes(value as ExamTrack);
 }
 
 function isSortKey(value: string | undefined): value is CurriculumSummarySortKey {

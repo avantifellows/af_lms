@@ -17,7 +17,7 @@ edges:
     condition: when writing the auth gate for a route
   - target: patterns/INDEX.md
     condition: when starting a concrete task that may have a runbook
-last_updated: 2026-06-25
+last_updated: 2026-08-06
 ---
 
 # Conventions
@@ -35,6 +35,7 @@ last_updated: 2026-06-25
 - Business logic + data access lives in `src/lib/*`; route handlers stay thin (auth gate → call lib → shape response). Components never call `query()` directly.
 - Tests are **colocated**: `foo.ts` → `foo.test.ts` (and `Foo.tsx` → `Foo.test.tsx`) in the same folder. E2E specs live under `e2e/`.
 - Client-safe shared values go in `@/lib/constants` (e.g. `PROGRAM_IDS`); anything importing `@/lib/db` is server-only and must not be reached from a client component.
+- A closed code set (codes + type + type guard + display labels) lives in one dependency-free `src/lib/*` module so server validation and UI dropdowns can never drift: `@/lib/exam-tracks` (Exam Track), `@/lib/cms-tests` (CMS test type). Widening such a set is a one-file change — never re-declare the literals locally.
 - Types shared across modules live in `src/types/`; one-off types stay local to their module.
 
 ## Patterns

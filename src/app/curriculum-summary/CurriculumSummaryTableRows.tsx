@@ -7,6 +7,7 @@ import type {
   CurriculumSummaryChapterRow,
   CurriculumSummaryRow,
 } from "@/lib/curriculum-summary";
+import { formatExamTrack } from "@/lib/exam-tracks";
 
 interface CurriculumSummaryTableRowsProps {
   rows: CurriculumSummaryRow[];
@@ -395,13 +396,6 @@ function getFlagGroupType(reason: string): FlagGroupType {
     default:
       return "other";
   }
-}
-
-function formatExamTrack(track: string): string {
-  if (track === "jee_main") return "JEE Main";
-  if (track === "jee_advanced") return "JEE Advanced";
-  if (track === "neet") return "NEET";
-  return track;
 }
 
 function formatCoverage(count: number, total: number): string {

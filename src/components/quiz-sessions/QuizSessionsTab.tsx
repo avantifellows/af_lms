@@ -13,7 +13,7 @@ import {
   CMS_TEST_TYPE_OPTIONS,
   type CmsTestType,
 } from "@/lib/cms-tests";
-import type { ExamTrack } from "@/types/curriculum";
+import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "@/lib/exam-tracks";
 
 interface BatchOption {
   id: number;
@@ -90,11 +90,6 @@ const GradeOptions = [11, 12];
 // New-CMS chapter-test picker (source toggle inside session creation). Test subtypes +
 // their labels are shared with the server routes via CMS_TEST_TYPE_OPTIONS (@/lib/cms-tests).
 type TestSource = "legacy" | "cms";
-const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
-  { value: "jee_main", label: "JEE Main" },
-  { value: "jee_advanced", label: "JEE Advanced" },
-  { value: "neet", label: "NEET" },
-];
 const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
 
 interface CmsChapterOption {
@@ -1697,9 +1692,9 @@ function QuizSessionCreateModal({
                             className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                           >
                             <option value="">Select exam track</option>
-                            {EXAM_TRACK_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
+                            {EXAM_TRACKS.map((track) => (
+                              <option key={track} value={track}>
+                                {formatExamTrack(track)}
                               </option>
                             ))}
                           </select>

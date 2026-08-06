@@ -3,10 +3,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
 import {
-  EXAM_TRACKS,
   curriculumIdForExamTrack,
   resolveGradeId,
 } from "@/lib/curriculum-options";
+import { isExamTrack } from "@/lib/exam-tracks";
 import { CMS_TEST_TYPES, type CmsTestType } from "@/lib/cms-tests";
 import { query } from "@/lib/db";
 import type { ExamTrack } from "@/types/curriculum";
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
   const testType = (searchParams.get("test_type") || "chapter_test").trim() as CmsTestType;
   const chapterIdParam = (searchParams.get("chapter_id") || "").trim();
 
-  if (!EXAM_TRACKS.includes(examTrack)) {
+  if (!isExamTrack(examTrack)) {
     return NextResponse.json(
       { error: "Invalid or missing exam_track" },
       { status: 400 }

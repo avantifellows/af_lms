@@ -7,7 +7,7 @@ import type {
   CurriculumSummarySchoolOption,
   CurriculumSummarySubjectOption,
 } from "@/lib/curriculum-summary";
-import type { ExamTrack } from "@/types/curriculum";
+import { formatExamTrack, isExamTrack, type ExamTrack } from "@/lib/exam-tracks";
 
 interface SchoolFilterSelectProps {
   options: CurriculumSummarySchoolOption[];
@@ -486,15 +486,4 @@ function SearchableMultiSelectFilter({
       )}
     </div>
   );
-}
-
-function formatExamTrack(track: string): string {
-  if (track === "jee_main") return "JEE Main";
-  if (track === "jee_advanced") return "JEE Advanced";
-  if (track === "neet") return "NEET";
-  return track;
-}
-
-function isExamTrack(value: string): value is ExamTrack {
-  return value === "jee_main" || value === "jee_advanced" || value === "neet";
 }

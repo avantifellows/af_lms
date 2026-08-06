@@ -2,12 +2,12 @@ import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
 import {
   curriculumIdForExamTrack,
-  isExamTrack,
   isGradeNumber,
   isSubjectName,
   resolveCurriculumProgramScope,
   type CurriculumValidationFailure,
 } from "./curriculum-options";
+import { isExamTrack } from "./exam-tracks";
 import { isFutureIST, isPastOrTodayIST } from "./curriculum-date-helpers";
 import {
   markChapterComplete,

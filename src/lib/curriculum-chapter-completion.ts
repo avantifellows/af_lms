@@ -1,12 +1,12 @@
 import type { PoolClient } from "pg";
 import { query } from "./db";
 import {
-  isExamTrack,
   isGradeNumber,
   isSubjectName,
   resolveCurriculumProgramScope,
   type CurriculumValidationFailure,
 } from "./curriculum-options";
+import { isExamTrack } from "./exam-tracks";
 import type { ExamTrack, GradeNumber, SubjectName } from "@/types/curriculum";
 import { GRADE_IDS, SUBJECT_IDS } from "@/types/curriculum";
 import type { UserPermission } from "./permissions";

@@ -12,7 +12,7 @@ import {
   type CurriculumConfigListResult,
   type CurriculumConfigSyllabusStatus,
 } from "@/lib/curriculum-config";
-import type { ExamTrack } from "@/types/curriculum";
+import { EXAM_TRACKS, formatExamTrack } from "@/lib/exam-tracks";
 import CurriculumConfigChapterSearchFilter from "./CurriculumConfigChapterSearchFilter";
 import CurriculumConfigExportButton from "./CurriculumConfigExportButton";
 import CurriculumConfigTable from "./CurriculumConfigTable";
@@ -20,12 +20,6 @@ import CurriculumConfigTable from "./CurriculumConfigTable";
 interface PageProps {
   searchParams: Promise<Record<string, string | undefined>>;
 }
-
-const EXAM_TRACK_OPTIONS: Array<{ value: ExamTrack; label: string }> = [
-  { value: "jee_main", label: "JEE Main" },
-  { value: "jee_advanced", label: "JEE Advanced" },
-  { value: "neet", label: "NEET" },
-];
 
 const SYLLABUS_STATUS_OPTIONS: Array<{
   value: CurriculumConfigSyllabusStatus;
@@ -139,9 +133,9 @@ function ConfigFilters({
             defaultValue={result.activeFilters.examTrack}
             className="min-h-[44px] rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-normal text-text-primary"
           >
-            {EXAM_TRACK_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            {EXAM_TRACKS.map((track) => (
+              <option key={track} value={track}>
+                {formatExamTrack(track)}
               </option>
             ))}
           </select>
