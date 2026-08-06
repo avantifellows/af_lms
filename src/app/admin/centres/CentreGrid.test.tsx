@@ -66,35 +66,6 @@ const optionSets: CentreOptionSet[] = [
     sortOrder: 3,
     options: [],
   },
-  {
-    id: 4,
-    code: "stream",
-    label: "Centre Stream",
-    allowMulti: true,
-    sortOrder: 4,
-    options: [
-      {
-        id: 41,
-        optionSetCode: "stream",
-        code: "jee",
-        label: "JEE",
-        sortOrder: 1,
-        isActive: true,
-        insertedAt: "",
-        updatedAt: "",
-      },
-      {
-        id: 42,
-        optionSetCode: "stream",
-        code: "legacy_stream",
-        label: "Legacy Stream",
-        sortOrder: 2,
-        isActive: false,
-        insertedAt: "",
-        updatedAt: "",
-      },
-    ],
-  },
 ];
 
 const filters: CentreListFilters = {
@@ -105,7 +76,6 @@ const filters: CentreListFilters = {
   typeCode: null,
   categoryCode: null,
   subCategoryCode: null,
-  streamCode: null,
   isPhysical: "all",
 };
 
@@ -123,8 +93,6 @@ const rows: CentreListRow[] = [
     subCategoryCode: null,
     subCategoryLabel: null,
     subCategoryOptionActive: null,
-    streamCodes: ["jee"],
-    streams: [{ code: "jee", label: "JEE", isActive: true }],
     grade11ExamTrackCodes: ["jee_main"],
     grade12ExamTrackCodes: ["neet"],
     isPhysical: true,
@@ -156,8 +124,6 @@ const rows: CentreListRow[] = [
     subCategoryCode: null,
     subCategoryLabel: null,
     subCategoryOptionActive: null,
-    streamCodes: [],
-    streams: [],
     grade11ExamTrackCodes: [],
     grade12ExamTrackCodes: [],
     isPhysical: false,
@@ -225,6 +191,7 @@ describe("CentreGrid", () => {
 
     expect(screen.getByRole("heading", { name: "Centres" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New Centre" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Stream")).not.toBeInTheDocument();
     expect(screen.getByText("Total Centres")).toBeInTheDocument();
     expect(screen.getByText("Active Centres")).toBeInTheDocument();
     expect(screen.getByText("Centres linked to Schools")).toBeInTheDocument();
@@ -244,9 +211,8 @@ describe("CentreGrid", () => {
     expect(within(linkedCard).getByText("JEE Main")).toBeInTheDocument();
     expect(within(linkedCard).getByText("Grade 12 Exam Tracks:")).toBeInTheDocument();
     expect(within(linkedCard).getByText("NEET")).toBeInTheDocument();
-    // School metadata and streams stay behind the expand toggle
+    // School metadata stays behind the expand toggle
     expect(within(linkedCard).queryByText("SCH001")).not.toBeInTheDocument();
-    expect(within(linkedCard).queryByText("JEE")).not.toBeInTheDocument();
 
     await user.click(linkedToggle);
     expect(within(linkedCard).getByText("SCH001")).toBeInTheDocument();
@@ -254,7 +220,6 @@ describe("CentreGrid", () => {
     expect(within(linkedCard).getByText("West")).toBeInTheDocument();
     expect(within(linkedCard).getByText("Gujarat")).toBeInTheDocument();
     expect(within(linkedCard).getByText("Bhavnagar")).toBeInTheDocument();
-    expect(within(linkedCard).getByText("JEE")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Hide details for JNV Bhavnagar CoE" })
     ).toBeInTheDocument();
@@ -271,7 +236,6 @@ describe("CentreGrid", () => {
     expect(
       within(unlinkedCard).getByText("No School linked to this Centre")
     ).toBeInTheDocument();
-    expect(within(unlinkedCard).getByText("No streams")).toBeInTheDocument();
   });
 
   it("loads Centres through API-supported filters when filters are applied", async () => {
@@ -462,7 +426,6 @@ describe("CentreGrid", () => {
       "Legacy Type (inactive)"
     );
     await user.selectOptions(modalTypeSelect, "coe");
-    await user.click(screen.getByRole("checkbox", { name: "JEE" }));
     await user.click(screen.getByRole("checkbox", { name: "Grade 11 JEE Advanced" }));
     await user.click(screen.getByRole("checkbox", { name: "Grade 12 CET" }));
 
@@ -493,7 +456,6 @@ describe("CentreGrid", () => {
           type_code: "coe",
           category_code: null,
           sub_category_code: null,
-          stream_codes: ["jee"],
           grade_11_exam_track_codes: ["jee_advanced"],
           grade_12_exam_track_codes: ["cet"],
           is_physical: true,
@@ -555,7 +517,6 @@ describe("CentreGrid", () => {
           type_code: "coe",
           category_code: "school",
           sub_category_code: null,
-          stream_codes: ["jee"],
           grade_11_exam_track_codes: [],
           grade_12_exam_track_codes: ["neet"],
           is_physical: true,

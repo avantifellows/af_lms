@@ -3,7 +3,7 @@ import { type UserPermission } from "./permissions";
 import { makeSchemaChecker, requireAdmin } from "./admin-guard";
 import { isExamTrack, type ExamTrack } from "./exam-tracks";
 
-export type CentreOptionSetCode = "type" | "category" | "sub_category" | "stream";
+export type CentreOptionSetCode = "type" | "category" | "sub_category";
 
 // Correlated subquery yielding a user's active centre assignments as a JSON
 // array of { centreName, role }, aliased `centres`. Embed inside a SELECT over
@@ -63,7 +63,6 @@ export interface CentreListFilters {
   typeCode: string | null;
   categoryCode: string | null;
   subCategoryCode: string | null;
-  streamCode: string | null;
   isPhysical: CentreBooleanFilter;
 }
 
@@ -72,12 +71,6 @@ export interface CentreListParams {
   limit: number;
   offset: number;
   filters: CentreListFilters;
-}
-
-export interface CentreStreamDisplay {
-  code: string;
-  label: string;
-  isActive: boolean | null;
 }
 
 export interface CentreListRow {
@@ -93,8 +86,6 @@ export interface CentreListRow {
   subCategoryCode: string | null;
   subCategoryLabel: string | null;
   subCategoryOptionActive: boolean | null;
-  streamCodes: string[];
-  streams: CentreStreamDisplay[];
   grade11ExamTrackCodes: ExamTrack[];
   grade12ExamTrackCodes: ExamTrack[];
   isPhysical: boolean;
@@ -227,7 +218,6 @@ interface CentreCreatePayload {
   typeCode: string | null;
   categoryCode: string | null;
   subCategoryCode: string | null;
-  streamCodes: string[];
   grade11ExamTrackCodes: ExamTrack[];
   grade12ExamTrackCodes: ExamTrack[];
   isPhysical: boolean;
@@ -281,8 +271,6 @@ interface CentreListQueryRow {
   sub_category_code: string | null;
   sub_category_label: string | null;
   sub_category_is_active: boolean | string | null;
-  stream_codes: string[] | null;
-  stream_options: unknown;
   grade_11_exam_track_codes: string[] | null;
   grade_12_exam_track_codes: string[] | null;
   is_physical: boolean | string | null;
@@ -307,7 +295,6 @@ const FIXED_OPTION_SET_CODES: CentreOptionSetCode[] = [
   "type",
   "category",
   "sub_category",
-  "stream",
 ];
 
 const REQUIRED_CENTRE_COLUMNS: Array<{ table: string; column: string }> = [
@@ -332,7 +319,6 @@ const REQUIRED_CENTRE_COLUMNS: Array<{ table: string; column: string }> = [
   { table: "centres", column: "type_code" },
   { table: "centres", column: "category_code" },
   { table: "centres", column: "sub_category_code" },
-  { table: "centres", column: "stream_codes" },
   { table: "centres", column: "is_physical" },
   { table: "centres", column: "is_active" },
   { table: "centres", column: "program_id" },
@@ -442,7 +428,6 @@ export function normalizeCentreListParams(searchParams: {
       typeCode: nullableCodeParam(searchParams.type),
       categoryCode: nullableCodeParam(searchParams.category),
       subCategoryCode: nullableCodeParam(searchParams.sub_category),
-      streamCode: nullableCodeParam(searchParams.stream),
       isPhysical: booleanFilter(searchParams.is_physical),
     },
   };
@@ -503,11 +488,6 @@ export async function getCentreList(params: {
       )}`
     );
   }
-  if (normalized.filters.streamCode) {
-    whereClauses.push(
-      `${addParam(normalized.filters.streamCode)} = ANY(centres.stream_codes)`
-    );
-  }
   if (normalized.filters.isPhysical !== "all") {
     whereClauses.push(
       `centres.is_physical = ${addParam(
@@ -536,8 +516,6 @@ export async function getCentreList(params: {
        centres.sub_category_code,
        sub_category_options.label AS sub_category_label,
        sub_category_options.is_active AS sub_category_is_active,
-       centres.stream_codes,
-       COALESCE(streams.stream_options, '[]'::jsonb) AS stream_options,
        COALESCE(exam_tracks.grade_11_codes, '{}'::text[]) AS grade_11_exam_track_codes,
        COALESCE(exam_tracks.grade_12_codes, '{}'::text[]) AS grade_12_exam_track_codes,
        centres.is_physical,
@@ -576,22 +554,6 @@ export async function getCentreList(params: {
      LEFT JOIN centre_options sub_category_options
        ON sub_category_options.option_set_id = sub_category_set.id
       AND sub_category_options.code = centres.sub_category_code
-     LEFT JOIN LATERAL (
-       SELECT jsonb_agg(
-                jsonb_build_object(
-                  'code', stream_code.code,
-                  'label', stream_options.label,
-                  'is_active', stream_options.is_active
-                )
-                ORDER BY stream_code.ordinality
-              ) AS stream_options
-       FROM unnest(centres.stream_codes) WITH ORDINALITY AS stream_code(code, ordinality)
-       LEFT JOIN centre_option_sets stream_set
-         ON stream_set.code = 'stream'
-       LEFT JOIN centre_options stream_options
-         ON stream_options.option_set_id = stream_set.id
-        AND stream_options.code = stream_code.code
-     ) streams ON true
      LEFT JOIN LATERAL (
        SELECT
          array_agg(mapping.exam_track_code ORDER BY mapping.exam_track_code)
@@ -762,10 +724,10 @@ export async function createCentre(params: {
   const rows = await query<CentreListQueryRow>(
     centreMutationReturningSql(
       `INSERT INTO centres
-         (name, school_id, type_code, category_code, sub_category_code, stream_codes, is_physical, is_active, program_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         (name, school_id, type_code, category_code, sub_category_code, is_physical, is_active, program_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      { grade11: 10, grade12: 11 }
+      { grade11: 9, grade12: 10 }
     ),
     [
       payload.payload.name,
@@ -773,7 +735,6 @@ export async function createCentre(params: {
       payload.payload.typeCode,
       payload.payload.categoryCode,
       payload.payload.subCategoryCode,
-      payload.payload.streamCodes,
       payload.payload.isPhysical,
       payload.payload.isActive,
       payload.payload.programId,
@@ -836,14 +797,13 @@ export async function updateCentre(params: {
            type_code = $4,
            category_code = $5,
            sub_category_code = $6,
-           stream_codes = $7,
-           is_physical = $8,
-           is_active = $9,
-           program_id = $10,
+           is_physical = $7,
+           is_active = $8,
+           program_id = $9,
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      { grade11: 11, grade12: 12 }
+      { grade11: 10, grade12: 11 }
     ),
     [
       params.id,
@@ -852,7 +812,6 @@ export async function updateCentre(params: {
       payload.payload.typeCode,
       payload.payload.categoryCode,
       payload.payload.subCategoryCode,
-      payload.payload.streamCodes,
       payload.payload.isPhysical,
       payload.payload.isActive,
       payload.payload.programId,
@@ -1057,8 +1016,6 @@ function mapCentreListRow(row: CentreListQueryRow): CentreListRow {
       row.sub_category_is_active === null
         ? null
         : booleanFromDb(row.sub_category_is_active),
-    streamCodes: Array.isArray(row.stream_codes) ? row.stream_codes : [],
-    streams: streamOptionsFromDb(row.stream_options),
     grade11ExamTrackCodes: examTracksFromDb(row.grade_11_exam_track_codes),
     grade12ExamTrackCodes: examTracksFromDb(row.grade_12_exam_track_codes),
     isPhysical: booleanFromDb(row.is_physical),
@@ -1080,27 +1037,6 @@ function mapCentreListRow(row: CentreListQueryRow): CentreListRow {
             district: String(row.school_district ?? ""),
           },
   };
-}
-
-function streamOptionsFromDb(value: unknown): CentreStreamDisplay[] {
-  const parsed = typeof value === "string" ? safeJsonParse(value) : value;
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed.flatMap((entry) => {
-    if (!isPlainObject(entry) || typeof entry.code !== "string") return [];
-    return [
-      {
-        code: entry.code,
-        label: typeof entry.label === "string" ? entry.label : "",
-        isActive:
-          typeof entry.is_active === "boolean"
-            ? entry.is_active
-            : entry.is_active === null
-              ? null
-              : booleanFromDb(entry.is_active as string | boolean | null),
-      },
-    ];
-  });
 }
 
 function normalizeCentreOptionCreatePayload(
@@ -1242,7 +1178,6 @@ function normalizeCentreCreatePayload(
     "type_code",
     "category_code",
     "sub_category_code",
-    "stream_codes",
     "grade_11_exam_track_codes",
     "grade_12_exam_track_codes",
     "is_physical",
@@ -1272,7 +1207,6 @@ function normalizeCentreCreatePayload(
     "sub_category_code",
     fields
   );
-  const streamCodes = stringArrayFromPayload(payload.stream_codes);
   const grade11ExamTrackCodes = examTrackArrayFromPayload(
     payload.grade_11_exam_track_codes
   );
@@ -1292,9 +1226,6 @@ function normalizeCentreCreatePayload(
   }
   if (programId === undefined) {
     fields.program_id = "Program id must be a positive integer or null";
-  }
-  if (streamCodes === null) {
-    fields.stream_codes = "Centre Stream codes must be an array of strings";
   }
   if (grade11ExamTrackCodes === null) {
     fields.grade_11_exam_track_codes = "Grade 11 Exam Tracks must use supported codes";
@@ -1326,7 +1257,6 @@ function normalizeCentreCreatePayload(
       typeCode,
       categoryCode,
       subCategoryCode,
-      streamCodes: streamCodes ?? [],
       grade11ExamTrackCodes: grade11ExamTrackCodes ?? [],
       grade12ExamTrackCodes: grade12ExamTrackCodes ?? [],
       isPhysical: isPhysical ?? false,
@@ -1348,7 +1278,6 @@ function normalizeCentreEditPayload(
     "type_code",
     "category_code",
     "sub_category_code",
-    "stream_codes",
     "grade_11_exam_track_codes",
     "grade_12_exam_track_codes",
     "is_physical",
@@ -1376,10 +1305,6 @@ function normalizeCentreEditPayload(
     "program_id" in payload
       ? nullablePositiveIntegerFromPayload(payload.program_id)
       : existing.programId;
-  const streamCodes =
-    "stream_codes" in payload
-      ? stringArrayFromPayload(payload.stream_codes)
-      : existing.streamCodes;
   const grade11ExamTrackCodes =
     "grade_11_exam_track_codes" in payload
       ? examTrackArrayFromPayload(payload.grade_11_exam_track_codes)
@@ -1426,9 +1351,6 @@ function normalizeCentreEditPayload(
   if (programId === undefined) {
     fields.program_id = "Program id must be a positive integer or null";
   }
-  if (streamCodes === null) {
-    fields.stream_codes = "Centre Stream codes must be an array of strings";
-  }
   if (grade11ExamTrackCodes === null) {
     fields.grade_11_exam_track_codes = "Grade 11 Exam Tracks must use supported codes";
   }
@@ -1459,7 +1381,6 @@ function normalizeCentreEditPayload(
       typeCode,
       categoryCode,
       subCategoryCode,
-      streamCodes: streamCodes ?? [],
       grade11ExamTrackCodes: grade11ExamTrackCodes ?? [],
       grade12ExamTrackCodes: grade12ExamTrackCodes ?? [],
       isPhysical: isPhysical ?? existing.isPhysical,
@@ -1483,7 +1404,7 @@ async function getCentreById(id: number): Promise<CentreListRow | null> {
 function validateCentreOptionCodes(params: {
   payload: Pick<
     CentreCreatePayload,
-    "typeCode" | "categoryCode" | "subCategoryCode" | "streamCodes"
+    "typeCode" | "categoryCode" | "subCategoryCode"
   >;
   optionSets: CentreOptionSet[];
   existing: CentreListRow | null;
@@ -1515,15 +1436,6 @@ function validateCentreOptionCodes(params: {
     fields,
   });
 
-  const existingStreamCodes = new Set(params.existing?.streamCodes ?? []);
-  for (const code of params.payload.streamCodes) {
-    if (isSelectableCentreOption(params.optionSets, "stream", code)) continue;
-    if (existingStreamCodes.has(code) && hasCentreOption(params.optionSets, "stream", code)) {
-      continue;
-    }
-    fields.stream_codes = "Centre Stream codes must be active stream options";
-    break;
-  }
 
   if (Object.keys(fields).length > 0) {
     return {
@@ -1721,8 +1633,6 @@ function centreMutationReturningSql(
     changed.sub_category_code,
     sub_category_options.label AS sub_category_label,
     sub_category_options.is_active AS sub_category_is_active,
-    changed.stream_codes,
-    COALESCE(streams.stream_options, '[]'::jsonb) AS stream_options,
     ${grade11Codes} AS grade_11_exam_track_codes,
     ${grade12Codes} AS grade_12_exam_track_codes,
     changed.is_physical,
@@ -1758,22 +1668,6 @@ function centreMutationReturningSql(
   LEFT JOIN centre_options sub_category_options
     ON sub_category_options.option_set_id = sub_category_set.id
    AND sub_category_options.code = changed.sub_category_code
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(
-             jsonb_build_object(
-               'code', stream_code.code,
-               'label', stream_options.label,
-               'is_active', stream_options.is_active
-             )
-             ORDER BY stream_code.ordinality
-           ) AS stream_options
-    FROM unnest(changed.stream_codes) WITH ORDINALITY AS stream_code(code, ordinality)
-    LEFT JOIN centre_option_sets stream_set
-      ON stream_set.code = 'stream'
-    LEFT JOIN centre_options stream_options
-      ON stream_options.option_set_id = stream_set.id
-     AND stream_options.code = stream_code.code
-  ) streams ON true
   ${examTrackJoin}`;
 }
 
@@ -1931,14 +1825,6 @@ function schoolLinkFilter(
   return normalized === "linked" || normalized === "unlinked"
     ? normalized
     : "all";
-}
-
-function safeJsonParse(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return [];
-  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

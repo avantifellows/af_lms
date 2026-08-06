@@ -73,7 +73,6 @@ centre-1,JNV Test,CoE,11,jee_main
     });
     expect(db.calls).toHaveLength(2);
     expect(db.calls[0].sql).toContain("centres.type_code");
-    expect(db.calls[0].sql).not.toContain("stream_codes");
     expect(db.calls.some((call) => /\bINSERT\b/i.test(call.sql))).toBe(false);
   });
 

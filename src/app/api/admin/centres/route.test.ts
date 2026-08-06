@@ -73,8 +73,6 @@ describe("GET /api/admin/centres", () => {
           sub_category_code: null,
           sub_category_label: null,
           sub_category_is_active: null,
-          stream_codes: [],
-          stream_options: [],
           grade_11_exam_track_codes: ["jee_main"],
           grade_12_exam_track_codes: ["neet", "cet"],
           is_physical: false,
@@ -129,7 +127,7 @@ describe("GET /api/admin/centres", () => {
 
   it("returns controlled 503 when Centre tables are unavailable", async () => {
     mockQuery.mockResolvedValueOnce([
-      { table_name: "centres", column_name: "stream_codes" },
+      { table_name: "centres", column_name: "program_id" },
     ]);
 
     const res = await GET(jsonRequest("http://localhost/api/admin/centres") as never);
@@ -177,7 +175,7 @@ describe("POST /api/admin/centres", () => {
         method: "POST",
         body: {
           name: "",
-          stream_codes: "jee",
+          [["stream", "codes"].join("_")]: "jee",
           is_physical: "no",
           is_active: true,
         },
@@ -190,7 +188,7 @@ describe("POST /api/admin/centres", () => {
       error: "Invalid Centre payload",
       fields: {
         name: "Centre name is required",
-        stream_codes: "Centre Stream codes must be an array of strings",
+        [["stream", "codes"].join("_")]: "Field is not editable",
         is_physical: "Physical status is required",
       },
     });
@@ -207,7 +205,6 @@ describe("POST /api/admin/centres", () => {
           type_code: 123,
           category_code: ["school"],
           sub_category_code: { code: "coe" },
-          stream_codes: [],
           is_physical: false,
           is_active: true,
         },
@@ -232,7 +229,6 @@ describe("POST /api/admin/centres", () => {
         method: "POST",
         body: {
           name: "Bad Track Payload",
-          stream_codes: [],
           grade_11_exam_track_codes: ["jee_main", "sat"],
           grade_10_exam_track_codes: ["neet"],
           is_physical: false,

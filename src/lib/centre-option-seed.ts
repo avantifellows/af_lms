@@ -110,7 +110,6 @@ export const CENTRE_OPTION_SEED_SETS: SeedOptionSet[] = [
     allowMulti: false,
     sortOrder: 3,
   },
-  { code: "stream", label: "Centre Stream", allowMulti: true, sortOrder: 4 },
 ];
 
 export const CENTRE_OPTION_SEED_OPTIONS: SeedOption[] = [
@@ -189,27 +188,6 @@ export const CENTRE_OPTION_SEED_OPTIONS: SeedOption[] = [
     code: "nodal",
     label: "Nodal",
     sortOrder: 5,
-    isActive: true,
-  },
-  {
-    optionSetCode: "stream",
-    code: "jee",
-    label: "JEE",
-    sortOrder: 1,
-    isActive: true,
-  },
-  {
-    optionSetCode: "stream",
-    code: "neet",
-    label: "NEET",
-    sortOrder: 2,
-    isActive: true,
-  },
-  {
-    optionSetCode: "stream",
-    code: "math_foundation",
-    label: "Math Foundation",
-    sortOrder: 3,
     isActive: true,
   },
 ];

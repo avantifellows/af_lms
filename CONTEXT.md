@@ -221,7 +221,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Centre** links to **School** through `school.id`; school code and UDISE code are display/search identifiers, not the Centre relationship key
 - A **Centre** name is not globally unique; the same School can have separate billing/funder centres for different operational setups
 - In v1, **Centre** rows do not have a uniqueness constraint beyond their primary key
-- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, non-null `stream_codes`, `is_physical`, `is_active`, and normal timestamps
+- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, `is_physical`, `is_active`, and normal timestamps; Grade-specific Exam Tracks live in `centre_exam_tracks`
 - In v1, **Centre** classification fields are current-state fields on the Centre itself, not separate academic-year history records
 - In v1, **Centre** rows use normal inserted/updated timestamps without a dedicated audit actor or changelog model
 - In v1, **Centre** type, category, and sub-category can be null so incomplete source rows can be imported and cleaned later
@@ -243,7 +243,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
 - Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
 - Centre Admins assign the five fixed **Exam Track** choices but cannot create additional Track types; adding a Track requires coordinated Curriculum and CMS support
-- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
+- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, Grade 11/12 Exam Tracks, physical status, and active status
 - In v1, **Centre** administration displays linked School metadata such as school name, code, UDISE, region, state, and district as read-only values derived from School
 - In v1, unlinked **Centres** do not store centre-level location fields; location columns remain blank until the Centre is linked to a School or a later feature adds centre-level location
 - In v1, Centre option code validity is enforced by AF LMS APIs and import scripts rather than foreign keys from Centre rows to option rows
@@ -254,7 +254,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, **Centres** are deactivated with `is_active = false`; the admin UI does not hard-delete Centre rows
 - In v1, Centre options are deactivated with `is_active = false`; the admin UI does not hard-delete option rows because Centre rows may still reference their codes
 - In v1, inactive Centre options remain displayable on existing Centre rows but are not offered for new selections
-- In v1, Centre option sets are fixed to type, category, sub-category, and stream; admins configure options inside those sets rather than creating new sets
+- In v1, Centre option sets are fixed to type, category, and sub-category; Exam Tracks use the shared fixed vocabulary instead of configurable Centre options
 - In v1, admins cannot create or delete Centre option sets; option set editing, if exposed, is limited to display label and ordering
 - In v1, Centre option configuration is stored in `centre_option_sets` and `centre_options`; option sets define fixed fields, while options define stable codes, labels, ordering, and active state
 - Centre schema changes are introduced through db-service migrations, while AF LMS owns the data scripts for seeding Centre options and importing the initial Centre CSV data

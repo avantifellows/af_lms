@@ -9,7 +9,6 @@ import {
   ChevronRight,
   CircleOff,
   Edit2,
-  Link2,
   Plus,
   RotateCcw,
   Save,
@@ -71,7 +70,6 @@ interface CentreFormState {
   typeCode: string;
   categoryCode: string;
   subCategoryCode: string;
-  streamCodes: string[];
   grade11ExamTrackCodes: string[];
   grade12ExamTrackCodes: string[];
   isPhysical: boolean;
@@ -87,7 +85,6 @@ const EMPTY_FILTERS: CentreListFilters = {
   typeCode: null,
   categoryCode: null,
   subCategoryCode: null,
-  streamCode: null,
   isPhysical: "all",
 };
 
@@ -294,7 +291,6 @@ export default function CentreGrid({
         typeCode: row.typeCode ?? "",
         categoryCode: row.categoryCode ?? "",
         subCategoryCode: row.subCategoryCode ?? "",
-        streamCodes: row.streamCodes,
         grade11ExamTrackCodes: row.grade11ExamTrackCodes,
         grade12ExamTrackCodes: row.grade12ExamTrackCodes,
         isPhysical: row.isPhysical,
@@ -320,14 +316,6 @@ export default function CentreGrid({
     setModal((current) =>
       current ? { ...current, form: { ...current.form, ...patch } } : current
     );
-  };
-
-  const toggleStream = (code: string) => {
-    if (!modal) return;
-    const streamCodes = modal.form.streamCodes.includes(code)
-      ? modal.form.streamCodes.filter((value) => value !== code)
-      : [...modal.form.streamCodes, code];
-    patchForm({ streamCodes });
   };
 
   const toggleExamTrack = (
@@ -560,12 +548,6 @@ export default function CentreGrid({
               setFilters({ ...filters, categoryCode: categoryCode || null })
             }
           />
-          <OptionFilter
-            label="Stream"
-            value={filters.streamCode ?? ""}
-            options={optionsBySet.get("stream") ?? []}
-            onChange={(streamCode) => setFilters({ ...filters, streamCode: streamCode || null })}
-          />
           <FilterSelect
             label="Physical"
             value={filters.isPhysical}
@@ -782,41 +764,6 @@ export default function CentreGrid({
                           </Select>
                         </Field>
                       </div>
-                    </div>
-
-                    <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
-                      <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase text-text-primary">
-                        <Link2 className="h-4 w-4 text-accent" aria-hidden="true" />
-                        Centre streams
-                      </div>
-                      <div className="grid max-h-44 gap-2 overflow-y-auto rounded-lg border border-border bg-bg-input p-3 sm:grid-cols-2">
-                        {selectOptions({
-                          options: optionsBySet.get("stream") ?? [],
-                          currentCodes: modal.form.streamCodes,
-                          includeInactiveCurrent: modal.mode === "edit",
-                        }).map((option) => (
-                          <label
-                            key={option.code}
-                            className="inline-flex min-h-[38px] cursor-pointer items-center gap-2 rounded-md px-2 text-sm font-medium text-text-primary hover:bg-hover-bg"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={modal.form.streamCodes.includes(option.code)}
-                              onChange={() => toggleStream(option.code)}
-                              className="h-4 w-4 accent-[var(--color-accent)]"
-                            />
-                            <span>{option.label}</span>
-                            {!option.isActive && (
-                              <span className="rounded-full bg-warning-bg px-2 py-0.5 text-xs text-warning-text">
-                                inactive
-                              </span>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                      {fieldErrors.stream_codes && (
-                        <p className="mt-1 text-xs text-danger">{fieldErrors.stream_codes}</p>
-                      )}
                     </div>
 
                     <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
@@ -1292,23 +1239,6 @@ function CentreCard({
               </div>
             )}
             <DetailGroup title="Centre Details" columns={3}>
-              <div className="col-span-2">
-                <DetailField label="Centre Streams">
-                  {row.streams.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {row.streams.map((stream) => (
-                        <OptionBadge
-                          key={stream.code}
-                          label={stream.label || stream.code}
-                          active={stream.isActive}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-text-muted/60">No streams</span>
-                  )}
-                </DetailField>
-              </div>
               <DetailField label="Program" value={row.programName ?? "None"} />
               <DetailField label="Updated">
                 <span className="font-mono text-xs text-text-muted">
@@ -1354,7 +1284,6 @@ function appendFilterParams(params: URLSearchParams, filters: CentreListFilters)
   if (filters.typeCode) params.set("type", filters.typeCode);
   if (filters.categoryCode) params.set("category", filters.categoryCode);
   if (filters.subCategoryCode) params.set("sub_category", filters.subCategoryCode);
-  if (filters.streamCode) params.set("stream", filters.streamCode);
   if (filters.isPhysical !== "all") params.set("is_physical", filters.isPhysical);
 }
 
@@ -1382,7 +1311,6 @@ function emptyForm(): CentreFormState {
     typeCode: "",
     categoryCode: "",
     subCategoryCode: "",
-    streamCodes: [],
     grade11ExamTrackCodes: [],
     grade12ExamTrackCodes: [],
     isPhysical: false,
@@ -1398,7 +1326,6 @@ function formToPayload(form: CentreFormState) {
     type_code: form.typeCode || null,
     category_code: form.categoryCode || null,
     sub_category_code: form.subCategoryCode || null,
-    stream_codes: form.streamCodes,
     grade_11_exam_track_codes: form.grade11ExamTrackCodes,
     grade_12_exam_track_codes: form.grade12ExamTrackCodes,
     is_physical: form.isPhysical,
