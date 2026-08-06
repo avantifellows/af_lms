@@ -1,0 +1,5 @@
+# Use Centre Exam Tracks as Curriculum's availability source
+
+Centre-wide Stream values cannot represent different Exam Tracks by Grade, while a separate Curriculum Track list can allow logs for Tracks that do not operate at a Centre. Issue #252 therefore replaces Centre Stream with one or more fixed Centre Exam Track mappings per Centre and Grade, and makes Centre Management the only source of Track availability for Curriculum Log and Curriculum Summary. Curriculum resolves one active physical Centre from School and Program, fails closed on missing or ambiguous Centre data, and uses global LMS Chapter Exam Config only to decide whether a mapped Track has Chapter content available for logging.
+
+This mapping is current state rather than Academic Year history. Initial mappings come from one verified import instead of inferred legacy Stream values, and later changes are maintained in Centre Management. Existing logs remain stored when a mapping is removed, but current logging and Summary follow the current mapping.

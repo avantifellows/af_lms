@@ -286,13 +286,13 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
 - Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
 - **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
-- A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; it has no Done action
+- A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; its footer has Clear and Done actions for clearing or confirming that filter's selections
 - A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
 - An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
 - With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
 - Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
 - Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
-- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours on each Chapter row and totals both metrics on the parent School-Program-Grade-Subject-Exam Track row
+- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours only on expanded Chapter rows, not on the parent School-Program-Grade-Subject-Exam Track row
 - Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
