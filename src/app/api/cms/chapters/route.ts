@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
-import { isExamTrack } from "@/lib/exam-tracks";
+import { isCmsExamTrack } from "@/lib/cms-tests";
 import { query } from "@/lib/db";
-import { SUBJECT_IDS, type SubjectName, type ExamTrack } from "@/types/curriculum";
+import { SUBJECT_IDS, type SubjectName } from "@/types/curriculum";
 
 // Chapters for the new-CMS chapter-test picker: in-syllabus chapters for an
 // exam-track/grade/subject, so the session creator can drill Subject -> Chapter -> Test.
@@ -41,11 +41,11 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const examTrack = (searchParams.get("exam_track") || "").trim() as ExamTrack;
+  const examTrack = (searchParams.get("exam_track") || "").trim();
   const grade = Number((searchParams.get("grade") || "").trim());
   const subject = (searchParams.get("subject") || "").trim();
 
-  if (!isExamTrack(examTrack)) {
+  if (!isCmsExamTrack(examTrack)) {
     return NextResponse.json(
       { error: "Invalid or missing exam_track" },
       { status: 400 }

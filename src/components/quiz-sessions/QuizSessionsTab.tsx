@@ -9,11 +9,13 @@ import {
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 import { parseBatchStream } from "@/lib/batch-code";
 import {
+  CMS_EXAM_TRACKS,
   CMS_SOURCE,
   CMS_TEST_TYPE_OPTIONS,
+  type CmsExamTrack,
   type CmsTestType,
 } from "@/lib/cms-tests";
-import { EXAM_TRACKS, formatExamTrack, type ExamTrack } from "@/lib/exam-tracks";
+import { formatExamTrack } from "@/lib/exam-tracks";
 
 interface BatchOption {
   id: number;
@@ -979,7 +981,7 @@ function QuizSessionCreateModal({
   // major_test skips subject/chapter and lists straight off exam track + grade.
   const [testSource, setTestSource] = useState<TestSource>("legacy");
   const [cmsTestType, setCmsTestType] = useState<CmsTestType>("chapter_test");
-  const [cmsExamTrack, setCmsExamTrack] = useState<ExamTrack | "">("");
+  const [cmsExamTrack, setCmsExamTrack] = useState<CmsExamTrack | "">("");
   const [cmsGrade, setCmsGrade] = useState("");
   const [cmsSubject, setCmsSubject] = useState("");
   const [cmsChapters, setCmsChapters] = useState<CmsChapterOption[]>([]);
@@ -1686,13 +1688,13 @@ function QuizSessionCreateModal({
                           <select
                             value={cmsExamTrack}
                             onChange={(event) => {
-                              setCmsExamTrack(event.target.value as ExamTrack | "");
+                              setCmsExamTrack(event.target.value as CmsExamTrack | "");
                               setCmsChapterId(null);
                             }}
                             className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                           >
                             <option value="">Select exam track</option>
-                            {EXAM_TRACKS.map((track) => (
+                            {CMS_EXAM_TRACKS.map((track) => (
                               <option key={track} value={track}>
                                 {formatExamTrack(track)}
                               </option>

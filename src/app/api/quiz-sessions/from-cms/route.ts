@@ -12,9 +12,12 @@ import {
   resolveGradeId,
   streamForExamTrack,
 } from "@/lib/curriculum-options";
-import { isExamTrack } from "@/lib/exam-tracks";
-import { CMS_SOURCE, isCmsTestType } from "@/lib/cms-tests";
-import type { ExamTrack } from "@/types/curriculum";
+import {
+  CMS_SOURCE,
+  isCmsExamTrack,
+  isCmsTestType,
+  type CmsExamTrack,
+} from "@/lib/cms-tests";
 
 // Create a quiz session from a new-CMS test. This is the SYNCHRONOUS replacement for the
 // legacy SNS -> etl-data-flow sessionCreator Lambda: af_lms builds the quiz in quiz-backend,
@@ -42,7 +45,7 @@ interface CreateFromCmsBody {
   name?: string;
   cmsTestId?: number;
   testType?: string;
-  examTrack?: ExamTrack;
+  examTrack?: CmsExamTrack;
   grade?: number;
   testName?: string;
   testCode?: string;
@@ -144,7 +147,7 @@ export async function POST(request: NextRequest) {
   if (!body.cmsTestId || Number.isNaN(Number(body.cmsTestId))) {
     return NextResponse.json({ error: "cmsTestId is required" }, { status: 400 });
   }
-  if (!isExamTrack(body.examTrack)) {
+  if (!isCmsExamTrack(body.examTrack)) {
     return NextResponse.json({ error: "Valid examTrack is required" }, { status: 400 });
   }
   if (body.grade !== 11 && body.grade !== 12) {

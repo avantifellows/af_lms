@@ -36,6 +36,7 @@ last_updated: 2026-08-06
 - Tests are **colocated**: `foo.ts` → `foo.test.ts` (and `Foo.tsx` → `Foo.test.tsx`) in the same folder. E2E specs live under `e2e/`.
 - Client-safe shared values go in `@/lib/constants` (e.g. `PROGRAM_IDS`); anything importing `@/lib/db` is server-only and must not be reached from a client component.
 - A closed code set (codes + type + type guard + display labels) lives in one dependency-free `src/lib/*` module so server validation and UI dropdowns can never drift: `@/lib/exam-tracks` (Exam Track), `@/lib/cms-tests` (CMS test type). Widening such a set is a one-file change — never re-declare the literals locally.
+- A feature that supports only part of a wider vocabulary owns a named subset in its client-safe shared module (for example, `CMS_EXAM_TRACKS`); never render the wider list and rely on a later request to reject unsupported choices.
 - Types shared across modules live in `src/types/`; one-off types stay local to their module.
 
 ## Patterns

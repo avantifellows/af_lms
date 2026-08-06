@@ -6,10 +6,8 @@ import {
   curriculumIdForExamTrack,
   resolveGradeId,
 } from "@/lib/curriculum-options";
-import { isExamTrack } from "@/lib/exam-tracks";
-import { CMS_TEST_TYPES, type CmsTestType } from "@/lib/cms-tests";
+import { CMS_TEST_TYPES, isCmsExamTrack, type CmsTestType } from "@/lib/cms-tests";
 import { query } from "@/lib/db";
-import type { ExamTrack } from "@/types/curriculum";
 
 // New CMS (nex-gen-cms) service API. af_lms consumes the list route to let the session
 // creator pick tests authored in the new CMS. The CMS list route is subtype-agnostic
@@ -82,12 +80,12 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const examTrack = (searchParams.get("exam_track") || "").trim() as ExamTrack;
+  const examTrack = (searchParams.get("exam_track") || "").trim();
   const grade = Number((searchParams.get("grade") || "").trim());
   const testType = (searchParams.get("test_type") || "chapter_test").trim() as CmsTestType;
   const chapterIdParam = (searchParams.get("chapter_id") || "").trim();
 
-  if (!isExamTrack(examTrack)) {
+  if (!isCmsExamTrack(examTrack)) {
     return NextResponse.json(
       { error: "Invalid or missing exam_track" },
       { status: 400 }
