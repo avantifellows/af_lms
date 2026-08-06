@@ -287,7 +287,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
 - Issue #252 keeps the Region filter in **Curriculum Summary** and removes the State and District filters
 - **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
-- A **Curriculum Summary** multi-select list stays open while users check or uncheck multiple values and closes when they click outside; its footer has Clear and Done actions for clearing or confirming that filter's selections
+- A **Curriculum Summary** multi-select updates its form selection immediately and stays open while users check or uncheck values; clicking outside or Done keeps the selections and closes the list, while Clear unchecks that filter and leaves the list open
+- Apply filters is the only action that reloads **Curriculum Summary** with the selected filter values
 - A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
 - An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
 - With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
