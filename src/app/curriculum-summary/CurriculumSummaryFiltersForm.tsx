@@ -8,6 +8,7 @@ import type {
   CurriculumSummaryFilters,
 } from "@/lib/curriculum-summary";
 import type { ExamTrack } from "@/types/curriculum";
+import { EXAM_TRACKS } from "@/lib/exam-tracks";
 import SchoolFilterSelect, {
   ExamTrackFilterSelect,
   GradeFilterSelect,
@@ -43,6 +44,23 @@ export default function CurriculumSummaryFiltersForm({
     () => uniqueSorted(options.schools.map((school) => school.region)),
     [options.schools]
   );
+  const downstreamOptions = useMemo(
+    () => optionsForSchools(options, selectedSchoolCodes, selectedRegions),
+    [options, selectedSchoolCodes, selectedRegions]
+  );
+
+  function handleSelectedSchoolsChange(schoolCodes: string[]) {
+    const nextOptions = optionsForSchools(options, schoolCodes, selectedRegions);
+    setSelectedSchoolCodes(schoolCodes);
+    setSelectedProgramIds((selected) =>
+      keepAvailable(selected, nextOptions.programs.map(({ id }) => id))
+    );
+    setSelectedGrades((selected) => keepAvailable(selected, nextOptions.grades));
+    setSelectedSubjectIds((selected) =>
+      keepAvailable(selected, nextOptions.subjects.map(({ id }) => id))
+    );
+    setSelectedExamTracks((selected) => keepAvailable(selected, nextOptions.examTracks));
+  }
 
   function handleClearFilters() {
     setSelectedSchoolCodes([]);
@@ -67,25 +85,25 @@ export default function CurriculumSummaryFiltersForm({
           key={`schools:${filters.schools.join(",")}`}
           options={schoolOptions}
           selectedCodes={selectedSchoolCodes}
-          onSelectedCodesChange={setSelectedSchoolCodes}
+          onSelectedCodesChange={handleSelectedSchoolsChange}
         />
         <ProgramFilterSelect
-          options={options.programs}
+          options={downstreamOptions.programs}
           selectedIds={selectedProgramIds}
           onSelectedIdsChange={setSelectedProgramIds}
         />
         <GradeFilterSelect
-          options={options.grades}
+          options={downstreamOptions.grades}
           selectedGrades={selectedGrades}
           onSelectedGradesChange={setSelectedGrades}
         />
         <SubjectFilterSelect
-          options={options.subjects}
+          options={downstreamOptions.subjects}
           selectedIds={selectedSubjectIds}
           onSelectedIdsChange={setSelectedSubjectIds}
         />
         <ExamTrackFilterSelect
-          options={options.examTracks}
+          options={downstreamOptions.examTracks}
           selectedTracks={selectedExamTracks}
           onSelectedTracksChange={setSelectedExamTracks}
         />
@@ -145,6 +163,45 @@ export default function CurriculumSummaryFiltersForm({
       </div>
     </form>
   );
+}
+
+function optionsForSchools(
+  options: CurriculumSummaryFilterOptions,
+  schoolCodes: string[],
+  regions: string[]
+): CurriculumSummaryFilterOptions {
+  if (!options.availability) return options;
+
+  const selectedSchools = new Set(schoolCodes);
+  const selectedRegions = new Set(regions);
+  const schoolRegions = new Map(options.schools.map((school) => [school.code, school.region]));
+  const rows = options.availability.filter(
+    (row) =>
+      (selectedSchools.size === 0 || selectedSchools.has(row.schoolCode)) &&
+      (selectedRegions.size === 0 || selectedRegions.has(schoolRegions.get(row.schoolCode) ?? ""))
+  );
+  const programs = new Map(rows.map((row) => [row.programId, row.programName]));
+  const subjects = new Map(
+    rows.flatMap((row) =>
+      row.subjectId === null || row.subjectName === null
+        ? []
+        : [[row.subjectId, row.subjectName] as const]
+    )
+  );
+  const tracks = new Set(rows.map((row) => row.examTrack));
+
+  return {
+    ...options,
+    programs: [...programs].map(([id, name]) => ({ id, name })).sort((a, b) => a.id - b.id),
+    grades: [...new Set(rows.map((row) => row.grade))].sort((a, b) => a - b),
+    subjects: [...subjects].map(([id, name]) => ({ id, name })).sort((a, b) => a.id - b.id),
+    examTracks: EXAM_TRACKS.filter((track) => tracks.has(track)),
+  };
+}
+
+function keepAvailable<T>(selected: T[], available: T[]): T[] {
+  const availableSet = new Set(available);
+  return selected.filter((value) => availableSet.has(value));
 }
 
 function filterSchoolsByRegion(

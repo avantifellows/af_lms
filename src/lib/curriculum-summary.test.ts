@@ -577,7 +577,7 @@ describe("curriculum summary", () => {
     });
   });
 
-  it("keeps dashboard filter options independent from their own active filters", async () => {
+  it("keeps mapped option unions independent from downstream active filters", async () => {
     mockQuery
       .mockResolvedValueOnce([
         {
@@ -626,13 +626,94 @@ describe("curriculum summary", () => {
     expect(optionsSql).toContain("from subject_options");
     expect(optionsSql).toContain("from exam_track_options");
     expect(optionsSql).toContain("from geo_options");
-    expect(optionsSql).toContain("subject_filter_option_rows as");
-    expect(optionsSql).toContain("exam_track_filter_option_rows as");
-    expect(optionsSql).toContain("where ($9::int[] is null or grade = any($9::int[]))");
-    expect(optionsSql).toContain(
-      "where ($10::int[] is null or subject_id = any($10::int[]))"
-    );
+    const optionSql = optionsSql.slice(optionsSql.indexOf("option_rows as"));
+    expect(optionSql).not.toContain("$8::int[] is null or program_id");
+    expect(optionSql).not.toContain("$9::int[] is null or grade");
+    expect(optionSql).not.toContain("$10::int[] is null or subject_id");
+    expect(optionSql).not.toContain("$11::text[] is null or exam_track");
     expect(optionsSql).not.toContain("left join filtered_rows on true");
+  });
+
+  it("limits downstream options to the union of mapped rows for the selected Schools", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [{ id: 1, name: "JNV CoE" }],
+          grades: [11],
+          subjects: [{ id: 4, name: "Physics" }],
+          exam_tracks: ["jee_main"],
+          regions: [],
+          availability: [
+            {
+              schoolCode: "70705",
+              programId: 1,
+              programName: "JNV CoE",
+              grade: 11,
+              subjectId: 4,
+              subjectName: "Physics",
+              examTrack: "jee_main",
+            },
+            {
+              schoolCode: "64037",
+              programId: 2,
+              programName: "JNV Nodal",
+              grade: 12,
+              subjectId: 7,
+              subjectName: "Biology",
+              examTrack: "neet",
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(0))
+      .mockResolvedValueOnce([{
+        total_rows: 0,
+        flagged_rows: 0,
+        completed_chapters: 0,
+        total_configured_chapters: 0,
+        prescribed_chapters: 0,
+        actual_minutes: 0,
+        prescribed_minutes: 0,
+      }])
+      .mockResolvedValueOnce([]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams(
+        { schools: "70705", programs: "2", grades: "12", subjects: "7" },
+        "2026-05-30"
+      ),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      filterOptions: {
+        programs: [{ id: 1, name: "JNV CoE" }],
+        grades: [11],
+        subjects: [{ id: 4, name: "Physics" }],
+        examTracks: ["jee_main"],
+        availability: [
+          { schoolCode: "70705", programId: 1, grade: 11, subjectId: 4, examTrack: "jee_main" },
+          { schoolCode: "64037", programId: 2, grade: 12, subjectId: 7, examTrack: "neet" },
+        ],
+      },
+    });
+
+    const optionsSql = String(mockQuery.mock.calls[0][0]).toLowerCase();
+    expect(optionsSql).toContain("option_rows as");
+    expect(optionsSql).toContain("from mapped_rows");
+    expect(optionsSql).toContain("school_code = any($7::text[])");
+    const optionSql = optionsSql.slice(optionsSql.indexOf("option_rows as"));
+    expect(optionSql).not.toContain("$8::int[] is null or program_id");
+    expect(optionSql).not.toContain("$9::int[] is null or grade");
+    expect(optionSql).not.toContain("$10::int[] is null or subject_id");
   });
 
   it("defaults to the current academic year using the injected IST date", () => {

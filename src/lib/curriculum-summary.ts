@@ -71,6 +71,16 @@ export interface CurriculumSummarySubjectOption {
   name: string;
 }
 
+export interface CurriculumSummaryFilterAvailability {
+  schoolCode: string;
+  programId: number;
+  programName: string;
+  grade: number;
+  subjectId: number | null;
+  subjectName: string | null;
+  examTrack: ExamTrack;
+}
+
 export interface CurriculumSummaryFilterOptions {
   schools: CurriculumSummarySchoolOption[];
   programs: CurriculumSummaryProgramOption[];
@@ -78,6 +88,7 @@ export interface CurriculumSummaryFilterOptions {
   subjects: CurriculumSummarySubjectOption[];
   examTracks: ExamTrack[];
   regions: string[];
+  availability?: CurriculumSummaryFilterAvailability[];
 }
 
 export interface CurriculumSummaryStats {
@@ -169,6 +180,7 @@ interface OptionsQueryRow {
   subjects: unknown;
   exam_tracks: unknown;
   regions: unknown;
+  availability: unknown;
 }
 
 interface SummaryQueryRow {
@@ -737,40 +749,29 @@ function buildOptionsSql(): string {
       SELECT DISTINCT school_code, school_name, region, state, district
       FROM scoped_school_programs
     ),
-    program_options AS (
-      SELECT DISTINCT program_id, program_name, program_order
-      FROM scoped_school_programs
-    ),
-    primary_filter_option_rows AS (
+    option_rows AS (
       SELECT *
-      FROM expected_rows
+      FROM mapped_rows
       WHERE ($7::text[] IS NULL OR school_code = ANY($7::text[]))
-        AND ($8::int[] IS NULL OR program_id = ANY($8::int[]))
         AND ($12::text[] IS NULL OR region = ANY($12::text[]))
     ),
-    subject_filter_option_rows AS (
-      SELECT *
-      FROM primary_filter_option_rows
-      WHERE ($9::int[] IS NULL OR grade = ANY($9::int[]))
-    ),
-    exam_track_filter_option_rows AS (
-      SELECT *
-      FROM subject_filter_option_rows
-      WHERE ($10::int[] IS NULL OR subject_id = ANY($10::int[]))
+    program_options AS (
+      SELECT DISTINCT program_id, program_name, program_order
+      FROM option_rows
     ),
     grade_options AS (
       SELECT DISTINCT grade
-      FROM primary_filter_option_rows
+      FROM option_rows
       WHERE grade IS NOT NULL
     ),
     subject_options AS (
       SELECT DISTINCT subject_id, subject_name
-      FROM subject_filter_option_rows
+      FROM option_rows
       WHERE subject_id IS NOT NULL
     ),
     exam_track_options AS (
       SELECT DISTINCT exam_track
-      FROM exam_track_filter_option_rows
+      FROM option_rows
       WHERE exam_track IS NOT NULL
     ),
     geo_options AS (
@@ -811,6 +812,18 @@ function buildOptionsSql(): string {
         SELECT COALESCE(jsonb_agg(exam_track ORDER BY exam_track), '[]'::jsonb)
         FROM exam_track_options
       ) AS exam_tracks,
+      (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+          'schoolCode', school_code,
+          'programId', program_id,
+          'programName', program_name,
+          'grade', grade,
+          'subjectId', subject_id,
+          'subjectName', subject_name,
+          'examTrack', exam_track
+        ) ORDER BY school_code, program_order, grade, subject_id, exam_track), '[]'::jsonb)
+        FROM mapped_rows
+      ) AS availability,
       geo_options.regions
     FROM geo_options`;
 }
@@ -1098,6 +1111,17 @@ function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFi
       name: normalizeSubjectName(subject.name),
     }))
     .sort((a, b) => a.id - b.id);
+  const availability = parseJsonArray<CurriculumSummaryFilterAvailability>(row?.availability)
+    .filter((item) => isExamTrack(item.examTrack))
+    .map((item) => ({
+      schoolCode: String(item.schoolCode),
+      programId: Number(item.programId),
+      programName: String(item.programName),
+      grade: Number(item.grade),
+      subjectId: item.subjectId === null ? null : Number(item.subjectId),
+      subjectName: item.subjectName === null ? null : normalizeSubjectName(item.subjectName),
+      examTrack: item.examTrack,
+    }));
 
   return {
     schools,
@@ -1108,6 +1132,7 @@ function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFi
       parseJsonArray<string>(row?.exam_tracks).includes(track)
     ),
     regions: parseJsonArray<string>(row?.regions).map(String).sort(),
+    availability,
   };
 }
 
