@@ -45,7 +45,7 @@ A soft-deletable dated record of curriculum activity for a school, program, grad
 _Avoid_: Teaching Session, Session, Class Log
 
 **Class Cancellation Log**:
-An LMS Curriculum Log that records only that a class was cancelled on a date within the selected curriculum scope.
+An LMS Curriculum Log that records that a class for one Chapter was cancelled on a date within the selected curriculum scope.
 _Avoid_: Cancelled teaching, zero-hour class
 
 **Doubt Solving Log**:
@@ -267,8 +267,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - Centre v1 should be delivered in slices: db-service schema, AF LMS option seed script, AF LMS Centre import script, admin Centre APIs, Centre grid UI, and Centre option config UI
 - A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**, Grade, Subject, and **Exam Track**
 - A regular teaching **LMS Curriculum Log** has duration and one or more covered topics
-- A **Class Cancellation Log** has a date but no chapter, topics, or duration; it appears in log history but contributes no teaching time or curriculum progress
-- At most one active **Class Cancellation Log** exists for each School, Program, Grade, Subject, Exam Track, and date
+- A **Class Cancellation Log** has a date and one Chapter but no topics or duration; it appears in log history but contributes no teaching time or curriculum progress
+- At most one active **Class Cancellation Log** exists for each School, Program, Grade, Subject, Exam Track, Chapter, and date
 - A **Doubt Solving Log** has a date, chapter, and duration but no covered topics; it appears in log history but contributes no Actual Hours, topic coverage, or curriculum progress
 - **Class Cancellation Logs** and **Doubt Solving Logs** use the same edit and soft-delete lifecycle as regular teaching LMS Curriculum Logs
 - The Curriculum Add Log flow selects Regular Class, Class Cancelled, or Doubt Solving in one modal and shows only the fields required by that type
@@ -292,6 +292,8 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
 - Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
 - Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
+- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours on each Chapter row and totals both metrics on the parent School-Program-Grade-Subject-Exam Track row
+- Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
