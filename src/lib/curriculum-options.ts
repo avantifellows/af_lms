@@ -191,11 +191,20 @@ export async function resolveCurriculumProgramScope(
 
   const programs = allowedProgramIds.length
     ? (await query<CurriculumProgramOption>(
-        `SELECT id, name
-         FROM program
-         WHERE id = ANY($1::int[])
-         ORDER BY array_position(ARRAY[1, 2]::int[], id)`,
-        [allowedProgramIds]
+        `SELECT p.id, p.name
+         FROM program p
+         WHERE p.id = ANY($1::int[])
+           AND EXISTS (
+             SELECT 1
+             FROM centres c
+             JOIN school s ON s.id = c.school_id
+             WHERE c.program_id = p.id
+               AND s.code = $2
+               AND c.is_active IS TRUE
+               AND c.is_physical IS TRUE
+           )
+         ORDER BY array_position(ARRAY[1, 2]::int[], p.id)`,
+        [allowedProgramIds, schoolCode]
       )).map((program) => ({ ...program, id: Number(program.id) }))
     : [];
   const seatCentreIds = permission.scope?.centres;
