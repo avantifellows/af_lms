@@ -44,11 +44,31 @@ describe("getSessionWindow", () => {
     expect(after.hasEnded).toBe(true);
   });
 
-  it("handles the ISO-with-offset form without double-converting", async () => {
-    stubEndTime("2026-06-23T18:03:00Z");
-    const w = await getSessionWindow("S1", new Date("2026-06-23T18:04:00Z"));
-    expect(w.endTimeUtcIso).toBe("2026-06-23T18:03:00.000Z");
+  // Regression: a trailing `Z` on a session timestamp is NOT UTC. The API layer
+  // stamps one on while the value stays IST wall-clock, so branching on it (or
+  // trusting Date.parse) puts the gate 5h30m early. Real example from session
+  // 18259, which reads "2026-08-12T23:45:00Z" but means 23:45 IST == 18:15 UTC.
+  it("treats a bogus trailing Z as IST wall-clock, not UTC", async () => {
+    stubEndTime("2026-08-12T23:45:00Z");
+    const w = await getSessionWindow("S1", new Date("2026-08-12T18:20:00Z"));
+    expect(w.endTimeUtcIso).toBe("2026-08-12T18:15:00.000Z");
     expect(w.hasEnded).toBe(true);
+  });
+
+  it("does not let a bogus Z unblock generation while the test is still open", async () => {
+    stubEndTime("2026-08-12T23:45:00Z");
+    // 18:05Z is 23:35 IST — ten minutes before the window closes. Reading the Z
+    // as UTC would call this ended.
+    const w = await getSessionWindow("S1", new Date("2026-08-12T18:05:00Z"));
+    expect(w.hasEnded).toBe(false);
+  });
+
+  it("agrees across the space-separated and Z-suffixed forms of one instant", async () => {
+    stubEndTime("2026-08-12 23:45:00");
+    const bare = await getSessionWindow("S1", new Date("2026-08-12T18:20:00Z"));
+    stubEndTime("2026-08-12T23:45:00Z");
+    const zed = await getSessionWindow("S1", new Date("2026-08-12T18:20:00Z"));
+    expect(zed.endTimeUtcIso).toBe(bare.endTimeUtcIso);
   });
 
   it("fails open when the session row is absent", async () => {

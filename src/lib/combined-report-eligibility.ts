@@ -58,15 +58,21 @@ export async function getSessionWindow(
   const raw = rows[0]?.end_time ?? null;
   if (!raw) return { endTimeUtcIso: null, hasEnded: true };
 
-  // dbIstTimestampToUtcIso THROWS on a value it can't parse (it falls through to
-  // `new Date(x).toISOString()`), so a malformed timestamp must not be allowed to
-  // turn a report listing into a 502.
+  // Convert unconditionally — never branch on a trailing `Z`. Session timestamps
+  // are IST wall-clock even when something upstream has stamped a `Z` on them
+  // (the API layer does), so that `Z` does not mean UTC: session 18259's window
+  // end reads "2026-08-12T23:45:00Z" through the API but means 23:45 IST.
+  // Trusting it would put the gate 5h30m early. dbIstTimestampToUtcIso handles
+  // both the bare `YYYY-MM-DD HH:mm:ss` this query returns and the Z-suffixed
+  // form, so one unconditional call is correct for every shape — matching what
+  // the quiz-sessions routes do.
+  //
+  // It THROWS on a value it can't parse (falling through to
+  // `new Date(x).toISOString()`), so a malformed timestamp must not be allowed
+  // to turn a report listing into a 502.
   let endMs = NaN;
   try {
-    const utcIso = /[zZ]$|[+-]\d{2}:\d{2}$/.test(raw)
-      ? raw
-      : dbIstTimestampToUtcIso(raw);
-    endMs = Date.parse(utcIso);
+    endMs = Date.parse(dbIstTimestampToUtcIso(raw));
   } catch {
     endMs = NaN;
   }
