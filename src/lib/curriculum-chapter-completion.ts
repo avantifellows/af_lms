@@ -60,6 +60,16 @@ export function normalizeChapterIds(chapterIds: unknown): number[] {
   );
 }
 
+function hasInvalidChapterIds(chapterIds: unknown): boolean {
+  return (
+    chapterIds != null &&
+    (!Array.isArray(chapterIds) ||
+      chapterIds.some(
+        (id) => typeof id !== "number" || !Number.isInteger(id) || id <= 0
+      ))
+  );
+}
+
 export async function validateChapterCompletionDeltas(params: {
   schoolCode: string;
   programId: number;
@@ -90,6 +100,16 @@ export async function validateChapterCompletionDeltas(params: {
   );
   if (compatibilityError) {
     return { ok: false, status: 422, error: compatibilityError };
+  }
+  if (
+    hasInvalidChapterIds(params.completeChapterIds) ||
+    hasInvalidChapterIds(params.uncompleteChapterIds)
+  ) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Chapter Completion changes must use arrays of positive integer Chapter IDs",
+    };
   }
 
   const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);

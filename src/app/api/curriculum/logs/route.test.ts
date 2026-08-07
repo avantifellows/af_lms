@@ -993,6 +993,38 @@ describe("/api/curriculum/logs", () => {
     expect(mockWithTransaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["Class Cancelled", "class_cancelled", "44"],
+    ["Doubt Solving", "doubt_solving", ["invalid"]],
+  ])(
+    "rejects malformed Chapter Completion fields on a %s log",
+    async (_label, logType, completeChapterIds) => {
+      mockQuery.mockResolvedValueOnce([]);
+
+      const res = await POST(
+        jsonReq("/api/curriculum/logs", {
+          school_code: "70705",
+          program_id: 1,
+          exam_track: "jee_main",
+          grade: 11,
+          subject: "Physics",
+          log_type: logType,
+          log_date: "2026-02-15",
+          chapter_id: 44,
+          duration_minutes: logType === "doubt_solving" ? 60 : undefined,
+          complete_chapter_ids: completeChapterIds,
+        })
+      );
+
+      expect(res.status).toBe(422);
+      await expect(res.json()).resolves.toEqual({
+        error: "Chapter Completion changes must use arrays of positive integer Chapter IDs",
+      });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockWithTransaction).not.toHaveBeenCalled();
+    }
+  );
+
   it("rejects an unknown log type", async () => {
     mockQuery.mockResolvedValueOnce([]);
 
