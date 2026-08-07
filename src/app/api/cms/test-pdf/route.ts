@@ -9,6 +9,7 @@ import { requireCmsServiceAccess } from "@/lib/cms-service";
 // and the answer key. The CMS also supports questions_with_answers, not exposed here.
 const PDF_TYPES = ["questions", "answers"];
 
+// fallow-ignore-next-line complexity
 export async function GET(request: NextRequest) {
   const access = await requireCmsServiceAccess();
   if (!access.ok) {

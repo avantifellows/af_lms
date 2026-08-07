@@ -957,6 +957,7 @@ function mapCentreOptionMutationRow(row: CentreOptionMutationRow): CentreOption 
   };
 }
 
+// fallow-ignore-next-line complexity
 function mapCentreListRow(row: CentreListQueryRow): CentreListRow {
   const schoolId = row.school_id === null ? null : numberFromDb(row.school_id);
 

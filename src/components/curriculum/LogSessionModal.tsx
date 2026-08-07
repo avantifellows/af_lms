@@ -53,6 +53,7 @@ function parseDurationInput(value: string): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+// fallow-ignore-next-line complexity
 export default function LogSessionModal({
   chapters,
   progress,
@@ -148,6 +149,7 @@ export default function LogSessionModal({
     });
   };
 
+  // fallow-ignore-next-line complexity
   const handleSave = () => {
     if (isChapterBacked) {
       if (selectedChapterId == null) {

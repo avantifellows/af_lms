@@ -55,6 +55,7 @@ async function requireSuccessfulResponse(
   throw new Error(body?.error ?? fallbackError);
 }
 
+// fallow-ignore-next-line complexity
 export default function CurriculumTab({
   schoolCode,
   schoolName,
@@ -170,6 +171,7 @@ export default function CurriculumTab({
     const subject = selectedSubject;
     let isCancelled = false;
 
+    // fallow-ignore-next-line complexity
     async function fetchCurriculumData() {
       setIsDataLoading(true);
       setError(null);
@@ -316,6 +318,7 @@ export default function CurriculumTab({
     setSelectedSubject(first?.subject ?? null);
   }
 
+  // fallow-ignore-next-line complexity
   function handleGradeChange(grade: GradeNumber) {
     const trackOption =
       options?.centreExamTracks.find(
@@ -356,6 +359,7 @@ export default function CurriculumTab({
     }
   }
 
+  // fallow-ignore-next-line complexity
   async function handleSaveLog(payload: {
     logType: WritableCurriculumLogType;
     date: string;

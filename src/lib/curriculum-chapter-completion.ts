@@ -1,16 +1,15 @@
 import type { PoolClient } from "pg";
 import { query } from "./db";
 import {
-  isGradeNumber,
-  isSubjectName,
-  resolveCurriculumProgramScope,
+  requireCurriculumProgramAccess,
+  validateCurriculumSelection,
   type CurriculumValidationFailure,
 } from "./curriculum-options";
-import { isExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import type { ExamTrack, GradeNumber, SubjectName } from "@/types/curriculum";
 import { GRADE_IDS, SUBJECT_IDS } from "@/types/curriculum";
 import type { UserPermission } from "./permissions";
+import { normalizePositiveIntegerIds } from "./curriculum-input";
 
 interface CompletionScopeRow {
   chapter_id: number;
@@ -49,17 +48,6 @@ function toTimestampString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-export function normalizeChapterIds(chapterIds: unknown): number[] {
-  if (!Array.isArray(chapterIds)) return [];
-  return Array.from(
-    new Set(
-      chapterIds
-        .map((id) => (typeof id === "number" ? id : Number.parseInt(String(id), 10)))
-        .filter((id) => Number.isInteger(id) && id > 0)
-    )
-  );
-}
-
 function hasInvalidChapterIds(chapterIds: unknown): boolean {
   return (
     chapterIds != null &&
@@ -80,23 +68,12 @@ export async function validateChapterCompletionDeltas(params: {
   uncompleteChapterIds: unknown;
   permission: UserPermission;
 }): Promise<ChapterCompletionValidationResult> {
-  if (!isExamTrack(params.examTrack)) {
-    return { ok: false, status: 422, error: "Invalid Exam Track" };
-  }
-  if (!isGradeNumber(params.grade)) {
-    return { ok: false, status: 422, error: "Grade must be 11 or 12" };
-  }
-  if (!isSubjectName(params.subject)) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Subject must be Physics, Chemistry, Maths, or Biology",
-    };
-  }
+  const selection = validateCurriculumSelection(params);
+  if (!selection.ok) return selection;
 
   const compatibilityError = getSubjectExamTrackCompatibilityError(
-    params.subject,
-    params.examTrack
+    selection.subject,
+    selection.examTrack
   );
   if (compatibilityError) {
     return { ok: false, status: 422, error: compatibilityError };
@@ -112,14 +89,11 @@ export async function validateChapterCompletionDeltas(params: {
     };
   }
 
-  const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
-  if (!scope.ok) return scope;
-  if (!scope.allowedProgramIds.includes(params.programId)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
+  const access = await requireCurriculumProgramAccess(params);
+  if (!access.ok) return access;
 
-  const completeChapterIds = normalizeChapterIds(params.completeChapterIds);
-  const uncompleteChapterIds = normalizeChapterIds(params.uncompleteChapterIds);
+  const completeChapterIds = normalizePositiveIntegerIds(params.completeChapterIds);
+  const uncompleteChapterIds = normalizePositiveIntegerIds(params.uncompleteChapterIds);
   const overlappingChapterIds = completeChapterIds.filter((id) =>
     uncompleteChapterIds.includes(id)
   );
@@ -135,11 +109,11 @@ export async function validateChapterCompletionDeltas(params: {
   if (chapterIds.length === 0) {
     return {
       ok: true,
-      examTrack: params.examTrack,
-      grade: params.grade,
-      gradeId: GRADE_IDS[params.grade],
-      subject: params.subject,
-      subjectId: SUBJECT_IDS[params.subject],
+      examTrack: selection.examTrack,
+      grade: selection.grade,
+      gradeId: GRADE_IDS[selection.grade],
+      subject: selection.subject,
+      subjectId: SUBJECT_IDS[selection.subject],
       completeChapterIds,
       uncompleteChapterIds,
     };
@@ -165,10 +139,10 @@ export async function validateChapterCompletionDeltas(params: {
        AND g.number = $3
        AND ch.subject_id = $4`,
     [
-      params.examTrack,
+      selection.examTrack,
       chapterIds,
-      params.grade,
-      SUBJECT_IDS[params.subject],
+      selection.grade,
+      SUBJECT_IDS[selection.subject],
       params.schoolCode,
       params.programId,
     ]
@@ -198,11 +172,11 @@ export async function validateChapterCompletionDeltas(params: {
 
   return {
     ok: true,
-    examTrack: params.examTrack,
-    grade: params.grade,
-    gradeId: GRADE_IDS[params.grade],
-    subject: params.subject,
-    subjectId: SUBJECT_IDS[params.subject],
+    examTrack: selection.examTrack,
+    grade: selection.grade,
+    gradeId: GRADE_IDS[selection.grade],
+    subject: selection.subject,
+    subjectId: SUBJECT_IDS[selection.subject],
     completeChapterIds,
     uncompleteChapterIds,
   };

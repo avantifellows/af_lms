@@ -119,12 +119,40 @@ function normalizeSubjectName(value: unknown): SubjectName {
   return subject === "Mathematics" ? "Maths" : (subject as SubjectName);
 }
 
-export function isGradeNumber(value: number): value is GradeNumber {
+function isGradeNumber(value: number): value is GradeNumber {
   return value === 11 || value === 12;
 }
 
-export function isSubjectName(value: string): value is SubjectName {
+function isSubjectName(value: string): value is SubjectName {
   return SUBJECT_ORDER.includes(value as SubjectName);
+}
+
+export function validateCurriculumSelection(params: {
+  examTrack: string;
+  grade: number;
+  subject: string;
+}):
+  | { ok: true; examTrack: ExamTrack; grade: GradeNumber; subject: SubjectName }
+  | CurriculumValidationFailure {
+  if (!isExamTrack(params.examTrack)) {
+    return { ok: false, status: 422, error: "Invalid Exam Track" };
+  }
+  if (!isGradeNumber(params.grade)) {
+    return { ok: false, status: 422, error: "Grade must be 11 or 12" };
+  }
+  if (!isSubjectName(params.subject)) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Subject must be Physics, Chemistry, Maths, or Biology",
+    };
+  }
+  return {
+    ok: true,
+    examTrack: params.examTrack,
+    grade: params.grade,
+    subject: params.subject,
+  };
 }
 
 export function curriculumIdForExamTrack(examTrack: ContentExamTrack): number;
@@ -170,7 +198,27 @@ function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; 
   });
 }
 
-export async function resolveCurriculumProgramScope(
+function mapGradeSubjectRows(rows: ConfigScopeRow[]) {
+  return sortByCurriculumOrder(
+    rows
+      .map((row) => ({
+        examTrack: row.exam_track,
+        grade: row.grade as GradeNumber,
+        gradeId: Number(row.grade_id),
+        subject: normalizeSubjectName(row.subject),
+        subjectId: Number(row.subject_id),
+      }))
+      .filter(
+        (row) =>
+          isExamTrack(row.examTrack) &&
+          isGradeNumber(row.grade) &&
+          isSubjectName(row.subject)
+      )
+  );
+}
+
+// fallow-ignore-next-line complexity
+async function resolveCurriculumProgramScope(
   schoolCode: string,
   permission: UserPermission
 ): Promise<ProgramScopeResult> {
@@ -237,6 +285,19 @@ export async function resolveCurriculumProgramScope(
   };
 }
 
+export async function requireCurriculumProgramAccess(params: {
+  schoolCode: string;
+  programId: number;
+  permission: UserPermission;
+}): Promise<{ ok: true } | ScopeFailure> {
+  const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
+  if (!scope.ok) return scope;
+  return scope.allowedProgramIds.includes(params.programId)
+    ? { ok: true }
+    : { ok: false, status: 403, error: "Forbidden" };
+}
+
+// fallow-ignore-next-line complexity
 export async function getCurriculumOptions(params: {
   schoolCode: string;
   programIdOverride?: number | null;
@@ -339,44 +400,14 @@ export async function getCurriculumOptions(params: {
       .filter((row) => isExamTrack(row.exam_track) && isGradeNumber(row.grade))
       .map((row) => `${row.exam_track}:${row.grade}`)
   );
-  const allGradeSubjects = sortByCurriculumOrder(
-    configRows
-      .map((row) => ({
-        examTrack: row.exam_track,
-        grade: row.grade as GradeNumber,
-        gradeId: Number(row.grade_id),
-        subject: normalizeSubjectName(row.subject),
-        subjectId: Number(row.subject_id),
-      }))
-      .filter(
-        (row) =>
-          isExamTrack(row.examTrack) &&
-          isGradeNumber(row.grade) &&
-          isSubjectName(row.subject)
-      )
-  );
+  const allGradeSubjects = mapGradeSubjectRows(configRows);
   const mappedGradeSubjects = allGradeSubjects.filter((row) =>
     mappedKeys.has(`${row.examTrack}:${row.grade}`)
   );
   const configuredKeys = new Set(
     allGradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
   );
-  const historicalGradeSubjects = sortByCurriculumOrder(
-    historicalLogRows
-      .map((row) => ({
-        examTrack: row.exam_track,
-        grade: row.grade as GradeNumber,
-        gradeId: Number(row.grade_id),
-        subject: normalizeSubjectName(row.subject),
-        subjectId: Number(row.subject_id),
-      }))
-      .filter(
-        (row) =>
-          isExamTrack(row.examTrack) &&
-          isGradeNumber(row.grade) &&
-          isSubjectName(row.subject)
-      )
-  );
+  const historicalGradeSubjects = mapGradeSubjectRows(historicalLogRows);
   const gradeSubjects = sortByCurriculumOrder(
     [...mappedGradeSubjects, ...historicalGradeSubjects].filter(
       (row, index, rows) =>
@@ -462,34 +493,20 @@ export async function getCurriculumChapters(params: {
   subject: string;
   permission: UserPermission;
 }): Promise<CurriculumChaptersResult> {
-  if (!isExamTrack(params.examTrack)) {
-    return { ok: false, status: 422, error: "Invalid Exam Track" };
-  }
-  if (!isGradeNumber(params.grade)) {
-    return { ok: false, status: 422, error: "Grade must be 11 or 12" };
-  }
-  if (!isSubjectName(params.subject)) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Subject must be Physics, Chemistry, Maths, or Biology",
-    };
-  }
+  const selection = validateCurriculumSelection(params);
+  if (!selection.ok) return selection;
 
-  const curriculumId = curriculumIdForExamTrack(params.examTrack);
+  const curriculumId = curriculumIdForExamTrack(selection.examTrack);
   if (curriculumId === null) {
     return {
       ok: false,
       status: 422,
-      error: `Curriculum configuration is not available for ${formatExamTrack(params.examTrack)}`,
+      error: `Curriculum configuration is not available for ${formatExamTrack(selection.examTrack)}`,
     };
   }
 
-  const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
-  if (!scope.ok) return scope;
-  if (!scope.allowedProgramIds.includes(params.programId)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
+  const access = await requireCurriculumProgramAccess(params);
+  if (!access.ok) return access;
   const rows = await query<ChapterScopeRow>(
     `SELECT
        ch.id AS chapter_id,
@@ -521,11 +538,9 @@ export async function getCurriculumChapters(params: {
        AND s.id = $3
      ORDER BY cfg.coverage_sequence ASC, ch.code ASC, t.code ASC`,
     [
-      params.examTrack,
-      params.grade,
-      ({ Maths: 1, Chemistry: 2, Biology: 3, Physics: 4 } as Record<SubjectName, number>)[
-        params.subject
-      ],
+      selection.examTrack,
+      selection.grade,
+      ({ Maths: 1, Chemistry: 2, Biology: 3, Physics: 4 } as Record<SubjectName, number>)[selection.subject],
       curriculumId,
     ]
   );

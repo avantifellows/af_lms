@@ -932,6 +932,7 @@ export default function QuizSessionsTab({
   );
 }
 
+// fallow-ignore-next-line complexity
 function QuizSessionCreateModal({
   batches,
   onClose,

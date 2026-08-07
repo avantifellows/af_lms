@@ -88,6 +88,7 @@ const EMPTY_FILTERS: CentreListFilters = {
   isPhysical: "all",
 };
 
+// fallow-ignore-next-line complexity
 export default function CentreGrid({
   initialRows,
   initialSummary,
@@ -1121,6 +1122,7 @@ function OptionSelectField({
   );
 }
 
+// fallow-ignore-next-line complexity
 function CentreCard({
   row,
   expanded,

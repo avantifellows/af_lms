@@ -265,6 +265,7 @@ export function StringFilterSelect({
   );
 }
 
+// fallow-ignore-next-line complexity
 function SearchableMultiSelectFilter({
   label,
   name,

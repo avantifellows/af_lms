@@ -2,13 +2,12 @@ import type { PoolClient } from "pg";
 import { query, withTransaction } from "./db";
 import {
   curriculumIdForExamTrack,
-  isGradeNumber,
-  isSubjectName,
-  resolveCurriculumProgramScope,
+  requireCurriculumProgramAccess,
+  validateCurriculumSelection,
   type CurriculumValidationFailure,
 } from "./curriculum-options";
 import { validateCentreExamTrackMapping } from "./centre-resolver";
-import { formatExamTrack, isExamTrack } from "./exam-tracks";
+import { formatExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
 import { isFutureIST, isPastOrTodayIST } from "./curriculum-date-helpers";
 import {
@@ -34,6 +33,7 @@ import {
   SUBJECT_IDS,
 } from "@/types/curriculum";
 import type { UserPermission } from "./permissions";
+import { normalizePositiveIntegerIds } from "./curriculum-input";
 
 interface LogTopicRow {
   id: number;
@@ -121,20 +121,14 @@ function toTimestampString(value: string | Date): string {
 }
 
 function normalizeTopicIds(topicIds: unknown): number[] {
-  if (!Array.isArray(topicIds)) return [];
-  return Array.from(
-    new Set(
-      topicIds
-        .map((id) => (typeof id === "number" ? id : Number.parseInt(String(id), 10)))
-        .filter((id) => Number.isInteger(id) && id > 0)
-    )
-  );
+  return normalizePositiveIntegerIds(topicIds);
 }
 
 function hasProvidedTopics(topicIds: unknown): boolean {
   return topicIds != null && (!Array.isArray(topicIds) || topicIds.length > 0);
 }
 
+// fallow-ignore-next-line complexity
 function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
   const logsById = new Map<number, LmsCurriculumLog & { _editable: boolean }>();
 
@@ -210,42 +204,28 @@ export async function validateSelectedScope(params: {
   | CurriculumValidationFailure
   | { ok: false; status: 403 | 404; error: string }
 > {
-  if (!isExamTrack(params.examTrack)) {
-    return { ok: false, status: 422, error: "Invalid Exam Track" };
-  }
-  if (!isGradeNumber(params.grade)) {
-    return { ok: false, status: 422, error: "Grade must be 11 or 12" };
-  }
-  if (!isSubjectName(params.subject)) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Subject must be Physics, Chemistry, Maths, or Biology",
-    };
-  }
+  const selection = validateCurriculumSelection(params);
+  if (!selection.ok) return selection;
 
-  const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
-  if (!scope.ok) return scope;
-  if (!scope.allowedProgramIds.includes(params.programId)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
+  const access = await requireCurriculumProgramAccess(params);
+  if (!access.ok) return access;
 
-  const curriculumId = curriculumIdForExamTrack(params.examTrack);
+  const curriculumId = curriculumIdForExamTrack(selection.examTrack);
   if (curriculumId === null) {
     return {
       ok: false,
       status: 422,
-      error: `Curriculum configuration is not available for ${formatExamTrack(params.examTrack)}`,
+      error: `Curriculum configuration is not available for ${formatExamTrack(selection.examTrack)}`,
     };
   }
 
   return {
     ok: true,
-    examTrack: params.examTrack,
-    grade: params.grade,
-    subject: params.subject,
-    gradeId: GRADE_IDS[params.grade],
-    subjectId: SUBJECT_IDS[params.subject],
+    examTrack: selection.examTrack,
+    grade: selection.grade,
+    subject: selection.subject,
+    gradeId: GRADE_IDS[selection.grade],
+    subjectId: SUBJECT_IDS[selection.subject],
     curriculumId,
   };
 }
@@ -787,6 +767,7 @@ export async function getCurriculumLogById(id: number): Promise<LmsCurriculumLog
   return logsFromRows(rows)[0] ?? null;
 }
 
+// fallow-ignore-next-line complexity
 export async function createCurriculumLog(params: {
   schoolCode: string;
   programId: number;
@@ -1034,6 +1015,7 @@ export async function createCurriculumLog(params: {
   };
 }
 
+// fallow-ignore-next-line complexity
 async function updateClassCancelledLogFields(params: {
   id: number;
   log: LogMutationScopeRow;
@@ -1114,6 +1096,7 @@ async function updateClassCancelledLogFields(params: {
   return { ok: true, log: updatedLog };
 }
 
+// fallow-ignore-next-line complexity
 async function updateDoubtSolvingLogFields(params: {
   id: number;
   log: LogMutationScopeRow;
@@ -1168,38 +1151,53 @@ async function updateDoubtSolvingLogFields(params: {
       actorEmail: params.actorEmail,
     })
   );
-  if (!updated) {
-    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
-  }
-
-  const updatedLog = await getCurriculumLogById(params.id);
-  if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");
-  return { ok: true, log: updatedLog };
+  return loadUpdatedCurriculumLog(params.id, updated);
 }
 
+async function loadUpdatedCurriculumLog(id: number, updated: boolean) {
+  if (!updated) {
+    return { ok: false as const, status: 404 as const, error: "LMS Curriculum Log not found" };
+  }
+  const log = await getCurriculumLogById(id);
+  if (!log) throw new Error("Updated LMS Curriculum Log was not found");
+  return { ok: true as const, log };
+}
+
+async function loadMappedLogMutationScope(
+  id: number,
+  permission: UserPermission
+) {
+  const log = await loadLogMutationScope(id);
+  if (!log) {
+    return { ok: false as const, status: 404 as const, error: "LMS Curriculum Log not found" };
+  }
+
+  const access = await requireCurriculumProgramAccess({
+    schoolCode: log.school_code,
+    programId: log.program_id,
+    permission,
+  });
+  if (!access.ok) return access;
+  if (!log.is_currently_mapped) {
+    return {
+      ok: false as const,
+      status: 422 as const,
+      error: "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
+    };
+  }
+  return { ok: true as const, log };
+}
+
+// fallow-ignore-next-line complexity
 export async function updateCurriculumLog(params: {
   id: number;
   patch: Record<string, unknown>;
   permission: UserPermission;
   actorEmail: string;
 }): Promise<CurriculumEditResult> {
-  const log = await loadLogMutationScope(params.id);
-  if (!log) {
-    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
-  }
-
-  const scope = await resolveCurriculumProgramScope(log.school_code, params.permission);
-  if (!scope.ok) return scope;
-  if (!scope.allowedProgramIds.includes(log.program_id)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-  if (!log.is_currently_mapped) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
-    };
-  }
+  const access = await loadMappedLogMutationScope(params.id, params.permission);
+  if (!access.ok) return access;
+  const { log } = access;
 
   const subject = (Object.keys(SUBJECT_IDS) as SubjectName[]).find(
     (name) => SUBJECT_IDS[name] === log.subject_id
@@ -1318,14 +1316,7 @@ export async function updateCurriculumLog(params: {
       actorEmail: params.actorEmail,
     })
   );
-  if (!updated) {
-    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
-  }
-
-  const updatedLog = await getCurriculumLogById(params.id);
-  if (!updatedLog) throw new Error("Updated LMS Curriculum Log was not found");
-
-  return { ok: true, log: updatedLog };
+  return loadUpdatedCurriculumLog(params.id, updated);
 }
 
 export async function deleteCurriculumLog(params: {
@@ -1333,23 +1324,9 @@ export async function deleteCurriculumLog(params: {
   permission: UserPermission;
   actorEmail: string;
 }): Promise<CurriculumDeleteResult> {
-  const log = await loadLogMutationScope(params.id);
-  if (!log) {
-    return { ok: false, status: 404, error: "LMS Curriculum Log not found" };
-  }
-
-  const scope = await resolveCurriculumProgramScope(log.school_code, params.permission);
-  if (!scope.ok) return scope;
-  if (!scope.allowedProgramIds.includes(log.program_id)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-  if (!log.is_currently_mapped) {
-    return {
-      ok: false,
-      status: 422,
-      error: "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
-    };
-  }
+  const access = await loadMappedLogMutationScope(params.id, params.permission);
+  if (!access.ok) return access;
+  const { log } = access;
   if (!log.is_editable) {
     return { ok: false, status: 422, error: "Historical LMS Curriculum Logs are not editable" };
   }

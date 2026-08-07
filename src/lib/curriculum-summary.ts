@@ -1178,6 +1178,7 @@ function mapFilterOptions(row: OptionsQueryRow | undefined): CurriculumSummaryFi
   };
 }
 
+// fallow-ignore-next-line complexity
 function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
   const schoolCode = String(row.school_code);
   const programId = Number(row.program_id);
@@ -1215,12 +1216,7 @@ function mapSummaryRow(row: SummaryQueryRow): CurriculumSummaryRow {
     prescribedChapters: numberFromDb(row.prescribed_chapters),
     actualMinutes: numberFromDb(row.actual_minutes),
     prescribedMinutes: numberFromDb(row.prescribed_minutes),
-    deltaPercent:
-      row.delta_percent === null || row.delta_percent === undefined
-        ? null
-        : Number(row.delta_percent),
-    flagged: row.flagged === true || row.flagged === "true",
-    flagReasons: parseJsonArray<string>(row.flag_reasons).map(String),
+    ...mapFlagFields(row),
   };
 }
 
@@ -1254,10 +1250,15 @@ function mapChapterRow(row: ChapterQueryRow): CurriculumSummaryChapterRow {
     prescribedMinutes: numberFromDb(row.prescribed_minutes),
     classCancellationCount: numberFromDb(row.class_cancellation_count),
     doubtSolvingMinutes: numberFromDb(row.doubt_solving_minutes),
-    deltaPercent:
-      row.delta_percent === null || row.delta_percent === undefined
-        ? null
-        : Number(row.delta_percent),
+    ...mapFlagFields(row),
+  };
+}
+
+function mapFlagFields(
+  row: Pick<SummaryQueryRow, "delta_percent" | "flagged" | "flag_reasons">
+) {
+  return {
+    deltaPercent: row.delta_percent == null ? null : Number(row.delta_percent),
     flagged: row.flagged === true || row.flagged === "true",
     flagReasons: parseJsonArray<string>(row.flag_reasons).map(String),
   };

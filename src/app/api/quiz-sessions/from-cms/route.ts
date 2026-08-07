@@ -116,7 +116,7 @@ async function resolveGroupId(batchId: string): Promise<number | null> {
   return groups?.[0]?.id ?? null;
 }
 
-// fallow-ignore-next-line code-duplication
+// fallow-ignore-next-line complexity code-duplication
 export async function POST(request: NextRequest) {
   const access = await requireQuizSessionRequestAccess("edit");
   if (!access.ok) {

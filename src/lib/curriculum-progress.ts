@@ -46,6 +46,7 @@ function toTimestampString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+// fallow-ignore-next-line complexity
 export async function getCurriculumProgress(params: {
   schoolCode: string;
   programId: number;

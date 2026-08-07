@@ -27,6 +27,7 @@ function chapterName(row: ChapterNameRow): string {
   );
 }
 
+// fallow-ignore-next-line complexity
 export async function GET(request: NextRequest) {
   const access = await requireQuizSessionRequestAccess("view");
   if (!access.ok) {

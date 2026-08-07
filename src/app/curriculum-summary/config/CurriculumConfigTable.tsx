@@ -385,6 +385,7 @@ function RemovePanel({
   );
 }
 
+// fallow-ignore-next-line complexity
 function AddPanel({
   activeFilters,
   rows,

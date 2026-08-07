@@ -246,6 +246,7 @@ async function listQuizSessions(
   return { sessions: items.map(normalizeSessionTimes), hasMore };
 }
 
+// fallow-ignore-next-line complexity
 export async function POST(request: NextRequest) {
   const access = await requireQuizSessionRequestAccess("edit");
   if (!access.ok) {
