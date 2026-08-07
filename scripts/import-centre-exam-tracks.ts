@@ -45,13 +45,15 @@ async function main(): Promise<void> {
       sourcePath: options.sourcePath,
     });
     console.log(JSON.stringify(report, null, 2));
-    if (!report.ok) process.exitCode = 1;
+    if (!report.ok) {
+      process.exitCode = 1;
+    }
   } finally {
     await dbModule.default.end();
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+main().catch((error: unknown) => {
   process.exitCode = 1;
+  console.error(error instanceof Error ? error.message : error);
 });

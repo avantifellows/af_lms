@@ -43,6 +43,18 @@ function selectFirstGradeSubject(
   ) ?? null;
 }
 
+async function requireSuccessfulResponse(
+  response: Response,
+  fallbackError: string
+): Promise<void> {
+  if (response.ok) return;
+  if (response.status === 403) {
+    throw new Error("Your permissions changed. Reload the page before trying again.");
+  }
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  throw new Error(body?.error ?? fallbackError);
+}
+
 export default function CurriculumTab({
   schoolCode,
   schoolName,
@@ -77,6 +89,14 @@ export default function CurriculumTab({
       ? "logs"
       : "chapters"
   );
+
+  const applyOptions = useCallback((data: CurriculumOptionsResponse) => {
+    setOptions(data);
+    setSelectedProgramId(data.defaults.programId);
+    setSelectedExamTrack(data.defaults.examTrack);
+    setSelectedGrade(data.defaults.grade);
+    setSelectedSubject(data.defaults.subject);
+  }, []);
 
   const resetScopeInteractionState = useCallback(() => {
     setLogError(null);
@@ -115,11 +135,7 @@ export default function CurriculumTab({
         const data = (await response.json()) as CurriculumOptionsResponse;
         if (isCancelled) return;
 
-        setOptions(data);
-        setSelectedProgramId(data.defaults.programId);
-        setSelectedExamTrack(data.defaults.examTrack);
-        setSelectedGrade(data.defaults.grade);
-        setSelectedSubject(data.defaults.subject);
+        applyOptions(data);
       } catch (err) {
         if (!isCancelled) {
           setError(err instanceof Error ? err.message : "An error occurred");
@@ -135,7 +151,7 @@ export default function CurriculumTab({
     return () => {
       isCancelled = true;
     };
-  }, [schoolCode]);
+  }, [applyOptions, schoolCode]);
 
   useEffect(() => {
     if (!selectedProgramId || !selectedExamTrack || !selectedGrade || !selectedSubject) {
@@ -332,11 +348,7 @@ export default function CurriculumTab({
       );
       if (!response.ok) throw new Error("Failed to fetch Curriculum options");
       const data = (await response.json()) as CurriculumOptionsResponse;
-      setOptions(data);
-      setSelectedProgramId(data.defaults.programId);
-      setSelectedExamTrack(data.defaults.examTrack);
-      setSelectedGrade(data.defaults.grade);
-      setSelectedSubject(data.defaults.subject);
+      applyOptions(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -416,13 +428,7 @@ export default function CurriculumTab({
         }
       );
 
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Your permissions changed. Reload the page before trying again.");
-        }
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to save LMS Curriculum Log");
-      }
+      await requireSuccessfulResponse(response, "Failed to save LMS Curriculum Log");
 
       setIsLogSessionModalOpen(false);
       setEditingLog(null);
@@ -461,13 +467,7 @@ export default function CurriculumTab({
         }),
       });
 
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Your permissions changed. Reload the page before trying again.");
-        }
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to update Chapter Completion");
-      }
+      await requireSuccessfulResponse(response, "Failed to update Chapter Completion");
 
       try {
         await refetchLogsAndProgress();
@@ -492,13 +492,7 @@ export default function CurriculumTab({
         method: "DELETE",
       });
 
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Your permissions changed. Reload the page before trying again.");
-        }
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to delete LMS Curriculum Log");
-      }
+      await requireSuccessfulResponse(response, "Failed to delete LMS Curriculum Log");
 
     } catch (err) {
       setLogError(

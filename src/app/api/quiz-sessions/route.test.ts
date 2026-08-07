@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -29,6 +30,17 @@ vi.mock("@/lib/permissions", () => ({
 }));
 vi.mock("@/lib/quiz-session-access", () => ({
   requireQuizSessionAccess: mocks.mockRequireQuizSessionAccess,
+  requireQuizSessionRequestAccess: async (mode: "view" | "edit") => {
+    const session = await mocks.mockGetServerSession();
+    if (!session?.user?.email) {
+      return {
+        ok: false,
+        response: Response.json({ error: "Unauthorized" }, { status: 401 }),
+      };
+    }
+    const access = await mocks.mockRequireQuizSessionAccess(session.user.email, mode);
+    return access.ok ? { ...access, email: session.user.email } : access;
+  },
   canAccessQuizSessionSchool: mocks.mockCanAccessQuizSessionSchool,
   canAccessQuizSessionBatches: mocks.mockCanAccessQuizSessionBatches,
   resolveBatchGroups: mocks.mockResolveBatchGroups,

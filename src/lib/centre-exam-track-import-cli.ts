@@ -1,3 +1,5 @@
+import { parseArgs } from "node:util";
+
 import type { CentreExamTrackImportMode } from "./centre-exam-track-import";
 
 export interface CentreExamTrackImportCliOptions {
@@ -10,45 +12,37 @@ export interface CentreExamTrackImportCliOptions {
 export function parseCentreExamTrackImportArgs(
   argv: string[]
 ): CentreExamTrackImportCliOptions {
-  const options: CentreExamTrackImportCliOptions = {
-    mode: "dry-run",
-    envFile: ".env.local",
-    help: false,
-  };
-  let sawApply = false;
-  let sawDryRun = false;
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--help" || arg === "-h") options.help = true;
-    else if (arg === "--apply") {
-      options.mode = "apply";
-      sawApply = true;
-    } else if (arg === "--dry-run") {
-      options.mode = "dry-run";
-      sawDryRun = true;
-    } else if (arg.startsWith("--env=")) {
-      options.envFile = `.env.${arg.slice("--env=".length)}`;
-    } else if (arg.startsWith("--env-file=")) {
-      options.envFile = arg.slice("--env-file=".length);
-    } else if (arg === "--file") {
-      const sourcePath = argv[index + 1];
-      if (!sourcePath || sourcePath.startsWith("--")) {
-        throw new Error("--file requires a path.");
-      }
-      options.sourcePath = sourcePath;
-      index += 1;
-    } else if (arg.startsWith("--file=")) {
-      const sourcePath = arg.slice("--file=".length);
-      if (!sourcePath) throw new Error("--file requires a path.");
-      options.sourcePath = sourcePath;
-    } else {
-      throw new Error(`Unknown argument: ${arg}`);
+  let values: ReturnType<typeof parseArgs>["values"];
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        help: { type: "boolean", short: "h" },
+        apply: { type: "boolean" },
+        "dry-run": { type: "boolean" },
+        env: { type: "string" },
+        "env-file": { type: "string" },
+        file: { type: "string" },
+      },
+      strict: true,
+    }));
+  } catch (error) {
+    if (argv.at(-1) === "--file" || argv.includes("--file=")) {
+      throw new Error("--file requires a path.");
     }
+    throw error;
   }
 
-  if (sawApply && sawDryRun) {
+  if (values.apply && values["dry-run"]) {
     throw new Error("Use either --apply or --dry-run, not both.");
   }
-  return options;
+
+  return {
+    mode: values.apply ? "apply" : "dry-run",
+    envFile:
+      (values["env-file"] as string | undefined) ??
+      (values.env ? `.env.${values.env}` : ".env.local"),
+    help: values.help === true,
+    sourcePath: values.file as string | undefined,
+  };
 }

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import {
   canAccessQuizSessionBatches,
-  requireQuizSessionAccess,
+  requireQuizSessionRequestAccess,
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
@@ -118,13 +116,9 @@ async function resolveGroupId(batchId: string): Promise<number | null> {
   return groups?.[0]?.id ?? null;
 }
 
+// fallow-ignore-next-line code-duplication
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "edit");
+  const access = await requireQuizSessionRequestAccess("edit");
   if (!access.ok) {
     return access.response;
   }
@@ -310,7 +304,7 @@ export async function POST(request: NextRequest) {
 
   // Student-facing shortened session/OMR links + the attendance report link (legacy
   // sessionCreator parity; each falls back to its full URL if the shortener is unavailable).
-  const createdBy = session.user.email;
+  const createdBy = access.email;
   // The three shortener calls are independent — run them concurrently so a create pays one
   // shortener round-trip's latency, not three.
   const [shortenedLink, shortenedOmrLink, reportLink] = await Promise.all([
@@ -383,7 +377,7 @@ export async function POST(request: NextRequest) {
       test_takers_count: 100,
       status: "success",
       date_created: utcToISTDate(new Date().toISOString()),
-      created_by: session.user.email,
+      created_by: access.email,
       created_from: "lms",
     },
   };

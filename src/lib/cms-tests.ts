@@ -37,3 +37,17 @@ export function isCmsTestType(value: string | undefined): value is CmsTestType {
 export function isCmsExamTrack(value: string | undefined): value is CmsExamTrack {
   return !!value && (CMS_EXAM_TRACKS as readonly string[]).includes(value);
 }
+
+export function parseCmsCurriculumScope(searchParams: URLSearchParams) {
+  const examTrack = (searchParams.get("exam_track") ?? "").trim();
+  if (!isCmsExamTrack(examTrack)) {
+    return { ok: false as const, error: "Invalid or missing exam_track" };
+  }
+
+  const grade = Number((searchParams.get("grade") ?? "").trim());
+  if (grade !== 11 && grade !== 12) {
+    return { ok: false as const, error: "grade must be 11 or 12" };
+  }
+
+  return { ok: true as const, examTrack, grade };
+}

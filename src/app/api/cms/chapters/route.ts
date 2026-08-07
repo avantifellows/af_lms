@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
-import { isCmsExamTrack } from "@/lib/cms-tests";
+import { requireQuizSessionRequestAccess } from "@/lib/quiz-session-access";
+import { parseCmsCurriculumScope } from "@/lib/cms-tests";
 import { query } from "@/lib/db";
 import { SUBJECT_IDS, type SubjectName } from "@/types/curriculum";
 
@@ -30,30 +28,18 @@ function chapterName(row: ChapterNameRow): string {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "view");
+  const access = await requireQuizSessionRequestAccess("view");
   if (!access.ok) {
     return access.response;
   }
 
   const { searchParams } = new URL(request.url);
-  const examTrack = (searchParams.get("exam_track") || "").trim();
-  const grade = Number((searchParams.get("grade") || "").trim());
   const subject = (searchParams.get("subject") || "").trim();
-
-  if (!isCmsExamTrack(examTrack)) {
-    return NextResponse.json(
-      { error: "Invalid or missing exam_track" },
-      { status: 400 }
-    );
+  const scope = parseCmsCurriculumScope(searchParams);
+  if (!scope.ok) {
+    return NextResponse.json({ error: scope.error }, { status: 400 });
   }
-  if (grade !== 11 && grade !== 12) {
-    return NextResponse.json({ error: "grade must be 11 or 12" }, { status: 400 });
-  }
+  const { examTrack, grade } = scope;
   const subjectId = SUBJECT_IDS[subject as SubjectName];
   if (!subjectId) {
     return NextResponse.json({ error: "Invalid or missing subject" }, { status: 400 });

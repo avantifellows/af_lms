@@ -6,10 +6,7 @@ import type { CurriculumLogType } from "@/lib/curriculum-log-types";
 // Re-exported so the many existing `@/types/curriculum` importers keep one import site,
 // while @/lib/exam-tracks stays the single place the track codes are declared.
 export type { ExamTrack };
-export type {
-  CurriculumLogType,
-  WritableCurriculumLogType,
-} from "@/lib/curriculum-log-types";
+export type { CurriculumLogType } from "@/lib/curriculum-log-types";
 
 export interface Topic {
   id: number;

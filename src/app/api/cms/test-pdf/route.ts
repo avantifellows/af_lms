@@ -1,36 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
+import { requireCmsServiceAccess } from "@/lib/cms-service";
 
 // On-demand PDF for a new-CMS test, so session details can offer question/answer PDFs the
 // same way legacy sessions do — but generated fresh by the CMS rather than stored. Proxies
 // the CMS service-PDF route (bearer-authed) and streams the bytes back. Nothing is stored;
 // the PDF always reflects the current test. See task lms-cms-tests.
-const CMS_SERVICE_URL = process.env.CMS_SERVICE_URL?.trim();
-const CMS_SERVICE_TOKEN = process.env.CMS_SERVICE_TOKEN?.trim();
-
 // Only the two variants we surface (legacy showed Question + Solution): the question paper
 // and the answer key. The CMS also supports questions_with_answers, not exposed here.
 const PDF_TYPES = ["questions", "answers"];
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "view");
+  const access = await requireCmsServiceAccess();
   if (!access.ok) {
     return access.response;
   }
-
-  if (!CMS_SERVICE_URL || !CMS_SERVICE_TOKEN) {
-    return NextResponse.json(
-      { error: "CMS service is not configured" },
-      { status: 500 }
-    );
-  }
+  const { cms } = access;
 
   const { searchParams } = new URL(request.url);
   const testId = (searchParams.get("testId") || "").trim();
@@ -53,7 +37,7 @@ export async function GET(request: NextRequest) {
   }
 
   const cmsUrl =
-    `${CMS_SERVICE_URL.replace(/\/$/, "")}/api/service/test-pdf` +
+    `${cms.url}/api/service/test-pdf` +
     `?id=${encodeURIComponent(testId)}` +
     `&curriculum_id=${encodeURIComponent(curriculumId)}` +
     `&grade_id=${encodeURIComponent(gradeId)}` +
@@ -62,7 +46,7 @@ export async function GET(request: NextRequest) {
   let response: Response;
   try {
     response = await fetch(cmsUrl, {
-      headers: { Authorization: `Bearer ${CMS_SERVICE_TOKEN}` },
+      headers: { Authorization: `Bearer ${cms.token}` },
       cache: "no-store",
     });
   } catch (err) {
