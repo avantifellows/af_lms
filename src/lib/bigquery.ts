@@ -9,6 +9,7 @@ import type {
   StudentQuestionRow,
 } from "@/types/quiz";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { AL_RANK } from "@/lib/academic-level";
 
 let bigQueryClient: BigQuery | null = null;
 
@@ -250,18 +251,6 @@ export async function getBatchOverviewData(
     streams: [...streamsSet].sort(),
   };
 }
-
-// Unified AL rank — M and B are stream-specific parallel scales.
-// M1 (engineering top) and B1 (medical top) share rank 3, M2/B2 share rank 2,
-// NQ rank 1, NE rank 0. Used for sorting + mode AL tie-break.
-export const AL_RANK: Record<string, number> = {
-  M1: 3,
-  B1: 3,
-  M2: 2,
-  B2: 2,
-  "Not Qualified": 1,
-  "Not Eligible for Academic Level": 0,
-};
 
 function alRank(al: string | null | undefined): number {
   if (!al) return -1;

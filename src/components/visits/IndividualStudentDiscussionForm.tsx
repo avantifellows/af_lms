@@ -11,7 +11,7 @@ import {
   type IndividualStudentRef,
   type ValidGrade,
 } from "@/lib/individual-student-discussion";
-import { getStudentDisplayName, type Student } from "@/lib/student-utils";
+import { getStudentDisplayName, type StudentRef } from "@/lib/student-utils";
 import { isPlainObject } from "@/lib/visit-form-utils";
 import { FormSection, RadioPair, Select, StickyProgressBar } from "@/components/ui";
 
@@ -51,7 +51,7 @@ function parseGrade(value: string): ValidGrade | null {
 /* -- Searchable multi-select picker -------------------------------------- */
 
 interface SearchableStudentSelectProps {
-  students: Student[];
+  students: StudentRef[];
   disabled: boolean;
   onToggle: (id: number) => void;
   emptyMessage: string;

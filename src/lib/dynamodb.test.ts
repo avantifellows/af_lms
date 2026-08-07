@@ -49,6 +49,7 @@ function makeStudent(overrides: Partial<{
   last_name: string | null;
   gender: string | null;
   stream: string | null;
+  category: string | null;
   grade: number | null;
   status: string | null;
   program_name: string | null;
@@ -577,6 +578,50 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
       expect(optics.priority).toBe("High");
       // "None" is treated as untagged -> null so the UI renders an em-dash.
       expect(heat.priority).toBeNull();
+    });
+
+    it("surfaces academic_level + qualification_status straight off the report doc (#28, #248)", async () => {
+      // etl-next's student_reports_v2_flow copies both onto overall_performance
+      // from the BigQuery fact row, so af_lms reads them here rather than
+      // issuing its own BigQuery query for AL.
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", category: "SC" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2", category: null }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            overall_performance: {
+              marks_scored: 80, max_marks_possible: 100, percentage: 80, accuracy: 75,
+              total_questions: 20, num_skipped: 0,
+              academic_level: "M1", qualification_status: "Qualified",
+            },
+          }),
+          // No AL / status on this doc — e.g. a chapter test, or a student with
+          // no applicable cutoff. Must stay null so the UI can show "NA".
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            overall_performance: {
+              marks_scored: 40, max_marks_possible: 100, percentage: 40, accuracy: 50,
+              total_questions: 20, num_skipped: 0,
+            },
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+
+      const withAL = result!.students.find((s) => s.enrollment_user_id === "u1")!;
+      expect(withAL.academic_level).toBe("M1");
+      expect(withAL.qualification_status).toBe("Qualified");
+      expect(withAL.category).toBe("SC");
+
+      const withoutAL = result!.students.find((s) => s.enrollment_user_id === "u2")!;
+      expect(withoutAL.academic_level).toBeNull();
+      expect(withoutAL.qualification_status).toBeNull();
+      expect(withoutAL.category).toBeNull();
     });
 
     it("computes chapter attempt_rate from chapter-level num_skipped (not subject's)", async () => {

@@ -47,6 +47,7 @@ interface StudentIdentifiers {
   last_name: string | null;
   gender: string | null;
   stream: string | null;
+  category: string | null;
 }
 
 // Built from the canonical school roster (the same query + dedup the
@@ -70,6 +71,7 @@ async function getSchoolStudentIdentifiers(
       last_name: s.last_name,
       gender: s.gender,
       stream: s.stream,
+      category: s.category,
     })
   );
 }
@@ -85,6 +87,14 @@ interface V2OverallPerformance {
   num_wrong?: number | null;
   num_skipped?: number | null;
   total_questions?: number | null;
+  // Written by etl-next's student_reports_v2_flow (build_overall_performance),
+  // copied from the BigQuery fact row — so the report doc is already the
+  // authoritative source for both and af_lms does not need to re-query BQ.
+  academic_level?: string | null;
+  // "Qualified" / "Not Qualified" today. The fact model derives it from the AL
+  // codes, and emits an empty status where no cutoff applies (e.g. "Not
+  // Eligible for Academic Level"), so treat anything unrecognised as unknown.
+  qualification_status?: string | null;
 }
 
 interface V2SubjectPerformance {
@@ -415,6 +425,9 @@ export async function getTestDeepDiveFromDynamo(
       // doc.user_id is the enrollment_user_id (the BQ question-level join key).
       enrollment_user_id: doc.user_id != null ? String(doc.user_id) : null,
       gender: student.gender,
+      category: student.category,
+      academic_level: overall.academic_level || null,
+      qualification_status: overall.qualification_status || null,
       marks_scored: toNum(overall.marks_scored),
       max_marks: toNum(overall.max_marks_possible),
       percentage: toNum(overall.percentage),
