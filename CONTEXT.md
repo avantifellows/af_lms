@@ -235,10 +235,9 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
 - A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
 - Removing a **Centre Exam Track** blocks new logs and removes that track from the current **Curriculum Summary**, while existing logs remain stored for audit
-- Initial **Centre Exam Track** mappings come from one approved import keyed by stable Centre identity and Grade; after import, Admins maintain them in Centre Management without live Sheet sync
-- The approved **Centre Exam Track** import does not infer mappings from legacy centre-wide stream values; dry-run and apply modes fail unless every row matches exactly, and the legacy Centre Stream field is removed after cutover
-- The issue #252 feature change includes the reviewed mapping file and deterministic dry-run import script; production runs the import once after the schema change
-- Issue #252 is not activated in production until the verified **Centre Exam Track** mapping file passes the import dry run
+- Initial **Centre Exam Track** mappings are entered by Admins from the reviewed mapping Sheet through Centre Management; there is no live Sheet sync or one-off importer
+- Admins do not infer mappings from legacy centre-wide stream values; the legacy Centre Stream field is removed during cutover
+- Issue #252 is activated only after Admins enter the reviewed Grade 11/12 mappings during a planned configuration window and verify them in Centre Management
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
 - Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
@@ -572,7 +571,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
 - "center/centre" in the imported CRUD export means **Centre**, not **School**.
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
-- The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** from the approved mapping.
+- The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** entered from the reviewed mapping Sheet.
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. An `admin` may manage any scoped Visit; a `program_admin` may manage only their own in-progress Visits and otherwise has scoped read access. Feature permissions vary: for #155 Student Addition, `program_admin` is intentionally allowed to write student data. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).
