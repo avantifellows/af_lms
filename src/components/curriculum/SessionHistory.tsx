@@ -115,7 +115,8 @@ export default function SessionHistory({
                     <button
                       type="button"
                       onClick={() => handleDeleteLog(log)}
-                      className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                      disabled={!log.isEditable}
+                      className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
                     >
                       Delete log
                     </button>

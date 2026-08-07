@@ -129,3 +129,64 @@ it("prunes only downstream selections unavailable after Schools change without n
   expect(screen.queryByRole("checkbox", { name: "Biology (7)" })).not.toBeInTheDocument();
   expect(push).not.toHaveBeenCalled();
 });
+
+it("prunes Schools and downstream selections unavailable after Regions change", async () => {
+  const user = userEvent.setup();
+  render(
+    <CurriculumSummaryFiltersForm
+      filters={{
+        schools: ["70705", "64037"],
+        programs: [1, 2],
+        grades: [11, 12],
+        subjects: [4, 7],
+        examTracks: ["jee_main", "neet"],
+        regions: [],
+        preset: "all",
+        flagged: false,
+        forceEmpty: false,
+      }}
+      options={{
+        schools: [
+          { code: "70705", name: "JNV Bhavnagar", region: "West", state: null, district: null },
+          { code: "64037", name: "JNV Agra", region: "North", state: null, district: null },
+        ],
+        programs: [{ id: 1, name: "JNV CoE" }, { id: 2, name: "JNV Nodal" }],
+        grades: [11, 12],
+        subjects: [{ id: 4, name: "Physics" }, { id: 7, name: "Biology" }],
+        examTracks: ["jee_main", "neet"],
+        regions: ["North", "West"],
+        availability: [
+          {
+            schoolCode: "70705",
+            programId: 1,
+            programName: "JNV CoE",
+            grade: 11,
+            subjectId: 4,
+            subjectName: "Physics",
+            examTrack: "jee_main",
+          },
+          {
+            schoolCode: "64037",
+            programId: 2,
+            programName: "JNV Nodal",
+            grade: 12,
+            subjectId: 7,
+            subjectName: "Biology",
+            examTrack: "neet",
+          },
+        ],
+      }}
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Regions: All" }));
+  await user.click(screen.getByRole("checkbox", { name: "North" }));
+
+  expect(document.querySelector<HTMLInputElement>('input[name="regions"]')?.value).toBe("North");
+  expect(document.querySelector<HTMLInputElement>('input[name="schools"]')?.value).toBe("64037");
+  expect(document.querySelector<HTMLInputElement>('input[name="programs"]')?.value).toBe("2");
+  expect(document.querySelector<HTMLInputElement>('input[name="grades"]')?.value).toBe("12");
+  expect(document.querySelector<HTMLInputElement>('input[name="subjects"]')?.value).toBe("7");
+  expect(document.querySelector<HTMLInputElement>('input[name="exam_tracks"]')?.value).toBe("neet");
+  expect(push).not.toHaveBeenCalled();
+});

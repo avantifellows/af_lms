@@ -39,6 +39,16 @@ describe("Centre Exam Track import", () => {
       envFile: ".env.production",
       help: false,
     });
+    expect(parseCentreExamTrackImportArgs(["--file", "/tmp/tracks.csv"])).toEqual({
+      mode: "dry-run",
+      envFile: ".env.local",
+      help: false,
+      sourcePath: "/tmp/tracks.csv",
+    });
+    expect(parseCentreExamTrackImportArgs(["--file=/tmp/tracks.csv"]).sourcePath)
+      .toBe("/tmp/tracks.csv");
+    expect(() => parseCentreExamTrackImportArgs(["--file"]))
+      .toThrow("--file requires a path.");
     expect(() => parseCentreExamTrackImportArgs(["--apply", "--dry-run"]))
       .toThrow("Use either --apply or --dry-run, not both.");
   });
@@ -87,7 +97,7 @@ centre-1,JNV Test,CoE,12,jee_advanced
         { centre_id: "41", centre_name: "JNV Test", type_code: "coe", grade_id: "8", grade: "12" },
       ],
       [{ centre_id: "41", grade_id: "7", exam_track_code: "jee_main" }],
-      [],
+      [{ centre_id: "41", grade_id: "8", exam_track_code: "jee_advanced" }],
     ]);
 
     const report = await runCentreExamTrackImport({ mode: "apply", db, sourcePath });
@@ -99,6 +109,32 @@ centre-1,JNV Test,CoE,12,jee_advanced
     });
     const insert = db.calls.find((call) => /INSERT INTO centre_exam_tracks/i.test(call.sql));
     expect(insert?.params).toEqual([41, 8, "jee_advanced"]);
+    expect(insert?.sql).toContain("RETURNING centre_id, grade_id, exam_track_code");
+  });
+
+  it("blocks source rows that resolve to the same target mapping", async () => {
+    const sourcePath = await writeSource(`source_id,centre_name,cost_centre_type,grade,exam_track_code
+centre-a,JNV Test,CoE,11,jee_main
+centre-b,JNV Test,CoE,11,jee_main
+`);
+    const db = new FakeImportDb([
+      [
+        { centre_id: "41", centre_name: "JNV Test", type_code: "coe", grade_id: "7", grade: "11" },
+      ],
+      [],
+    ]);
+
+    const report = await runCentreExamTrackImport({ mode: "apply", db, sourcePath });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues.duplicate).toEqual([
+      expect.objectContaining({
+        sourceId: "centre-a",
+        reason: "Multiple source rows resolve to the same Centre, Grade, and Exam Track",
+      }),
+    ]);
+    expect(report.counts).toMatchObject({ intendedInserts: 0, insertedRows: 0, blockers: 1 });
+    expect(db.calls.some((call) => /\bINSERT\b/i.test(call.sql))).toBe(false);
   });
 
   it("puts every blocker kind in its typed bucket and refuses apply", async () => {

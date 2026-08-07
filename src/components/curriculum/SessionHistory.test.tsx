@@ -171,7 +171,7 @@ describe("SessionHistory", () => {
     expect(editButtons[1]).toBeDisabled();
     const deleteButtons = screen.getAllByRole("button", { name: /delete log/i });
     expect(deleteButtons[0]).toBeEnabled();
-    expect(deleteButtons[1]).toBeEnabled();
+    expect(deleteButtons[1]).toBeDisabled();
     expect(screen.getByText("Historical log")).toBeInTheDocument();
 
     await user.click(editButtons[0]);

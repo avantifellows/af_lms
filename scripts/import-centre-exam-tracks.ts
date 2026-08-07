@@ -5,6 +5,7 @@
  * Usage:
  *   npm run centres:import-exam-tracks
  *   npm run centres:import-exam-tracks -- --apply
+ *   npm run centres:import-exam-tracks -- --file=path/to/reviewed.csv
  *   npm run centres:import-exam-tracks -- --env=staging
  *   npm run centres:import-exam-tracks -- --env-file=.env.local
  */
@@ -18,6 +19,7 @@ function printUsage(): void {
   npm run centres:import-exam-tracks
   npm run centres:import-exam-tracks -- --dry-run
   npm run centres:import-exam-tracks -- --apply
+  npm run centres:import-exam-tracks -- --file=path/to/reviewed.csv
   npm run centres:import-exam-tracks -- --env=staging
   npm run centres:import-exam-tracks -- --env-file=.env.local
 
@@ -38,7 +40,10 @@ async function main(): Promise<void> {
   ]);
 
   try {
-    const report = await runCentreExamTrackImport({ mode: options.mode });
+    const report = await runCentreExamTrackImport({
+      mode: options.mode,
+      sourcePath: options.sourcePath,
+    });
     console.log(JSON.stringify(report, null, 2));
     if (!report.ok) process.exitCode = 1;
   } finally {

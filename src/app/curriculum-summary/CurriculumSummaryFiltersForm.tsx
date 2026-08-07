@@ -52,6 +52,21 @@ export default function CurriculumSummaryFiltersForm({
   function handleSelectedSchoolsChange(schoolCodes: string[]) {
     const nextOptions = optionsForSchools(options, schoolCodes, selectedRegions);
     setSelectedSchoolCodes(schoolCodes);
+    pruneDownstreamSelections(nextOptions);
+  }
+
+  function handleSelectedRegionsChange(regions: string[]) {
+    const schoolCodes = keepAvailable(
+      selectedSchoolCodes,
+      filterSchoolsByRegion(options.schools, regions).map(({ code }) => code)
+    );
+    const nextOptions = optionsForSchools(options, schoolCodes, regions);
+    setSelectedRegions(regions);
+    setSelectedSchoolCodes(schoolCodes);
+    pruneDownstreamSelections(nextOptions);
+  }
+
+  function pruneDownstreamSelections(nextOptions: CurriculumSummaryFilterOptions) {
     setSelectedProgramIds((selected) =>
       keepAvailable(selected, nextOptions.programs.map(({ id }) => id))
     );
@@ -116,7 +131,7 @@ export default function CurriculumSummaryFiltersForm({
           noMatchesText="No matching regions"
           options={regionOptions.length > 0 ? regionOptions : options.regions}
           selectedValues={selectedRegions}
-          onSelectedValuesChange={setSelectedRegions}
+          onSelectedValuesChange={handleSelectedRegionsChange}
         />
         <label className="flex flex-col gap-1 text-sm font-medium text-text-secondary">
           Date preset

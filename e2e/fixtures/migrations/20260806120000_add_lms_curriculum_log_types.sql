@@ -31,7 +31,9 @@ ALTER TABLE public.lms_curriculum_logs
     CHECK (
       CASE log_type
         WHEN 'class_cancelled' THEN duration_minutes IS NULL
-        ELSE duration_minutes > 0 AND duration_minutes <= 720
+        ELSE duration_minutes IS NOT NULL
+          AND duration_minutes > 0
+          AND duration_minutes <= 720
       END
     );
 

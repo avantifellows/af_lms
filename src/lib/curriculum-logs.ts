@@ -1350,6 +1350,9 @@ export async function deleteCurriculumLog(params: {
       error: "Historical LMS Curriculum Logs are read-only after their Centre Exam Track mapping is removed",
     };
   }
+  if (!log.is_editable) {
+    return { ok: false, status: 422, error: "Historical LMS Curriculum Logs are not editable" };
+  }
 
   await withTransaction(async (client) => {
     await client.query(

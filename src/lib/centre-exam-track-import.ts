@@ -116,7 +116,7 @@ export async function runCentreExamTrackImport(params: {
       .map(sourceKey)
       .filter((key, index, keys) => keys.indexOf(key) !== index)
   );
-  const duplicate = [...duplicateKeys].map((key) =>
+  const sourceDuplicates = [...duplicateKeys].map((key) =>
     issueFrom(
       rows.find((row) => sourceKey(row) === key) as SourceRow,
       "Duplicate source Centre, Grade, and Exam Track row"
@@ -159,15 +159,30 @@ export async function runCentreExamTrackImport(params: {
   const resolved = matched
     .filter((entry) => entry.matches.length === 1)
     .map(({ row, matches: [match] }) => ({ row, match }));
+  const resolvedDuplicateKeys = new Set(
+    resolved
+      .map(resolvedKey)
+      .filter((key, index, keys) => keys.indexOf(key) !== index)
+  );
+  const resolvedDuplicates = [...resolvedDuplicateKeys].map((key) =>
+    issueFrom(
+      resolved.find((entry) => resolvedKey(entry) === key)!.row,
+      "Multiple source rows resolve to the same Centre, Grade, and Exam Track"
+    )
+  );
+  const duplicate = [...sourceDuplicates, ...resolvedDuplicates];
+  const uniqueResolved = resolved.filter(
+    (entry) => !resolvedDuplicateKeys.has(resolvedKey(entry))
+  );
   const blockers = blockerMessages({ unmatched, ambiguous, duplicate, invalid });
 
   const existing = await db.query<ExistingRow>(
     `SELECT centre_id, grade_id, exam_track_code
      FROM centre_exam_tracks
      WHERE centre_id = ANY($1::bigint[])`,
-    [[...new Set(resolved.map(({ match }) => Number(match.centre_id)))]]
+    [[...new Set(uniqueResolved.map(({ match }) => Number(match.centre_id)))]]
   );
-  const plannedInserts = resolved.filter(({ row, match }) =>
+  const plannedInserts = uniqueResolved.filter(({ row, match }) =>
     !existing.some(
       (entry) =>
         Number(entry.centre_id) === Number(match.centre_id) &&
@@ -175,7 +190,7 @@ export async function runCentreExamTrackImport(params: {
         entry.exam_track_code === row.examTrackCode
     )
   );
-  const alreadyPresentRows = resolved.length - plannedInserts.length;
+  const alreadyPresentRows = uniqueResolved.length - plannedInserts.length;
 
   if (blockers.length > 0) {
     return {
@@ -194,6 +209,7 @@ export async function runCentreExamTrackImport(params: {
     };
   }
 
+  let insertedRows = 0;
   if (mode === "apply" && plannedInserts.length > 0) {
     const values = plannedInserts
       .map((_, index) => {
@@ -201,16 +217,18 @@ export async function runCentreExamTrackImport(params: {
         return `($${offset + 1}, $${offset + 2}, $${offset + 3})`;
       })
       .join(", ");
-    await db.query(
+    const inserted = await db.query<ExistingRow>(
       `INSERT INTO centre_exam_tracks (centre_id, grade_id, exam_track_code)
        VALUES ${values}
-       ON CONFLICT (centre_id, grade_id, exam_track_code) DO NOTHING`,
+       ON CONFLICT (centre_id, grade_id, exam_track_code) DO NOTHING
+       RETURNING centre_id, grade_id, exam_track_code`,
       plannedInserts.flatMap(({ row, match }) => [
         Number(match.centre_id),
         Number(match.grade_id),
         row.examTrackCode,
       ])
     );
+    insertedRows = inserted.length;
   }
 
   return {
@@ -220,7 +238,7 @@ export async function runCentreExamTrackImport(params: {
       sourceRows: sourceRows.length,
       validRows: rows.length,
       intendedInserts: plannedInserts.length,
-      insertedRows: mode === "apply" ? plannedInserts.length : 0,
+      insertedRows,
       alreadyPresentRows,
       blockers: 0,
     },
@@ -263,6 +281,10 @@ function validateSourceRow(row: ParsedSourceRow): string[] {
 
 function sourceKey(row: SourceRow): string {
   return `${row.sourceId}\u0000${row.grade}\u0000${row.examTrackCode}`;
+}
+
+function resolvedKey({ row, match }: { row: SourceRow; match: MatchRow }): string {
+  return `${Number(match.centre_id)}\u0000${Number(match.grade_id)}\u0000${row.examTrackCode}`;
 }
 
 function issueFrom(
