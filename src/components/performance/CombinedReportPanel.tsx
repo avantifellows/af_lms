@@ -62,6 +62,12 @@ export default function CombinedReportPanel({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Generation eligibility comes from the API rather than being recomputed here,
+  // so the button can never disagree with what POST will actually allow.
+  const [canGenerate, setCanGenerate] = useState(false);
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  const [sessionEndTime, setSessionEndTime] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const base = `/api/quiz-analytics/${schoolUdise}/combined-reports`;
@@ -75,6 +81,10 @@ export default function CombinedReportPanel({
       if (!res.ok) throw new Error("Failed to load reports");
       const data = await res.json();
       setJobs(data.jobs ?? []);
+      setCanGenerate(Boolean(data.can_generate));
+      setBlockedMessage(data.blocked_message ?? null);
+      setBlockedReason(data.blocked_reason ?? null);
+      setSessionEndTime(data.session_end_time ?? null);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load reports");
@@ -157,16 +167,24 @@ export default function CombinedReportPanel({
         </div>
         <button
           onClick={generate}
-          disabled={submitting}
-          className="px-4 py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent shadow-sm transition-colors hover:opacity-90 disabled:opacity-50"
+          disabled={submitting || loading || !canGenerate}
+          title={blockedMessage ?? undefined}
+          className="px-4 py-2 min-h-[44px] text-xs md:text-sm font-bold uppercase tracking-wide rounded-lg bg-accent text-text-on-accent shadow-sm transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting
-            ? "Starting…"
-            : jobs.some((j) => j.status === "done")
-              ? "Regenerate"
-              : "Generate combined report"}
+          {submitting ? "Starting…" : "Generate combined report"}
         </button>
       </div>
+
+      {/* Not an error — the ordinary state of a test that is still open, or one
+          whose report has already been produced. */}
+      {!loading && blockedMessage && (
+        <div className="p-2 bg-bg-card border border-border text-text-muted rounded text-xs">
+          {blockedMessage}
+          {blockedReason === "session_not_ended" && sessionEndTime && (
+            <> Session ends {formatTime(sessionEndTime)}.</>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="p-2 bg-danger-bg border border-danger text-danger rounded text-xs">

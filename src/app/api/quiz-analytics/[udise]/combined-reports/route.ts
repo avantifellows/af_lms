@@ -11,6 +11,11 @@ import {
   listCombinedReportJobs,
   ReportingServiceError,
 } from "@/lib/reporting-service";
+import {
+  getSessionWindow,
+  evaluateGenerationEligibility,
+  BLOCKED_MESSAGE,
+} from "@/lib/combined-report-eligibility";
 
 // GET /api/quiz-analytics/[udise]/combined-reports?session_id=...
 // List the combined-report jobs for this school + test (the Performance-tab view).
@@ -29,7 +34,19 @@ export async function GET(
 
   try {
     const jobs = await listCombinedReportJobs(sessionId, auth.school.code);
-    return NextResponse.json({ jobs });
+    // The panel renders its button from this, so it needs the same verdict the
+    // POST route will apply — otherwise the button invites a click that 409s.
+    const window = await getSessionWindow(sessionId);
+    const eligibility = evaluateGenerationEligibility(window, jobs);
+    return NextResponse.json({
+      jobs,
+      session_end_time: window.endTimeUtcIso,
+      can_generate: eligibility.allowed,
+      blocked_reason: eligibility.reason ?? null,
+      blocked_message: eligibility.reason
+        ? BLOCKED_MESSAGE[eligibility.reason]
+        : null,
+    });
   } catch (error) {
     if (error instanceof ReportingServiceError) {
       console.error("Combined-report list error:", error.status, error.body);
@@ -72,6 +89,24 @@ export async function POST(
   }
 
   try {
+    // Gate before doing any work: the session must have closed, and this test
+    // must not already have a finished or in-flight report.
+    const [window, existingJobs] = await Promise.all([
+      getSessionWindow(body.session_id),
+      listCombinedReportJobs(body.session_id, auth.school.code),
+    ]);
+    const eligibility = evaluateGenerationEligibility(window, existingJobs);
+    if (!eligibility.allowed && eligibility.reason) {
+      return NextResponse.json(
+        {
+          error: BLOCKED_MESSAGE[eligibility.reason],
+          reason: eligibility.reason,
+          session_end_time: window.endTimeUtcIso,
+        },
+        { status: 409 },
+      );
+    }
+
     const { students: roster } = await getSchoolRoster(auth.school.id);
     // Narrow to the cohort the test belongs to (and drop dropouts), so the
     // combined report matches what the teacher sees for this test.
