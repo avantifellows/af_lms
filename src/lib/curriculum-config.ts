@@ -297,11 +297,6 @@ interface RemoveMutationRow extends CurriculumConfigQueryRow {
   failure_reason: "stale" | "missing" | "already_out_of_syllabus" | null;
 }
 
-const EXAM_TRACK_CURRICULUM_IDS: Partial<Record<ExamTrack, number>> = {
-  jee_main: 1,
-  jee_advanced: 9,
-  neet: 2,
-};
 const SYLLABUS_STATUSES: CurriculumConfigSyllabusStatus[] = [
   "in_syllabus",
   "out_of_syllabus",
@@ -667,7 +662,7 @@ export async function getCurriculumConfigChapterOptions(
     return schema;
   }
 
-  const curriculumId = EXAM_TRACK_CURRICULUM_IDS[params.examTrack];
+  const curriculumId = curriculumIdForExamTrack(params.examTrack);
   if (curriculumId == null) {
     return {
       ok: false,
