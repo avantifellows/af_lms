@@ -158,6 +158,7 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
 
     expect(res.status).toBe(200);
     expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+    expect(String(mockQuery.mock.calls[1][0])).toContain("l.chapter_id IS NULL");
     expect(clientQuery).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining("UPDATE lms_curriculum_logs"),
@@ -215,6 +216,7 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
           topic_currently_in_syllabus: null,
           log_chapter_id: 55,
           log_chapter_name: [{ lang_code: "en", chapter: "Laws of Motion" }],
+          log_chapter_currently_in_syllabus: true,
         },
       ]);
 
@@ -277,6 +279,7 @@ describe("PATCH /api/curriculum/logs/[id]", () => {
           topic_currently_in_syllabus: null,
           log_chapter_id: 55,
           log_chapter_name: [{ lang_code: "en", chapter: "Laws of Motion" }],
+          log_chapter_currently_in_syllabus: true,
         },
       ]);
 

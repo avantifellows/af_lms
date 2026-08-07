@@ -512,8 +512,11 @@ function buildScopedUniverseSql(): string {
         WHERE cfg.is_in_syllabus = true
       ) configured
       WHERE NOT (
-        (configured.subject_name = 'Biology' AND configured.exam_track = ANY($13::text[]))
-        OR (configured.subject_name = 'Maths' AND configured.exam_track = ANY($14::text[]))
+        (LOWER(configured.subject_name) = 'biology' AND configured.exam_track = ANY($13::text[]))
+        OR (
+          LOWER(configured.subject_name) IN ('maths', 'mathematics')
+          AND configured.exam_track = ANY($14::text[])
+        )
       )
     ),
     mapped_rows AS (

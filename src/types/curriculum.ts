@@ -1,10 +1,15 @@
 // Types for the Curriculum Tracker feature
 
 import type { ExamTrack } from "@/lib/exam-tracks";
+import type { CurriculumLogType } from "@/lib/curriculum-log-types";
 
 // Re-exported so the many existing `@/types/curriculum` importers keep one import site,
 // while @/lib/exam-tracks stays the single place the track codes are declared.
 export type { ExamTrack };
+export type {
+  CurriculumLogType,
+  WritableCurriculumLogType,
+} from "@/lib/curriculum-log-types";
 
 export interface Topic {
   id: number;
@@ -31,39 +36,6 @@ export interface LmsCurriculumLogTopic {
   topicName: string;
   chapterId: number;
   chapterName: string;
-}
-
-// A saved log's type never changes — a wrong type is fixed by soft-deleting and recreating.
-export const CURRICULUM_LOG_TYPES = [
-  "regular",
-  "class_cancelled",
-  "doubt_solving",
-] as const;
-
-export type CurriculumLogType = (typeof CURRICULUM_LOG_TYPES)[number];
-
-export const WRITABLE_CURRICULUM_LOG_TYPES = [
-  "regular",
-  "class_cancelled",
-  "doubt_solving",
-] as const satisfies readonly CurriculumLogType[];
-
-export type WritableCurriculumLogType =
-  (typeof WRITABLE_CURRICULUM_LOG_TYPES)[number];
-
-export const CURRICULUM_LOG_TYPE_LABELS: Record<CurriculumLogType, string> = {
-  regular: "Regular Class",
-  class_cancelled: "Class Cancelled",
-  doubt_solving: "Doubt Solving",
-};
-
-export function isWritableCurriculumLogType(
-  value: unknown
-): value is WritableCurriculumLogType {
-  return (
-    typeof value === "string" &&
-    (WRITABLE_CURRICULUM_LOG_TYPES as readonly string[]).includes(value)
-  );
 }
 
 export interface LmsCurriculumLog {

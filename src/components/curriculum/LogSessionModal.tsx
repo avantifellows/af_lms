@@ -5,12 +5,12 @@ import type {
   Chapter,
   ChapterProgress,
   LmsCurriculumLog,
-  WritableCurriculumLogType,
 } from "@/types/curriculum";
 import {
+  CURRICULUM_LOG_TYPES,
   CURRICULUM_LOG_TYPE_LABELS,
-  WRITABLE_CURRICULUM_LOG_TYPES,
-} from "@/types/curriculum";
+  type WritableCurriculumLogType,
+} from "@/lib/curriculum-log-types";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 interface LogSessionModalProps {
@@ -265,7 +265,7 @@ export default function LogSessionModal({
                 }
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
               >
-                {WRITABLE_CURRICULUM_LOG_TYPES.map((type) => (
+                {CURRICULUM_LOG_TYPES.map((type) => (
                   <option key={type} value={type}>
                     {CURRICULUM_LOG_TYPE_LABELS[type]}
                   </option>

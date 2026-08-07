@@ -57,3 +57,21 @@ it("clears selections without closing and closes on an outside click", async () 
   await user.click(screen.getByRole("button", { name: "Outside" }));
   expect(screen.queryByRole("searchbox", { name: "Search Schools" })).not.toBeInTheDocument();
 });
+
+it("shows every available option before the user searches", async () => {
+  const user = userEvent.setup();
+  const options = Array.from({ length: 24 }, (_, index) => ({
+    code: String(70000 + index),
+    name: `JNV School ${index + 1}`,
+    region: null,
+    state: null,
+    district: null,
+  }));
+
+  render(<SchoolFilterSelect options={options} selectedCodes={[]} />);
+
+  await user.click(screen.getByRole("button", { name: "Schools: All" }));
+  expect(
+    screen.getByRole("checkbox", { name: "JNV School 24 (70023)" })
+  ).toBeInTheDocument();
+});

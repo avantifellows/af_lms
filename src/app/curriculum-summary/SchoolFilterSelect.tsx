@@ -69,8 +69,6 @@ interface SearchableMultiSelectFilterProps {
   onSelectedValuesChange?: (selectedValues: string[]) => void;
 }
 
-const MAX_VISIBLE_OPTIONS = 20;
-
 function matchesOption(option: SearchableFilterOption, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -299,10 +297,7 @@ function SearchableMultiSelectFilter({
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const visibleOptions = useMemo(
-    () =>
-      options
-        .filter((option) => matchesOption(option, query))
-        .slice(0, MAX_VISIBLE_OPTIONS),
+    () => options.filter((option) => matchesOption(option, query)),
     [options, query]
   );
 

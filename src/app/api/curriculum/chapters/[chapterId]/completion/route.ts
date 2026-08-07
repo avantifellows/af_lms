@@ -8,6 +8,7 @@ import {
   unmarkChapterComplete,
   validateChapterCompletionDeltas,
 } from "@/lib/curriculum-chapter-completion";
+import { validateCentreExamTrackMapping } from "@/lib/centre-resolver";
 import { getFeatureAccess, getResolvedPermission } from "@/lib/permissions";
 
 type CurriculumSession = {
@@ -104,6 +105,16 @@ export async function PUT(
       { error: validation.error },
       { status: validation.status }
     );
+  }
+
+  const mapping = await validateCentreExamTrackMapping({
+    schoolCode,
+    programId,
+    grade: validation.grade,
+    examTrack: validation.examTrack,
+  });
+  if (!mapping.ok) {
+    return NextResponse.json({ error: mapping.error }, { status: 422 });
   }
 
   const result = await withTransaction((client) =>

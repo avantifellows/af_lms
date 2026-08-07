@@ -832,8 +832,11 @@ describe("curriculum summary", () => {
     expect(combinedSql).toContain("join centre_exam_tracks mapping");
     expect(combinedSql).toContain("centre_count = 1");
     expect(combinedSql).not.toContain("cross join configured_rows");
-    expect(combinedSql.indexOf("configured.subject_name = 'biology'")).toBeLessThan(
+    expect(combinedSql.indexOf("lower(configured.subject_name) = 'biology'")).toBeLessThan(
       combinedSql.indexOf("mapped_rows as")
+    );
+    expect(combinedSql).toContain(
+      "lower(configured.subject_name) in ('maths', 'mathematics')"
     );
     expect(combinedSql).toContain("row_kind = 'configuration_error' or");
     expect(combinedSql).toContain("row_kind = 'unavailable' or");

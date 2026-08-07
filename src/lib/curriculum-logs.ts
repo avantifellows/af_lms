@@ -17,19 +17,21 @@ import {
   validateChapterCompletionDeltas,
   type ChapterCompletionState,
 } from "./curriculum-chapter-completion";
+import {
+  isWritableCurriculumLogType,
+  type CurriculumLogType,
+  type WritableCurriculumLogType,
+} from "./curriculum-log-types";
 import type {
-  CurriculumLogType,
   ExamTrack,
   GradeNumber,
   LmsCurriculumLog,
   LmsCurriculumLogTopic,
   SubjectName,
-  WritableCurriculumLogType,
 } from "@/types/curriculum";
 import {
   GRADE_IDS,
   SUBJECT_IDS,
-  isWritableCurriculumLogType,
 } from "@/types/curriculum";
 import type { UserPermission } from "./permissions";
 
@@ -51,6 +53,7 @@ interface LogTopicRow {
   topic_currently_in_syllabus: boolean | null;
   log_chapter_id: number | null;
   log_chapter_name: unknown;
+  log_chapter_currently_in_syllabus: boolean | null;
 }
 
 interface ValidTopicRow {
@@ -139,6 +142,8 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
     const logId = Number(row.id);
     let log = logsById.get(logId);
     if (!log) {
+      const chapterIsEditable =
+        row.log_chapter_id == null || row.log_chapter_currently_in_syllabus === true;
       log = {
         id: logId,
         logType: row.log_type ?? "regular",
@@ -154,16 +159,14 @@ function logsFromRows(rows: LogTopicRow[]): LmsCurriculumLog[] {
             ? null
             : extractEnglishName(row.log_chapter_name, "chapter"),
         topics: [],
-        isEditable: true,
+        isEditable: chapterIsEditable,
         createdAt: toTimestampString(row.inserted_at),
         updatedAt: toTimestampString(row.updated_at),
-        _editable: true,
+        _editable: chapterIsEditable,
       };
       logsById.set(logId, log);
     }
 
-    // Types that store a Chapter directly have no topic rows, so there is no
-    // syllabus drift that could make them historical.
     if (row.topic_id == null) continue;
 
     if (!row.topic_currently_in_syllabus) {
@@ -462,6 +465,16 @@ async function loadLogMutationScope(id: number): Promise<LogMutationScopeRow | n
            )
          ),
          true
+       )
+       AND (
+         l.chapter_id IS NULL
+         OR EXISTS (
+           SELECT 1
+           FROM lms_chapter_exam_configs current_cfg
+           WHERE current_cfg.chapter_id = l.chapter_id
+             AND current_cfg.exam_track = l.exam_track
+             AND current_cfg.is_in_syllabus = true
+         )
        ) AS is_editable
      FROM lms_curriculum_logs l
      LEFT JOIN lms_curriculum_log_topics lt ON lt.curriculum_log_id = l.id
@@ -642,7 +655,17 @@ export async function getCurriculumLogs(params: {
        lt.chapter_name,
        lt.topic_currently_in_syllabus,
        l.chapter_id AS log_chapter_id,
-       log_ch.name AS log_chapter_name
+       log_ch.name AS log_chapter_name,
+       CASE
+         WHEN l.chapter_id IS NULL THEN NULL
+         ELSE EXISTS (
+           SELECT 1
+           FROM lms_chapter_exam_configs current_cfg
+           WHERE current_cfg.chapter_id = l.chapter_id
+             AND current_cfg.exam_track = l.exam_track
+             AND current_cfg.is_in_syllabus = true
+         )
+       END AS log_chapter_currently_in_syllabus
      FROM lms_curriculum_logs l
      LEFT JOIN chapter log_ch ON log_ch.id = l.chapter_id
      LEFT JOIN LATERAL (
@@ -709,7 +732,17 @@ export async function getCurriculumLogById(id: number): Promise<LmsCurriculumLog
        lt.chapter_name,
        lt.topic_currently_in_syllabus,
        l.chapter_id AS log_chapter_id,
-       log_ch.name AS log_chapter_name
+       log_ch.name AS log_chapter_name,
+       CASE
+         WHEN l.chapter_id IS NULL THEN NULL
+         ELSE EXISTS (
+           SELECT 1
+           FROM lms_chapter_exam_configs current_cfg
+           WHERE current_cfg.chapter_id = l.chapter_id
+             AND current_cfg.exam_track = l.exam_track
+             AND current_cfg.is_in_syllabus = true
+         )
+       END AS log_chapter_currently_in_syllabus
      FROM lms_curriculum_logs l
      LEFT JOIN chapter log_ch ON log_ch.id = l.chapter_id
      LEFT JOIN LATERAL (

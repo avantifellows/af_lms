@@ -590,6 +590,29 @@ describe("curriculum config create helpers", () => {
     ]);
   });
 
+  it("rejects a valid Track that has no curriculum content", async () => {
+    await expect(
+      createCurriculumConfigRow({
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          chapter_id: 7,
+          exam_track: "cet",
+          is_in_syllabus: true,
+          prescribed_minutes: 90,
+          coverage_sequence: 2,
+        },
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "Curriculum configuration is not available for CET",
+      fields: {
+        exam_track: "Curriculum configuration is not available for CET",
+      },
+    });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it("maps database unique-constraint races to duplicate conflicts", async () => {
     mockQuery
       .mockResolvedValueOnce([{ subject_id: 4 }])
@@ -682,6 +705,34 @@ describe("curriculum config edit helpers", () => {
           "Out-of-syllabus rows must have zero prescribed minutes",
       },
     });
+  });
+
+  it("rejects edits to a Track that has no curriculum content", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { exam_track: "math_foundation", subject_id: 1 },
+    ]);
+
+    await expect(
+      editCurriculumConfigRow({
+        id: 42,
+        adminEmail: "admin@avantifellows.org",
+        body: {
+          prescribed_minutes: 90,
+          coverage_sequence: 2,
+          is_in_syllabus: true,
+          updated_at: "2026-05-30T10:00:00.000Z",
+        },
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "Curriculum configuration is not available for Math Foundation",
+      fields: {
+        exam_track:
+          "Curriculum configuration is not available for Math Foundation",
+      },
+    });
+    expect(mockQuery).toHaveBeenCalledOnce();
   });
 
   it("returns impact counts with log-topic chapter joins and soft-delete filters", async () => {

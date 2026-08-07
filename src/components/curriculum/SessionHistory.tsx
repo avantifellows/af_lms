@@ -1,7 +1,7 @@
 "use client";
 
 import type { LmsCurriculumLog } from "@/types/curriculum";
-import { CURRICULUM_LOG_TYPE_LABELS } from "@/types/curriculum";
+import { CURRICULUM_LOG_TYPE_LABELS } from "@/lib/curriculum-log-types";
 import { formatDuration } from "@/lib/curriculum-helpers";
 
 interface SessionHistoryProps {

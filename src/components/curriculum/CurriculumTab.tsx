@@ -11,8 +11,8 @@ import type {
   GradeNumber,
   LmsCurriculumLog,
   SubjectName,
-  WritableCurriculumLogType,
 } from "@/types/curriculum";
+import type { WritableCurriculumLogType } from "@/lib/curriculum-log-types";
 import { formatExamTrack } from "@/lib/exam-tracks";
 import ChapterAccordion from "./ChapterAccordion";
 import LogSessionModal from "./LogSessionModal";

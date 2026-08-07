@@ -4,6 +4,7 @@ import {
 } from "./curriculum-schema";
 import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
 import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
+import { curriculumIdForExamTrack } from "./curriculum-options";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
 import { SUBJECT_IDS, type ExamTrack, type SubjectName } from "@/types/curriculum";
@@ -324,6 +325,15 @@ function subjectNameForId(subjectId: number): SubjectName | null {
       (subject) => SUBJECT_IDS[subject] === subjectId
     ) ?? null
   );
+}
+
+function curriculumContentError(
+  examTrack: ExamTrack
+): CurriculumConfigValidationFailure | null {
+  if (curriculumIdForExamTrack(examTrack) !== null) return null;
+
+  const error = `Curriculum configuration is not available for ${formatExamTrack(examTrack)}`;
+  return { ok: false, status: 422, error, fields: { exam_track: error } };
 }
 
 export async function requireCurriculumConfigAdmin(
@@ -731,6 +741,9 @@ export async function createCurriculumConfigRow(params: {
   }
 
   const payload = payloadResult.payload;
+  const contentError = curriculumContentError(payload.examTrack);
+  if (contentError) return contentError;
+
   const chapterRows = await query<{ subject_id: number }>(
     "SELECT subject_id FROM chapter WHERE id = $1 LIMIT 1",
     [payload.chapterId]
@@ -855,6 +868,9 @@ export async function editCurriculumConfigRow(params: {
   if (!identity) {
     return { ok: false, status: 404, error: "Curriculum Config row not found" };
   }
+  const contentError = curriculumContentError(identity.exam_track);
+  if (contentError) return contentError;
+
   const subject = subjectNameForId(Number(identity.subject_id));
   const compatibilityError = subject
     ? getSubjectExamTrackCompatibilityError(subject, identity.exam_track)

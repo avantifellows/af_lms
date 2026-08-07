@@ -169,6 +169,26 @@ describe("/api/curriculum/logs", () => {
           chapter_name: [{ lang_code: "en", chapter: "Old Chapter" }],
           topic_currently_in_syllabus: false,
         },
+        {
+          id: 12,
+          log_type: "class_cancelled",
+          log_date: "2026-02-13",
+          duration_minutes: null,
+          program_id: 1,
+          grade_id: 3,
+          subject_id: 4,
+          exam_track: "jee_main",
+          inserted_at: "2026-02-13T10:00:00.000Z",
+          updated_at: "2026-02-13T10:00:00.000Z",
+          topic_id: null,
+          topic_name: null,
+          chapter_id: null,
+          chapter_name: null,
+          topic_currently_in_syllabus: null,
+          log_chapter_id: 44,
+          log_chapter_name: [{ lang_code: "en", chapter: "Old Kinematics" }],
+          log_chapter_currently_in_syllabus: false,
+        },
       ]);
 
     const res = await GET(
@@ -210,11 +230,20 @@ describe("/api/curriculum/logs", () => {
           updatedAt: "2026-02-15T10:00:00.000Z",
         },
         expect.objectContaining({ id: 11, isEditable: false }),
+        expect.objectContaining({
+          id: 12,
+          logType: "class_cancelled",
+          chapterId: 44,
+          isEditable: false,
+        }),
       ],
     });
     expect(mockQuery).toHaveBeenLastCalledWith(
       expect.stringContaining("AND l.deleted_at IS NULL"),
       ["70705", 1, 3, 4, "jee_main", 1]
+    );
+    expect(String(mockQuery.mock.calls.at(-1)?.[0])).toContain(
+      "END AS log_chapter_currently_in_syllabus"
     );
   });
 
@@ -498,6 +527,7 @@ describe("/api/curriculum/logs", () => {
           topic_currently_in_syllabus: null,
           log_chapter_id: 44,
           log_chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+          log_chapter_currently_in_syllabus: true,
         },
       ]);
 
@@ -792,6 +822,7 @@ describe("/api/curriculum/logs", () => {
           topic_currently_in_syllabus: null,
           log_chapter_id: 44,
           log_chapter_name: [{ lang_code: "en", chapter: "Kinematics" }],
+          log_chapter_currently_in_syllabus: true,
         },
       ]);
 
