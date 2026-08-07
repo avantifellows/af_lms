@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { requireQuizSessionAccess } from "@/lib/quiz-session-access";
 import {
-  EXAM_TRACKS,
   curriculumIdForExamTrack,
   resolveGradeId,
 } from "@/lib/curriculum-options";
-import { CMS_TEST_TYPES, type CmsTestType } from "@/lib/cms-tests";
+import {
+  CMS_TEST_TYPES,
+  parseCmsCurriculumScope,
+  type CmsTestType,
+} from "@/lib/cms-tests";
+import { requireCmsServiceAccess } from "@/lib/cms-service";
 import { query } from "@/lib/db";
-import type { ExamTrack } from "@/types/curriculum";
 
 // New CMS (nex-gen-cms) service API. af_lms consumes the list route to let the session
 // creator pick tests authored in the new CMS. The CMS list route is subtype-agnostic
@@ -17,9 +17,6 @@ import type { ExamTrack } from "@/types/curriculum";
 // set of supported test types is a picker/scope change with no backend work. For chapter
 // tests the CMS returns chapter_id per test (in type_params) so we can offer "tests for a
 // chapter". Bearer-authed, mirrors the DB_SERVICE_URL/TOKEN pattern.
-const CMS_SERVICE_URL = process.env.CMS_SERVICE_URL;
-const CMS_SERVICE_TOKEN = process.env.CMS_SERVICE_TOKEN;
-
 interface RawCmsTest {
   id: number;
   code: string;
@@ -63,39 +60,23 @@ async function chapterIdsSharingCode(chapterId: number): Promise<number[]> {
   return rows.map((r) => Number(r.id));
 }
 
+// fallow-ignore-next-line complexity code-duplication
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const access = await requireQuizSessionAccess(session.user.email, "view");
+  const access = await requireCmsServiceAccess();
   if (!access.ok) {
     return access.response;
   }
-
-  if (!CMS_SERVICE_URL || !CMS_SERVICE_TOKEN) {
-    return NextResponse.json(
-      { error: "CMS service is not configured" },
-      { status: 500 }
-    );
-  }
+  const { cms } = access;
 
   const { searchParams } = new URL(request.url);
-  const examTrack = (searchParams.get("exam_track") || "").trim() as ExamTrack;
-  const grade = Number((searchParams.get("grade") || "").trim());
   const testType = (searchParams.get("test_type") || "chapter_test").trim() as CmsTestType;
   const chapterIdParam = (searchParams.get("chapter_id") || "").trim();
-
-  if (!EXAM_TRACKS.includes(examTrack)) {
-    return NextResponse.json(
-      { error: "Invalid or missing exam_track" },
-      { status: 400 }
-    );
+  // fallow-ignore-next-line code-duplication
+  const scope = parseCmsCurriculumScope(searchParams);
+  if (!scope.ok) {
+    return NextResponse.json({ error: scope.error }, { status: 400 });
   }
-  if (grade !== 11 && grade !== 12) {
-    return NextResponse.json({ error: "grade must be 11 or 12" }, { status: 400 });
-  }
+  const { examTrack, grade } = scope;
   if (!CMS_TEST_TYPES.includes(testType)) {
     return NextResponse.json(
       { error: "Invalid or missing test_type" },
@@ -115,7 +96,7 @@ export async function GET(request: NextRequest) {
 
   const curriculumId = curriculumIdForExamTrack(examTrack);
   const cmsUrl =
-    `${CMS_SERVICE_URL.replace(/\/$/, "")}/api/service/tests` +
+    `${cms.url}/api/service/tests` +
     `?curriculum-dropdown=${curriculumId}` +
     `&grade-dropdown=${encodeURIComponent(String(gradeId))}` +
     `&testtype-dropdown=${encodeURIComponent(testType)}`;
@@ -124,7 +105,7 @@ export async function GET(request: NextRequest) {
   try {
     response = await fetch(cmsUrl, {
       headers: {
-        Authorization: `Bearer ${CMS_SERVICE_TOKEN}`,
+        Authorization: `Bearer ${cms.token}`,
         accept: "application/json",
       },
       cache: "no-store",

@@ -9,11 +9,13 @@ import {
 import { addHours, toDateTimeLocalValue } from "@/lib/quiz-session-time";
 import { parseBatchStream } from "@/lib/batch-code";
 import {
+  CMS_EXAM_TRACKS,
   CMS_SOURCE,
   CMS_TEST_TYPE_OPTIONS,
+  type CmsExamTrack,
   type CmsTestType,
 } from "@/lib/cms-tests";
-import type { ExamTrack } from "@/types/curriculum";
+import { formatExamTrack } from "@/lib/exam-tracks";
 
 interface BatchOption {
   id: number;
@@ -90,11 +92,6 @@ const GradeOptions = [11, 12];
 // New-CMS chapter-test picker (source toggle inside session creation). Test subtypes +
 // their labels are shared with the server routes via CMS_TEST_TYPE_OPTIONS (@/lib/cms-tests).
 type TestSource = "legacy" | "cms";
-const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
-  { value: "jee_main", label: "JEE Main" },
-  { value: "jee_advanced", label: "JEE Advanced" },
-  { value: "neet", label: "NEET" },
-];
 const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
 
 interface CmsChapterOption {
@@ -935,6 +932,7 @@ export default function QuizSessionsTab({
   );
 }
 
+// fallow-ignore-next-line complexity
 function QuizSessionCreateModal({
   batches,
   onClose,
@@ -984,7 +982,7 @@ function QuizSessionCreateModal({
   // major_test skips subject/chapter and lists straight off exam track + grade.
   const [testSource, setTestSource] = useState<TestSource>("legacy");
   const [cmsTestType, setCmsTestType] = useState<CmsTestType>("chapter_test");
-  const [cmsExamTrack, setCmsExamTrack] = useState<ExamTrack | "">("");
+  const [cmsExamTrack, setCmsExamTrack] = useState<CmsExamTrack | "">("");
   const [cmsGrade, setCmsGrade] = useState("");
   const [cmsSubject, setCmsSubject] = useState("");
   const [cmsChapters, setCmsChapters] = useState<CmsChapterOption[]>([]);
@@ -1691,15 +1689,15 @@ function QuizSessionCreateModal({
                           <select
                             value={cmsExamTrack}
                             onChange={(event) => {
-                              setCmsExamTrack(event.target.value as ExamTrack | "");
+                              setCmsExamTrack(event.target.value as CmsExamTrack | "");
                               setCmsChapterId(null);
                             }}
                             className="min-h-[44px] w-full rounded-lg border-2 border-border bg-bg-input px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                           >
                             <option value="">Select exam track</option>
-                            {EXAM_TRACK_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
+                            {CMS_EXAM_TRACKS.map((track) => (
+                              <option key={track} value={track}>
+                                {formatExamTrack(track)}
                               </option>
                             ))}
                           </select>

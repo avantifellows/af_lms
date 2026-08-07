@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Chapter, ChapterProgress, LmsCurriculumLog } from "@/types/curriculum";
+import type {
+  Chapter,
+  ChapterProgress,
+  LmsCurriculumLog,
+} from "@/types/curriculum";
+import {
+  CURRICULUM_LOG_TYPES,
+  CURRICULUM_LOG_TYPE_LABELS,
+  type WritableCurriculumLogType,
+} from "@/lib/curriculum-log-types";
 import { getTodayIST } from "@/lib/curriculum-date-helpers";
 
 interface LogSessionModalProps {
@@ -10,8 +19,10 @@ interface LogSessionModalProps {
   scopeLabel?: string;
   onClose: () => void;
   onSave: (payload: {
+    logType: WritableCurriculumLogType;
     date: string;
-    durationMinutes: number;
+    durationMinutes: number | null;
+    chapterId: number | null;
     topicIds: number[];
     completeChapterIds: number[];
     uncompleteChapterIds: number[];
@@ -42,6 +53,7 @@ function parseDurationInput(value: string): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+// fallow-ignore-next-line complexity
 export default function LogSessionModal({
   chapters,
   progress,
@@ -62,6 +74,15 @@ export default function LogSessionModal({
     [editLog]
   );
   const initialDurationMinutes = editLog?.durationMinutes ?? 60;
+  // A saved log's type is immutable, so edit mode pins the selector to it.
+  const [logType, setLogType] = useState<WritableCurriculumLogType>(
+    editLog?.logType === "class_cancelled" || editLog?.logType === "doubt_solving"
+      ? editLog.logType
+      : "regular"
+  );
+  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
+    editLog?.chapterId ?? null
+  );
   const [date, setDate] = useState(editLog?.logDate ?? getTodayIST());
   const [hours, setHours] = useState(String(Math.floor(initialDurationMinutes / 60)));
   const [minutes, setMinutes] = useState(String(initialDurationMinutes % 60));
@@ -73,6 +94,9 @@ export default function LogSessionModal({
   const [expandedChapterIds, setExpandedChapterIds] = useState<Set<number>>(
     new Set(initialExpandedChapterIds)
   );
+  const isClassCancelled = logType === "class_cancelled";
+  const isDoubtSolving = logType === "doubt_solving";
+  const isChapterBacked = isClassCancelled || isDoubtSolving;
 
   const toggleTopic = (topicId: number) => {
     setSelectedTopicIds((prev) => {
@@ -125,7 +149,36 @@ export default function LogSessionModal({
     });
   };
 
+  // fallow-ignore-next-line complexity
   const handleSave = () => {
+    if (isChapterBacked) {
+      if (selectedChapterId == null) {
+        alert(
+          isClassCancelled
+            ? "Please pick the Chapter whose class was cancelled"
+            : "Please pick the Chapter covered by doubt solving"
+        );
+        return;
+      }
+      const durationMinutes = isDoubtSolving
+        ? parseDurationInput(hours) * 60 + parseDurationInput(minutes)
+        : null;
+      if (isDoubtSolving && !durationMinutes) {
+        alert("Please enter a valid duration");
+        return;
+      }
+      onSave({
+        logType,
+        date,
+        durationMinutes,
+        chapterId: selectedChapterId,
+        topicIds: [],
+        completeChapterIds: [],
+        uncompleteChapterIds: [],
+      });
+      return;
+    }
+
     const durationMinutes = parseDurationInput(hours) * 60 + parseDurationInput(minutes);
     const hasTopicSelections = selectedTopicIds.size > 0;
     const hasCompletionDeltas =
@@ -140,8 +193,10 @@ export default function LogSessionModal({
       return;
     }
     onSave({
+      logType: "regular",
       date,
       durationMinutes,
+      chapterId: null,
       topicIds: Array.from(selectedTopicIds),
       completeChapterIds: Array.from(completeChapterIds),
       uncompleteChapterIds: Array.from(uncompleteChapterIds),
@@ -195,6 +250,37 @@ export default function LogSessionModal({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-4">
+            {/* Log type — swaps the field set below */}
+            <div className="mb-4">
+              <label
+                htmlFor="curriculum-log-type"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Log type
+              </label>
+              <select
+                id="curriculum-log-type"
+                value={logType}
+                disabled={isEditMode}
+                onChange={(e) =>
+                  setLogType(e.target.value as WritableCurriculumLogType)
+                }
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-accent focus:ring-1 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-500"
+              >
+                {CURRICULUM_LOG_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {CURRICULUM_LOG_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+              {isEditMode && (
+                <p className="mt-1 text-xs text-gray-500">
+                  A log&rsquo;s type can&rsquo;t change — delete it and create the
+                  right type instead.
+                </p>
+              )}
+            </div>
+
             {/* Date and Duration */}
             <div className="flex gap-4 mb-4">
               {/* Date */}
@@ -210,7 +296,8 @@ export default function LogSessionModal({
                 />
               </div>
 
-              {/* Duration */}
+              {/* Duration — Class Cancelled records no teaching time */}
+              {!isClassCancelled && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Duration
@@ -242,12 +329,50 @@ export default function LogSessionModal({
                   <span className="text-sm text-gray-500">mins</span>
                 </div>
               </div>
+              )}
             </div>
 
             {/* Divider */}
             <div className="border-t border-gray-200 my-4" />
 
-            {/* Topic Selection */}
+            {isChapterBacked ? (
+              /* Chapter-backed log selection */
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  {isClassCancelled
+                    ? "Which class was cancelled?"
+                    : "Which Chapter did you cover doubts for?"}
+                </label>
+                <p className="mb-2 mt-0.5 text-xs text-gray-500">
+                  Pick one in-syllabus Chapter.
+                </p>
+
+                <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
+                  {chapters.map((chapter) => {
+                    const chapterId = Number(chapter.id);
+                    return (
+                      <label
+                        key={chapter.id}
+                        data-chapter-row
+                        className="flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 hover:bg-gray-50"
+                      >
+                        <input
+                          type="radio"
+                          name="curriculum-log-chapter"
+                          checked={selectedChapterId === chapterId}
+                          onChange={() => setSelectedChapterId(chapterId)}
+                          className="w-4 h-4 border-gray-300 text-accent focus:ring-accent/20"
+                        />
+                        <span className="flex-1 text-sm text-gray-700">
+                          {chapter.name}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+            /* Topic Selection */
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 What did you teach?
@@ -370,8 +495,10 @@ export default function LogSessionModal({
                 })}
               </div>
             </div>
+            )}
 
             {/* Selection Summary */}
+            {!isChapterBacked && (
             <div className="mt-3 text-sm text-gray-600 space-y-1">
               {selectedTopicIds.size > 0 && (
                 <div>
@@ -385,6 +512,7 @@ export default function LogSessionModal({
                 </div>
               )}
             </div>
+            )}
             {error && (
               <div className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">
                 {error}
@@ -404,11 +532,13 @@ export default function LogSessionModal({
             <button
               onClick={handleSave}
               disabled={
-                ((isEditMode && selectedTopicIds.size === 0) ||
-                  (!isEditMode &&
-                    selectedTopicIds.size === 0 &&
-                  completeChapterIds.size === 0 &&
-                    uncompleteChapterIds.size === 0)) ||
+                (isChapterBacked
+                  ? selectedChapterId == null
+                  : (isEditMode && selectedTopicIds.size === 0) ||
+                    (!isEditMode &&
+                      selectedTopicIds.size === 0 &&
+                      completeChapterIds.size === 0 &&
+                      uncompleteChapterIds.size === 0)) ||
                 isSaving
               }
               className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"

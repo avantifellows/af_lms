@@ -32,17 +32,6 @@ const optionSets: CentreOptionSet[] = [
     sortOrder: 3,
     options: [],
   },
-  {
-    id: 4,
-    code: "stream",
-    label: "Centre Stream",
-    allowMulti: true,
-    sortOrder: 4,
-    options: [
-      option(41, "stream", "jee", "JEE", 1, true),
-      option(42, "stream", "foundation", "Math Foundation", 2, false),
-    ],
-  },
 ];
 
 function option(
@@ -85,7 +74,6 @@ describe("CentreOptionConfig", () => {
       "Centre Type",
       "Centre Category",
       "Centre Sub-category",
-      "Centre Stream",
     ]) {
       expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     }
@@ -100,9 +88,6 @@ describe("CentreOptionConfig", () => {
     expect(within(typeSection).getByDisplayValue("Legacy Type")).toBeInTheDocument();
     expect(within(typeSection).getByText("Inactive")).toBeInTheDocument();
 
-    const streamSection = sectionFor("Centre Stream");
-    expect(within(streamSection).getByDisplayValue("foundation")).toBeDisabled();
-    expect(within(streamSection).getByText("Inactive")).toBeInTheDocument();
   });
 
   it("creates a new option with a suggested code that admins can confirm", async () => {
@@ -219,14 +204,14 @@ describe("CentreOptionConfig", () => {
     } as Response);
     renderConfig();
 
-    const streamSection = sectionFor("Centre Stream");
-    await user.click(within(streamSection).getByRole("button", { name: "New option" }));
-    await user.click(within(streamSection).getByRole("button", { name: "Save new option" }));
+    const subCategorySection = sectionFor("Centre Sub-category");
+    await user.click(within(subCategorySection).getByRole("button", { name: "New option" }));
+    await user.click(within(subCategorySection).getByRole("button", { name: "Save new option" }));
 
-    expect(await within(streamSection).findByText("Invalid Centre option create payload")).toBeInTheDocument();
-    expect(within(streamSection).getByText("Option code is required")).toBeInTheDocument();
-    expect(within(streamSection).getByText("Option label is required")).toBeInTheDocument();
-    expect(within(streamSection).getByLabelText("New Centre Stream label")).toBeInTheDocument();
+    expect(await within(subCategorySection).findByText("Invalid Centre option create payload")).toBeInTheDocument();
+    expect(within(subCategorySection).getByText("Option code is required")).toBeInTheDocument();
+    expect(within(subCategorySection).getByText("Option label is required")).toBeInTheDocument();
+    expect(within(subCategorySection).getByLabelText("New Centre Sub-category label")).toBeInTheDocument();
   });
 
   it("shows save errors for existing options without changing the visible option", async () => {

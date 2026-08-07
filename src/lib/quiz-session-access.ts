@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import {
   canAccessSchoolSync,
@@ -43,6 +45,20 @@ export async function requireQuizSessionAccess(
   }
 
   return { ok: true, permission };
+}
+
+export async function requireQuizSessionRequestAccess(
+  mode: QuizSessionAccessMode
+): Promise<(QuizSessionAccessOk & { email: string }) | QuizSessionAccessDenied> {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+  const access = await requireQuizSessionAccess(session.user.email, mode);
+  return access.ok ? { ...access, email: session.user.email } : access;
 }
 
 export async function canAccessQuizSessionSchool(

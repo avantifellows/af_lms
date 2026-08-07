@@ -1,5 +1,13 @@
 // Types for the Curriculum Tracker feature
 
+import type { ExamTrack } from "@/lib/exam-tracks";
+import type { CurriculumLogType } from "@/lib/curriculum-log-types";
+
+// Re-exported so the many existing `@/types/curriculum` importers keep one import site,
+// while @/lib/exam-tracks stays the single place the track codes are declared.
+export type { ExamTrack };
+export type { CurriculumLogType } from "@/lib/curriculum-log-types";
+
 export interface Topic {
   id: number;
   code: string;
@@ -29,12 +37,17 @@ export interface LmsCurriculumLogTopic {
 
 export interface LmsCurriculumLog {
   id: number;
+  logType: CurriculumLogType;
   logDate: string;
-  durationMinutes: number;
+  // Null only for Class Cancelled logs, which record no teaching time.
+  durationMinutes: number | null;
   programId: number;
   gradeId: number;
   subjectId: number;
   examTrack: ExamTrack;
+  // Set only by the non-regular types; Regular Class derives chapters from topics.
+  chapterId: number | null;
+  chapterName: string | null;
   topics: LmsCurriculumLogTopic[];
   isEditable: boolean;
   createdAt: string;
@@ -53,7 +66,6 @@ export interface ChapterProgress {
 
 export type SubjectName = "Physics" | "Chemistry" | "Maths" | "Biology";
 export type GradeNumber = 11 | 12;
-export type ExamTrack = "jee_main" | "jee_advanced" | "neet";
 
 export interface CurriculumProgramOption {
   id: number;
@@ -68,10 +80,20 @@ export interface CurriculumGradeSubjectOption {
   subjectId: number;
 }
 
+export interface CurriculumCentreExamTrackOption {
+  examTrack: ExamTrack;
+  grade: GradeNumber;
+  hasCurriculumConfig: boolean;
+  isMapped: boolean;
+  hasHistoricalLogs: boolean;
+}
+
 export interface CurriculumOptionsResponse {
   programs: CurriculumProgramOption[];
   examTracks: ExamTrack[];
+  centreExamTracks: CurriculumCentreExamTrackOption[];
   gradeSubjects: CurriculumGradeSubjectOption[];
+  configurationError: string | null;
   defaults: {
     programId: number | null;
     examTrack: ExamTrack | null;

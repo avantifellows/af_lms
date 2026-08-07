@@ -65,8 +65,6 @@ describe("curriculum summary", () => {
           subjects: [{ id: 4, name: "Physics" }],
           exam_tracks: ["jee_main"],
           regions: ["West"],
-          states: ["Gujarat"],
-          districts: ["Bhavnagar"],
         },
       ])
       .mockResolvedValueOnce(guardRows())
@@ -138,8 +136,6 @@ describe("curriculum summary", () => {
         subjects: [{ id: 4, name: "Physics" }],
         examTracks: ["jee_main"],
         regions: ["West"],
-        states: ["Gujarat"],
-        districts: ["Bhavnagar"],
       },
       rows: [
         {
@@ -166,6 +162,104 @@ describe("curriculum summary", () => {
     expect(mockQuery).toHaveBeenCalledTimes(5);
   });
 
+  it("maps unavailable and Centre configuration-error rows without inventing subjects or metrics", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        schools: [], programs: [], grades: [11], subjects: [],
+        exam_tracks: ["cet"], regions: [],
+      }])
+      .mockResolvedValueOnce(guardRows(2))
+      .mockResolvedValueOnce([{
+        total_rows: 2, flagged_rows: 0, completed_chapters: 0,
+        total_configured_chapters: 0, prescribed_chapters: 0,
+        actual_minutes: 0, prescribed_minutes: 0,
+      }])
+      .mockResolvedValueOnce([
+        {
+          row_kind: "unavailable",
+          configuration_error: null,
+          school_code: "70705",
+          school_name: "JNV Bhavnagar",
+          region: "West",
+          state: "Gujarat",
+          district: "Bhavnagar",
+          program_id: 1,
+          program_name: "JNV CoE",
+          grade: 11,
+          subject_id: null,
+          subject_name: null,
+          exam_track: "cet",
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
+          delta_percent: null,
+          flagged: false,
+          flag_reasons: [],
+        },
+        {
+          row_kind: "configuration_error",
+          configuration_error: "No active physical Centre is configured for this School and Program",
+          school_code: "99999",
+          school_name: "JNV Missing",
+          region: "West",
+          state: "Gujarat",
+          district: "Nowhere",
+          program_id: 1,
+          program_name: "JNV CoE",
+          grade: null,
+          subject_id: null,
+          subject_name: null,
+          exam_track: null,
+          completed_chapters: 0,
+          total_configured_chapters: 0,
+          prescribed_chapters: 0,
+          actual_minutes: 0,
+          prescribed_minutes: 0,
+          delta_percent: null,
+          flagged: false,
+          flag_reasons: [],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      rows: [
+        {
+          rowKind: "unavailable",
+          rowKey: "70705:1:11:cet:unavailable",
+          grade: 11,
+          subjectId: null,
+          subjectName: null,
+          examTrack: "cet",
+          explanation: "Curriculum configuration is unavailable",
+        },
+        {
+          rowKind: "configuration_error",
+          rowKey: "99999:1:configuration_error",
+          grade: null,
+          subjectId: null,
+          subjectName: null,
+          examTrack: null,
+          explanation: "No active physical Centre is configured for this School and Program",
+        },
+      ],
+    });
+  });
+
   it("returns computed metrics and weighted stats for the full filtered set before pagination", async () => {
     mockQuery
       .mockResolvedValueOnce([
@@ -176,8 +270,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(2))
@@ -256,6 +348,49 @@ describe("curriculum summary", () => {
     });
   });
 
+  it("counts only Regular Class logs toward Actual Hours and chapter coverage", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [],
+          grades: [],
+          subjects: [],
+          exam_tracks: [],
+          regions: [],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(1))
+      .mockResolvedValueOnce([
+        {
+          total_rows: 1,
+          flagged_rows: 0,
+          completed_chapters: 0,
+          total_configured_chapters: 1,
+          prescribed_chapters: 1,
+          actual_minutes: 0,
+          prescribed_minutes: 60,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams({}, "2026-05-30"),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    const rowsSql = String(mockQuery.mock.calls[3][0]).replace(/\s+/g, " ");
+    expect(rowsSql).toContain("l.log_type = 'regular'");
+    const statsSql = String(mockQuery.mock.calls[2][0]).replace(/\s+/g, " ");
+    expect(statsSql).toContain("l.log_type = 'regular'");
+  });
+
   it("keeps zero-prescribed delta blank while surfacing actual-time flag reasons", async () => {
     mockQuery
       .mockResolvedValueOnce([
@@ -266,8 +401,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(0))
@@ -340,7 +473,7 @@ describe("curriculum summary", () => {
         programs: "1,abc,999",
         grades: "11,nope",
         subjects: "4,-1",
-        exam_tracks: "jee_main,stream",
+        exam_tracks: "jee_main,cet,math_foundation,stream",
         from: "2026-02-31",
         to: "2026-05-15",
         flagged: "true",
@@ -353,7 +486,7 @@ describe("curriculum summary", () => {
       programs: [1, 999],
       grades: [11],
       subjects: [4],
-      examTracks: ["jee_main"],
+      examTracks: ["jee_main", "cet", "math_foundation"],
       preset: "custom",
       from: undefined,
       to: "2026-05-15",
@@ -378,6 +511,33 @@ describe("curriculum summary", () => {
       to: undefined,
       forceEmpty: false,
     });
+  });
+
+  it("ignores retired State and District URL parameters", () => {
+    const filters = normalizeCurriculumSummarySearchParams(
+      { regions: "West", states: "Gujarat", districts: "Bhavnagar" },
+      "2026-05-30"
+    );
+
+    expect(filters.regions).toEqual(["West"]);
+    expect(filters).not.toHaveProperty("states");
+    expect(filters).not.toHaveProperty("districts");
+    expect(buildCommonQueryParams(pmPermission, filters)).toEqual([
+      true,
+      null,
+      null,
+      [1, 2, 74, 94, 78, 88],
+      false,
+      [1, 2],
+      null,
+      null,
+      null,
+      null,
+      null,
+      ["West"],
+      ["jee_main", "jee_advanced"],
+      ["neet"],
+    ]);
   });
 
   it("normalizes supported sort keys with a safe deterministic default", () => {
@@ -417,7 +577,7 @@ describe("curriculum summary", () => {
     });
   });
 
-  it("keeps dashboard filter options independent from their own active filters", async () => {
+  it("keeps mapped option unions independent from downstream active filters", async () => {
     mockQuery
       .mockResolvedValueOnce([
         {
@@ -427,8 +587,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: ["West"],
-          states: ["Gujarat"],
-          districts: ["Bhavnagar"],
         },
       ])
       .mockResolvedValueOnce(guardRows(0))
@@ -468,13 +626,94 @@ describe("curriculum summary", () => {
     expect(optionsSql).toContain("from subject_options");
     expect(optionsSql).toContain("from exam_track_options");
     expect(optionsSql).toContain("from geo_options");
-    expect(optionsSql).toContain("subject_filter_option_rows as");
-    expect(optionsSql).toContain("exam_track_filter_option_rows as");
-    expect(optionsSql).toContain("where ($9::int[] is null or grade = any($9::int[]))");
-    expect(optionsSql).toContain(
-      "where ($10::int[] is null or subject_id = any($10::int[]))"
-    );
+    const optionSql = optionsSql.slice(optionsSql.indexOf("option_rows as"));
+    expect(optionSql).not.toContain("$8::int[] is null or program_id");
+    expect(optionSql).not.toContain("$9::int[] is null or grade");
+    expect(optionSql).not.toContain("$10::int[] is null or subject_id");
+    expect(optionSql).not.toContain("$11::text[] is null or exam_track");
     expect(optionsSql).not.toContain("left join filtered_rows on true");
+  });
+
+  it("limits downstream options to the union of mapped rows for the selected Schools", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          schools: [],
+          programs: [{ id: 1, name: "JNV CoE" }],
+          grades: [11],
+          subjects: [{ id: 4, name: "Physics" }],
+          exam_tracks: ["jee_main"],
+          regions: [],
+          availability: [
+            {
+              schoolCode: "70705",
+              programId: 1,
+              programName: "JNV CoE",
+              grade: 11,
+              subjectId: 4,
+              subjectName: "Physics",
+              examTrack: "jee_main",
+            },
+            {
+              schoolCode: "64037",
+              programId: 2,
+              programName: "JNV Nodal",
+              grade: 12,
+              subjectId: 7,
+              subjectName: "Biology",
+              examTrack: "neet",
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce(guardRows(0))
+      .mockResolvedValueOnce([{
+        total_rows: 0,
+        flagged_rows: 0,
+        completed_chapters: 0,
+        total_configured_chapters: 0,
+        prescribed_chapters: 0,
+        actual_minutes: 0,
+        prescribed_minutes: 0,
+      }])
+      .mockResolvedValueOnce([]);
+
+    const result = await getCurriculumSummary({
+      actorEmail: "pm@avantifellows.org",
+      permission: pmPermission,
+      filters: normalizeCurriculumSummarySearchParams(
+        { schools: "70705", programs: "2", grades: "12", subjects: "7" },
+        "2026-05-30"
+      ),
+      sort: "school",
+      dir: "asc",
+      page: 1,
+      pageSize: 10,
+      todayIstDate: "2026-05-30",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      filterOptions: {
+        programs: [{ id: 1, name: "JNV CoE" }],
+        grades: [11],
+        subjects: [{ id: 4, name: "Physics" }],
+        examTracks: ["jee_main"],
+        availability: [
+          { schoolCode: "70705", programId: 1, grade: 11, subjectId: 4, examTrack: "jee_main" },
+          { schoolCode: "64037", programId: 2, grade: 12, subjectId: 7, examTrack: "neet" },
+        ],
+      },
+    });
+
+    const optionsSql = String(mockQuery.mock.calls[0][0]).toLowerCase();
+    expect(optionsSql).toContain("option_rows as");
+    expect(optionsSql).toContain("from mapped_rows");
+    expect(optionsSql).toContain("school_code = any($7::text[])");
+    const optionSql = optionsSql.slice(optionsSql.indexOf("option_rows as"));
+    expect(optionSql).not.toContain("$8::int[] is null or program_id");
+    expect(optionSql).not.toContain("$9::int[] is null or grade");
+    expect(optionSql).not.toContain("$10::int[] is null or subject_id");
   });
 
   it("defaults to the current academic year using the injected IST date", () => {
@@ -504,8 +743,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]);
 
@@ -548,7 +785,7 @@ describe("curriculum summary", () => {
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("uses bulk summary SQL without active-student dependencies", async () => {
+  it("grounds the Summary universe in the one resolved Centre's current Exam Track mappings", async () => {
     mockQuery.mockResolvedValueOnce([
       {
         schools: [],
@@ -557,8 +794,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
       {
@@ -588,8 +823,23 @@ describe("curriculum summary", () => {
 
     const combinedSql = mockQuery.mock.calls
       .map(([sql]) => String(sql).toLowerCase())
-      .join("\n");
-    expect(combinedSql).toContain("cross join configured_rows");
+      .join("\n")
+      .replace(/\s+/g, " ");
+    expect(combinedSql).toContain("left join centres");
+    expect(combinedSql).toContain("centres.is_active = true");
+    expect(combinedSql).toContain("centres.is_physical = true");
+    expect(combinedSql).toContain("count(centres.id)::int as centre_count");
+    expect(combinedSql).toContain("join centre_exam_tracks mapping");
+    expect(combinedSql).toContain("centre_count = 1");
+    expect(combinedSql).not.toContain("cross join configured_rows");
+    expect(combinedSql.indexOf("lower(configured.subject_name) = 'biology'")).toBeLessThan(
+      combinedSql.indexOf("mapped_rows as")
+    );
+    expect(combinedSql).toContain(
+      "lower(configured.subject_name) in ('maths', 'mathematics')"
+    );
+    expect(combinedSql).toContain("row_kind = 'configuration_error' or");
+    expect(combinedSql).toContain("row_kind = 'unavailable' or");
     expect(combinedSql).toContain("join program p on p.id = any($4::int[])");
     expect(combinedSql).toContain("from school_options");
     expect(combinedSql).toContain("from program_options");
@@ -605,6 +855,18 @@ describe("curriculum summary", () => {
     expect(combinedSql).not.toContain("student");
   });
 
+  it("passes the shared incompatible Subject and Exam Track pairs into the Summary universe query", () => {
+    const params = buildCommonQueryParams(
+      pmPermission,
+      normalizeCurriculumSummarySearchParams({}, "2026-05-30")
+    );
+
+    expect(params.slice(-2)).toEqual([
+      ["jee_main", "jee_advanced"],
+      ["neet"],
+    ]);
+  });
+
   it("passes date filters and Only flagged into the computed summary queries", async () => {
     mockQuery.mockResolvedValueOnce([
       {
@@ -614,8 +876,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(0)).mockResolvedValueOnce([
       {
@@ -665,8 +925,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(20)).mockResolvedValueOnce([
       {
@@ -708,8 +966,6 @@ describe("curriculum summary", () => {
         subjects: [],
         exam_tracks: [],
         regions: [],
-        states: [],
-        districts: [],
       },
     ]).mockResolvedValueOnce(guardRows(2)).mockResolvedValueOnce([
       {
@@ -749,8 +1005,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(10001));
@@ -787,8 +1041,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(11))
@@ -834,8 +1086,6 @@ describe("curriculum summary", () => {
           subjects: [],
           exam_tracks: [],
           regions: [],
-          states: [],
-          districts: [],
         },
       ])
       .mockResolvedValueOnce(guardRows(12))
@@ -885,6 +1135,8 @@ describe("curriculum summary", () => {
           prescribed_count: 1,
           actual_minutes: 95,
           prescribed_minutes: 90,
+          class_cancellation_count: 2,
+          doubt_solving_minutes: 135,
           delta_percent: 5.5555555556,
           flagged: false,
           flag_reasons: [],
@@ -916,6 +1168,8 @@ describe("curriculum summary", () => {
             prescribedCount: 1,
             actualMinutes: 95,
             prescribedMinutes: 90,
+            classCancellationCount: 2,
+            doubtSolvingMinutes: 135,
             deltaPercent: 5.5555555556,
             flagged: false,
             flagReasons: [],
@@ -934,6 +1188,10 @@ describe("curriculum summary", () => {
       "ROUND( duration_minutes::numeric * (topics_in_chapter_for_log::numeric / NULLIF(total_topics_in_log, 0)::numeric) )"
     );
     expect(chapterSql).toContain("cc.deleted_at IS NULL");
+    expect(chapterSql).toContain("l.log_type = 'class_cancelled'");
+    expect(chapterSql).toContain("l.log_type = 'doubt_solving'");
+    expect(chapterSql).toContain("l.chapter_id = ch.id");
+    expect(chapterSql).toContain("l.deleted_at IS NULL");
     expect(chapterSql).toContain("cmr.delta_percent < -10");
     expect(chapterSql).toContain("cmr.delta_percent > 10");
     expect(chapterSql).toContain("cmr.prescribed_minutes > 0 AND cmr.completed_count = 0");
@@ -941,6 +1199,7 @@ describe("curriculum summary", () => {
     expect(chapterSql).toContain(
       "ORDER BY page_row_order ASC, coverage_sequence ASC NULLS LAST, chapter_code ASC, chapter_sort_name ASC, chapter_id ASC"
     );
+    expect(mockQuery.mock.calls[4][1].slice(14, 16)).toEqual(["2026-04-01", "2026-05-30"]);
     expect(mockQuery.mock.calls[4][1].slice(-2)).toEqual([10, 10]);
   });
 });

@@ -2,9 +2,12 @@ import {
   checkCurriculumConfigManagementSchema,
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
+import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
+import { getSubjectExamTrackCompatibilityError } from "./curriculum-subject-track";
+import { curriculumIdForExamTrack } from "./curriculum-options";
 import { query } from "./db";
 import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
-import type { ExamTrack } from "@/types/curriculum";
+import { SUBJECT_IDS, type ExamTrack, type SubjectName } from "@/types/curriculum";
 
 export type CurriculumConfigSession = {
   user?: { email?: string | null } | null;
@@ -162,6 +165,7 @@ export type CurriculumConfigChapterOptionsResult =
       ok: true;
       options: CurriculumConfigChapterOption[];
     }
+  | CurriculumConfigValidationFailure
   | CurriculumSchemaUnavailable;
 
 export interface CurriculumConfigEditPayload {
@@ -293,12 +297,6 @@ interface RemoveMutationRow extends CurriculumConfigQueryRow {
   failure_reason: "stale" | "missing" | "already_out_of_syllabus" | null;
 }
 
-const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
-const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
-  jee_main: 1,
-  jee_advanced: 9,
-  neet: 2,
-};
 const SYLLABUS_STATUSES: CurriculumConfigSyllabusStatus[] = [
   "in_syllabus",
   "out_of_syllabus",
@@ -315,6 +313,23 @@ const SORT_KEYS: CurriculumConfigSortKey[] = [
   "updated_at",
 ];
 const PAGE_SIZES = [10, 20, 50, 100];
+
+function subjectNameForId(subjectId: number): SubjectName | null {
+  return (
+    (Object.keys(SUBJECT_IDS) as SubjectName[]).find(
+      (subject) => SUBJECT_IDS[subject] === subjectId
+    ) ?? null
+  );
+}
+
+function curriculumContentError(
+  examTrack: ExamTrack
+): CurriculumConfigValidationFailure | null {
+  if (curriculumIdForExamTrack(examTrack) !== null) return null;
+
+  const error = `Curriculum configuration is not available for ${formatExamTrack(examTrack)}`;
+  return { ok: false, status: 422, error, fields: { exam_track: error } };
+}
 
 export async function requireCurriculumConfigAdmin(
   session: CurriculumConfigSession
@@ -647,11 +662,21 @@ export async function getCurriculumConfigChapterOptions(
     return schema;
   }
 
+  const curriculumId = curriculumIdForExamTrack(params.examTrack);
+  if (curriculumId == null) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Curriculum configuration is not available for ${formatExamTrack(params.examTrack)}`,
+      fields: { exam_track: "Curriculum configuration is not available" },
+    };
+  }
+
   const rows = await query<CurriculumConfigChapterOptionQueryRow>(
     buildChapterOptionsSql(),
     [
       params.examTrack,
-      EXAM_TRACK_CURRICULUM_IDS[params.examTrack],
+      curriculumId,
       params.grade,
       params.subject,
       params.search ? `%${params.search.toLowerCase()}%` : null,
@@ -711,6 +736,34 @@ export async function createCurriculumConfigRow(params: {
   }
 
   const payload = payloadResult.payload;
+  const contentError = curriculumContentError(payload.examTrack);
+  if (contentError) return contentError;
+
+  const chapterRows = await query<{ subject_id: number }>(
+    "SELECT subject_id FROM chapter WHERE id = $1 LIMIT 1",
+    [payload.chapterId]
+  );
+  const subject = subjectNameForId(Number(chapterRows[0]?.subject_id));
+  if (!subject) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Invalid Curriculum Config create payload",
+      fields: { chapter_id: "Chapter was not found" },
+    };
+  }
+  const compatibilityError = getSubjectExamTrackCompatibilityError(
+    subject,
+    payload.examTrack
+  );
+  if (compatibilityError) {
+    return {
+      ok: false,
+      status: 422,
+      error: compatibilityError,
+      fields: { exam_track: compatibilityError },
+    };
+  }
 
   try {
     const rows = await query<CreateMutationRow>(buildCreateSql(), [
@@ -798,6 +851,34 @@ export async function editCurriculumConfigRow(params: {
   }
 
   const payload = payloadResult.payload;
+  const identityRows = await query<{ exam_track: ExamTrack; subject_id: number }>(
+    `SELECT cfg.exam_track, ch.subject_id
+     FROM lms_chapter_exam_configs cfg
+     JOIN chapter ch ON ch.id = cfg.chapter_id
+     WHERE cfg.id = $1
+     LIMIT 1`,
+    [params.id]
+  );
+  const identity = identityRows[0];
+  if (!identity) {
+    return { ok: false, status: 404, error: "Curriculum Config row not found" };
+  }
+  const contentError = curriculumContentError(identity.exam_track);
+  if (contentError) return contentError;
+
+  const subject = subjectNameForId(Number(identity.subject_id));
+  const compatibilityError = subject
+    ? getSubjectExamTrackCompatibilityError(subject, identity.exam_track)
+    : null;
+  if (compatibilityError) {
+    return {
+      ok: false,
+      status: 422,
+      error: compatibilityError,
+      fields: { exam_track: compatibilityError },
+    };
+  }
+
   const rows = await query<EditMutationRow>(buildEditSql(), [
     params.id,
     payload.isInSyllabus,
@@ -920,10 +1001,6 @@ export async function removeCurriculumConfigRowFromSyllabus(params: {
           activeChapterCompletions: 0,
         },
   };
-}
-
-function isExamTrack(value: unknown): value is ExamTrack {
-  return typeof value === "string" && EXAM_TRACKS.includes(value as ExamTrack);
 }
 
 function isSyllabusStatus(value: unknown): value is CurriculumConfigSyllabusStatus {

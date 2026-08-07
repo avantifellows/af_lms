@@ -47,7 +47,6 @@ CREATE TABLE IF NOT EXISTS centres (
   type_code VARCHAR(50),
   category_code VARCHAR(50),
   sub_category_code VARCHAR(50),
-  stream_codes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
   program_id INTEGER,
   is_physical BOOLEAN NOT NULL DEFAULT true,
   is_active BOOLEAN NOT NULL DEFAULT true,

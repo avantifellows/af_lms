@@ -9,7 +9,6 @@ import {
   ChevronRight,
   CircleOff,
   Edit2,
-  Link2,
   Plus,
   RotateCcw,
   Save,
@@ -35,6 +34,7 @@ import type {
   CentreSchoolLinkFilter,
   ProgramOption,
 } from "@/lib/centres";
+import { EXAM_TRACKS, formatExamTrack } from "@/lib/exam-tracks";
 
 interface CentreGridProps {
   initialRows: CentreListRow[];
@@ -70,7 +70,8 @@ interface CentreFormState {
   typeCode: string;
   categoryCode: string;
   subCategoryCode: string;
-  streamCodes: string[];
+  grade11ExamTrackCodes: string[];
+  grade12ExamTrackCodes: string[];
   isPhysical: boolean;
   isActive: boolean;
   programId: number | null;
@@ -84,10 +85,10 @@ const EMPTY_FILTERS: CentreListFilters = {
   typeCode: null,
   categoryCode: null,
   subCategoryCode: null,
-  streamCode: null,
   isPhysical: "all",
 };
 
+// fallow-ignore-next-line complexity
 export default function CentreGrid({
   initialRows,
   initialSummary,
@@ -291,7 +292,8 @@ export default function CentreGrid({
         typeCode: row.typeCode ?? "",
         categoryCode: row.categoryCode ?? "",
         subCategoryCode: row.subCategoryCode ?? "",
-        streamCodes: row.streamCodes,
+        grade11ExamTrackCodes: row.grade11ExamTrackCodes,
+        grade12ExamTrackCodes: row.grade12ExamTrackCodes,
         isPhysical: row.isPhysical,
         isActive: row.isActive,
         programId: row.programId,
@@ -317,12 +319,17 @@ export default function CentreGrid({
     );
   };
 
-  const toggleStream = (code: string) => {
+  const toggleExamTrack = (
+    field: "grade11ExamTrackCodes" | "grade12ExamTrackCodes",
+    code: string
+  ) => {
     if (!modal) return;
-    const streamCodes = modal.form.streamCodes.includes(code)
-      ? modal.form.streamCodes.filter((value) => value !== code)
-      : [...modal.form.streamCodes, code];
-    patchForm({ streamCodes });
+    const current = modal.form[field];
+    patchForm({
+      [field]: current.includes(code)
+        ? current.filter((value) => value !== code)
+        : [...current, code],
+    });
   };
 
   const toggleSearchTerm = async (value: string) => {
@@ -541,12 +548,6 @@ export default function CentreGrid({
             onChange={(categoryCode) =>
               setFilters({ ...filters, categoryCode: categoryCode || null })
             }
-          />
-          <OptionFilter
-            label="Stream"
-            value={filters.streamCode ?? ""}
-            options={optionsBySet.get("stream") ?? []}
-            onChange={(streamCode) => setFilters({ ...filters, streamCode: streamCode || null })}
           />
           <FilterSelect
             label="Physical"
@@ -767,38 +768,23 @@ export default function CentreGrid({
                     </div>
 
                     <div className="rounded-lg border border-border bg-bg-card px-4 py-4">
-                      <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase text-text-primary">
-                        <Link2 className="h-4 w-4 text-accent" aria-hidden="true" />
-                        Centre streams
+                      <div className="mb-4 text-sm font-bold uppercase text-text-primary">
+                        Centre Exam Tracks
                       </div>
-                      <div className="grid max-h-44 gap-2 overflow-y-auto rounded-lg border border-border bg-bg-input p-3 sm:grid-cols-2">
-                        {selectOptions({
-                          options: optionsBySet.get("stream") ?? [],
-                          currentCodes: modal.form.streamCodes,
-                          includeInactiveCurrent: modal.mode === "edit",
-                        }).map((option) => (
-                          <label
-                            key={option.code}
-                            className="inline-flex min-h-[38px] cursor-pointer items-center gap-2 rounded-md px-2 text-sm font-medium text-text-primary hover:bg-hover-bg"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={modal.form.streamCodes.includes(option.code)}
-                              onChange={() => toggleStream(option.code)}
-                              className="h-4 w-4 accent-[var(--color-accent)]"
-                            />
-                            <span>{option.label}</span>
-                            {!option.isActive && (
-                              <span className="rounded-full bg-warning-bg px-2 py-0.5 text-xs text-warning-text">
-                                inactive
-                              </span>
-                            )}
-                          </label>
-                        ))}
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <ExamTrackCheckboxes
+                          label="Grade 11 Exam Tracks"
+                          selected={modal.form.grade11ExamTrackCodes}
+                          error={fieldErrors.grade_11_exam_track_codes}
+                          onToggle={(code) => toggleExamTrack("grade11ExamTrackCodes", code)}
+                        />
+                        <ExamTrackCheckboxes
+                          label="Grade 12 Exam Tracks"
+                          selected={modal.form.grade12ExamTrackCodes}
+                          error={fieldErrors.grade_12_exam_track_codes}
+                          onToggle={(code) => toggleExamTrack("grade12ExamTrackCodes", code)}
+                        />
                       </div>
-                      {fieldErrors.stream_codes && (
-                        <p className="mt-1 text-xs text-danger">{fieldErrors.stream_codes}</p>
-                      )}
                     </div>
                   </div>
 
@@ -1136,6 +1122,7 @@ function OptionSelectField({
   );
 }
 
+// fallow-ignore-next-line complexity
 function CentreCard({
   row,
   expanded,
@@ -1215,6 +1202,18 @@ function CentreCard({
                 <span className="text-text-muted/60">None</span>
               )}
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">Grade 11 Exam Tracks:</span>
+              <span className="font-medium text-text-primary">
+                {formatExamTracks(row.grade11ExamTrackCodes)}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">Grade 12 Exam Tracks:</span>
+              <span className="font-medium text-text-primary">
+                {formatExamTracks(row.grade12ExamTrackCodes)}
+              </span>
+            </div>
           </div>
 
           <div className="mt-3 flex items-center gap-2">
@@ -1242,23 +1241,6 @@ function CentreCard({
               </div>
             )}
             <DetailGroup title="Centre Details" columns={3}>
-              <div className="col-span-2">
-                <DetailField label="Centre Streams">
-                  {row.streams.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {row.streams.map((stream) => (
-                        <OptionBadge
-                          key={stream.code}
-                          label={stream.label || stream.code}
-                          active={stream.isActive}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-text-muted/60">No streams</span>
-                  )}
-                </DetailField>
-              </div>
               <DetailField label="Program" value={row.programName ?? "None"} />
               <DetailField label="Updated">
                 <span className="font-mono text-xs text-text-muted">
@@ -1304,7 +1286,6 @@ function appendFilterParams(params: URLSearchParams, filters: CentreListFilters)
   if (filters.typeCode) params.set("type", filters.typeCode);
   if (filters.categoryCode) params.set("category", filters.categoryCode);
   if (filters.subCategoryCode) params.set("sub_category", filters.subCategoryCode);
-  if (filters.streamCode) params.set("stream", filters.streamCode);
   if (filters.isPhysical !== "all") params.set("is_physical", filters.isPhysical);
 }
 
@@ -1332,7 +1313,8 @@ function emptyForm(): CentreFormState {
     typeCode: "",
     categoryCode: "",
     subCategoryCode: "",
-    streamCodes: [],
+    grade11ExamTrackCodes: [],
+    grade12ExamTrackCodes: [],
     isPhysical: false,
     isActive: true,
     programId: null,
@@ -1346,11 +1328,49 @@ function formToPayload(form: CentreFormState) {
     type_code: form.typeCode || null,
     category_code: form.categoryCode || null,
     sub_category_code: form.subCategoryCode || null,
-    stream_codes: form.streamCodes,
+    grade_11_exam_track_codes: form.grade11ExamTrackCodes,
+    grade_12_exam_track_codes: form.grade12ExamTrackCodes,
     is_physical: form.isPhysical,
     is_active: form.isActive,
     program_id: form.programId,
   };
+}
+
+function formatExamTracks(codes: string[]): string {
+  return codes.length > 0 ? codes.map(formatExamTrack).join(", ") : "None";
+}
+
+function ExamTrackCheckboxes({
+  label,
+  selected,
+  error,
+  onToggle,
+}: {
+  label: string;
+  selected: string[];
+  error?: string;
+  onToggle: (code: string) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="text-xs font-semibold uppercase text-text-muted">{label}</legend>
+      <div className="mt-1 grid gap-1">
+        {EXAM_TRACKS.map((code) => (
+          <label key={code} className="flex min-h-9 items-center gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              aria-label={`${label.replace(" Exam Tracks", "")} ${formatExamTrack(code)}`}
+              checked={selected.includes(code)}
+              onChange={() => onToggle(code)}
+              className="h-4 w-4 accent-[var(--color-accent)]"
+            />
+            {formatExamTrack(code)}
+          </label>
+        ))}
+      </div>
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    </fieldset>
+  );
 }
 
 function selectOptions(params: {

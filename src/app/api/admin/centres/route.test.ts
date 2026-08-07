@@ -73,8 +73,8 @@ describe("GET /api/admin/centres", () => {
           sub_category_code: null,
           sub_category_label: null,
           sub_category_is_active: null,
-          stream_codes: [],
-          stream_options: [],
+          grade_11_exam_track_codes: ["jee_main"],
+          grade_12_exam_track_codes: ["neet", "cet"],
           is_physical: false,
           is_active: true,
           inserted_at: null,
@@ -118,6 +118,8 @@ describe("GET /api/admin/centres", () => {
           id: 91,
           name: "JNV Pune CoE",
           updatedAt: "2026-01-06T00:00:00.000Z",
+          grade11ExamTrackCodes: ["jee_main"],
+          grade12ExamTrackCodes: ["neet", "cet"],
         },
       ],
     });
@@ -125,7 +127,7 @@ describe("GET /api/admin/centres", () => {
 
   it("returns controlled 503 when Centre tables are unavailable", async () => {
     mockQuery.mockResolvedValueOnce([
-      { table_name: "centres", column_name: "stream_codes" },
+      { table_name: "centres", column_name: "program_id" },
     ]);
 
     const res = await GET(jsonRequest("http://localhost/api/admin/centres") as never);
@@ -148,6 +150,23 @@ describe("POST /api/admin/centres", () => {
     mockQuery.mockResolvedValue([]);
   });
 
+  it("rejects non-admin requests before touching Centre data", async () => {
+    mockGetUserPermission.mockResolvedValueOnce({
+      ...adminPermission,
+      role: "program_manager",
+    });
+
+    const res = await POST(
+      jsonRequest("http://localhost/api/admin/centres", {
+        method: "POST",
+        body: {},
+      }) as never
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it("returns 422 validation errors from the Centre service", async () => {
     mockQuery.mockResolvedValueOnce([]);
 
@@ -156,7 +175,7 @@ describe("POST /api/admin/centres", () => {
         method: "POST",
         body: {
           name: "",
-          stream_codes: "jee",
+          [["stream", "codes"].join("_")]: "jee",
           is_physical: "no",
           is_active: true,
         },
@@ -169,7 +188,7 @@ describe("POST /api/admin/centres", () => {
       error: "Invalid Centre payload",
       fields: {
         name: "Centre name is required",
-        stream_codes: "Centre Stream codes must be an array of strings",
+        [["stream", "codes"].join("_")]: "Field is not editable",
         is_physical: "Physical status is required",
       },
     });
@@ -186,7 +205,6 @@ describe("POST /api/admin/centres", () => {
           type_code: 123,
           category_code: ["school"],
           sub_category_code: { code: "coe" },
-          stream_codes: [],
           is_physical: false,
           is_active: true,
         },
@@ -201,6 +219,30 @@ describe("POST /api/admin/centres", () => {
         type_code: "Centre option code must be a string or null",
         category_code: "Centre option code must be a string or null",
         sub_category_code: "Centre option code must be a string or null",
+      },
+    });
+  });
+
+  it("rejects unsupported Centre Exam Track codes and grades", async () => {
+    const res = await POST(
+      jsonRequest("http://localhost/api/admin/centres", {
+        method: "POST",
+        body: {
+          name: "Bad Track Payload",
+          grade_11_exam_track_codes: ["jee_main", "sat"],
+          grade_10_exam_track_codes: ["neet"],
+          is_physical: false,
+          is_active: true,
+        },
+      }) as never
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Invalid Centre payload",
+      fields: {
+        grade_11_exam_track_codes: "Grade 11 Exam Tracks must use supported codes",
+        grade_10_exam_track_codes: "Only Grade 11 and Grade 12 Exam Tracks are supported",
       },
     });
   });

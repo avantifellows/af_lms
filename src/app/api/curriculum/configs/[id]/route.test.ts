@@ -121,24 +121,26 @@ describe("PATCH /api/curriculum/configs/[id]", () => {
     expect(invalid.status).toBe(422);
     expect(mockQuery).not.toHaveBeenCalled();
 
-    mockQuery.mockResolvedValueOnce([
-      {
-        failure_reason: "stale",
-        config_id: null,
-        chapter_id: null,
-        chapter_code: null,
-        chapter_name: null,
-        grade: null,
-        subject_id: null,
-        subject_name: null,
-        exam_track: null,
-        is_in_syllabus: null,
-        prescribed_minutes: null,
-        coverage_sequence: null,
-        updated_by_email: null,
-        updated_at: null,
-      },
-    ]);
+    mockQuery
+      .mockResolvedValueOnce([{ exam_track: "jee_main", subject_id: 4 }])
+      .mockResolvedValueOnce([
+        {
+          failure_reason: "stale",
+          config_id: null,
+          chapter_id: null,
+          chapter_code: null,
+          chapter_name: null,
+          grade: null,
+          subject_id: null,
+          subject_name: null,
+          exam_track: null,
+          is_in_syllabus: null,
+          prescribed_minutes: null,
+          coverage_sequence: null,
+          updated_by_email: null,
+          updated_at: null,
+        },
+      ]);
     const stale = await PATCH(
       jsonRequest("http://localhost/api/curriculum/configs/42", {
         method: "PATCH",
@@ -154,8 +156,62 @@ describe("PATCH /api/curriculum/configs/[id]", () => {
     expect(stale.status).toBe(409);
   });
 
+  it("rejects editing a Maths NEET Curriculum Config row", async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          failure_reason: null,
+          config_id: "42",
+          chapter_id: "7",
+          chapter_code: "MAT-01",
+          chapter_name: "Relations",
+          grade: "11",
+          subject_id: "1",
+          subject_name: "Maths",
+          exam_track: "neet",
+          is_in_syllabus: true,
+          prescribed_minutes: "120",
+          coverage_sequence: "3",
+          updated_by_email: "admin@avantifellows.org",
+          updated_at: "2026-06-01T12:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          expected_summary_rows: "12",
+          active_curriculum_logs: "0",
+          active_chapter_completions: "0",
+          duplicate_coverage_count: "0",
+        },
+      ]);
+
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/curriculum/configs/42", {
+        method: "PATCH",
+        body: {
+          prescribed_minutes: 120,
+          coverage_sequence: 3,
+          is_in_syllabus: true,
+          updated_at: "2026-05-30T10:00:00.000Z",
+          lock_token: "9001",
+        },
+      }) as NextRequest,
+      routeParams({ id: "42" })
+    );
+
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Maths is not valid with NEET",
+    });
+    expect(mockQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE lms_chapter_exam_configs"),
+      expect.anything()
+    );
+  });
+
   it("returns the saved row, impact counts, and warnings for successful admin edits", async () => {
     mockQuery
+      .mockResolvedValueOnce([{ exam_track: "jee_main", subject_id: 4 }])
       .mockResolvedValueOnce([
         {
           failure_reason: null,

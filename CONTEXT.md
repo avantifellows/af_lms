@@ -26,9 +26,9 @@ _Avoid_: Cohort, section
 An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
 _Avoid_: Course, stream
 
-**Centre Stream**:
-One or more academic delivery streams attached to a Centre, such as JEE, NEET, or Math Foundation.
-_Avoid_: Program, Exam Track, comma-separated stream
+**Centre Exam Track**:
+An Exam Track assigned to one Centre for one Grade. A Centre and Grade can have one or more Centre Exam Tracks.
+_Avoid_: Centre Stream, Program, generic JEE
 
 **UDISE Code**:
 A unique government-issued identifier for a school.
@@ -41,8 +41,16 @@ _Avoid_: PIN, access code
 ### Curriculum
 
 **LMS Curriculum Log**:
-A soft-deletable dated record of curriculum teaching for a school, program, grade, subject, and exam track, with duration and covered topics.
+A soft-deletable dated record of curriculum activity for a school, program, grade, subject, and exam track. A regular teaching entry has duration and covered topics; cancellation and doubt-solving entries have narrower data and do not change Curriculum Progress.
 _Avoid_: Teaching Session, Session, Class Log
+
+**Class Cancellation Log**:
+An LMS Curriculum Log that records that a class for one Chapter was cancelled on a date within the selected curriculum scope.
+_Avoid_: Cancelled teaching, zero-hour class
+
+**Doubt Solving Log**:
+An LMS Curriculum Log that records doubt-solving duration for one chapter on a date within the selected curriculum scope.
+_Avoid_: Revision class, curriculum teaching log
 
 **Chapter Completion**:
 The current state that a chapter is complete for a school, program, and exam track.
@@ -57,7 +65,7 @@ A top-level read-only dashboard for reviewing curriculum progress across schools
 _Avoid_: Curriculum tab, curriculum report, curriculum overview
 
 **Exam Track**:
-The exam-specific curriculum lens selected by a user, such as JEE Main, JEE Advanced, or NEET.
+The exam-specific curriculum lens used by a Centre, such as JEE Main, JEE Advanced, NEET, CET, or Math Foundation.
 _Avoid_: Stream, orientation
 
 **LMS Chapter Exam Config**:
@@ -213,15 +221,28 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - **Centre** links to **School** through `school.id`; school code and UDISE code are display/search identifiers, not the Centre relationship key
 - A **Centre** name is not globally unique; the same School can have separate billing/funder centres for different operational setups
 - In v1, **Centre** rows do not have a uniqueness constraint beyond their primary key
-- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, non-null `stream_codes`, `is_physical`, `is_active`, and normal timestamps
+- In v1, **Centre** schema stores `name`, nullable `school_id`, nullable `type_code`, nullable `category_code`, nullable `sub_category_code`, `is_physical`, `is_active`, and normal timestamps; Grade-specific Exam Tracks live in `centre_exam_tracks`
 - In v1, **Centre** classification fields are current-state fields on the Centre itself, not separate academic-year history records
 - In v1, **Centre** rows use normal inserted/updated timestamps without a dedicated audit actor or changelog model
 - In v1, **Centre** type, category, and sub-category can be null so incomplete source rows can be imported and cleaned later
-- A **Centre** can have multiple **Centre Streams**
-- In v1, a **Centre** can have no Centre Streams assigned; empty streams are valid for special rows such as bench teacher buckets
+- Issue #252 replaces the legacy centre-level **Centre Stream** classification with grade-specific **Centre Exam Tracks**
+- A **Centre** can have multiple **Centre Exam Tracks** for one Grade
+- A **Centre** and Grade can have no **Centre Exam Tracks** assigned
+- In issue #252, **Centre Exam Tracks** are current Centre-and-Grade mappings and are not scoped by Academic Year; revisit this assumption only when mappings need to change between years
+- Curriculum resolves one active physical **Centre** from the selected School and Program, then loads **Centre Exam Tracks** for that Centre and Grade
+- Curriculum fails closed when School and Program resolve to zero or multiple active physical **Centres**
+- When a Centre and Grade have no **Centre Exam Tracks**, Curriculum shows the missing configuration and blocks new LMS Curriculum Logs without falling back to other Exam Tracks
+- **Centre Exam Tracks** are the only source of Exam Track availability in Curriculum; Curriculum does not keep a separate approved-track list
+- A mapped **Centre Exam Track** without LMS Chapter Exam Config is visible in Curriculum but unavailable for logging until configuration exists
+- Removing a **Centre Exam Track** blocks new logs and removes that track from the current **Curriculum Summary**, while existing logs remain stored for audit
+- Initial **Centre Exam Track** mappings are entered by Admins from the reviewed mapping Sheet through Centre Management; there is no live Sheet sync or one-off importer
+- Admins do not infer mappings from legacy centre-wide stream values; the legacy Centre Stream field is removed during cutover
+- Issue #252 is activated only after Admins enter the reviewed Grade 11/12 mappings during a planned configuration window and verify them in Centre Management
 - In v1, **Centre** configurable fields store stable option codes on the Centre row; display labels and ordering come from centre option configuration
 - In v1, **Centre** administration includes both a spreadsheet-like Centre grid and a Centre option configuration surface for editing option labels, option active state, and ordering
-- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, streams, physical status, and active status
+- Issue #252 replaces the Centre grid's Centre Stream column with Grade 11 Exam Tracks and Grade 12 Exam Tracks multi-select columns using the five fixed Exam Track choices
+- Centre Admins assign the five fixed **Exam Track** choices but cannot create additional Track types; adding a Track requires coordinated Curriculum and CMS support
+- In v1, **Centre** administration can create and edit Centre name, linked School, type, category, sub-category, Grade 11/12 Exam Tracks, physical status, and active status
 - In v1, **Centre** administration displays linked School metadata such as school name, code, UDISE, region, state, and district as read-only values derived from School
 - In v1, unlinked **Centres** do not store centre-level location fields; location columns remain blank until the Centre is linked to a School or a later feature adds centre-level location
 - In v1, Centre option code validity is enforced by AF LMS APIs and import scripts rather than foreign keys from Centre rows to option rows
@@ -232,7 +253,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - In v1, **Centres** are deactivated with `is_active = false`; the admin UI does not hard-delete Centre rows
 - In v1, Centre options are deactivated with `is_active = false`; the admin UI does not hard-delete option rows because Centre rows may still reference their codes
 - In v1, inactive Centre options remain displayable on existing Centre rows but are not offered for new selections
-- In v1, Centre option sets are fixed to type, category, sub-category, and stream; admins configure options inside those sets rather than creating new sets
+- In v1, Centre option sets are fixed to type, category, and sub-category; Exam Tracks use the shared fixed vocabulary instead of configurable Centre options
 - In v1, admins cannot create or delete Centre option sets; option set editing, if exposed, is limited to display label and ordering
 - In v1, Centre option configuration is stored in `centre_option_sets` and `centre_options`; option sets define fixed fields, while options define stable codes, labels, ordering, and active state
 - Centre schema changes are introduced through db-service migrations, while AF LMS owns the data scripts for seeding Centre options and importing the initial Centre CSV data
@@ -243,16 +264,42 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - The initial Centre import requires a checked-in mapping file with one row per source Centre and explicit school-link status; unresolved or ambiguous mappings block apply mode
 - Yearly planning fields such as `plan_status_2627` are out of scope for Centre v1
 - Centre v1 should be delivered in slices: db-service schema, AF LMS option seed script, AF LMS Centre import script, admin Centre APIs, Centre grid UI, and Centre option config UI
-- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program** and **Exam Track**
-- An **LMS Curriculum Log** has many covered topics
+- A **School** has many **LMS Curriculum Logs**, each scoped to exactly one **Program**, Grade, Subject, and **Exam Track**
+- A regular teaching **LMS Curriculum Log** has duration and one or more covered topics
+- A **Class Cancellation Log** has a date and one Chapter but no topics or duration; it appears in log history but contributes no teaching time or curriculum progress
+- At most one active **Class Cancellation Log** exists for each School, Program, Grade, Subject, Exam Track, Chapter, and date
+- A **Doubt Solving Log** has a date, chapter, and duration but no covered topics; it appears in log history but contributes no Actual Hours, topic coverage, or curriculum progress
+- **Class Cancellation Logs** and **Doubt Solving Logs** use the same edit and soft-delete lifecycle as regular teaching LMS Curriculum Logs
+- The Curriculum Add Log flow selects Regular Class, Class Cancelled, or Doubt Solving in one modal and shows only the fields required by that type
+- An existing **LMS Curriculum Log** cannot change its log type; correcting the type requires soft-deleting the entry and creating another
+- A **Doubt Solving Log** can select one in-syllabus Chapter from LMS Chapter Exam Config for its Exam Track, Grade, and Subject, but cannot use free text or an out-of-syllabus Chapter
+- Curriculum shows all three LMS Curriculum Log types in one chronological history with a clear type label and only the details relevant to that type; issue #252 adds no history type filter
+- Regular Class, **Class Cancellation Log**, and **Doubt Solving Log** dates can be today or in the past, but not in the future
+- All three LMS Curriculum Log types reuse the existing Curriculum permission: Teacher, Program Admin, and Admin can edit, while Program Manager can view
 - **Chapter Completion** is stored independently from **LMS Curriculum Logs**
 - **Curriculum Progress** combines covered topics and teaching time from **LMS Curriculum Logs** with stored **Chapter Completion**
 - **Curriculum Summary** aggregates **Curriculum Progress** across multiple **Schools** for PM/admin monitoring
 - Each **Curriculum Summary** top-level row represents one School-Program-Grade-Subject-Exam Track combination
+- **Curriculum Summary** shows a mapped **Centre Exam Track** without LMS Chapter Exam Config as unavailable rather than hiding the operational track or creating empty chapter rows
+- An unavailable **Centre Exam Track** appears as one non-expandable top-level row with School, Program, Grade, and Exam Track; Subject and metrics are blank and the row explains that Curriculum configuration is unavailable
+- When School and Program resolve to zero or multiple active physical Centres, **Curriculum Summary** shows a configuration-error row for that combination while continuing to load valid combinations
+- Selecting Schools in **Curriculum Summary** limits the available values in the other multi-select filters but does not select values automatically
+- Issue #252 keeps the Region filter in **Curriculum Summary** and removes the State and District filters
+- **Curriculum Summary** multi-select filters keep selections inside their open checkbox lists rather than showing removable selection chips; users clear one filter by unchecking values or clear all filters with Clear filters
+- A **Curriculum Summary** multi-select updates its form selection immediately and stays open while users check or uncheck values; clicking outside or Done keeps the selections and closes the list, while Clear unchecks that filter and leaves the list open
+- Apply filters is the only action that reloads **Curriculum Summary** with the selected filter values
+- A closed **Curriculum Summary** multi-select shows All when empty and a selected-value count when one or more values are checked
+- An empty Program, Grade, Subject, or Exam Track filter in **Curriculum Summary** means all available values for the selected Schools
+- With multiple Schools selected, **Curriculum Summary** filter options use the union of values available to any selected School, while result rows still include only valid School combinations
+- Changing selected Schools automatically removes selected filter values that are no longer valid for any selected School
+- Issue #252 does not add Chapter Test Completion Status or connect **Curriculum Summary** to Quiz Sessions or BigQuery; that work is deferred to a separate change
+- **Curriculum Summary** shows Class Cancellation Count and Doubt Solving Hours only on expanded Chapter rows, not on the parent School-Program-Grade-Subject-Exam Track row
+- Class Cancellation Count includes active Class Cancellation Logs, while Doubt Solving Hours sum active Doubt Solving Log duration without changing Actual Hours or Curriculum Progress
 - **Curriculum Summary** uses **Chapter Completion** as its source for chapter completion state
 - **Curriculum Summary** is the entry point to **Curriculum Config Management** for eligible **Admins**
 - In v1, **Curriculum Config Management** is exposed at `/curriculum-summary/config` with the page title `Curriculum Config`
 - A chapter has one **LMS Chapter Exam Config** per configured exam track
+- Curriculum rejects Biology for JEE Main or JEE Advanced and Maths for NEET even if an invalid LMS Chapter Exam Config exists; Curriculum Config Management prevents creating those invalid pairs
 - **LMS Chapter Exam Config** is global per chapter and exam track, not scoped to a school or program
 - **Curriculum Config Management** changes global **LMS Chapter Exam Config** values and is restricted to **Admins**
 - In v1, **Curriculum Config Management** edits the live **LMS Chapter Exam Config** rows directly rather than using draft or versioned configs
@@ -524,7 +571,7 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 - "school code" vs "UDISE code": `school.code` is an internal short identifier; `school.udise_code` is the government-issued UDISE. Both identify a school but in different contexts. API routes use UDISE in URLs, passcodes derive from school code.
 - "center/centre" in the imported CRUD export means **Centre**, not **School**.
 - Centre `name` alone is not an identity; `JNV Adilabad` appears as separate CoE and Nodal centres in the source export.
-- The source `program` column maps to **Centre Stream**, not **Program** or **Exam Track**; it should be stored as an array, not a comma-separated string.
+- The imported source `program` column populated the legacy centre-level stream field; issue #252 supersedes it with grade-specific **Centre Exam Tracks** entered from the reviewed mapping Sheet.
 - Centre option labels are configurable option data; Centre rows should store stable codes rather than labels.
 - "admin" vs "program_admin": These are distinct roles. An `admin` may manage any scoped Visit; a `program_admin` may manage only their own in-progress Visits and otherwise has scoped read access. Feature permissions vary: for #155 Student Addition, `program_admin` is intentionally allowed to write student data. The naming is confusing — always use the full term.
 - "deleted" for actions vs visits: Actions already support soft delete (`deleted_at` on `lms_pm_school_visit_actions`). Issue #35 extends this to visits (`lms_pm_school_visits`).

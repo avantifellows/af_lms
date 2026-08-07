@@ -70,6 +70,11 @@ describe("GET /api/curriculum/options", () => {
         { code: "70705", region: "AHMEDABAD", program_ids: [1, 2, 64] },
       ])
       .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ id: 41, name: "LMS Centre" }])
+      .mockResolvedValueOnce([
+        { exam_track: "jee_main", grade: 11 },
+        { exam_track: "neet", grade: 12 },
+      ])
       .mockResolvedValueOnce([
         {
           exam_track: "jee_main",
@@ -85,14 +90,32 @@ describe("GET /api/curriculum/options", () => {
           subject_id: 3,
           subject: [{ lang_code: "en", subject: "Biology" }],
         },
-      ]);
+      ])
+      .mockResolvedValueOnce([]);
 
     const res = await GET(nextReq("/api/curriculum/options?school_code=70705"));
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       programs: [{ id: 1, name: "JNV CoE" }],
-      examTracks: ["jee_main", "neet"],
+      examTracks: ["jee_main"],
+      centreExamTracks: [
+        {
+          examTrack: "jee_main",
+          grade: 11,
+          hasCurriculumConfig: true,
+          isMapped: true,
+          hasHistoricalLogs: false,
+        },
+        {
+          examTrack: "neet",
+          grade: 12,
+          hasCurriculumConfig: true,
+          isMapped: true,
+          hasHistoricalLogs: false,
+        },
+      ],
+      configurationError: null,
       gradeSubjects: [
         {
           examTrack: "jee_main",
@@ -117,6 +140,113 @@ describe("GET /api/curriculum/options", () => {
         subject: "Physics",
         subjectId: 4,
       },
+    });
+  });
+
+  it("returns only the resolved Centre's Grade-specific mapped Tracks with config availability", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ code: "70705", region: "AHMEDABAD" }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ id: 41, name: "LMS Centre" }])
+      .mockResolvedValueOnce([
+        { exam_track: "jee_main", grade_id: 3, grade: 11 },
+        { exam_track: "cet", grade_id: 3, grade: 11 },
+        { exam_track: "neet", grade_id: 4, grade: 12 },
+      ])
+      .mockResolvedValueOnce([
+        {
+          exam_track: "jee_main",
+          grade_id: 3,
+          grade: 11,
+          subject_id: 4,
+          subject: [{ lang_code: "en", subject: "Physics" }],
+        },
+        {
+          exam_track: "jee_advanced",
+          grade_id: 3,
+          grade: 11,
+          subject_id: 4,
+          subject: [{ lang_code: "en", subject: "Physics" }],
+        },
+        {
+          exam_track: "neet",
+          grade_id: 4,
+          grade: 12,
+          subject_id: 3,
+          subject: [{ lang_code: "en", subject: "Biology" }],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const res = await GET(nextReq("/api/curriculum/options?school_code=70705"));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      examTracks: ["jee_main", "cet"],
+      centreExamTracks: [
+        { examTrack: "jee_main", grade: 11, hasCurriculumConfig: true },
+        { examTrack: "cet", grade: 11, hasCurriculumConfig: false },
+        { examTrack: "neet", grade: 12, hasCurriculumConfig: true },
+      ],
+      configurationError: null,
+      defaults: { programId: 1, grade: 11, examTrack: "jee_main" },
+    });
+  });
+
+  it("keeps an unmapped Track selectable when it has retained log history", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ code: "70705", region: "AHMEDABAD" }])
+      .mockResolvedValueOnce([{ id: 1, name: "JNV CoE" }])
+      .mockResolvedValueOnce([{ id: 41, name: "LMS Centre" }])
+      .mockResolvedValueOnce([{ exam_track: "jee_main", grade: 11 }])
+      .mockResolvedValueOnce([
+        {
+          exam_track: "jee_main",
+          grade_id: 3,
+          grade: 11,
+          subject_id: 4,
+          subject: [{ lang_code: "en", subject: "Physics" }],
+        },
+        {
+          exam_track: "jee_advanced",
+          grade_id: 3,
+          grade: 11,
+          subject_id: 4,
+          subject: [{ lang_code: "en", subject: "Physics" }],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          exam_track: "jee_advanced",
+          grade_id: 3,
+          grade: 11,
+          subject_id: 4,
+          subject: [{ lang_code: "en", subject: "Physics" }],
+        },
+      ]);
+
+    const res = await GET(nextReq("/api/curriculum/options?school_code=70705"));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      examTracks: ["jee_main", "jee_advanced"],
+      centreExamTracks: [
+        {
+          examTrack: "jee_main",
+          grade: 11,
+          isMapped: true,
+          hasHistoricalLogs: false,
+        },
+        {
+          examTrack: "jee_advanced",
+          grade: 11,
+          isMapped: false,
+          hasHistoricalLogs: true,
+        },
+      ],
+      defaults: { examTrack: "jee_main", grade: 11, subject: "Physics" },
     });
   });
 
