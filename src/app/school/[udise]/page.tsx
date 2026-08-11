@@ -20,7 +20,8 @@ import {
   type ProgramPermissionContext,
   type UserPermission,
 } from "@/lib/permissions";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS, PROGRAM_IDS_ORDERED } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
 import { type Grade, type Student } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
 import { type DataIssue } from "@/lib/school-student-list-data-issues";
@@ -407,26 +408,30 @@ function getSchoolNavigation(
   };
 }
 
-function enrollmentSchoolData({ students, isPasscodeUser, isAdmin, programContext, canAddStudent, school }: {
+function enrollmentSchoolData({ students, isPasscodeUser, isAdmin, programContext, canAddStudent, school, supportedProgramIds }: {
   students: Student[];
   isPasscodeUser: boolean;
   isAdmin: boolean;
   programContext: ProgramPermissionContext;
   canAddStudent: boolean;
   school: School;
+  // From getLmsSupportedProgramIds() — centre-derived ∪ PROGRAM_IDS. Passed in
+  // rather than imported so this stays sync and unit-testable, and so a newly
+  // onboarded centre program shows up without a code edit (D22c).
+  supportedProgramIds: number[];
 }) {
   const activeStudents = students.filter(
     (student) => student.status !== "dropout" &&
-      PROGRAM_IDS_ORDERED.some((programId) => studentHasCurrentProgram(student, programId))
+      supportedProgramIds.some((programId) => studentHasCurrentProgram(student, programId))
   );
   const dropoutStudents = students.filter(
     (student) => student.status === "dropout" || (student.dropout_program_ids?.length ?? 0) > 0
   );
-  const programsWithStudents = new Set(PROGRAM_IDS_ORDERED.filter((programId) =>
+  const programsWithStudents = new Set(supportedProgramIds.filter((programId) =>
     students.some((student) => studentHasCurrentProgram(student, programId) ||
       studentDroppedFromProgram(student, programId))
   ));
-  const visiblePrograms = (isPasscodeUser || isAdmin ? PROGRAM_IDS_ORDERED : programContext.programIds)
+  const visiblePrograms = (isPasscodeUser || isAdmin ? supportedProgramIds : programContext.programIds)
     .filter((id) => programsWithStudents.has(id));
   if (canAddStudent) visiblePrograms.push(PROGRAM_IDS.NVS);
   return {
@@ -476,6 +481,7 @@ function EnrollmentSchoolTab({
   school,
   canAddStudent,
   canDropoutStudent,
+  supportedProgramIds,
 }: {
   students: Student[];
   dataIssues: DataIssue[];
@@ -489,9 +495,11 @@ function EnrollmentSchoolTab({
   school: School;
   canAddStudent: boolean;
   canDropoutStudent: boolean;
+  supportedProgramIds: number[];
 }) {
   const data = enrollmentSchoolData({
     students, isPasscodeUser, isAdmin, programContext, canAddStudent, school,
+    supportedProgramIds,
   });
 
   return (
@@ -795,12 +803,17 @@ export default async function SchoolPage({ params }: PageProps) {
   // Fetch enrollment data in parallel (other tabs lazy-load their own data).
   // getSchoolRoster is the canonical student list (query + dedup + issues),
   // shared with the Performance deep-dive so both surfaces always agree.
-  const [{ students: dedupedStudents, issues: dataIssues }, grades, batches] =
-    await Promise.all([
-      getSchoolRoster(school.id),
-      getGrades(),
-      getBatchesWithMetadata(),
-    ]);
+  const [
+    { students: dedupedStudents, issues: dataIssues },
+    grades,
+    batches,
+    supportedProgramIds,
+  ] = await Promise.all([
+    getSchoolRoster(school.id),
+    getGrades(),
+    getBatchesWithMetadata(),
+    getLmsSupportedProgramIds(),
+  ]);
 
   const nvsStreams = getDistinctNVSStreams(batches);
   const isAdmin = permission?.role === "admin";
@@ -819,6 +832,7 @@ export default async function SchoolPage({ params }: PageProps) {
       school={school}
       canAddStudent={canAddStudent}
       canDropoutStudent={canDropout}
+      supportedProgramIds={supportedProgramIds}
     />
   );
   const academicMentorshipContent = await buildAcademicMentorshipContent({

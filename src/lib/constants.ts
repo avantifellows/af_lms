@@ -16,6 +16,9 @@ export const PROGRAM_IDS = {
   PUNJAB_NODAL: 94,
   EMRS_COE: 78,
   UTTARAKHAND_COE: 88, // RGNV (Rajiv Gandhi Navodaya Vidyalaya) schools
+  KARNATAKA_COE: 97, // GPUC Shimoga
+  MAHARASHTRA_COACHING_TESTPREP: 99, // Mumbai Andheri/Dadar, Pune FC Road/Kasarwadi
+  MAHARASHTRA_COACHING_FOUNDATION: 100, // Mumbai/Pune Foundation Coaching
 } as const;
 
 // Canonical display order for program IDs (JNV first, then non-JNV centres).
@@ -40,6 +43,9 @@ export const PROGRAM_ID_TO_LABEL: Record<number, string> = {
   [PROGRAM_IDS.PUNJAB_NODAL]: "Punjab Nodal",
   [PROGRAM_IDS.EMRS_COE]: "EMRS CoE",
   [PROGRAM_IDS.UTTARAKHAND_COE]: "Uttarakhand CoE",
+  [PROGRAM_IDS.KARNATAKA_COE]: "Karnataka CoE",
+  [PROGRAM_IDS.MAHARASHTRA_COACHING_TESTPREP]: "Maharashtra Coaching Test Prep",
+  [PROGRAM_IDS.MAHARASHTRA_COACHING_FOUNDATION]: "Maharashtra Coaching Foundation",
 };
 
 export const HOLISTIC_MENTORSHIP_PROGRAM_IDS = [
