@@ -946,8 +946,16 @@ describe("DashboardPage (server component)", () => {
     const [countSql] = mockQuery.mock.calls[1];
     for (const sql of [listSql, countSql]) {
       expect(sql).toContain("s.udise_code IS NULL");
-      expect(sql).toContain("s2.udise_code IS NOT NULL");
-      expect(sql).toContain("s2.name = s.name");
+      expect(sql).toContain("v2.udise_code IS NOT NULL");
+      expect(sql).toContain("v2.name = s.name");
+      // The namesake lookup must read the narrowed CTE, not the full school
+      // table — the flat form cost ~3.5s on every dashboard load, search or not.
+      expect(sql).toContain("FROM visible v2");
+      expect(sql).not.toMatch(/FROM school s2/);
+      // MATERIALIZED is load-bearing: without it PG inlines the CTE and the plan
+      // collapses back to evaluating both predicates over all ~10.8k rows.
+      expect(sql).toContain("WITH visible AS MATERIALIZED");
+      expect(sql).toContain("FROM visible s");
     }
   });
 
