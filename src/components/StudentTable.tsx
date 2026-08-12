@@ -13,6 +13,7 @@ import {
 } from "@/components/ui";
 import { DocumentsList } from "@/components/documents/DocumentsList";
 import { PROGRAM_IDS, PROGRAM_ID_TO_LABEL } from "@/lib/constants";
+import { getCategoryColor } from "@/lib/student-utils";
 
 export interface Student {
   group_user_id: string;
@@ -135,21 +136,6 @@ function formatDate(dateString: string | null): string {
     "Dec",
   ];
   return `${String(d.getDate()).padStart(2, "0")} ${months[d.getMonth()]} ${d.getFullYear()}`;
-}
-
-function getCategoryColor(category: string | null): string {
-  switch (category) {
-    case "Gen":
-      return "bg-green-100 text-green-800";
-    case "OBC":
-      return "bg-hover-bg text-accent-hover";
-    case "SC":
-      return "bg-purple-100 text-purple-800";
-    case "ST":
-      return "bg-orange-100 text-orange-800";
-    default:
-      return "bg-gray-100 text-gray-800";
-  }
 }
 
 interface StudentCardProps {
