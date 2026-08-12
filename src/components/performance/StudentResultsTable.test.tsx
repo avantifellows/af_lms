@@ -16,6 +16,7 @@ const STUDENTS: StudentDeepDiveRow[] = [
     percentage: 40,
     accuracy: 50,
     attempt_rate: 60,
+    has_quiz_ended: true,
     subject_scores: [
       {
         subject: "Physics",
@@ -79,6 +80,33 @@ describe("StudentResultsTable", () => {
     render(<StudentResultsTable {...props} />);
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("badges a student who never submitted the test", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], has_quiz_ended: false }]}
+      />
+    );
+    expect(screen.getByText("Test Incomplete")).toBeInTheDocument();
+  });
+
+  it("shows no badge when submission status is unknown", () => {
+    // Report docs written before etl-next carried the flag have no value at all.
+    // Treating that as unsubmitted would badge every historical test.
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[{ ...STUDENTS[0], has_quiz_ended: null }]}
+      />
+    );
+    expect(screen.queryByText("Test Incomplete")).not.toBeInTheDocument();
+  });
+
+  it("shows no badge for a submitted attempt", () => {
+    render(<StudentResultsTable {...props} />);
+    expect(screen.queryByText("Test Incomplete")).not.toBeInTheDocument();
   });
 
   it("renders the student's social category as a chip", () => {

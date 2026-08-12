@@ -95,6 +95,9 @@ interface V2OverallPerformance {
   // codes, and emits an empty status where no cutoff applies (e.g. "Not
   // Eligible for Academic Level"), so treat anything unrecognised as unknown.
   qualification_status?: string | null;
+  // Absent on docs written before etl-next carried it, and null where the
+  // student has no test-level row upstream — both mean unknown, not unsubmitted.
+  has_quiz_ended?: boolean | null;
 }
 
 interface V2SubjectPerformance {
@@ -434,6 +437,8 @@ export async function getTestDeepDiveFromDynamo(
       accuracy: toNum(overall.accuracy),
       attempt_rate: overallAttemptRate,
       subject_scores: subjectScores,
+      has_quiz_ended:
+        typeof overall.has_quiz_ended === "boolean" ? overall.has_quiz_ended : null,
     });
   }
 

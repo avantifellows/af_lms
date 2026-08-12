@@ -169,6 +169,10 @@ export interface StudentDeepDiveRow {
   accuracy: number;
   attempt_rate: number;
   subject_scores: StudentSubjectScore[];
+  // False only when the report doc positively says the student never submitted.
+  // Null for docs written before etl-next started carrying the flag, and where
+  // the student has no test-level row upstream — unknown, so no badge.
+  has_quiz_ended: boolean | null;
 }
 
 export interface TestDeepDiveData {

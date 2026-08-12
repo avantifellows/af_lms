@@ -351,6 +351,14 @@ export default function StudentResultsTable({
                           {isExpanded ? "▼" : "▶"}
                         </span>
                       )}
+                      {s.has_quiz_ended === false && (
+                        <span
+                          className="ml-2 inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded bg-danger text-white"
+                          title="This student never submitted the test, so their marks are only what was saved before they left."
+                        >
+                          Test Incomplete
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
                       {s.gender || "-"}
