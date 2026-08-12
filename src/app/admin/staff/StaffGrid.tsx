@@ -75,6 +75,19 @@ function seatRoleOptionsFor(
     : PM_SEAT_ROLES;
 }
 
+// The Add form offers one flat role list — Teacher, APC, and the PM tiers —
+// matching what Edit shows (#249). The API still takes (kind, role): Teacher
+// and APC are teacher-record kinds, a PM tier picks kind "staff" + that seat.
+type AddRole = "teacher" | "apc" | (typeof PM_SEAT_ROLES)[number];
+const ADD_ROLE_OPTIONS: readonly { value: AddRole; label: string }[] = [
+  { value: "teacher", label: "Teacher" },
+  { value: "apc", label: SEAT_ROLE_LABELS.apc },
+  ...PM_SEAT_ROLES.map((role) => ({ value: role, label: SEAT_ROLE_LABELS[role] })),
+];
+function addKindFor(role: AddRole): "teacher" | "apc" | "staff" {
+  return role === "teacher" || role === "apc" ? role : "staff";
+}
+
 function rowKey(row: StaffRosterRow): string {
   return `${row.kind}:${row.recordId}`;
 }
@@ -176,11 +189,8 @@ export default function StaffGrid({
   const [addError, setAddError] = useState("");
   const [addName, setAddName] = useState("");
   const [addEmail, setAddEmail] = useState("");
-  const [addKind, setAddKind] = useState<"teacher" | "apc" | "staff">(
-    "teacher"
-  );
+  const [addRole, setAddRole] = useState<AddRole>("teacher");
   const [addSubject, setAddSubject] = useState("");
-  const [addSeatRole, setAddSeatRole] = useState<SeatRole>("pm");
   const [addCentre, setAddCentre] = useState("");
   const [addCode, setAddCode] = useState("");
 
@@ -431,9 +441,8 @@ export default function StaffGrid({
   const openAddModal = () => {
     setAddName("");
     setAddEmail("");
-    setAddKind("teacher");
+    setAddRole("teacher");
     setAddSubject("");
-    setAddSeatRole("pm");
     setAddCentre("");
     setAddCode("");
     setAddError("");
@@ -450,6 +459,7 @@ export default function StaffGrid({
     setAddBusy(true);
     setAddError("");
     try {
+      const addKind = addKindFor(addRole);
       const response = await fetch(`/api/admin/staff`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -463,7 +473,7 @@ export default function StaffGrid({
             addKind === "staff" || !addSubject
               ? undefined
               : Number(addSubject),
-          role: addKind === "staff" ? addSeatRole : undefined,
+          role: addKind === "staff" ? addRole : undefined,
           af_id: addCode.trim() || undefined,
         }),
       });
@@ -487,7 +497,7 @@ export default function StaffGrid({
   const addValid =
     addEmail.trim().includes("@") &&
     !!addCentre &&
-    (addKind === "teacher" ? !!addSubject : true);
+    (addRole === "teacher" ? !!addSubject : true);
 
   const saveExit = (row: StaffRosterRow) => {
     const url =
@@ -1146,24 +1156,26 @@ export default function StaffGrid({
             </label>
             <label>
               <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                Type
+                Role
               </span>
               <Select
-                value={addKind}
+                value={addRole}
                 onChange={(event) =>
-                  setAddKind(event.target.value as "teacher" | "apc" | "staff")
+                  setAddRole(event.target.value as AddRole)
                 }
-                aria-label="Type"
+                aria-label="Role"
               >
-                <option value="teacher">Teacher</option>
-                <option value="apc">APC</option>
-                <option value="staff">PM / Staff</option>
+                {ADD_ROLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </Select>
             </label>
-            {addKind !== "staff" ? (
+            {addKindFor(addRole) !== "staff" && (
               <label>
                 <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                  {addKind === "apc" ? "Subject (optional)" : "Subject"}
+                  {addRole === "apc" ? "Subject (optional)" : "Subject"}
                 </span>
                 <Select
                   value={addSubject}
@@ -1171,30 +1183,11 @@ export default function StaffGrid({
                   aria-label="Subject"
                 >
                   <option value="">
-                    {addKind === "apc" ? "No subject" : "Select Subject…"}
+                    {addRole === "apc" ? "No subject" : "Select Subject…"}
                   </option>
                   {subjects.map((subject) => (
                     <option key={subject.id} value={subject.id}>
                       {subject.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            ) : (
-              <label>
-                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-text-muted">
-                  Role
-                </span>
-                <Select
-                  value={addSeatRole}
-                  onChange={(event) =>
-                    setAddSeatRole(event.target.value as SeatRole)
-                  }
-                  aria-label="Role"
-                >
-                  {PM_SEAT_ROLES.map((role) => (
-                    <option key={role} value={role}>
-                      {SEAT_ROLE_LABELS[role]}
                     </option>
                   ))}
                 </Select>

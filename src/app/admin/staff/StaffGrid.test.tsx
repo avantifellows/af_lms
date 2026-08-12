@@ -461,7 +461,7 @@ describe("StaffGrid", () => {
         ).length
       ).toBe(3); // placeholder + 2 centres
     });
-    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "apc" } });
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "apc" } });
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "apc@avantifellows.org" },
     });
@@ -479,6 +479,54 @@ describe("StaffGrid", () => {
             email: "apc@avantifellows.org",
             kind: "apc",
             centre_id: 8,
+          }),
+        })
+      );
+    });
+  });
+
+  it("adds an SPM from the flat role list — kind 'staff', role 'spm', no subject field", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Add user"));
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Centre") as HTMLSelectElement).querySelectorAll(
+          "option"
+        ).length
+      ).toBe(3); // placeholder + 2 centres
+    });
+    // Every role is directly pickable — no Type detour (#249). PM tiers hide
+    // the subject field entirely.
+    const roleSelect = screen.getByLabelText("Role") as HTMLSelectElement;
+    expect(
+      Array.from(roleSelect.querySelectorAll("option")).map((o) => o.value)
+    ).toEqual(["teacher", "apc", "apm", "pm", "spm", "ph"]);
+    fireEvent.change(roleSelect, { target: { value: "spm" } });
+    expect(screen.queryByLabelText("Subject")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "spm@avantifellows.org" },
+    });
+    fireEvent.change(screen.getByLabelText("Centre"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add User" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            email: "spm@avantifellows.org",
+            kind: "staff",
+            centre_id: 8,
+            role: "spm",
           }),
         })
       );
