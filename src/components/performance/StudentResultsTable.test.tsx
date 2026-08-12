@@ -92,6 +92,25 @@ describe("StudentResultsTable", () => {
     expect(screen.getByText("Test Incomplete")).toBeInTheDocument();
   });
 
+  it("does not let an unsubmitted student consume a rank position", () => {
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[
+          { ...STUDENTS[0], student_name: "Top Scorer", percentage: 90, has_quiz_ended: true },
+          { ...STUDENTS[0], student_name: "Walked Out", percentage: 4, has_quiz_ended: false },
+          { ...STUDENTS[0], student_name: "Second", percentage: 50, has_quiz_ended: true },
+        ]}
+      />
+    );
+    const rowFor = (name: string) =>
+      screen.getByText(name).closest("tr") as HTMLElement;
+    expect(rowFor("Top Scorer").textContent).toContain("01");
+    expect(rowFor("Second").textContent).toContain("02");
+    // Not "03" — ranking a non-participant misstates the "of N" a teacher reads.
+    expect(rowFor("Walked Out").textContent).toContain("—");
+  });
+
   it("shows no badge when submission status is unknown", () => {
     // Report docs written before etl-next carried the flag have no value at all.
     // Treating that as unsubmitted would badge every historical test.

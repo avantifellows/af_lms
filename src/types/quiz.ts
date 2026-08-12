@@ -77,6 +77,8 @@ export interface TestDeepDiveSummary {
   test_name: string;
   start_date: string;
   students_appeared: number;
+  // Of those, how many submitted. Every figure below is computed over these only.
+  students_submitted: number;
   avg_score: number;
   min_score: number;
   max_score: number;

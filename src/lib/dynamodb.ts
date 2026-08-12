@@ -314,6 +314,9 @@ export async function getTestDeepDiveFromDynamo(
     if (!testName) testName = doc.report_header?.test_name || "";
     if (!startDate) startDate = doc.report_header?.test_date || "";
 
+    // Unknown counts as submitted, so historical reports keep their figures.
+    const submitted = overall.has_quiz_ended !== false;
+
     const overallTotal = toNum(overall.total_questions);
     const overallSkipped = toNum(overall.num_skipped);
     const overallAttemptRate =
@@ -351,12 +354,14 @@ export async function getTestDeepDiveFromDynamo(
         totalQ: 0,
         count: 0,
       };
-      existing.totalPct += toNum(si.percentage);
-      existing.totalAcc += toNum(si.accuracy);
-      existing.totalAttempt += attemptRate;
-      existing.totalQ = Math.max(existing.totalQ, total);
-      existing.count += 1;
-      subjectAggMap.set(sectionKey, existing);
+      if (submitted) {
+        existing.totalPct += toNum(si.percentage);
+        existing.totalAcc += toNum(si.accuracy);
+        existing.totalAttempt += attemptRate;
+        existing.totalQ = Math.max(existing.totalQ, total);
+        existing.count += 1;
+        subjectAggMap.set(sectionKey, existing);
+      }
 
       // Per-student chapter rows for this subject.
       const chapters: StudentChapterScore[] = subjectChapters.map((c) => {
@@ -387,14 +392,16 @@ export async function getTestDeepDiveFromDynamo(
         if (!chEx.priority && c.priority && c.priority !== "None") {
           chEx.priority = c.priority;
         }
-        chEx.totalScore += chPct;
-        chEx.totalMarks += chMarks;
-        chEx.maxMarks = Math.max(chEx.maxMarks, chMax);
-        chEx.totalAcc += toNum(c.accuracy);
-        chEx.totalAttempt += chAttemptRate;
-        chEx.totalQ = Math.max(chEx.totalQ, chTotal);
-        chEx.count += 1;
-        chapterAggMap.set(chKey, chEx);
+        if (submitted) {
+          chEx.totalScore += chPct;
+          chEx.totalMarks += chMarks;
+          chEx.maxMarks = Math.max(chEx.maxMarks, chMax);
+          chEx.totalAcc += toNum(c.accuracy);
+          chEx.totalAttempt += chAttemptRate;
+          chEx.totalQ = Math.max(chEx.totalQ, chTotal);
+          chEx.count += 1;
+          chapterAggMap.set(chKey, chEx);
+        }
 
         return {
           subject: sectionDisplay,
@@ -444,11 +451,16 @@ export async function getTestDeepDiveFromDynamo(
 
   if (studentRows.length === 0) return null;
 
-  // Compute summary
-  const percentages = studentRows.map((s) => s.percentage);
-  const marks = studentRows.map((s) => s.marks_scored);
-  const accuracies = studentRows.map((s) => s.accuracy);
-  const attemptRates = studentRows.map((s) => s.attempt_rate);
+  // Summary stats cover submitted attempts only; students_appeared still counts
+  // everyone who opened the test. Falls back to all rows when nobody submitted,
+  // so the tiles show the attempts that exist rather than zeroes.
+  const scored = studentRows.filter((s) => s.has_quiz_ended !== false);
+  const statRows = scored.length > 0 ? scored : studentRows;
+
+  const percentages = statRows.map((s) => s.percentage);
+  const marks = statRows.map((s) => s.marks_scored);
+  const accuracies = statRows.map((s) => s.accuracy);
+  const attemptRates = statRows.map((s) => s.attempt_rate);
 
   const avg = (arr: number[]) =>
     arr.length > 0
@@ -460,6 +472,7 @@ export async function getTestDeepDiveFromDynamo(
     test_name: testName,
     start_date: startDate,
     students_appeared: studentRows.length,
+    students_submitted: scored.length,
     avg_score: avg(percentages),
     min_score: round1(Math.min(...percentages)),
     max_score: round1(Math.max(...percentages)),

@@ -219,6 +219,19 @@ describe("getCumulativeALData", () => {
     expect(result.students[result.students.length - 1].student_id).toBe("bilal");
   });
 
+  it("excludes unsubmitted attempts from the AL matrix", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    await getCumulativeALData("11223344", 11);
+
+    const sql = mocks.mockQueryFn.mock.calls[0][0].query;
+    // NOT FALSE, never = TRUE: null means unknown, and dropping those rows would
+    // silently remove attempts that have no test-level row upstream.
+    expect(sql).toContain("has_quiz_ended IS NOT FALSE");
+    expect(sql).not.toContain("has_quiz_ended = TRUE");
+  });
+
   it("normalizes BigQuery DATE objects ({value: '...'}) on start_date", async () => {
     const rows = [
       {

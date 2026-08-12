@@ -53,6 +53,11 @@ const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
 const FACT_QUESTION_LEVEL_TABLE =
   "`avantifellows.production_dbt_final.fact_student_test_results_question_level`";
 
+// An abandoned attempt still carries an academic_level, which would credit the
+// student with a level for a test they never submitted. NOT FALSE rather than
+// = TRUE: null means unknown (no test-level row upstream), not unsubmitted.
+const SUBMITTED_ONLY = "AND has_quiz_ended IS NOT FALSE";
+
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
 // real Academic Level (AL) values populated on the section='overall' row.
 export const MAJOR_TEST_FORMATS = [
@@ -304,6 +309,7 @@ export async function getCumulativeALData(
       AND academic_level IN (${alList})
       AND fk_student_id IS NOT NULL
       AND session_id IS NOT NULL
+      ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
       ${testGradeFilter}

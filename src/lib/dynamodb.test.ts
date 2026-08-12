@@ -379,6 +379,89 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
   });
 
   describe("aggregations", () => {
+    it("excludes unsubmitted attempts from the summary stats", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2", first_name: "Bob" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            overall_performance: {
+              marks_scored: 90, max_marks_possible: 100, percentage: 90, accuracy: 80,
+              num_correct: 18, num_wrong: 0, num_skipped: 2, total_questions: 20,
+              has_quiz_ended: true,
+            },
+          }),
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            overall_performance: {
+              marks_scored: 4, max_marks_possible: 100, percentage: 4, accuracy: 10,
+              num_correct: 1, num_wrong: 1, num_skipped: 18, total_questions: 20,
+              has_quiz_ended: false,
+            },
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      // Both students are listed and counted as present...
+      expect(result!.summary.students_appeared).toBe(2);
+      expect(result!.students).toHaveLength(2);
+      // ...but the 4% walkout must not drag the average down or set the minimum.
+      expect(result!.summary.students_submitted).toBe(1);
+      expect(result!.summary.avg_score).toBe(90);
+      expect(result!.summary.min_score).toBe(90);
+    });
+
+    it("falls back to all attempts when nobody submitted", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            overall_performance: {
+              marks_scored: 8, max_marks_possible: 100, percentage: 8, accuracy: 20,
+              num_correct: 2, num_wrong: 2, num_skipped: 16, total_questions: 20,
+              has_quiz_ended: false,
+            },
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      // Zeroed tiles would read as a catastrophic result rather than an unfinished one.
+      expect(result!.summary.students_submitted).toBe(0);
+      expect(result!.summary.avg_score).toBe(8);
+    });
+
+    it("counts attempts with unknown submission status as submitted", async () => {
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            overall_performance: {
+              marks_scored: 90, max_marks_possible: 100, percentage: 90, accuracy: 80,
+              num_correct: 18, num_wrong: 0, num_skipped: 2, total_questions: 20,
+            },
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      expect(result!.summary.students_submitted).toBe(1);
+      expect(result!.students[0].has_quiz_ended).toBeNull();
+    });
+
     it("computes summary (avg, min, max, accuracy) across students", async () => {
       mocks.mockQuery.mockResolvedValueOnce([
         makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
