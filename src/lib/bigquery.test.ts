@@ -157,16 +157,17 @@ describe("getBatchOverviewData", () => {
     await expect(getBatchOverviewData("11223344", 10)).rejects.toThrow("BQ error");
   });
 
-  it("counts only submitted attempts in the test list", async () => {
+  // Participation is attendance, not a result: a student who opened the test and
+  // never submitted still turned up, and that is the signal we need for
+  // connectivity complaints. Only scored figures exclude them.
+  it("keeps unsubmitted attempts in the participation count", async () => {
     mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
 
     const { getBatchOverviewData } = await import("./bigquery");
     await getBatchOverviewData("11223344", 10);
 
-    const [testListCall, enrolledCall] = mocks.mockQueryFn.mock.calls;
-    expect(testListCall[0].query).toContain("has_quiz_ended IS TRUE");
-    // The enrolment count comes from dim_student, which has no such column.
-    expect(enrolledCall[0].query).not.toContain("has_quiz_ended");
+    const [testListCall] = mocks.mockQueryFn.mock.calls;
+    expect(testListCall[0].query).not.toContain("has_quiz_ended");
   });
 
   it("returns null totalEnrolled when no enrollment rows", async () => {

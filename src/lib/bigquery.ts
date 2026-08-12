@@ -52,10 +52,11 @@ const DIM_STUDENT_TABLE = "`avantifellows.production_dbt_final.dim_student`";
 const FACT_QUESTION_LEVEL_TABLE =
   "`avantifellows.production_dbt_final.fact_student_test_results_question_level`";
 
-// Opening a test without submitting still writes fact rows, at near-zero marks,
-// which drags class averages down and lists non-participants as low scorers. The
-// quiz ETL already excludes these from its own aggregates
-// (filter_test_level_df_for_aggregation). Only the overall fact carries the flag.
+// Opening a test without submitting still writes fact rows, at near-zero marks.
+// Those rows are real attendance, so participation counts keep them; but they are
+// not results, so anything scored reads submitted attempts only. The quiz ETL
+// draws the same line in filter_test_level_df_for_aggregation. Only the overall
+// fact carries the flag — the question- and chapter-level facts do not.
 const SUBMITTED_ONLY = "AND has_quiz_ended IS TRUE";
 
 // Test formats that count as "major" (i.e. the Full Tests tab) — these also have
@@ -185,7 +186,6 @@ export async function getBatchOverviewData(
       AND student_grade = @grade
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND session_id IS NOT NULL
-      ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
     GROUP BY session_id, test_name
