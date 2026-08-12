@@ -359,9 +359,10 @@ export function isActiveCentreOptionCode(
 }
 
 export async function requireCentreAdmin(
-  session: CentreAdminSession
+  session: CentreAdminSession,
+  opts?: { forWrite?: boolean }
 ): Promise<CentreAdminResult> {
-  return requireAdmin(session);
+  return requireAdmin(session, opts);
 }
 
 const centreSchemaChecker = makeSchemaChecker(loadCentreSchemaStatus);

@@ -4,12 +4,12 @@ vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/permissions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/permissions")>()),
-  isAdmin: vi.fn(),
+  getUserPermission: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { GET, POST } from "./route";
 import {
@@ -19,7 +19,8 @@ import {
 } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockIsAdmin = vi.mocked(isAdmin);
+const mockGetUserPermission = vi.mocked(getUserPermission);
+const ADMIN_PERMISSION = { email: "admin@avantifellows.org", level: 3, role: "admin" } as UserPermission;
 const mockQuery = vi.mocked(query);
 
 beforeEach(() => {
@@ -35,14 +36,14 @@ describe("GET /api/admin/users", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const res = await GET();
     expect(res.status).toBe(403);
   });
 
   it("returns users list", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const users = [{ id: 1, email: "u@test.com", level: 3, role: "admin" }];
     mockQuery.mockResolvedValue(users);
 
@@ -66,7 +67,7 @@ describe("POST /api/admin/users", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
       body: { email: "u@test.com", level: 1, program_ids: [1] },
@@ -75,9 +76,27 @@ describe("POST /api/admin/users", () => {
     expect(res.status).toBe(403);
   });
 
+  it("returns 403 for a read-only admin (writes blocked, reads allowed)", async () => {
+    mockSession.mockResolvedValue(ADMIN_SESSION);
+    mockGetUserPermission.mockResolvedValue({
+      ...ADMIN_PERMISSION,
+      read_only: true,
+    } as UserPermission);
+    const req = jsonRequest("http://localhost/api/admin/users", {
+      method: "POST",
+      body: { email: "u@test.com", level: 1, program_ids: [1] },
+    });
+    const res = await POST(req as never);
+    expect(res.status).toBe(403);
+
+    mockQuery.mockResolvedValue([]);
+    const getRes = await GET();
+    expect(getRes.status).toBe(200);
+  });
+
   it("returns 400 when email is missing", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
       body: { level: 1, program_ids: [1] },
@@ -90,7 +109,7 @@ describe("POST /api/admin/users", () => {
 
   it("returns 400 when level is out of range", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
       body: { email: "u@test.com", level: 5, program_ids: [1] },
@@ -103,7 +122,7 @@ describe("POST /api/admin/users", () => {
 
   it("returns 400 when program_ids is missing", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
       body: { email: "u@test.com", level: 1 },
@@ -116,7 +135,7 @@ describe("POST /api/admin/users", () => {
 
   it("creates user with valid role", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValue([{ id: 10 }]);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
@@ -136,7 +155,7 @@ describe("POST /api/admin/users", () => {
 
   it("creates a Program 1-wide Holistic Mentorship Admin without a Centre seat", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValue([{ id: 12 }]);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
@@ -164,7 +183,7 @@ describe("POST /api/admin/users", () => {
 
   it("rejects an unknown role", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",
       body: { email: "u@test.com", level: 1, role: "unknown", program_ids: [1] },
@@ -177,7 +196,7 @@ describe("POST /api/admin/users", () => {
 
   it("returns 500 on query error", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockRejectedValue(new Error("DB error"));
     const req = jsonRequest("http://localhost/api/admin/users", {
       method: "POST",

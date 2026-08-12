@@ -20,9 +20,13 @@ export type AdminGuardResult =
   | { ok: false; status: 401 | 403; error: "Unauthorized" | "Forbidden" };
 
 // Passcode users and any non-`admin` Google role are rejected; only
-// `user_permission.role === "admin"` passes.
+// `user_permission.role === "admin"` passes. Pass `forWrite: true` on mutating
+// routes — a read-only admin (role "admin" + read_only) may see every admin
+// surface but must not change anything, and route guards are the enforcement
+// point (hiding UI controls alone would leave the API open).
 export async function requireAdmin(
-  session: AdminSession
+  session: AdminSession,
+  opts?: { forWrite?: boolean }
 ): Promise<AdminGuardResult> {
   const email = session?.user?.email;
   if (!email) {
@@ -33,6 +37,9 @@ export async function requireAdmin(
   }
   const permission = await getUserPermission(email);
   if (permission?.role !== "admin") {
+    return { ok: false, status: 403, error: "Forbidden" };
+  }
+  if (opts?.forWrite && permission.read_only) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
   return { ok: true, email, permission };

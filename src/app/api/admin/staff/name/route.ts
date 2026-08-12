@@ -13,7 +13,7 @@ import {
 // Staff Management, the Users screen, and login. See updateStaffName.
 export async function PATCH(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const access = await requireStaffAdmin(session);
+  const access = await requireStaffAdmin(session, { forWrite: true });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }

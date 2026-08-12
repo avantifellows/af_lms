@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 // atomic action — the self-contained "Add User" on Staff Management.
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const access = await requireStaffAdmin(session);
+  const access = await requireStaffAdmin(session, { forWrite: true });
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }

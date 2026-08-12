@@ -13,7 +13,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const access = await requireAdminApiAccess();
+  const access = await requireAdminApiAccess({ forWrite: true });
   if (!access.ok) return access.response;
 
   const { id } = await params;

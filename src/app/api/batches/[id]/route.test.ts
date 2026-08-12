@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/permissions", () => ({ isAdmin: vi.fn() }));
+vi.mock("@/lib/permissions", () => ({ getUserPermission: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { PATCH } from "./route";
 import {
   jsonRequest,
@@ -15,7 +15,8 @@ import {
 } from "../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockIsAdmin = vi.mocked(isAdmin);
+const mockGetUserPermission = vi.mocked(getUserPermission);
+const ADMIN_PERMISSION = { email: "admin@avantifellows.org", level: 3, role: "admin" } as UserPermission;
 const mockFetch = vi.fn();
 
 beforeEach(() => {
@@ -38,7 +39,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const req = jsonRequest("http://localhost/api/batches/42", {
       method: "PATCH",
       body: { metadata: { stream: "engineering" } },
@@ -49,7 +50,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("returns 400 when metadata is missing", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/batches/42", {
       method: "PATCH",
       body: {},
@@ -60,7 +61,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("returns 400 for invalid stream", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/batches/42", {
       method: "PATCH",
       body: { metadata: { stream: "invalid" } },
@@ -73,7 +74,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("returns 400 for invalid grade", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/batches/42", {
       method: "PATCH",
       body: { metadata: { grade: 7 } },
@@ -86,7 +87,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("updates batch successfully", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const result = { id: 42, metadata: { stream: "engineering", grade: 11 } };
     mockFetch.mockResolvedValue(new Response(JSON.stringify(result), { status: 200 }));
 
@@ -102,7 +103,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("accepts NDA stream metadata", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const result = { id: 42, metadata: { stream: "nda", grade: 11 } };
     mockFetch.mockResolvedValue(new Response(JSON.stringify(result), { status: 200 }));
 
@@ -117,7 +118,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("forwards error status from DB service", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockFetch.mockResolvedValue(new Response("Error", { status: 422 }));
 
     const req = jsonRequest("http://localhost/api/batches/42", {
@@ -130,7 +131,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("returns 500 on fetch error", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockFetch.mockRejectedValue(new Error("network error"));
 
     const req = jsonRequest("http://localhost/api/batches/42", {
@@ -143,7 +144,7 @@ describe("PATCH /api/batches/[id]", () => {
 
   it("returns 400 when batch ID is empty", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/batches/", {
       method: "PATCH",
       body: { metadata: { stream: "engineering" } },

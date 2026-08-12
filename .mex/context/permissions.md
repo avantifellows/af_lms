@@ -39,7 +39,9 @@ Admin user create/update APIs reject unknown roles with 400 instead of silently 
 2. **School scope** (`AccessLevel`): `1` = specific `school_codes`, `2` = `regions`, `3` = all schools. (`isAdmin` is by **role**, not level.)
 3. **Program eligibility** (`program_ids`): COE=1, NODAL=2, NVS=64, plus non-JNV centre programs. Some features are gated to CoE/Nodal.
 
-A `read_only` flag downgrades any `edit` to `view`.
+A `read_only` flag downgrades any `edit` to `view` — **including for admins**: "Admin (Read
+Only)" is not a separate role, it is `role = admin` + `read_only = true` (#249). It sees every
+admin surface but every admin mutation route 403s it via the `forWrite` guard option below.
 
 ## Feature access — the matrix
 
@@ -68,6 +70,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 ## The gate — what to call
 
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
+- **Admin-surface routes:** `requireAdmin` / `requireStaffAdmin` / `requireCentreAdmin` (`admin-guard.ts` family) and `requireAdminApiAccess` (`api/admin/route-helpers.ts`) all take an optional `{ forWrite: true }`. **Every mutating admin handler (POST/PATCH/PUT/DELETE) must pass it** — it 403s read-only admins; reads stay bare. `isAdmin(email)` alone must not gate a write (it cannot see `read_only`).
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
 - **Holistic Mentorship tutorial:** `/holistic-mentorship/tutorial` uses `program_read` for the Admin guide. Teacher links add `school_code`, and the same route uses `roster_view` for that School before showing the Teacher guide. Program Managers, Program Admins, passcode users, and unsupported Teacher School access remain blocked.

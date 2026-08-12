@@ -3,13 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/permissions", () => ({
-  isAdmin: vi.fn(),
+  getUserPermission: vi.fn(),
   PROGRAM_IDS_ORDERED: [1, 2, 64, 74, 94, 78],
 }));
 vi.mock("@/lib/db", () => ({ query: vi.fn() }));
 
 import { getServerSession } from "next-auth";
-import { isAdmin } from "@/lib/permissions";
+import { getUserPermission, type UserPermission } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { PATCH } from "./route";
 import {
@@ -20,7 +20,8 @@ import {
 } from "../../../__test-utils__/api-test-helpers";
 
 const mockSession = vi.mocked(getServerSession);
-const mockIsAdmin = vi.mocked(isAdmin);
+const mockGetUserPermission = vi.mocked(getUserPermission);
+const ADMIN_PERMISSION = { email: "admin@avantifellows.org", level: 3, role: "admin" } as UserPermission;
 const mockQuery = vi.mocked(query);
 
 beforeEach(() => {
@@ -42,7 +43,7 @@ describe("PATCH /api/admin/schools/[code]", () => {
 
   it("returns 403 when not admin", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(false);
+    mockGetUserPermission.mockResolvedValue(null);
     const req = jsonRequest("http://localhost/api/admin/schools/70705", {
       method: "PATCH",
       body: { program_ids: [1] },
@@ -53,7 +54,7 @@ describe("PATCH /api/admin/schools/[code]", () => {
 
   it("returns 400 when program_ids is not an array", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/schools/70705", {
       method: "PATCH",
       body: { program_ids: "not-array" },
@@ -66,7 +67,7 @@ describe("PATCH /api/admin/schools/[code]", () => {
 
   it("returns 400 for invalid program IDs", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     const req = jsonRequest("http://localhost/api/admin/schools/70705", {
       method: "PATCH",
       body: { program_ids: [1, 999] },
@@ -79,7 +80,7 @@ describe("PATCH /api/admin/schools/[code]", () => {
 
   it("updates school program_ids successfully", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockResolvedValue([]);
     const req = jsonRequest("http://localhost/api/admin/schools/70705", {
       method: "PATCH",
@@ -97,7 +98,7 @@ describe("PATCH /api/admin/schools/[code]", () => {
 
   it("returns 500 on query error", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
-    mockIsAdmin.mockResolvedValue(true);
+    mockGetUserPermission.mockResolvedValue(ADMIN_PERMISSION);
     mockQuery.mockRejectedValue(new Error("DB error"));
     const req = jsonRequest("http://localhost/api/admin/schools/70705", {
       method: "PATCH",
