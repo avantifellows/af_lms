@@ -41,6 +41,8 @@ frontend:
           echo "QUIZ_AF_API_KEY=$QUIZ_AF_API_KEY" >> .env.production
           echo "AF_SHORTENER_URL=$AF_SHORTENER_URL" >> .env.production
           echo "AF_SHORTENER_AUTH_TOKEN=$AF_SHORTENER_AUTH_TOKEN" >> .env.production
+          echo "REPORTING_SERVICE_URL=$REPORTING_SERVICE_URL" >> .env.production
+          echo "REPORTING_SERVICE_API_KEY=$REPORTING_SERVICE_API_KEY" >> .env.production
     build:
       commands:
         - npm run build

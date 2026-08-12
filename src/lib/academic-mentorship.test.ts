@@ -5,6 +5,18 @@ vi.mock("./db", () => ({
   withTransaction: vi.fn(),
 }));
 
+vi.mock("./permissions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./permissions")>();
+  return {
+    ...actual,
+    getFeatureAccess: (permission: { read_only?: boolean } | null) => ({
+      access: permission?.read_only ? "view" : "edit",
+      canView: true,
+      canEdit: !permission?.read_only,
+    }),
+  };
+});
+
 import { query, withTransaction } from "./db";
 import {
   createAcademicMentorshipMapping,
