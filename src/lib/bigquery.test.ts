@@ -157,6 +157,18 @@ describe("getBatchOverviewData", () => {
     await expect(getBatchOverviewData("11223344", 10)).rejects.toThrow("BQ error");
   });
 
+  it("counts only submitted attempts in the test list", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getBatchOverviewData } = await import("./bigquery");
+    await getBatchOverviewData("11223344", 10);
+
+    const [testListCall, enrolledCall] = mocks.mockQueryFn.mock.calls;
+    expect(testListCall[0].query).toContain("has_quiz_ended IS TRUE");
+    // The enrolment count comes from dim_student, which has no such column.
+    expect(enrolledCall[0].query).not.toContain("has_quiz_ended");
+  });
+
   it("returns null totalEnrolled when no enrollment rows", async () => {
     mocks.mockQueryFn
       .mockResolvedValueOnce([[]])
@@ -217,6 +229,15 @@ describe("getCumulativeALData", () => {
     // Mode AL rank ordering: B1, M1 are tier 3 (tie) → tie broken by total tests desc
     // asha (3 tests) and chen (3 tests) before bilal (2 tests)
     expect(result.students[result.students.length - 1].student_id).toBe("bilal");
+  });
+
+  it("counts only submitted attempts", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getCumulativeALData } = await import("./bigquery");
+    await getCumulativeALData("11223344", 11);
+
+    expect(mocks.mockQueryFn.mock.calls[0][0].query).toContain("has_quiz_ended IS TRUE");
   });
 
   it("normalizes BigQuery DATE objects ({value: '...'}) on start_date", async () => {
