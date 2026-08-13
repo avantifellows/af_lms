@@ -316,8 +316,13 @@ const SORT_KEYS: CurriculumConfigSortKey[] = [
 ];
 const PAGE_SIZES = [10, 20, 50, 100];
 
+// Pass `forWrite: true` on mutating routes — a read-only admin (role "admin" +
+// read_only) may see every admin surface but must not change anything, and the
+// route guard is the enforcement point (hiding UI controls alone would leave
+// the API open).
 export async function requireCurriculumConfigAdmin(
-  session: CurriculumConfigSession
+  session: CurriculumConfigSession,
+  opts?: { forWrite?: boolean }
 ): Promise<CurriculumConfigAdminResult> {
   const email = session?.user?.email;
   if (!email) {
@@ -329,7 +334,10 @@ export async function requireCurriculumConfigAdmin(
   }
 
   const permission = await getUserPermission(email);
-  if (permission?.role !== "admin" || permission.read_only) {
+  if (permission?.role !== "admin") {
+    return { ok: false, status: 403, error: "Forbidden" };
+  }
+  if (opts?.forWrite && permission.read_only) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
 
