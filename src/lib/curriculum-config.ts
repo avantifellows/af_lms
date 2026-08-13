@@ -293,11 +293,12 @@ interface RemoveMutationRow extends CurriculumConfigQueryRow {
   failure_reason: "stale" | "missing" | "already_out_of_syllabus" | null;
 }
 
-const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet", "cet"];
 const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_main: 1,
   jee_advanced: 9,
   neet: 2,
+  cet: 10,
 };
 const SYLLABUS_STATUSES: CurriculumConfigSyllabusStatus[] = [
   "in_syllabus",

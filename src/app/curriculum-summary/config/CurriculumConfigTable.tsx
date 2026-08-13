@@ -1182,6 +1182,7 @@ function formatExamTrack(track: ExamTrack): string {
     jee_main: "JEE Main",
     jee_advanced: "JEE Advanced",
     neet: "NEET",
+    cet: "CET",
   };
   return labels[track];
 }

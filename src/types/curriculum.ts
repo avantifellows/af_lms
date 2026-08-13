@@ -53,7 +53,7 @@ export interface ChapterProgress {
 
 export type SubjectName = "Physics" | "Chemistry" | "Maths" | "Biology";
 export type GradeNumber = 11 | 12;
-export type ExamTrack = "jee_main" | "jee_advanced" | "neet";
+export type ExamTrack = "jee_main" | "jee_advanced" | "neet" | "cet";
 
 export interface CurriculumProgramOption {
   id: number;

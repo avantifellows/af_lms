@@ -94,6 +94,7 @@ const EXAM_TRACK_OPTIONS: { value: ExamTrack; label: string }[] = [
   { value: "jee_main", label: "JEE Main" },
   { value: "jee_advanced", label: "JEE Advanced" },
   { value: "neet", label: "NEET" },
+  { value: "cet", label: "CET" },
 ];
 const CMS_SUBJECT_OPTIONS = ["Physics", "Chemistry", "Maths", "Biology"];
 
