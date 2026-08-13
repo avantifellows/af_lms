@@ -379,6 +379,52 @@ describe("getTestDeepDiveFromDynamo (v2)", () => {
   });
 
   describe("aggregations", () => {
+    it("keeps chapter priority from an unsubmitted attempt but not its scores", async () => {
+      // Priority is chapter metadata, constant across students, so it must survive
+      // even when the only student carrying it walked out — otherwise the Chapter
+      // Analysis priority column blanks out. Their marks must still be excluded.
+      mocks.mockQuery.mockResolvedValueOnce([
+        makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
+        makeStudent({ student_id: "s2", apaar_id: null, user_id: "u2", first_name: "Bob" }),
+      ]);
+      mocks.mockSend.mockResolvedValueOnce({
+        Items: [
+          makeV2Doc({
+            student_id: "s1", user_id: "u1",
+            overall_performance: {
+              marks_scored: 0, max_marks_possible: 100, percentage: 0, accuracy: 0,
+              num_correct: 0, num_wrong: 0, num_skipped: 20, total_questions: 20,
+              has_quiz_ended: false,
+            },
+            chapter_performance: [
+              { chapter_name: "Limits", chapter_id: "c1", subject: "Physics", priority: "High",
+                marks_scored: 0, max_marks_possible: 20, percentage: 0, accuracy: 0,
+                num_correct: 0, num_wrong: 0, num_skipped: 5, total_questions: 5 },
+            ],
+          }),
+          makeV2Doc({
+            student_id: "s2", user_id: "u2",
+            overall_performance: {
+              marks_scored: 80, max_marks_possible: 100, percentage: 80, accuracy: 90,
+              num_correct: 16, num_wrong: 2, num_skipped: 2, total_questions: 20,
+              has_quiz_ended: true,
+            },
+            chapter_performance: [
+              { chapter_name: "Limits", chapter_id: "c1", subject: "Physics", priority: "None",
+                marks_scored: 16, max_marks_possible: 20, percentage: 80, accuracy: 90,
+                num_correct: 4, num_wrong: 1, num_skipped: 0, total_questions: 5 },
+            ],
+          }),
+        ],
+      });
+
+      const { getTestDeepDiveFromDynamo } = await importModule();
+      const result = await getTestDeepDiveFromDynamo("school-1", "JNV Test", 10, "sess-1");
+      const limits = result!.chapters.find((c) => c.chapter_name === "Limits")!;
+      expect(limits.priority).toBe("High");
+      expect(limits.avg_score).toBe(80);
+    });
+
     it("excludes unsubmitted attempts from the summary stats", async () => {
       mocks.mockQuery.mockResolvedValueOnce([
         makeStudent({ student_id: "s1", apaar_id: null, user_id: "u1", first_name: "Alice" }),
