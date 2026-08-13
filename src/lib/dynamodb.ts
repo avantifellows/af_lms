@@ -155,6 +155,94 @@ function toNum(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+interface SubjectAgg {
+  displayName: string;
+  totalPct: number;
+  totalAcc: number;
+  totalAttempt: number;
+  totalQ: number;
+  count: number;
+}
+
+interface ChapterAgg {
+  subject: string;
+  chapter_name: string;
+  chapter_id: string | null;
+  priority: string | null;
+  totalScore: number;
+  totalMarks: number;
+  maxMarks: number;
+  totalAcc: number;
+  totalAttempt: number;
+  totalQ: number;
+  count: number;
+}
+
+// Class-wide subject totals. Only submitted attempts contribute — an abandoned
+// one would drag the class average down without being a result.
+function accumulateSubject(
+  map: Map<string, SubjectAgg>,
+  key: string,
+  displayName: string,
+  row: { percentage?: number | null; accuracy?: number | null },
+  attemptRate: number,
+  totalQuestions: number
+): void {
+  const agg = map.get(key) ?? {
+    displayName,
+    totalPct: 0,
+    totalAcc: 0,
+    totalAttempt: 0,
+    totalQ: 0,
+    count: 0,
+  };
+  agg.totalPct += toNum(row.percentage);
+  agg.totalAcc += toNum(row.accuracy);
+  agg.totalAttempt += attemptRate;
+  agg.totalQ = Math.max(agg.totalQ, totalQuestions);
+  agg.count += 1;
+  map.set(key, agg);
+}
+
+// Class-wide chapter totals. `priority` is constant per chapter across students,
+// so it is captured from whichever row first carries a meaningful value — and it
+// is recorded even for an unsubmitted attempt, since it is metadata, not a score.
+function accumulateChapter(
+  map: Map<string, ChapterAgg>,
+  key: string,
+  subject: string,
+  chapter: V2ChapterPerformance,
+  values: { pct: number; marks: number; max: number; attemptRate: number; questions: number },
+  submitted: boolean
+): void {
+  const agg = map.get(key) ?? {
+    subject,
+    chapter_name: chapter.chapter_name || "",
+    chapter_id: chapter.chapter_id || null,
+    priority: null,
+    totalScore: 0,
+    totalMarks: 0,
+    maxMarks: 0,
+    totalAcc: 0,
+    totalAttempt: 0,
+    totalQ: 0,
+    count: 0,
+  };
+  if (!agg.priority && chapter.priority && chapter.priority !== "None") {
+    agg.priority = chapter.priority;
+  }
+  if (submitted) {
+    agg.totalScore += values.pct;
+    agg.totalMarks += values.marks;
+    agg.maxMarks = Math.max(agg.maxMarks, values.max);
+    agg.totalAcc += toNum(chapter.accuracy);
+    agg.totalAttempt += values.attemptRate;
+    agg.totalQ = Math.max(agg.totalQ, values.questions);
+    agg.count += 1;
+  }
+  map.set(key, agg);
+}
+
 // Paginate any QueryCommand until LastEvaluatedKey is null.
 async function paginatedQuery(
   buildCmd: (startKey?: Record<string, unknown>) => QueryCommand,
@@ -280,29 +368,11 @@ export async function getTestDeepDiveFromDynamo(
 
   // Step 3: Transform into TestDeepDiveData
   const studentRows: StudentDeepDiveRow[] = [];
-  const subjectAggMap = new Map<
-    string,
-    { displayName: string; totalPct: number; totalAcc: number; totalAttempt: number; totalQ: number; count: number }
-  >();
+  const subjectAggMap = new Map<string, SubjectAgg>();
   // Key chapter aggregates by chapter_id when available; fall back to
   // subject + chapter_name as a last resort so legacy/missing-id rows still
   // group correctly within a single session.
-  const chapterAggMap = new Map<
-    string,
-    {
-      subject: string;
-      chapter_name: string;
-      chapter_id: string | null;
-      priority: string | null;
-      totalScore: number;
-      totalMarks: number;
-      maxMarks: number;
-      totalAcc: number;
-      totalAttempt: number;
-      totalQ: number;
-      count: number;
-    }
-  >();
+  const chapterAggMap = new Map<string, ChapterAgg>();
 
   let testName = "";
   let startDate = "";
@@ -345,22 +415,8 @@ export async function getTestDeepDiveFromDynamo(
       const skipped = subjectChapters.reduce((sum, c) => sum + toNum(c.num_skipped), 0);
       const attemptRate = total > 0 ? ((total - skipped) / total) * 100 : 0;
 
-      // Subject analysis aggregates across the class.
-      const existing = subjectAggMap.get(sectionKey) || {
-        displayName: sectionDisplay,
-        totalPct: 0,
-        totalAcc: 0,
-        totalAttempt: 0,
-        totalQ: 0,
-        count: 0,
-      };
       if (submitted) {
-        existing.totalPct += toNum(si.percentage);
-        existing.totalAcc += toNum(si.accuracy);
-        existing.totalAttempt += attemptRate;
-        existing.totalQ = Math.max(existing.totalQ, total);
-        existing.count += 1;
-        subjectAggMap.set(sectionKey, existing);
+        accumulateSubject(subjectAggMap, sectionKey, sectionDisplay, si, attemptRate, total);
       }
 
       // Per-student chapter rows for this subject.
@@ -374,34 +430,20 @@ export async function getTestDeepDiveFromDynamo(
         const chPct = chMax > 0 ? (chMarks / chMax) * 100 : 0;
 
         const chKey = c.chapter_id || `${sectionKey}||${(c.chapter_name || "").toLowerCase()}`;
-        const chEx = chapterAggMap.get(chKey) || {
-          subject: sectionDisplay,
-          chapter_name: c.chapter_name || "",
-          chapter_id: c.chapter_id || null,
-          priority: null,
-          totalScore: 0,
-          totalMarks: 0,
-          maxMarks: 0,
-          totalAcc: 0,
-          totalAttempt: 0,
-          totalQ: 0,
-          count: 0,
-        };
-        // Priority is constant per chapter across students; keep the first
-        // meaningful (non-empty, non-"None") value we see.
-        if (!chEx.priority && c.priority && c.priority !== "None") {
-          chEx.priority = c.priority;
-        }
-        if (submitted) {
-          chEx.totalScore += chPct;
-          chEx.totalMarks += chMarks;
-          chEx.maxMarks = Math.max(chEx.maxMarks, chMax);
-          chEx.totalAcc += toNum(c.accuracy);
-          chEx.totalAttempt += chAttemptRate;
-          chEx.totalQ = Math.max(chEx.totalQ, chTotal);
-          chEx.count += 1;
-          chapterAggMap.set(chKey, chEx);
-        }
+        accumulateChapter(
+          chapterAggMap,
+          chKey,
+          sectionDisplay,
+          c,
+          {
+            pct: chPct,
+            marks: chMarks,
+            max: chMax,
+            attemptRate: chAttemptRate,
+            questions: chTotal,
+          },
+          submitted
+        );
 
         return {
           subject: sectionDisplay,
