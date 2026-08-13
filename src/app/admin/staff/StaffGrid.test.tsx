@@ -376,6 +376,151 @@ describe("StaffGrid", () => {
     });
   });
 
+  it("edits a teacher via Role + Subject selects — subject change PATCHes /positions", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/positions" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Edit Asha Teacher"));
+    const roleSelect = screen.getByLabelText("Edit role") as HTMLSelectElement;
+    expect(roleSelect.value).toBe("teacher");
+    // Role offers only the teacher band — no PM tiers.
+    expect(
+      Array.from(roleSelect.options).map((option) => option.value)
+    ).toEqual(["teacher", "apc"]);
+    const subjectSelect = screen.getByLabelText(
+      "Edit subject"
+    ) as HTMLSelectElement;
+    expect(subjectSelect.value).toBe("physics");
+
+    fireEvent.change(subjectSelect, { target: { value: "chemistry" } });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/positions",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ user_id: 70, role: "chemistry" }),
+        })
+      );
+    });
+  });
+
+  it("switches an APC back to Teacher using the record subject as the seat role", async () => {
+    const apcRow: StaffRosterRow[] = [
+      {
+        ...ROWS[0],
+        name: "Arun APC",
+        seats: [
+          { id: 45, centreId: 8, centreName: "JNV Adilabad - CoE", role: "apc" },
+        ],
+      },
+    ];
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/positions" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    render(
+      <StaffGrid
+        initialRows={apcRow}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    fireEvent.click(screen.getByLabelText("Edit Arun APC"));
+    const roleSelect = screen.getByLabelText("Edit role") as HTMLSelectElement;
+    expect(roleSelect.value).toBe("apc");
+    // An APC has no subject seat — the Subject select is hidden.
+    expect(screen.queryByLabelText("Edit subject")).toBeNull();
+
+    // subjectName is "Physics" (from ROWS[0]), so Teacher lands on 'physics'.
+    fireEvent.change(roleSelect, { target: { value: "teacher" } });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/positions",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ user_id: 70, role: "physics" }),
+        })
+      );
+    });
+  });
+
+  it("assigns a teacher to a new centre without a role picker — the seat inherits the subject", async () => {
+    const mockFetch = stubFetch((url, init) => {
+      if (url === "/api/admin/staff/positions" && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return undefined;
+    });
+
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Edit Asha Teacher"));
+    expect(screen.queryByLabelText("Assign role")).toBeNull();
+    // The centre options load async — wait for them before selecting.
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByLabelText("Assign centre") as HTMLSelectElement
+        ).querySelectorAll("option").length
+      ).toBe(3); // placeholder + 2 centres
+    });
+    fireEvent.change(screen.getByLabelText("Assign centre"), {
+      target: { value: "3" },
+    });
+    fireEvent.click(screen.getByText("Assign"));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/admin/staff/positions",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ centre_id: 3, role: "physics", user_id: 70 }),
+        })
+      );
+    });
+  });
+
+  it("offers only PM tiers when assigning a staff row to a new centre", async () => {
+    const pmRow: StaffRosterRow[] = [
+      {
+        kind: "staff",
+        recordId: 20,
+        userId: 80,
+        name: "Rupesh PM",
+        email: "rupesh@avantifellows.org",
+        employeeCode: "AF462",
+        subjectName: null,
+        staffType: "program_manager",
+        designation: null,
+        exitDate: null,
+        seats: [
+          { id: 99, centreId: 8, centreName: "JNV Adilabad - CoE", role: "pm" },
+        ],
+      },
+    ];
+    stubFetch();
+
+    render(
+      <StaffGrid
+        initialRows={pmRow}
+        initialSummary={SUMMARY}
+        initialFilters={FILTERS}
+      />
+    );
+    fireEvent.click(screen.getByLabelText("Edit Rupesh PM"));
+    const assignRole = screen.getByLabelText("Assign role") as HTMLSelectElement;
+    expect(
+      Array.from(assignRole.options).map((option) => option.value)
+    ).toEqual(["apm", "pm", "spm", "ph"]);
+  });
+
   it("requires arming before marking exited", async () => {
     const mockFetch = stubFetch((url, init) => {
       if (url.startsWith("/api/admin/staff/teachers/") && init?.method === "PATCH") {
