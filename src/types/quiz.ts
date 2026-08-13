@@ -77,6 +77,8 @@ export interface TestDeepDiveSummary {
   test_name: string;
   start_date: string;
   students_appeared: number;
+  // Of those, how many submitted. Every figure below is computed over these only.
+  students_submitted: number;
   avg_score: number;
   min_score: number;
   max_score: number;
@@ -169,6 +171,10 @@ export interface StudentDeepDiveRow {
   accuracy: number;
   attempt_rate: number;
   subject_scores: StudentSubjectScore[];
+  // False only when the report doc positively says the student never submitted.
+  // Null for docs written before etl-next started carrying the flag, and where
+  // the student has no test-level row upstream — unknown, so no badge.
+  has_quiz_ended: boolean | null;
 }
 
 export interface TestDeepDiveData {
