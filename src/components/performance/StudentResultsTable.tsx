@@ -270,6 +270,13 @@ export default function StudentResultsTable({
   };
 
   const sorted = [...students].sort((a, b) => {
+    // Unsubmitted attempts always sit below submitted ones, whatever the sort:
+    // otherwise a 0% walkout interleaves with a genuine 0% and the ranked column
+    // reads out of order.
+    const aDone = a.has_quiz_ended !== false;
+    const bDone = b.has_quiz_ended !== false;
+    if (aDone !== bDone) return aDone ? -1 : 1;
+
     const mul = sortDir === "asc" ? 1 : -1;
     if (sortKey === "student_name") {
       return mul * a.student_name.localeCompare(b.student_name);
@@ -361,7 +368,7 @@ export default function StudentResultsTable({
                       )}
                       {s.has_quiz_ended === false && (
                         <span
-                          className="ml-2 inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide rounded bg-danger text-white"
+                          className="ml-2 inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded bg-danger text-white"
                           title="This student never submitted the test, so their marks are only what was saved before they left."
                         >
                           Test Incomplete

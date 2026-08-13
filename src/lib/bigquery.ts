@@ -475,6 +475,7 @@ export async function getTestQuestionLevelData(
       AND session_id = @sessionId
       AND academic_year = '${CURRENT_ACADEMIC_YEAR}'
       AND question_id IS NOT NULL
+      ${SUBMITTED_ONLY}
       ${programFilter}
       ${streamFilter}
     GROUP BY section, chapter_name, chapter_id, question_id

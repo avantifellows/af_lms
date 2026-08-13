@@ -111,6 +111,24 @@ describe("StudentResultsTable", () => {
     expect(rowFor("Walked Out").textContent).toContain("—");
   });
 
+  it("sorts unsubmitted attempts below submitted ones on an equal score", () => {
+    // A genuine 0% (negative marking, submitted) must outrank a 0% walkout,
+    // otherwise the ranked column reads out of order.
+    render(
+      <StudentResultsTable
+        {...props}
+        students={[
+          { ...STUDENTS[0], student_name: "Walked Out", percentage: 0, has_quiz_ended: false },
+          { ...STUDENTS[0], student_name: "Scored Zero", percentage: 0, has_quiz_ended: true },
+        ]}
+      />
+    );
+    const names = screen.getAllByRole("row").slice(1).map((r) => r.textContent || "");
+    const iZero = names.findIndex((t) => t.includes("Scored Zero"));
+    const iOut = names.findIndex((t) => t.includes("Walked Out"));
+    expect(iZero).toBeLessThan(iOut);
+  });
+
   it("shows no badge when submission status is unknown", () => {
     // Report docs written before etl-next carried the flag have no value at all.
     // Treating that as unsubmitted would badge every historical test.

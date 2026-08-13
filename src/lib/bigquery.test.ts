@@ -171,6 +171,35 @@ describe("getBatchOverviewData", () => {
   });
 });
 
+describe("getTestQuestionLevelData", () => {
+  it("excludes unsubmitted attempts from the class-wide question breakdown", async () => {
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]);
+
+    const { getTestQuestionLevelData } = await import("./bigquery");
+    await getTestQuestionLevelData("11223344", 11, "sess-1");
+
+    // Walkouts skip every question, so counting them nearly doubles the skip
+    // count and a hard question becomes indistinguishable from an absent class.
+    expect(mocks.mockQueryFn.mock.calls[0][0].query).toContain("has_quiz_ended IS NOT FALSE");
+  });
+});
+
+describe("getAvailableGrades / getAvailablePrograms", () => {
+  it("does not filter the dropdown queries", async () => {
+    // 275 grade/program combos have no submitted attempt at all; filtering here
+    // would remove them from the picker and make those schools unreachable.
+    mocks.mockQueryFn.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+
+    const { getAvailableGrades, getAvailablePrograms } = await import("./bigquery");
+    await getAvailableGrades("11223344");
+    await getAvailablePrograms("11223344");
+
+    for (const call of mocks.mockQueryFn.mock.calls) {
+      expect(call[0].query).not.toContain("has_quiz_ended");
+    }
+  });
+});
+
 describe("getCumulativeALData", () => {
   it("aggregates AL counts + per-test progression per student, sorts students by mode AL rank", async () => {
     // Asha (PCM): M1 on s1, M2 on s2, M1 on s3 → al_counts {M1:2, M2:1}, mode M1
