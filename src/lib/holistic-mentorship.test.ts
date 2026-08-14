@@ -521,7 +521,8 @@ describe("requireHolisticMentorshipAccess", () => {
         })])
         .mockResolvedValueOnce([
           { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
-        ]);
+        ])
+        .mockResolvedValueOnce([{ id: 41 }]);
 
       await expect(
         requireHolisticMentorshipAccess(
@@ -542,6 +543,33 @@ describe("requireHolisticMentorshipAccess", () => {
         school: { id: 20, code: "SCH001", programId: 1 },
       });
     }
+  );
+
+  it.each(["program_manager", "program_admin"] as const)(
+    "denies %s Student reads when the Student is outside the accessible School",
+    async (role) => {
+    mockQuery
+      .mockResolvedValueOnce([permissionRow(role, {
+        level: 3,
+        program_ids: [1],
+        user_id: null,
+      })])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: `${role}@example.com` } },
+      "mapped_student_read",
+      {
+        schoolCode: "SCH001",
+        studentId: 99,
+        programId: 1,
+        academicYear: "2026-2027",
+      },
+    )).resolves.toEqual({ ok: false, status: 404, error: "Not found" });
+    },
   );
 
   it.each(["holistic_mentorship_admin", "teacher", "program_manager", "program_admin"] as const)(

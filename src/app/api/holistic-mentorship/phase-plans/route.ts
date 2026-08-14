@@ -41,7 +41,7 @@ function auditActor(access: { email: string; actorUserId?: number }): AuditActor
 }
 
 async function sessionAccess(
-  action: "program_read" | "phase_configure",
+  action: "phase_configuration_read" | "phase_configure",
   programId: number,
 ) {
   const session = await getServerSession(authOptions);
@@ -196,7 +196,7 @@ async function reorderPhases(
 export async function GET(request: NextRequest) {
   const programId = holisticProgramId(request.nextUrl.searchParams.get("program_id"));
   if (!programId) return holisticApiError("Invalid Program");
-  const { access } = await sessionAccess("program_read", programId);
+  const { access } = await sessionAccess("phase_configuration_read", programId);
   if (!access.ok) return holisticApiError(access.error, access.status);
   const academicYear = request.nextUrl.searchParams.get("academic_year") ?? CURRENT_ACADEMIC_YEAR;
   if (!validateAcademicYear(academicYear)) return holisticApiError("Invalid Academic Year");

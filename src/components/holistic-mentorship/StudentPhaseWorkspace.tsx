@@ -915,7 +915,8 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, s
           selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
           academicYear={academicYear} programId={programId} source={source} />
         <AdminSelectedPhase phase={selectedOpenPhase(detail)} selectedPhase={detail.selectedPhase}
-          studentId={detail.student.id} academicYear={academicYear} programId={programId}
+          studentId={detail.student.id} schoolCode={schoolCode}
+          academicYear={academicYear} programId={programId}
           canRegenerateProfile={canRegenerateProfile} />
       </Card>
     </div>
@@ -1168,11 +1169,12 @@ function PreparationSwitch({ mobilePanel, onSelect }: {
   </div>;
 }
 
-function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear, programId,
+function AdminSelectedPhase({ phase, selectedPhase, studentId, schoolCode, academicYear, programId,
   canRegenerateProfile }: {
   phase: OpenSelectedPhase | null;
   selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
   studentId: number;
+  schoolCode: string;
   academicYear: string;
   programId: number;
   canRegenerateProfile: boolean;
@@ -1193,7 +1195,7 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear, pro
           <AdminContextSourceBadge context={phase.context} />
         </div>
         {canRegenerateProfile && contextSourceIsProfile(phase.context) && <AdminProfileRegeneration
-          studentId={studentId} academicYear={academicYear} programId={programId}
+          studentId={studentId} schoolCode={schoolCode} academicYear={academicYear} programId={programId}
           initial={phase.context.regeneration ?? null}
         />}
         <AdminContextBlocks context={phase.context} />
@@ -1349,8 +1351,9 @@ async function queueProfileRegeneration(
   }
 }
 
-function AdminProfileRegeneration({ studentId, academicYear, programId, initial }: {
+function AdminProfileRegeneration({ studentId, schoolCode, academicYear, programId, initial }: {
   studentId: number;
+  schoolCode: string;
   academicYear: string;
   programId: number;
   initial: HolisticProfileRegeneration | null;
@@ -1363,6 +1366,7 @@ function AdminProfileRegeneration({ studentId, academicYear, programId, initial 
   const apiUrl = `/api/holistic-mentorship/profiles/${studentId}?${new URLSearchParams({
     academic_year: academicYear,
     program_id: String(programId),
+    school_code: schoolCode,
   })}`;
 
   const loadStatus = useCallback(async () => {

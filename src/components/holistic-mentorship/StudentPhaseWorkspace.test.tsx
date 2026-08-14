@@ -250,7 +250,7 @@ describe("StudentPhaseWorkspace", () => {
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1",
+      "/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1&school_code=SCH001",
       { cache: "no-store" }
     );
     expect(screen.getByText("failed")).toBeInTheDocument();

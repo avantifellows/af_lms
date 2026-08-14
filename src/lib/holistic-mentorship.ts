@@ -25,6 +25,7 @@ export type HolisticMentorshipAction =
   | "notes_submit"
   | "notes_edit"
   | "program_read"
+  | "phase_configuration_read"
   | "phase_configure"
   | "profile_regenerate"
   | "privacy_delete";
@@ -70,6 +71,7 @@ const PROGRAM_ACTIONS = new Set<HolisticMentorshipAction>([
   "program_read",
   "assignment_coverage_read",
   "mapped_student_read",
+  "phase_configuration_read",
   "phase_configure",
   "profile_regenerate",
   "admin_mapping_mutation",
@@ -93,6 +95,7 @@ const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
   "assignment_coverage_read",
   "mapped_student_read",
   "roster_view",
+  "phase_configuration_read",
 ]);
 
 function denied(
@@ -172,6 +175,53 @@ async function ownsActiveMapping(params: {
       params.programId,
       params.academicYear,
     ]
+  );
+  return rows.length > 0;
+}
+
+async function studentBelongsToSchoolScope(params: {
+  schoolId: number;
+  studentId: number;
+  academicYear: string;
+  programId: number;
+}): Promise<boolean> {
+  const rows = await query<{ id: number | string }>(
+    `SELECT student.id
+     FROM student
+     WHERE student.id = $1
+       AND student.status IS DISTINCT FROM 'dropout'
+       AND (
+         ($4 = $5 AND EXISTS (
+           SELECT 1
+           FROM centre_students roster_student
+           JOIN centres roster_centre
+             ON roster_centre.id = roster_student.centre_id
+            AND roster_centre.school_id = $2
+            AND roster_centre.program_id = $3
+            AND roster_centre.is_active IS TRUE
+           WHERE roster_student.user_id = student.user_id
+             AND roster_student.academic_year = $4
+             AND roster_student.program_id = $3
+             AND roster_student.grade IN (11, 12)
+           HAVING COUNT(DISTINCT roster_student.grade) = 1
+         ))
+         OR ($4 <> $5 AND EXISTS (
+           SELECT 1
+           FROM holistic_mentorship_mentor_mentee_mappings mapping
+           WHERE mapping.student_id = student.id
+             AND mapping.school_id = $2
+             AND mapping.program_id = $3
+             AND mapping.academic_year = $4
+         ))
+       )
+     LIMIT 1`,
+    [
+      params.studentId,
+      params.schoolId,
+      params.programId,
+      params.academicYear,
+      CURRENT_ACADEMIC_YEAR,
+    ],
   );
   return rows.length > 0;
 }
@@ -390,6 +440,15 @@ export async function requireHolisticMentorshipAccess(
     programId === undefined ||
     !getProgramContextSync(actor.permission).programIds.includes(programId)
   )) return denied(403, "Forbidden");
+  if (scopedStudentRead && options.studentId && school &&
+      !await studentBelongsToSchoolScope({
+        schoolId: school.id,
+        studentId: options.studentId,
+        academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
+        programId: programId!,
+      })) {
+    return denied(404, "Not found");
+  }
   const programIds = scopedProgramRead
     ? await resolveScopedProgramIds(actor.permission, requestedProgramId)
     : scopedCoverageRead || scopedStudentRead

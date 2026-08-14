@@ -28,7 +28,7 @@ describe("Holistic Profile admin API", () => {
       regeneration: { requestKey: "key", state: "running", requestedAt: "2026-07-17", errorCode: null },
     });
     const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027") as never,
+      new Request("http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1&school_code=SCH001") as never,
       { params: Promise.resolve({ studentId: "41" }) }
     );
 
@@ -63,12 +63,33 @@ describe("Holistic Profile admin API", () => {
     mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
 
     const response = await GET(
-      new Request("http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027") as never,
+      new Request("http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1&school_code=SCH999") as never,
       { params: Promise.resolve({ studentId: "41" }) }
     );
 
     expect(response.status).toBe(403);
+    expect(mockAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "mapped_student_read",
+      {
+        schoolCode: "SCH999",
+        studentId: 41,
+        academicYear: "2026-2027",
+        programId: 1,
+      },
+    );
     expect(getHolisticProfileAdmin).not.toHaveBeenCalled();
     expect(requestHolisticProfileRegeneration).not.toHaveBeenCalled();
+  });
+
+  it("requires School scope before authorizing a Profile read", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027&program_id=1") as never,
+      { params: Promise.resolve({ studentId: "41" }) },
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(getHolisticProfileAdmin).not.toHaveBeenCalled();
   });
 });
