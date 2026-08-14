@@ -20,7 +20,11 @@ import {
   type ProgramPermissionContext,
   type UserPermission,
 } from "@/lib/permissions";
-import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
+import {
+  CURRENT_ACADEMIC_YEAR,
+  isHolisticMentorshipProgramId,
+  PROGRAM_IDS,
+} from "@/lib/constants";
 import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
 import { type Grade, type Student } from "@/components/StudentTable";
 import { getSchoolRoster } from "@/lib/school-students";
@@ -47,7 +51,10 @@ import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipSession,
 } from "@/lib/holistic-mentorship";
-import { listHolisticAssignmentRoster } from "@/lib/holistic-mappings";
+import {
+  getHolisticAssignmentCoverageSummary,
+  listHolisticAssignmentRoster,
+} from "@/lib/holistic-mappings";
 import { listEligibleHolisticMentors } from "@/lib/holistic-mentor-eligibility";
 import { type ReactNode } from "react";
 
@@ -137,6 +144,7 @@ function getDistinctNVSStreams(batches: Batch[]): string[] {
 
 interface PageProps {
   params: Promise<{ udise: string }>;
+  searchParams?: Promise<{ program_id?: string | string[] }>;
 }
 
 function menteeMeta(grade: number | null, studentId: string | null): string {
@@ -592,19 +600,21 @@ async function buildHolisticMentorshipContent({
   session,
   permission,
   schoolCode,
+  programId,
   access,
 }: {
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
   schoolCode: string;
+  programId?: number | null;
   access: FeatureAccessResult;
 }): Promise<ReactNode | null> {
-  if (!access.canView) return null;
+  if (!access.canView || programId === null) return null;
   const isTeacher = permission?.role === "teacher";
   const holisticAccess = await requireHolisticMentorshipAccess(
     session,
-    isTeacher ? "roster_view" : "program_read",
-    { schoolCode }
+    isTeacher ? "roster_view" : "assignment_coverage_read",
+    { schoolCode, programId }
   );
   if (!holisticAccess.ok) return null;
   if (isTeacher) {
@@ -617,30 +627,14 @@ async function buildHolisticMentorshipContent({
       />
     );
   }
-  if (permission?.role === "program_manager" || permission?.role === "program_admin") {
-    const progressHref = `/admin/holistic-mentorship?program_id=${holisticAccess.school!.programId}`;
-    return (
-      <Card className="overflow-hidden border-l-4 border-l-accent p-0">
-        <div className="grid gap-5 p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-6">
-          <div className="min-w-0">
-            <Badge variant="info">Read only</Badge>
-            <h2 className="mt-3 text-lg font-semibold text-text-primary">Students &amp; Progress</h2>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-text-muted">
-              Monitor mapped Mentees, phase progress, and filtered exports across your permitted Schools.
-            </p>
-          </div>
-          <Link
-            href={progressHref}
-            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-4 text-sm font-bold text-text-on-accent shadow-sm transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2"
-          >
-            Open Students &amp; Progress
-          </Link>
-        </div>
-      </Card>
-    );
-  }
-  const [students, mentors] = await Promise.all([
+  const [students, summary, mentors] = await Promise.all([
     listHolisticAssignmentRoster({
+      permission: holisticAccess.permission,
+      schoolId: holisticAccess.school!.id,
+      programId: holisticAccess.school!.programId,
+      academicYear: CURRENT_ACADEMIC_YEAR,
+    }),
+    getHolisticAssignmentCoverageSummary({
       permission: holisticAccess.permission,
       schoolId: holisticAccess.school!.id,
       programId: holisticAccess.school!.programId,
@@ -660,6 +654,7 @@ async function buildHolisticMentorshipContent({
     role={permission?.role}
     canEdit={holisticAccess.canEdit}
     students={students}
+    summary={summary}
     mentors={mentors}
   />;
 }
@@ -668,6 +663,7 @@ async function buildSchoolTabs({
   session,
   permission,
   school,
+  holisticProgramId,
   enrollmentContent,
   academicMentorshipContent,
   curriculumAccess,
@@ -681,6 +677,7 @@ async function buildSchoolTabs({
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
   school: School;
+  holisticProgramId?: number | null;
   enrollmentContent: ReactNode;
   academicMentorshipContent: ReactNode;
   curriculumAccess: FeatureAccessResult;
@@ -695,6 +692,7 @@ async function buildSchoolTabs({
     session,
     permission,
     schoolCode: school.code,
+    programId: holisticProgramId,
     access: holisticMentorshipAccess,
   });
   const tabs: SchoolTab[] = [
@@ -799,9 +797,16 @@ function canDropoutStudent(
   return ["admin", "program_manager", "program_admin"].includes(permission?.role ?? "");
 }
 
-export default async function SchoolPage({ params }: PageProps) {
+export default async function SchoolPage({ params, searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
+  const rawHolisticProgramId = (await searchParams)?.program_id;
+  const requestedHolisticProgramId = rawHolisticProgramId === undefined
+    ? undefined
+    : typeof rawHolisticProgramId === "string" &&
+        isHolisticMentorshipProgramId(Number(rawHolisticProgramId))
+      ? Number(rawHolisticProgramId)
+      : null;
 
   if (!session) {
     redirect("/");
@@ -821,6 +826,7 @@ export default async function SchoolPage({ params }: PageProps) {
       session,
       permission,
       schoolCode: school.code,
+      programId: requestedHolisticProgramId,
       access: getFeatureAccess(permission, "holistic_mentorship"),
     });
     if (!holisticContent) redirect("/admin/holistic-mentorship");
@@ -893,6 +899,7 @@ export default async function SchoolPage({ params }: PageProps) {
     session,
     permission,
     school,
+    holisticProgramId: requestedHolisticProgramId,
     enrollmentContent,
     academicMentorshipContent,
     curriculumAccess: access.curriculum,

@@ -7,30 +7,30 @@ import { useMemo, useState } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
-import type { HolisticAssignmentRosterStudent as Student } from "@/lib/holistic-mappings";
+import type {
+  HolisticAssignmentCoverageSummary,
+  HolisticAssignmentRosterStudent as Student,
+} from "@/lib/holistic-mappings";
 import HolisticTutorialLink from "./HolisticTutorialLink";
 import StudentIdentity from "./StudentIdentity";
 
 type AssignmentFilter = "all" | "assigned" | "unassigned";
-type Progress = "completed" | "pending" | "none" | "unassigned";
+type Progress = "completed" | "pending" | "none";
 type EligibleMentor = { userId: number; name: string; email: string | null };
 
 const PROGRESS_LABEL: Record<Progress, string> = {
   completed: "Completed",
   pending: "Pending",
   none: "No active phase",
-  unassigned: "Not assigned",
 };
 
 const PROGRESS_CLASSES: Record<Progress, string> = {
   completed: "bg-success-bg text-success",
   pending: "border border-border bg-bg-card-alt text-text-muted",
   none: "border border-border bg-bg-card-alt text-text-muted",
-  unassigned: "border border-border bg-bg-card-alt text-text-muted",
 };
 
 function progress(student: Student): Progress {
-  if (!student.ownership) return "unassigned";
   if (student.activePhaseId === null) return "none";
   if (student.activeNotesState === "submitted") return "completed";
   return "pending";
@@ -47,18 +47,35 @@ function studentHref(student: Student, schoolCode: string, programId: number) {
   return `/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${params}`;
 }
 
-function Summary({ students }: { students: Student[] }) {
+function derivedSummary(students: Student[]): HolisticAssignmentCoverageSummary {
   const assigned = students.filter((student) => student.ownership).length;
   const mentors = new Set(students.flatMap((student) =>
     student.ownership ? [student.ownership.mentorUserId] : [])).size;
+  return {
+    eligible: students.length,
+    assigned,
+    unassigned: students.length - assigned,
+    activeMentors: mentors,
+    coveragePercentage: students.length ? Math.round((assigned / students.length) * 100) : 0,
+    completed: students.filter((student) => progress(student) === "completed").length,
+    pending: students.filter((student) => progress(student) === "pending").length,
+    noActivePhase: students.filter((student) => progress(student) === "none").length,
+  };
+}
+
+function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
   const metrics = [
-    ["Eligible Students", students.length],
-    ["Assigned", assigned],
-    ["Unassigned", students.length - assigned],
-    ["Active Mentors", mentors],
-    ["Coverage", students.length ? `${Math.round((assigned / students.length) * 100)}%` : "0%"],
+    ["Eligible Students", summary.eligible],
+    ["Assigned", summary.assigned],
+    ["Unassigned", summary.unassigned],
+    ["Active Mentors", summary.activeMentors],
+    ["Coverage", `${summary.coveragePercentage}%`],
+    ["Completed", summary.completed],
+    ["Pending", summary.pending],
+    ["No active Phase", summary.noActivePhase],
   ];
-  return <div className="grid grid-cols-2 border-y border-border bg-bg-card sm:grid-cols-5">
+  return <div role="region" aria-label="Assignment Coverage summary"
+    className="grid grid-cols-2 border-y border-border bg-bg-card sm:grid-cols-4 lg:grid-cols-8">
     {metrics.map(([label, value]) => <div key={label}
       className="border-b border-border px-4 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
       <div className="font-mono text-xl font-bold text-text-primary">{value}</div>
@@ -158,6 +175,7 @@ export default function AdminSchoolRoster({
   role,
   canEdit = true,
   mentors = [],
+  summary,
 }: {
   students: Student[];
   schoolCode: string;
@@ -166,6 +184,7 @@ export default function AdminSchoolRoster({
   role?: string;
   canEdit?: boolean;
   mentors?: EligibleMentor[];
+  summary?: HolisticAssignmentCoverageSummary;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -262,7 +281,7 @@ export default function AdminSchoolRoster({
       </div>
       <p className="mt-1 text-sm text-text-muted">School assignment coverage for {academicYear}</p>
     </div>
-    <Summary students={students} />
+    <Summary summary={summary ?? derivedSummary(students)} />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_12rem]">
       <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
         Search Student

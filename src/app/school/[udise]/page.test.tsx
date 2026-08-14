@@ -17,6 +17,7 @@ const {
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
   mockListHolisticAssignmentRoster,
+  mockGetHolisticAssignmentCoverageSummary,
   mockListEligibleHolisticMentors,
   mockRequireHolisticMentorshipAccess,
   mockGetLmsSupportedProgramIds,
@@ -38,6 +39,7 @@ const {
   mockListAcademicMentorshipMappings: vi.fn(),
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
   mockListHolisticAssignmentRoster: vi.fn(),
+  mockGetHolisticAssignmentCoverageSummary: vi.fn(),
   mockListEligibleHolisticMentors: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
   mockGetLmsSupportedProgramIds: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock("@/lib/holistic-mentorship", () => ({
 }));
 vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockListHolisticAssignmentRoster,
+  getHolisticAssignmentCoverageSummary: mockGetHolisticAssignmentCoverageSummary,
 }));
 vi.mock("@/lib/holistic-mentor-eligibility", () => ({
   listEligibleHolisticMentors: mockListEligibleHolisticMentors,
@@ -324,9 +327,12 @@ function setupAdminDefaults(schoolOverrides = {}) {
   return { school, permission };
 }
 
-const renderPage = async (udise = "24120100101") => {
+const renderPage = async (udise = "24120100101", programId?: string) => {
   const jsx = await SchoolPage({
     params: Promise.resolve({ udise }),
+    searchParams: programId === undefined
+      ? undefined
+      : Promise.resolve({ program_id: programId }),
   });
   return render(jsx);
 };
@@ -356,6 +362,16 @@ describe("SchoolPage (server component)", () => {
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
     mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
     mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockGetHolisticAssignmentCoverageSummary.mockResolvedValue({
+      eligible: 0,
+      assigned: 0,
+      unassigned: 0,
+      activeMentors: 0,
+      coveragePercentage: 0,
+      completed: 0,
+      pending: 0,
+      noActivePhase: 0,
+    });
     mockListEligibleHolisticMentors.mockResolvedValue([]);
     mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
@@ -1538,8 +1554,8 @@ describe("SchoolPage (server component)", () => {
     await renderPage();
     expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
       expect.anything(),
-      "program_read",
-      { schoolCode: "70705" }
+      "assignment_coverage_read",
+      { schoolCode: "70705", programId: undefined }
     );
   });
 
@@ -1575,16 +1591,18 @@ describe("SchoolPage (server component)", () => {
     });
   });
 
-  it("routes Program Managers to scoped Students & Progress without exposing Assignment Coverage", async () => {
+  it.each(["program_manager", "program_admin"] as const)(
+    "shows scoped read-only Assignment Coverage for an in-scope %s",
+    async (role) => {
     setupAdminDefaults({ id: "20", code: "SCH001" });
     const permission = makePermission({
-      email: "pm@example.com",
-      role: "program_manager",
+      email: `${role}@example.com`,
+      role,
       level: 1,
       school_codes: ["SCH001"],
       program_ids: [1],
     });
-    mockGetServerSession.mockResolvedValue(googleSession({ user: { email: "pm@example.com" } }));
+    mockGetServerSession.mockResolvedValue(googleSession({ user: { email: `${role}@example.com` } }));
     mockGetUserPermission.mockResolvedValue(permission);
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: true,
@@ -1594,14 +1612,91 @@ describe("SchoolPage (server component)", () => {
       programIds: [1],
       canEdit: false,
     });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 41,
+      name: "Asha Rao",
+      externalStudentId: "S41",
+      grade: 11,
+      activePhaseId: 73,
+      activeNotesState: null,
+      ownership: { mappingId: 8, mentorUserId: 9, mentorName: "Anita Mentor" },
+    }]);
+    mockGetHolisticAssignmentCoverageSummary.mockResolvedValue({
+      eligible: 1,
+      assigned: 1,
+      unassigned: 0,
+      activeMentors: 1,
+      coveragePercentage: 100,
+      completed: 0,
+      pending: 1,
+      noActivePhase: 0,
+    });
 
     await renderPage();
 
-    expect(screen.getByRole("link", { name: "Open Students & Progress" })).toHaveAttribute(
-      "href",
-      "/admin/holistic-mentorship?program_id=1",
+    expect(screen.getByText("School assignment coverage for 2026-2027")).toBeInTheDocument();
+    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Assign|Remove Mentor/ })).not.toBeInTheDocument();
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ user: { email: `${role}@example.com` } }),
+      "assignment_coverage_read",
+      { schoolCode: "SCH001", programId: undefined },
     );
+    expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
+      permission,
+      schoolId: 20,
+      programId: 1,
+      academicYear: "2026-2027",
+    });
+    expect(mockGetHolisticAssignmentCoverageSummary).toHaveBeenCalledWith({
+      permission,
+      schoolId: 20,
+      programId: 1,
+      academicYear: "2026-2027",
+    });
+  });
+
+  it("passes an explicit supported Program through for a multi-Program School", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    const permission = makePermission({
+      email: "pm@example.com",
+      role: "program_manager",
+      level: 1,
+      school_codes: ["SCH001"],
+      program_ids: [1, 78],
+    });
+    mockGetServerSession.mockResolvedValue(googleSession({ user: { email: "pm@example.com" } }));
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 78 },
+      programId: 78,
+      programIds: [78],
+      canEdit: false,
+    });
+
+    await renderPage("24120100101", "78");
+
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "assignment_coverage_read",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+    expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith(
+      expect.objectContaining({ programId: 78, schoolId: 20 }),
+    );
+  });
+
+  it("does not expose Holistic coverage for a forged unsupported Program URL", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001" });
+
+    await renderPage("24120100101", "999");
+
+    expect(mockRequireHolisticMentorshipAccess).not.toHaveBeenCalled();
     expect(mockListHolisticAssignmentRoster).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("tab-holistic_mentorship")).not.toBeInTheDocument();
   });
 
   it("wires eligible Mentors into writable Admin coverage assignments", async () => {

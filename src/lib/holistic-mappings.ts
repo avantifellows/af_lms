@@ -32,6 +32,28 @@ export interface HolisticAssignmentRosterStudent {
   } | null;
 }
 
+export interface HolisticAssignmentCoverageSummary {
+  eligible: number;
+  assigned: number;
+  unassigned: number;
+  activeMentors: number;
+  coveragePercentage: number;
+  completed: number;
+  pending: number;
+  noActivePhase: number;
+}
+
+interface CoverageSummaryRow {
+  eligible_count: number | string;
+  assigned_count: number | string;
+  unassigned_count: number | string;
+  active_mentor_count: number | string;
+  coverage_percentage: number | string;
+  completed_count: number | string;
+  pending_count: number | string;
+  no_active_phase_count: number | string;
+}
+
 interface ActiveMappingRow {
   id: number | string;
   student_id: number | string;
@@ -715,4 +737,96 @@ export async function listHolisticAssignmentRoster(params: {
             mentorName: row.mentor_name || "Unknown Mentor",
           },
   }));
+}
+
+export async function getHolisticAssignmentCoverageSummary(params: {
+  permission: UserPermission;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+}): Promise<HolisticAssignmentCoverageSummary> {
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  });
+  const schoolScope = buildHolisticSchoolScopePredicate(params.permission, {
+    startIndex: 4,
+    schoolCodeColumn: "scope_school.code",
+    schoolRegionColumn: "scope_school.region",
+  });
+  const schoolScopeSql = schoolScope.clause
+    ? `AND EXISTS (
+         SELECT 1
+         FROM school scope_school
+         WHERE scope_school.id = $1 AND ${schoolScope.clause}
+       )`
+    : "";
+  const rows = await query<CoverageSummaryRow>(
+    `WITH ${ELIGIBLE_ROSTER_CTE_SQL},
+     coverage_roster AS MATERIALIZED (
+       SELECT st.id AS student_id,
+              mapping.mentor_user_id,
+              active_phase.id AS active_phase_id,
+              EXISTS (
+                SELECT 1
+                FROM holistic_mentorship_post_session_notes notes
+                WHERE notes.student_id = st.id
+                  AND notes.phase_id = active_phase.id
+                  AND notes.state = 'submitted'
+              ) AS has_submitted_notes
+       FROM eligible_roster roster_student
+       JOIN student st ON st.user_id = roster_student.user_id
+       LEFT JOIN LATERAL (
+         SELECT phase.id
+         FROM holistic_mentorship_phase_plans plan
+         JOIN holistic_mentorship_phases phase
+           ON phase.phase_plan_id = plan.id AND phase.state = 'open'
+         JOIN grade phase_grade
+           ON phase_grade.id = phase.grade_id AND phase_grade.number = roster_student.grade
+         WHERE plan.program_id = $3 AND plan.academic_year = $2
+         ORDER BY phase.position DESC
+         LIMIT 1
+       ) active_phase ON true
+       LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping
+         ON mapping.student_id = st.id
+        AND mapping.academic_year = $2
+        AND mapping.school_id = $1
+        AND mapping.program_id = $3
+        AND mapping.ended_at IS NULL
+       WHERE st.status IS DISTINCT FROM 'dropout'
+         ${schoolScopeSql}
+     ), counts AS (
+       SELECT COUNT(*)::int AS eligible_count,
+              COUNT(*) FILTER (WHERE mentor_user_id IS NOT NULL)::int AS assigned_count,
+              COUNT(*) FILTER (WHERE mentor_user_id IS NULL)::int AS unassigned_count,
+              COUNT(DISTINCT mentor_user_id)::int AS active_mentor_count,
+              COUNT(*) FILTER (
+                WHERE active_phase_id IS NOT NULL AND has_submitted_notes
+              )::int AS completed_count,
+              COUNT(*) FILTER (
+                WHERE active_phase_id IS NOT NULL AND NOT has_submitted_notes
+              )::int AS pending_count,
+              COUNT(*) FILTER (WHERE active_phase_id IS NULL)::int AS no_active_phase_count
+       FROM coverage_roster
+     )
+     SELECT eligible_count, assigned_count, unassigned_count, active_mentor_count,
+            CASE WHEN eligible_count = 0 THEN 0
+                 ELSE ROUND(assigned_count * 100.0 / eligible_count, 1)
+            END AS coverage_percentage,
+            completed_count, pending_count, no_active_phase_count
+     FROM counts`,
+    [params.schoolId, params.academicYear, params.programId, ...schoolScope.params],
+  );
+  const row = rows[0];
+  return {
+    eligible: Number(row?.eligible_count ?? 0),
+    assigned: Number(row?.assigned_count ?? 0),
+    unassigned: Number(row?.unassigned_count ?? 0),
+    activeMentors: Number(row?.active_mentor_count ?? 0),
+    coveragePercentage: Number(row?.coverage_percentage ?? 0),
+    completed: Number(row?.completed_count ?? 0),
+    pending: Number(row?.pending_count ?? 0),
+    noActivePhase: Number(row?.no_active_phase_count ?? 0),
+  };
 }

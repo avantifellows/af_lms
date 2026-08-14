@@ -8,6 +8,7 @@ import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
   assignHolisticMenteeAsAdmin,
   assignHolisticMentees,
+  getHolisticAssignmentCoverageSummary,
   listHolisticAssignmentRoster,
   removeHolisticMenteeAsAdmin,
   removeHolisticMentees,
@@ -119,6 +120,87 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     const [sql, params] = mockQuery.mock.calls[0];
     expect(String(sql)).toContain("scope_school.code = ANY($8::text[])");
     expect(params).toEqual([4, "2026-2027", 1, "%%", null, false, null, ["SCH001"]]);
+  });
+
+  it("reports server-scoped Assignment Coverage metrics with an exhaustive status partition", async () => {
+    mockQuery.mockResolvedValueOnce([{
+      eligible_count: "3",
+      assigned_count: "2",
+      unassigned_count: "1",
+      active_mentor_count: "2",
+      coverage_percentage: "66.7",
+      completed_count: "1",
+      pending_count: "1",
+      no_active_phase_count: "1",
+    }]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    };
+
+    await expect(getHolisticAssignmentCoverageSummary({
+      permission: scopedPermission,
+      programId: 1,
+      schoolId: 4,
+      academicYear: "2026-2027",
+    })).resolves.toEqual({
+      eligible: 3,
+      assigned: 2,
+      unassigned: 1,
+      activeMentors: 2,
+      coveragePercentage: 66.7,
+      completed: 1,
+      pending: 1,
+      noActivePhase: 1,
+    });
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(String(sql)).toContain("scope_school.code = ANY($4::text[])");
+    expect(String(sql)).toContain("COUNT(*) FILTER (WHERE mentor_user_id IS NULL)");
+    expect(String(sql)).toContain("COUNT(DISTINCT mentor_user_id)");
+    expect(String(sql)).toContain("active_phase_id IS NOT NULL AND has_submitted_notes");
+    expect(String(sql)).toContain("active_phase_id IS NOT NULL AND NOT has_submitted_notes");
+    expect(String(sql)).toContain("active_phase_id IS NULL");
+    expect(String(sql)).toContain("ROUND(assigned_count * 100.0 / eligible_count, 1)");
+    expect(String(sql)).toContain("notes.student_id = st.id");
+    expect(String(sql)).toContain("notes.phase_id = active_phase.id");
+    expect(params).toEqual([4, "2026-2027", 1, ["SCH001"]]);
+  });
+
+  it("reports zero percent and an empty exhaustive partition when no Students are eligible", async () => {
+    mockQuery.mockResolvedValueOnce([{
+      eligible_count: 0,
+      assigned_count: 0,
+      unassigned_count: 0,
+      active_mentor_count: 0,
+      coverage_percentage: 0,
+      completed_count: 0,
+      pending_count: 0,
+      no_active_phase_count: 0,
+    }]);
+
+    await expect(getHolisticAssignmentCoverageSummary({
+      permission: adminPermission,
+      programId: 78,
+      schoolId: 4,
+      academicYear: "2026-2027",
+    })).resolves.toEqual({
+      eligible: 0,
+      assigned: 0,
+      unassigned: 0,
+      activeMentors: 0,
+      coveragePercentage: 0,
+      completed: 0,
+      pending: 0,
+      noActivePhase: 0,
+    });
+
+    expect(String(mockQuery.mock.calls[0][0])).toContain(
+      "CASE WHEN eligible_count = 0 THEN 0",
+    );
   });
 
   it("returns a draft state only to its authoring current Mentor", async () => {

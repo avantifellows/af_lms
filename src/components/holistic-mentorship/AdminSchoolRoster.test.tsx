@@ -40,10 +40,9 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
     const table = within(screen.getByRole("region", { name: "School mentorship coverage" }));
-    expect(table.getByText("Pending")).toBeInTheDocument();
+    expect(table.getAllByText("Pending")).toHaveLength(2);
     expect(table.queryByText("Draft saved")).not.toBeInTheDocument();
     expect(table.getByText("Unassigned")).toBeInTheDocument();
-    expect(table.getByText("Not assigned")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
@@ -54,6 +53,47 @@ describe("AdminSchoolRoster", () => {
       "href",
       "/holistic-mentorship/tutorial",
     );
+  });
+
+  it("renders the complete server-provided Assignment Coverage summary for a Program Manager", () => {
+    render(<AdminSchoolRoster
+      students={[
+        ...students,
+        {
+          studentId: 43,
+          name: "Meera Das",
+          externalStudentId: "S43",
+          grade: 11,
+          activePhaseId: 73,
+          activeNotesState: "submitted",
+          ownership: null,
+        },
+      ]}
+      schoolCode="SCH001"
+      role="program_manager"
+      canEdit={false}
+      summary={{
+        eligible: 3,
+        assigned: 1,
+        unassigned: 2,
+        activeMentors: 1,
+        coveragePercentage: 33.3,
+        completed: 1,
+        pending: 1,
+        noActivePhase: 1,
+      }}
+    />);
+
+    const summary = within(screen.getByRole("region", { name: "Assignment Coverage summary" }));
+    expect(summary.getByText("Eligible Students").previousSibling).toHaveTextContent("3");
+    expect(summary.getByText("Assigned").previousSibling).toHaveTextContent("1");
+    expect(summary.getByText("Unassigned").previousSibling).toHaveTextContent("2");
+    expect(summary.getByText("Active Mentors").previousSibling).toHaveTextContent("1");
+    expect(summary.getByText("Coverage").previousSibling).toHaveTextContent("33.3%");
+    expect(summary.getByText("Completed").previousSibling).toHaveTextContent("1");
+    expect(summary.getByText("Pending").previousSibling).toHaveTextContent("1");
+    expect(summary.getByText("No active Phase").previousSibling).toHaveTextContent("1");
+    expect(screen.queryByRole("button", { name: /Assign|Remove Mentor/ })).not.toBeInTheDocument();
   });
 
   it("filters by assignment without changing the summary", () => {

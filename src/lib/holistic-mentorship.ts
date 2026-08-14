@@ -17,6 +17,7 @@ import {
 
 export type HolisticMentorshipAction =
   | "roster_view"
+  | "assignment_coverage_read"
   | "mapping_mutation"
   | "admin_mapping_mutation"
   | "mapped_student_read"
@@ -67,6 +68,7 @@ interface HolisticMentorshipSchoolRow
 
 const PROGRAM_ACTIONS = new Set<HolisticMentorshipAction>([
   "program_read",
+  "assignment_coverage_read",
   "mapped_student_read",
   "phase_configure",
   "profile_regenerate",
@@ -88,6 +90,7 @@ const MAPPING_REQUIRED_ACTIONS = new Set<HolisticMentorshipAction>([
 ]);
 const READ_ONLY_ACTIONS = new Set<HolisticMentorshipAction>([
   "program_read",
+  "assignment_coverage_read",
   "mapped_student_read",
   "roster_view",
 ]);
@@ -178,7 +181,8 @@ function allowedActor(permission: UserPermission, action: HolisticMentorshipActi
   const scopedRead = permission.role === "program_manager" || permission.role === "program_admin";
   return {
     teacher: permission.role === "teacher" && TEACHER_ACTIONS.has(action),
-    program: (programWide && PROGRAM_ACTIONS.has(action)) || (scopedRead && action === "program_read"),
+    program: (programWide && PROGRAM_ACTIONS.has(action)) ||
+      (scopedRead && (action === "program_read" || action === "assignment_coverage_read")),
   };
 }
 
@@ -374,9 +378,17 @@ export async function requireHolisticMentorshipAccess(
 
   const scopedProgramRead = action === "program_read" &&
     (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
+  const scopedCoverageRead = action === "assignment_coverage_read" &&
+    (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
+  if (scopedCoverageRead && (
+    programId === undefined ||
+    !getProgramContextSync(actor.permission).programIds.includes(programId)
+  )) return denied(403, "Forbidden");
   const programIds = scopedProgramRead
     ? await resolveScopedProgramIds(actor.permission, requestedProgramId)
-    : [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
+    : scopedCoverageRead
+      ? [programId!]
+      : [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
   if (scopedProgramRead && programIds.length === 0) return denied(403, "Forbidden");
 
   if (MAPPING_REQUIRED_ACTIONS.has(action) && options.studentId) {
