@@ -284,7 +284,7 @@ describe("GET /api/curriculum/options", () => {
     expect(json.defaults.programId).toBe(2);
   });
 
-  it("allows admins to see CoE/Nodal Programs while excluding NVS", async () => {
+  it("shows admins only the active physical Centre Programs for the school", async () => {
     mockSession.mockResolvedValue(ADMIN_SESSION);
     mockGetUserPermission.mockResolvedValue({
       email: "admin@avantifellows.org",
@@ -314,6 +314,16 @@ describe("GET /api/curriculum/options", () => {
       { id: 1, name: "JNV CoE" },
       { id: 2, name: "JNV Nodal" },
     ]);
+    const programQuery = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM program p")
+    );
+    expect(programQuery?.[0]).toContain("FROM centres c");
+    expect(programQuery?.[0]).toContain("c.program_id = p.id");
+    expect(programQuery?.[0]).toContain("JOIN school s ON s.id = c.school_id");
+    expect(programQuery?.[0]).toContain("s.code = $2");
+    expect(programQuery?.[0]).toContain("c.is_active IS TRUE");
+    expect(programQuery?.[0]).toContain("c.is_physical IS TRUE");
+    expect(programQuery?.[1]).toEqual([expect.any(Array), "70705"]);
   });
 
   it("includes seat-derived Programs when building Curriculum options", async () => {

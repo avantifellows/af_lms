@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  curriculumIdForExamTrack,
-  resolveGradeId,
-} from "@/lib/curriculum-options";
+import { resolveGradeId } from "@/lib/curriculum-options";
 import {
   CMS_TEST_TYPES,
+  curriculumIdForCmsExamTrack,
   parseCmsCurriculumScope,
   type CmsTestType,
 } from "@/lib/cms-tests";
@@ -94,7 +92,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const curriculumId = curriculumIdForExamTrack(examTrack);
+  const curriculumId = curriculumIdForCmsExamTrack(examTrack);
   const cmsUrl =
     `${cms.url}/api/service/tests` +
     `?curriculum-dropdown=${curriculumId}` +

@@ -5,15 +5,13 @@ import {
   resolveBatchGroups,
 } from "@/lib/quiz-session-access";
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
-import {
-  curriculumIdForExamTrack,
-  resolveGradeId,
-  streamForExamTrack,
-} from "@/lib/curriculum-options";
+import { resolveGradeId } from "@/lib/curriculum-options";
 import {
   CMS_SOURCE,
+  curriculumIdForCmsExamTrack,
   isCmsExamTrack,
   isCmsTestType,
+  streamForCmsExamTrack,
   type CmsExamTrack,
 } from "@/lib/cms-tests";
 
@@ -169,7 +167,7 @@ export async function POST(request: NextRequest) {
   // the picker) must match the stream derived from the selected batch — e.g. a NEET test
   // cannot be attached to an engineering batch. Mirrors the legacy route's template.stream
   // vs body.stream check.
-  const expectedStream = streamForExamTrack(body.examTrack);
+  const expectedStream = streamForCmsExamTrack(body.examTrack);
   if (expectedStream && body.stream !== expectedStream) {
     return NextResponse.json(
       {
@@ -214,7 +212,7 @@ export async function POST(request: NextRequest) {
   }
   const { group, authType } = resolved;
 
-  const curriculumId = curriculumIdForExamTrack(body.examTrack);
+  const curriculumId = curriculumIdForCmsExamTrack(body.examTrack);
   const gradeId = await resolveGradeId(body.grade);
   if (!gradeId) {
     return NextResponse.json(

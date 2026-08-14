@@ -47,6 +47,7 @@ interface StudentIdentifiers {
   last_name: string | null;
   gender: string | null;
   stream: string | null;
+  category: string | null;
 }
 
 // Built from the canonical school roster (the same query + dedup the
@@ -70,6 +71,7 @@ async function getSchoolStudentIdentifiers(
       last_name: s.last_name,
       gender: s.gender,
       stream: s.stream,
+      category: s.category,
     })
   );
 }
@@ -85,6 +87,17 @@ interface V2OverallPerformance {
   num_wrong?: number | null;
   num_skipped?: number | null;
   total_questions?: number | null;
+  // Written by etl-next's student_reports_v2_flow (build_overall_performance),
+  // copied from the BigQuery fact row — so the report doc is already the
+  // authoritative source for both and af_lms does not need to re-query BQ.
+  academic_level?: string | null;
+  // "Qualified" / "Not Qualified" today. The fact model derives it from the AL
+  // codes, and emits an empty status where no cutoff applies (e.g. "Not
+  // Eligible for Academic Level"), so treat anything unrecognised as unknown.
+  qualification_status?: string | null;
+  // Absent on docs written before etl-next carried it, and null where the
+  // student has no test-level row upstream — both mean unknown, not unsubmitted.
+  has_quiz_ended?: boolean | null;
 }
 
 interface V2SubjectPerformance {
@@ -140,6 +153,94 @@ function toNum(v: unknown): number {
   if (typeof v === "number") return v;
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+interface SubjectAgg {
+  displayName: string;
+  totalPct: number;
+  totalAcc: number;
+  totalAttempt: number;
+  totalQ: number;
+  count: number;
+}
+
+interface ChapterAgg {
+  subject: string;
+  chapter_name: string;
+  chapter_id: string | null;
+  priority: string | null;
+  totalScore: number;
+  totalMarks: number;
+  maxMarks: number;
+  totalAcc: number;
+  totalAttempt: number;
+  totalQ: number;
+  count: number;
+}
+
+// Class-wide subject totals. Only submitted attempts contribute — an abandoned
+// one would drag the class average down without being a result.
+function accumulateSubject(
+  map: Map<string, SubjectAgg>,
+  key: string,
+  displayName: string,
+  row: { percentage?: number | null; accuracy?: number | null },
+  attemptRate: number,
+  totalQuestions: number
+): void {
+  const agg = map.get(key) ?? {
+    displayName,
+    totalPct: 0,
+    totalAcc: 0,
+    totalAttempt: 0,
+    totalQ: 0,
+    count: 0,
+  };
+  agg.totalPct += toNum(row.percentage);
+  agg.totalAcc += toNum(row.accuracy);
+  agg.totalAttempt += attemptRate;
+  agg.totalQ = Math.max(agg.totalQ, totalQuestions);
+  agg.count += 1;
+  map.set(key, agg);
+}
+
+// Class-wide chapter totals. `priority` is constant per chapter across students,
+// so it is captured from whichever row first carries a meaningful value — and it
+// is recorded even for an unsubmitted attempt, since it is metadata, not a score.
+function accumulateChapter(
+  map: Map<string, ChapterAgg>,
+  key: string,
+  subject: string,
+  chapter: V2ChapterPerformance,
+  values: { pct: number; marks: number; max: number; attemptRate: number; questions: number },
+  submitted: boolean
+): void {
+  const agg = map.get(key) ?? {
+    subject,
+    chapter_name: chapter.chapter_name || "",
+    chapter_id: chapter.chapter_id || null,
+    priority: null,
+    totalScore: 0,
+    totalMarks: 0,
+    maxMarks: 0,
+    totalAcc: 0,
+    totalAttempt: 0,
+    totalQ: 0,
+    count: 0,
+  };
+  if (!agg.priority && chapter.priority && chapter.priority !== "None") {
+    agg.priority = chapter.priority;
+  }
+  if (submitted) {
+    agg.totalScore += values.pct;
+    agg.totalMarks += values.marks;
+    agg.maxMarks = Math.max(agg.maxMarks, values.max);
+    agg.totalAcc += toNum(chapter.accuracy);
+    agg.totalAttempt += values.attemptRate;
+    agg.totalQ = Math.max(agg.totalQ, values.questions);
+    agg.count += 1;
+  }
+  map.set(key, agg);
 }
 
 // Paginate any QueryCommand until LastEvaluatedKey is null.
@@ -267,29 +368,11 @@ export async function getTestDeepDiveFromDynamo(
 
   // Step 3: Transform into TestDeepDiveData
   const studentRows: StudentDeepDiveRow[] = [];
-  const subjectAggMap = new Map<
-    string,
-    { displayName: string; totalPct: number; totalAcc: number; totalAttempt: number; totalQ: number; count: number }
-  >();
+  const subjectAggMap = new Map<string, SubjectAgg>();
   // Key chapter aggregates by chapter_id when available; fall back to
   // subject + chapter_name as a last resort so legacy/missing-id rows still
   // group correctly within a single session.
-  const chapterAggMap = new Map<
-    string,
-    {
-      subject: string;
-      chapter_name: string;
-      chapter_id: string | null;
-      priority: string | null;
-      totalScore: number;
-      totalMarks: number;
-      maxMarks: number;
-      totalAcc: number;
-      totalAttempt: number;
-      totalQ: number;
-      count: number;
-    }
-  >();
+  const chapterAggMap = new Map<string, ChapterAgg>();
 
   let testName = "";
   let startDate = "";
@@ -300,6 +383,9 @@ export async function getTestDeepDiveFromDynamo(
 
     if (!testName) testName = doc.report_header?.test_name || "";
     if (!startDate) startDate = doc.report_header?.test_date || "";
+
+    // Unknown counts as submitted, so historical reports keep their figures.
+    const submitted = overall.has_quiz_ended !== false;
 
     const overallTotal = toNum(overall.total_questions);
     const overallSkipped = toNum(overall.num_skipped);
@@ -329,21 +415,9 @@ export async function getTestDeepDiveFromDynamo(
       const skipped = subjectChapters.reduce((sum, c) => sum + toNum(c.num_skipped), 0);
       const attemptRate = total > 0 ? ((total - skipped) / total) * 100 : 0;
 
-      // Subject analysis aggregates across the class.
-      const existing = subjectAggMap.get(sectionKey) || {
-        displayName: sectionDisplay,
-        totalPct: 0,
-        totalAcc: 0,
-        totalAttempt: 0,
-        totalQ: 0,
-        count: 0,
-      };
-      existing.totalPct += toNum(si.percentage);
-      existing.totalAcc += toNum(si.accuracy);
-      existing.totalAttempt += attemptRate;
-      existing.totalQ = Math.max(existing.totalQ, total);
-      existing.count += 1;
-      subjectAggMap.set(sectionKey, existing);
+      if (submitted) {
+        accumulateSubject(subjectAggMap, sectionKey, sectionDisplay, si, attemptRate, total);
+      }
 
       // Per-student chapter rows for this subject.
       const chapters: StudentChapterScore[] = subjectChapters.map((c) => {
@@ -356,32 +430,20 @@ export async function getTestDeepDiveFromDynamo(
         const chPct = chMax > 0 ? (chMarks / chMax) * 100 : 0;
 
         const chKey = c.chapter_id || `${sectionKey}||${(c.chapter_name || "").toLowerCase()}`;
-        const chEx = chapterAggMap.get(chKey) || {
-          subject: sectionDisplay,
-          chapter_name: c.chapter_name || "",
-          chapter_id: c.chapter_id || null,
-          priority: null,
-          totalScore: 0,
-          totalMarks: 0,
-          maxMarks: 0,
-          totalAcc: 0,
-          totalAttempt: 0,
-          totalQ: 0,
-          count: 0,
-        };
-        // Priority is constant per chapter across students; keep the first
-        // meaningful (non-empty, non-"None") value we see.
-        if (!chEx.priority && c.priority && c.priority !== "None") {
-          chEx.priority = c.priority;
-        }
-        chEx.totalScore += chPct;
-        chEx.totalMarks += chMarks;
-        chEx.maxMarks = Math.max(chEx.maxMarks, chMax);
-        chEx.totalAcc += toNum(c.accuracy);
-        chEx.totalAttempt += chAttemptRate;
-        chEx.totalQ = Math.max(chEx.totalQ, chTotal);
-        chEx.count += 1;
-        chapterAggMap.set(chKey, chEx);
+        accumulateChapter(
+          chapterAggMap,
+          chKey,
+          sectionDisplay,
+          c,
+          {
+            pct: chPct,
+            marks: chMarks,
+            max: chMax,
+            attemptRate: chAttemptRate,
+            questions: chTotal,
+          },
+          submitted
+        );
 
         return {
           subject: sectionDisplay,
@@ -415,22 +477,32 @@ export async function getTestDeepDiveFromDynamo(
       // doc.user_id is the enrollment_user_id (the BQ question-level join key).
       enrollment_user_id: doc.user_id != null ? String(doc.user_id) : null,
       gender: student.gender,
+      category: student.category,
+      academic_level: overall.academic_level || null,
+      qualification_status: overall.qualification_status || null,
       marks_scored: toNum(overall.marks_scored),
       max_marks: toNum(overall.max_marks_possible),
       percentage: toNum(overall.percentage),
       accuracy: toNum(overall.accuracy),
       attempt_rate: overallAttemptRate,
       subject_scores: subjectScores,
+      has_quiz_ended:
+        typeof overall.has_quiz_ended === "boolean" ? overall.has_quiz_ended : null,
     });
   }
 
   if (studentRows.length === 0) return null;
 
-  // Compute summary
-  const percentages = studentRows.map((s) => s.percentage);
-  const marks = studentRows.map((s) => s.marks_scored);
-  const accuracies = studentRows.map((s) => s.accuracy);
-  const attemptRates = studentRows.map((s) => s.attempt_rate);
+  // Summary stats cover submitted attempts only; students_appeared still counts
+  // everyone who opened the test. Falls back to all rows when nobody submitted,
+  // so the tiles show the attempts that exist rather than zeroes.
+  const scored = studentRows.filter((s) => s.has_quiz_ended !== false);
+  const statRows = scored.length > 0 ? scored : studentRows;
+
+  const percentages = statRows.map((s) => s.percentage);
+  const marks = statRows.map((s) => s.marks_scored);
+  const accuracies = statRows.map((s) => s.accuracy);
+  const attemptRates = statRows.map((s) => s.attempt_rate);
 
   const avg = (arr: number[]) =>
     arr.length > 0
@@ -442,6 +514,7 @@ export async function getTestDeepDiveFromDynamo(
     test_name: testName,
     start_date: startDate,
     students_appeared: studentRows.length,
+    students_submitted: scored.length,
     avg_score: avg(percentages),
     min_score: round1(Math.min(...percentages)),
     max_score: round1(Math.max(...percentages)),

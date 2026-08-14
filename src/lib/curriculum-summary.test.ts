@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PHYSICAL_CENTRE_PROGRAM_IDS } from "./constants";
 import type { UserPermission } from "./permissions";
 
 const { mockQuery, mockCheckCurriculumSchema } = vi.hoisted(() => ({
@@ -526,7 +527,7 @@ describe("curriculum summary", () => {
       true,
       null,
       null,
-      [1, 2, 74, 94, 78, 88],
+      PHYSICAL_CENTRE_PROGRAM_IDS,
       false,
       [1, 2],
       null,

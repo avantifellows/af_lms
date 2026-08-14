@@ -18,6 +18,7 @@ const {
   mockListAcademicMentorshipTeacherMentees,
   mockListHolisticAssignmentRoster,
   mockRequireHolisticMentorshipAccess,
+  mockGetLmsSupportedProgramIds,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -37,6 +38,7 @@ const {
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
   mockListHolisticAssignmentRoster: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
+  mockGetLmsSupportedProgramIds: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -57,6 +59,12 @@ vi.mock("@/lib/permissions", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
+// Mocked (rather than driven through the sequential mockQuery chain) so the
+// centres read has one obvious seam per test. Defaulted below to the compiled-in
+// list, which is what an empty `centres` table resolves to anyway.
+vi.mock("@/lib/lms-programs", () => ({
+  getLmsSupportedProgramIds: mockGetLmsSupportedProgramIds,
+}));
 vi.mock("@/lib/school-student-list-data-issues", () => ({
   processStudents: mockProcessStudents,
 }));
@@ -216,6 +224,7 @@ vi.mock("@/components/EditStudentModal", () => ({
 }));
 
 import SchoolPage from "./page";
+import { PROGRAM_IDS, PROGRAM_IDS_ORDERED } from "@/lib/constants";
 
 // ---- helpers ----
 
@@ -322,6 +331,7 @@ const renderPage = async (udise = "24120100101") => {
 describe("SchoolPage (server component)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockGetLmsSupportedProgramIds.mockResolvedValue([...PROGRAM_IDS_ORDERED]);
     // Re-establish sentinel implementations after reset
     mockRedirect.mockImplementation((url: string) => {
       throw new Error(`REDIRECT:${url}`);
@@ -991,6 +1001,61 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByText("JNV NVS Students")).toBeInTheDocument();
     // 1 active NVS student
     expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
+  });
+
+  // GPUC Shimoga regression: 73 students with correct current enrollments in
+  // Karnataka CoE (97) rendered an EMPTY Enrollment tab, because activeStudents
+  // was filtered against the hand-maintained PROGRAM_IDS list, which lacked 97.
+  it("surfaces students of a centre program that is in the supported list", async () => {
+    const students = [
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: PROGRAM_IDS.KARNATAKA_COE,
+        program_name: "Karnataka CoE",
+        status: "active",
+      }),
+    ];
+
+    setupAdminDefaults();
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [PROGRAM_IDS.KARNATAKA_COE],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockProcessStudents.mockResolvedValue({ students, issues: [] });
+
+    await renderPage();
+
+    expect(screen.getByText("Karnataka CoE Students")).toBeInTheDocument();
+    expect(screen.getByTestId("enrollment-stats-total")).toHaveTextContent("1");
+  });
+
+  it("hides that same student when the program is NOT in the supported list — the pre-fix behaviour", async () => {
+    // Proves the supported list is genuinely what gates the roster, so this
+    // cannot silently regress to an unrelated cause.
+    const students = [
+      makeStudent({
+        group_user_id: "gu-1",
+        user_id: "u-1",
+        grade: 11,
+        program_id: PROGRAM_IDS.KARNATAKA_COE,
+        program_name: "Karnataka CoE",
+        status: "active",
+      }),
+    ];
+
+    setupAdminDefaults();
+    mockGetLmsSupportedProgramIds.mockResolvedValue(
+      PROGRAM_IDS_ORDERED.filter((id) => id !== PROGRAM_IDS.KARNATAKA_COE),
+    );
+    mockProcessStudents.mockResolvedValue({ students, issues: [] });
+
+    await renderPage();
+
+    expect(screen.queryByText("Karnataka CoE Students")).not.toBeInTheDocument();
   });
 
   it("renders one program's stats at a time when multiple programs are present", async () => {

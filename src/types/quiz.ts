@@ -77,6 +77,8 @@ export interface TestDeepDiveSummary {
   test_name: string;
   start_date: string;
   students_appeared: number;
+  // Of those, how many submitted. Every figure below is computed over these only.
+  students_submitted: number;
   avg_score: number;
   min_score: number;
   max_score: number;
@@ -152,12 +154,27 @@ export interface StudentDeepDiveRow {
   // client-side matching against the (INT64) BQ value.
   enrollment_user_id: string | null;
   gender: string | null;
+  // Social category from the LMS Postgres roster (student.category), carried
+  // through from the matched roster student — not from the report doc.
+  category: string | null;
+  // AL earned on *this* test, read straight off the report doc's
+  // overall_performance (etl-next copies it there from BigQuery). Null where the
+  // doc carries none — e.g. chapter tests, which have no AL — and the UI shows
+  // "NA" rather than inventing a level.
+  academic_level: string | null;
+  // On-track signal for the same test: "Qualified" / "Not Qualified", also off
+  // the report doc. Null when the doc has no status (no applicable cutoff).
+  qualification_status: string | null;
   marks_scored: number;
   max_marks: number;
   percentage: number;
   accuracy: number;
   attempt_rate: number;
   subject_scores: StudentSubjectScore[];
+  // False only when the report doc positively says the student never submitted.
+  // Null for docs written before etl-next started carrying the flag, and where
+  // the student has no test-level row upstream — unknown, so no badge.
+  has_quiz_ended: boolean | null;
 }
 
 export interface TestDeepDiveData {

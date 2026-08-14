@@ -1,8 +1,15 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Input } from "@/components/ui";
+
+// Each search is a full server render of the dashboard, so firing one per
+// keystroke meant typing "gpuc shim" issued nine of them — and they completed
+// out of order, so the list could settle on a stale keystroke's results.
+// 300ms is long enough to collapse a burst of typing into one request and short
+// enough not to feel laggy.
+const SEARCH_DEBOUNCE_MS = 300;
 
 interface SchoolSearchProps {
   defaultValue?: string;
@@ -35,6 +42,25 @@ export default function SchoolSearch({
     [router, searchParams, basePath]
   );
 
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = useCallback(
+    (term: string) => {
+      // Keep the input responsive immediately; defer only the navigation.
+      setValue(term);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => handleSearch(term), SEARCH_DEBOUNCE_MS);
+    },
+    [handleSearch]
+  );
+
+  // Don't leave a pending navigation behind on unmount.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   return (
     <div className="relative">
       <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
@@ -55,9 +81,13 @@ export default function SchoolSearch({
       <Input
         type="text"
         value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          handleSearch(e.target.value);
+        onChange={(e) => handleChange(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter skips the debounce for anyone who types then hits return.
+          if (e.key === "Enter") {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+            handleSearch(value);
+          }
         }}
         placeholder={placeholder}
         className="pl-10 pr-4"

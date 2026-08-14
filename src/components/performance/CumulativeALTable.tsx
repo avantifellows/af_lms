@@ -9,6 +9,12 @@ import type {
   ProgressionEntry,
   ProgressionTest,
 } from "@/types/quiz";
+import {
+  AL_DISPLAY_ORDER,
+  AL_RANK,
+  alChipColor,
+  alShortLabel as shortLabel,
+} from "@/lib/academic-level";
 
 interface Props {
   schoolUdise: string;
@@ -17,32 +23,6 @@ interface Props {
   stream?: string;
   testGrade?: number;
 }
-
-// Display order — best (top tier) first. M1/B1 are top of their respective
-// stream-specific scales; M2/B2 are mid; NQ/NE are bottom.
-const AL_DISPLAY_ORDER = [
-  "M1",
-  "B1",
-  "M2",
-  "B2",
-  "Not Qualified",
-  "Not Eligible for Academic Level",
-];
-
-// Unified rank — M and B tiers are parallel scales (engineering vs medical).
-const AL_RANK: Record<string, number> = {
-  M1: 3,
-  B1: 3,
-  M2: 2,
-  B2: 2,
-  "Not Qualified": 1,
-  "Not Eligible for Academic Level": 0,
-};
-
-const AL_SHORT_LABEL: Record<string, string> = {
-  "Not Qualified": "NQ",
-  "Not Eligible for Academic Level": "NE",
-};
 
 // Display label for canonical stream keys (mirrors bigquery.ts streamDisplayLabel).
 const STREAM_DISPLAY: Record<string, string> = {
@@ -59,27 +39,6 @@ const STREAM_DISPLAY: Record<string, string> = {
 function streamGroupLabel(canonical: string | null): string {
   if (!canonical) return "Stream not set";
   return STREAM_DISPLAY[canonical] || canonical.toUpperCase();
-}
-
-function shortLabel(al: string): string {
-  return AL_SHORT_LABEL[al] || al;
-}
-
-function alChipColor(al: string): string {
-  switch (al) {
-    case "M1":
-    case "B1":
-      return "bg-success-bg text-success border-success/30";
-    case "M2":
-    case "B2":
-      return "bg-success-bg/50 text-success/80 border-success/20";
-    case "Not Qualified":
-      return "bg-warning-bg text-warning border-warning/30";
-    case "Not Eligible for Academic Level":
-      return "bg-bg-card-alt text-text-muted border-border";
-    default:
-      return "bg-bg-card-alt text-text-muted border-border";
-  }
 }
 
 type SortKey = "name" | "tests" | "mode_al" | "latest_al";

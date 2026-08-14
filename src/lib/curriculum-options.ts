@@ -163,19 +163,6 @@ export function curriculumIdForExamTrack(examTrack: ExamTrack): number | null {
     : null;
 }
 
-// The batch stream (as produced by parseBatchStream: "engineering" | "medical") each exam
-// track targets. Used to reject mismatched pairings (e.g. a NEET test on an engineering
-// batch), which would otherwise put a wrong-subject test live for those students.
-const EXAM_TRACK_STREAMS: Record<ContentExamTrack, string> = {
-  jee_main: "engineering",
-  jee_advanced: "engineering",
-  neet: "medical",
-};
-
-export function streamForExamTrack(examTrack: ContentExamTrack): string {
-  return EXAM_TRACK_STREAMS[examTrack];
-}
-
 // CMS grade id from the grade table (grade number -> id). Both CMS routes resolve it via
 // the DB rather than a client-supplied map (which could drift), so the lookup lives here
 // once. Returns null when no grade row matches.
@@ -249,11 +236,20 @@ async function resolveCurriculumProgramScope(
 
   const programs = allowedProgramIds.length
     ? (await query<CurriculumProgramOption>(
-        `SELECT id, name
-         FROM program
-         WHERE id = ANY($1::int[])
-         ORDER BY array_position(ARRAY[1, 2]::int[], id)`,
-        [allowedProgramIds]
+        `SELECT p.id, p.name
+         FROM program p
+         WHERE p.id = ANY($1::int[])
+           AND EXISTS (
+             SELECT 1
+             FROM centres c
+             JOIN school s ON s.id = c.school_id
+             WHERE c.program_id = p.id
+               AND s.code = $2
+               AND c.is_active IS TRUE
+               AND c.is_physical IS TRUE
+           )
+         ORDER BY array_position(ARRAY[1, 2]::int[], p.id)`,
+        [allowedProgramIds, schoolCode]
       )).map((program) => ({ ...program, id: Number(program.id) }))
     : [];
   const seatCentreIds = permission.scope?.centres;

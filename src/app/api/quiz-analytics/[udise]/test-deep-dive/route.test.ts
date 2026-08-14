@@ -140,7 +140,11 @@ describe("GET /api/quiz-analytics/[udise]/test-deep-dive", () => {
       students: [
         {
           student_name: "Alice",
+          enrollment_user_id: "368592",
           gender: "F",
+          category: "SC",
+          academic_level: null,
+          qualification_status: null,
           marks_scored: 85,
           max_marks: 100,
           percentage: 85,
