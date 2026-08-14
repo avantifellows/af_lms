@@ -230,7 +230,6 @@ export async function listHolisticProgress(
        SELECT base.*,
               CASE WHEN base.phase_id IS NULL THEN 'no_active_phase'
                    WHEN notes.state = 'submitted' THEN 'completed'
-                   WHEN notes.state = 'draft' THEN 'pending'
                    WHEN base.initial_active_position IS NOT NULL AND base.phase_number < base.initial_active_position THEN 'skipped'
                    ELSE 'pending' END AS progress,
               CASE WHEN notes.state = 'submitted' THEN notes.first_submitted_at END AS completed_at,
@@ -241,6 +240,7 @@ export async function listHolisticProgress(
        FROM base
        LEFT JOIN holistic_mentorship_post_session_notes notes
          ON notes.student_id = base.student_id AND notes.phase_id = base.phase_id
+        AND notes.state = 'submitted'
        LEFT JOIN "user" author ON author.id = notes.author_user_id AND notes.state = 'submitted'
        LEFT JOIN LATERAL (
          SELECT jsonb_agg(jsonb_build_object('position', question.position, 'question', question.text, 'answer', answer.answer)

@@ -141,12 +141,10 @@ describe("Holistic progress", () => {
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
     expect(sql).toContain("THEN 'active'");
     expect(sql).toContain("WHEN notes.state = 'submitted' THEN 'completed'");
-    expect(sql).toContain("WHEN notes.state = 'draft' THEN 'pending'");
     expect(sql).toContain("ELSE 'pending'");
     expect(sql).toContain("notes.state = 'submitted' THEN notes.last_edited_at");
     expect(sql).toContain("school_name ASC NULLS LAST, grade ASC NULLS LAST, student_name ASC NULLS LAST");
-    expect(sql.indexOf("WHEN notes.state = 'draft' THEN 'pending'"))
-      .toBeLessThan(sql.indexOf("base.phase_number < base.initial_active_position"));
+    expect(sql).toContain("AND notes.state = 'submitted'");
     expect(result.counts).toEqual({
       totalMapped: 73,
       pending: 30,
@@ -160,6 +158,29 @@ describe("Holistic progress", () => {
       phaseState: "active",
       notesAuthorEmail: "mentor@example.com",
     });
+  });
+
+  it("makes an orphaned draft indistinguishable from no Notes when deriving a skipped Phase", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+
+    await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: 70,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: "skipped",
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc",
+      page: 1,
+    }, adminPermission);
+
+    const sql = String(mockQuery.mock.calls[0][0]);
+    expect(sql).toContain("AND notes.state = 'submitted'");
+    expect(sql).not.toContain("WHEN notes.state = 'draft'");
+    expect(sql).toContain("WHEN base.initial_active_position IS NOT NULL AND base.phase_number < base.initial_active_position THEN 'skipped'");
   });
 
   it("exports only approved fields and neutralizes formula-leading names and authored text", () => {
