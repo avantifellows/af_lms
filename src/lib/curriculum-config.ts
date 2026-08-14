@@ -3,7 +3,8 @@ import {
   type CurriculumSchemaUnavailable,
 } from "./curriculum-schema";
 import { query } from "./db";
-import { PHYSICAL_CENTRE_PROGRAM_IDS, getUserPermission, type UserPermission } from "./permissions";
+import { requireAdmin } from "./admin-guard";
+import { PHYSICAL_CENTRE_PROGRAM_IDS, type UserPermission } from "./permissions";
 import type { ExamTrack } from "@/types/curriculum";
 
 export type CurriculumConfigSession = {
@@ -316,32 +317,14 @@ const SORT_KEYS: CurriculumConfigSortKey[] = [
 ];
 const PAGE_SIZES = [10, 20, 50, 100];
 
-// Pass `forWrite: true` on mutating routes — a read-only admin (role "admin" +
-// read_only) may see every admin surface but must not change anything, and the
-// route guard is the enforcement point (hiding UI controls alone would leave
-// the API open).
+// Same policy as every other admin surface (passcode users blocked, only
+// role "admin", read-only admins 403 on `forWrite: true` writes) — delegate to
+// the shared guard so the surfaces can't drift.
 export async function requireCurriculumConfigAdmin(
   session: CurriculumConfigSession,
   opts?: { forWrite?: boolean }
 ): Promise<CurriculumConfigAdminResult> {
-  const email = session?.user?.email;
-  if (!email) {
-    return { ok: false, status: 401, error: "Unauthorized" };
-  }
-
-  if (session.isPasscodeUser) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  const permission = await getUserPermission(email);
-  if (permission?.role !== "admin") {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-  if (opts?.forWrite && permission.read_only) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-
-  return { ok: true, email, permission };
+  return requireAdmin(session, opts);
 }
 
 export function normalizeCurriculumConfigListParams(
