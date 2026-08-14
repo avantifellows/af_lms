@@ -1575,6 +1575,35 @@ describe("SchoolPage (server component)", () => {
     });
   });
 
+  it("routes Program Managers to scoped Students & Progress without exposing Assignment Coverage", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001" });
+    const permission = makePermission({
+      email: "pm@example.com",
+      role: "program_manager",
+      level: 1,
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    });
+    mockGetServerSession.mockResolvedValue(googleSession({ user: { email: "pm@example.com" } }));
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 1 },
+      programId: 1,
+      programIds: [1],
+      canEdit: false,
+    });
+
+    await renderPage();
+
+    expect(screen.getByRole("link", { name: "Open Students & Progress" })).toHaveAttribute(
+      "href",
+      "/admin/holistic-mentorship?program_id=1",
+    );
+    expect(mockListHolisticAssignmentRoster).not.toHaveBeenCalled();
+  });
+
   it("wires eligible Mentors into writable Admin coverage assignments", async () => {
     const { permission } = setupAdminDefaults({ id: "20", code: "SCH001" });
     mockRequireHolisticMentorshipAccess.mockResolvedValue({

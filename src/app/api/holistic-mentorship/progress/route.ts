@@ -109,6 +109,7 @@ export async function GET(request: Request) {
   const { filters, csv } = parsedRequest;
   const access = await holisticRouteAccess("program_read", {
     programId: filters.programId,
+    schoolCode: filters.schoolCode ?? undefined,
   });
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
   const result = csv

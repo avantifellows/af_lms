@@ -46,8 +46,8 @@ interface School {
 
 const labelClassName = "block text-sm font-medium text-gray-700";
 const ROLE_DESCRIPTIONS: Record<string, string> = {
-  program_manager: "Program Managers can conduct school visits and view their assigned schools",
-  program_admin: "Program Admins can oversee scoped schools and manage their own school visits",
+  program_manager: "Program Managers can conduct school visits, view assigned schools, and monitor scoped Holistic Mentorship progress",
+  program_admin: "Program Admins can oversee scoped schools, manage their own school visits, and monitor scoped Holistic Mentorship progress",
   teacher: "Teachers can view and manage students in their assigned schools",
   holistic_mentorship_admin: "Holistic Mentorship Admins can manage JNV CoE and EMRS CoE mentorship",
   admin: "Admins have full access to all features, all schools, and all programs",

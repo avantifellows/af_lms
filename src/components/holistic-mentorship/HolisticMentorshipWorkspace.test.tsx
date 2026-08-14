@@ -125,4 +125,38 @@ describe("HolisticMentorshipWorkspace", () => {
     ));
     expect(screen.getByLabelText("Program")).toHaveValue("78");
   });
+
+  it("renders scoped Program Manager and Program Admin workspaces without edit or detail affordances", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rows: [{
+          studentId: 41, studentName: "Student One", externalStudentId: "AF-41", grade: 11,
+          schoolName: "School One", schoolCode: "SCH001", mentorName: "Mentor One",
+          mentorEmail: "mentor@example.com", phaseId: 70, phaseNumber: 1,
+          phaseTitle: "Check-in", phaseState: "active", progress: "pending",
+          completedAt: null, notesAuthor: null, notesAuthorEmail: null,
+          notesLastEditedAt: null, answers: [],
+        }],
+        counts: { totalMapped: 1, pending: 1, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [{ code: "SCH001", name: "School One" }], mentors: [], phases: [] },
+        pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      }),
+    }));
+
+    render(<HolisticMentorshipWorkspace
+      mode="admin"
+      canEdit={false}
+      initialProgramId={78}
+      availableProgramIds={[78]}
+    />);
+
+    expect(await screen.findByText("Student One")).toBeInTheDocument();
+    expect(screen.getByLabelText("Program")).toHaveValue("78");
+    expect(screen.getAllByRole("option", { name: "78 - EMRS CoE" })).toHaveLength(1);
+    expect(screen.queryByRole("tab", { name: "Phase Setup" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Student One" })).not.toBeInTheDocument();
+  });
 });

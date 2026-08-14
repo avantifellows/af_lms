@@ -188,10 +188,12 @@ export default function ProgressWorkspace({
   academicYear = CURRENT_ACADEMIC_YEAR,
   programId = PROGRAM_IDS.COE,
   onAcademicYears,
+  showStudentLinks = true,
 }: {
   academicYear?: string;
   programId?: number;
   onAcademicYears?: (years: string[]) => void;
+  showStudentLinks?: boolean;
 }) {
   const { filters, setFilters, page, setPage, scope } = useProgressView(
     academicYear,
@@ -293,6 +295,7 @@ export default function ProgressWorkspace({
         direction={filters.direction}
         onSort={changeSort}
         onClearFilters={clearFilters}
+        showStudentLinks={showStudentLinks}
       />
       <ProgressPagination page={page} totalPages={totalPages} rowCount={data.rows.length}
         totalMapped={data.counts.totalMapped} onPageChange={setPage} />
@@ -411,6 +414,7 @@ function ProgressResults({
   direction,
   onSort,
   onClearFilters,
+  showStudentLinks,
 }: {
   rows: Row[];
   loading: boolean;
@@ -422,6 +426,7 @@ function ProgressResults({
   direction: string;
   onSort: (key: string) => void;
   onClearFilters: () => void;
+  showStudentLinks: boolean;
 }) {
   if (!loading && rows.length === 0) {
     return <ProgressEmptyState hasMappings={hasMappings} filtered={filtered} onClearFilters={onClearFilters} />;
@@ -450,6 +455,7 @@ function ProgressResults({
           loading={loading}
           academicYear={academicYear}
           programId={programId}
+          showStudentLinks={showStudentLinks}
         />
       </tbody>
     </table>
@@ -477,11 +483,12 @@ function ProgressEmptyState({ hasMappings, filtered, onClearFilters }: {
   </div>;
 }
 
-function ProgressRows({ rows, loading, academicYear, programId }: {
+function ProgressRows({ rows, loading, academicYear, programId, showStudentLinks }: {
   rows: Row[];
   loading: boolean;
   academicYear: string;
   programId: number;
+  showStudentLinks: boolean;
 }) {
   if (loading && rows.length === 0) {
     return <tr><td colSpan={8} className="px-3 py-12 text-center text-text-muted"><span role="status">Loading mapped Students...</span></td></tr>;
@@ -492,14 +499,16 @@ function ProgressRows({ rows, loading, academicYear, programId }: {
       row={row}
       academicYear={academicYear}
       programId={programId}
+      showStudentLinks={showStudentLinks}
     />
   ));
 }
 
-function ProgressRow({ row, academicYear, programId }: {
+function ProgressRow({ row, academicYear, programId, showStudentLinks }: {
   row: Row;
   academicYear: string;
   programId: number;
+  showStudentLinks: boolean;
 }) {
   return <tr className="hover:bg-hover-bg/50">
     <td className="px-3 py-3"><p className="font-semibold text-text-primary">{row.studentName}</p><p className="font-mono text-xs text-text-muted">{row.externalStudentId || "No external ID"}</p></td>
@@ -509,11 +518,11 @@ function ProgressRow({ row, academicYear, programId }: {
     <td className="px-3 py-3"><PhaseCell row={row} /></td>
     <td className="px-3 py-3"><ProgressBadge progress={row.progress} /></td>
     <td className="px-3 py-3 font-mono"><CompletionTime value={row.completedAt} /></td>
-    <td className="px-3 py-3"><ProgressActions
+    <td className="px-3 py-3">{showStudentLinks && <ProgressActions
       row={row}
       academicYear={academicYear}
       programId={programId}
-    /></td>
+    />}</td>
   </tr>;
 }
 

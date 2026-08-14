@@ -70,6 +70,30 @@ describe("HolisticMentorshipAdminPage", () => {
     );
   });
 
+  it("renders scoped Program Manager progress access read-only from the helper result", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "pm@example.com" } });
+    mockRequireAccess.mockResolvedValue({
+      ok: true,
+      canEdit: false,
+      programId: 78,
+      programIds: [78],
+      permission: { role: "program_manager" },
+    });
+
+    render(await HolisticMentorshipAdminPage());
+
+    expect(mockWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "admin",
+        canEdit: false,
+        initialProgramId: 78,
+        availableProgramIds: [78],
+      }),
+      undefined,
+    );
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+  });
+
   it("does not link the dedicated Admin back to its redirecting dashboard", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
     mockRequireAccess.mockResolvedValue({

@@ -489,10 +489,10 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(scopedRole).toBe(403);
   });
 
-  test("former Mentor loses stale-link access and excluded roles receive server-side 403 on desktop and mobile", async ({
+  test("former Mentor and passcode users stay denied while scoped roles enter read-only progress", async ({
     formerMentorPage,
-    pmPage,
-    programAdminPage,
+    holisticPmPage,
+    holisticProgramAdminPage,
     passcodePage,
   }) => {
     const stale = await formerMentorPage.request.get(
@@ -501,22 +501,46 @@ test.describe("Holistic Mentorship release workflows", () => {
     );
     expect(stale.status()).toBe(404);
 
-    for (const page of [pmPage, programAdminPage, passcodePage]) {
-      const desktopResponse = await page.request.get(
-        "/api/holistic-mentorship/progress?academic_year=2026-2027"
+    for (const page of [holisticPmPage, holisticProgramAdminPage]) {
+      await page.goto("/dashboard");
+      const navigation = page.getByRole("link", { name: "Holistic Mentorship" });
+      await expect(navigation).toBeVisible();
+      await navigation.click();
+      await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
+      await expect(page.getByText("Read only", { exact: true })).toBeVisible();
+      await expect(page.getByRole("tab", { name: "Phase Setup" })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: /^Open / })).toHaveCount(0);
+
+      const progress = await page.request.get(
+        "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1"
       );
-      expect(desktopResponse.status()).toBe(403);
+      expect(progress.status()).toBe(200);
+      const mutation = await page.request.post("/api/holistic-mentorship/mappings", {
+        data: {
+          academic_year: "2026-2027",
+          program_id: 1,
+          school_code: fixture.schoolCode,
+          selections: [{ student_id: fixture.unassignedStudentId, expected_mapping_id: null }],
+        },
+      });
+      expect(mutation.status()).toBe(403);
+
       await page.setViewportSize({ width: 375, height: 800 });
-      const mobileResponse = await page.request.get(
-        "/api/holistic-mentorship/progress?academic_year=2026-2027"
-      );
-      expect(mobileResponse.status()).toBe(403);
-      await page.goto("/admin/holistic-mentorship");
-      await expect(page.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
+      await expectNoPageOverflow(page);
     }
 
-    await pmPage.goto("/admin/holistic-mentorship");
-    await expectNoPageOverflow(pmPage);
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 800 }]) {
+      await passcodePage.setViewportSize(viewport);
+      const response = await passcodePage.request.get(
+        "/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1"
+      );
+      expect(response.status()).toBe(403);
+      await passcodePage.goto("/admin/holistic-mentorship");
+      await expect(passcodePage.getByRole("heading", { name: "Holistic Mentorship" })).not.toBeVisible();
+    }
   });
 });
 

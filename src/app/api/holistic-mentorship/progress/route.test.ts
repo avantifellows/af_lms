@@ -96,6 +96,19 @@ describe("Holistic progress API", () => {
     );
   });
 
+  it("authorizes a requested School before reading scoped progress", async () => {
+    const response = await GET(new Request(
+      "http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&school_code=SCH001"
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "admin@example.com" } },
+      "program_read",
+      { programId: 1, schoolCode: "SCH001" },
+    );
+  });
+
   it("exports all matching rows with the same filters and sort", async () => {
     mockCsv.mockReturnValue("Academic Year\r\n2026-2027");
     const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=csv&direction=desc") as never);

@@ -36,15 +36,17 @@ export default function HolisticMentorshipWorkspace({
   schoolCode,
   programId,
   initialProgramId = PROGRAM_IDS.COE,
+  availableProgramIds = [...HOLISTIC_MENTORSHIP_PROGRAM_IDS],
   canEdit = true,
 }: {
   mode: WorkspaceMode;
   schoolCode?: string;
   programId?: number;
   initialProgramId?: number;
+  availableProgramIds?: number[];
   canEdit?: boolean;
 }) {
-  const workspaces = WORKSPACES.admin;
+  const workspaces = canEdit ? WORKSPACES.admin : WORKSPACES.admin.slice(0, 1);
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   const tabSetId = useId();
@@ -102,7 +104,7 @@ export default function HolisticMentorshipWorkspace({
                 setAcademicYears([CURRENT_ACADEMIC_YEAR]);
               }}
             >
-              {HOLISTIC_MENTORSHIP_PROGRAM_IDS.map((id) => (
+              {availableProgramIds.map((id) => (
                 <option key={id} value={id}>
                   {id} - {PROGRAM_ID_TO_LABEL[id]}
                 </option>
@@ -162,6 +164,7 @@ export default function HolisticMentorshipWorkspace({
             academicYear={academicYear}
             programId={selectedProgramId}
             onAcademicYears={updateAcademicYears}
+            showStudentLinks={canEdit}
           />
         )}
       </div>

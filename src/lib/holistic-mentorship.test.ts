@@ -71,8 +71,6 @@ describe("requireHolisticMentorshipAccess", () => {
     ["admin", true],
     ["holistic_mentorship_admin", true],
     ["teacher", false],
-    ["program_manager", false],
-    ["program_admin", false],
   ] as const)("applies Program-wide access for %s", async (role, allowed) => {
     mockQuery.mockResolvedValueOnce([permissionRow(role)]);
 
@@ -83,6 +81,91 @@ describe("requireHolisticMentorshipAccess", () => {
 
     expect(result.ok).toBe(allowed);
     if (!allowed) expect(result).toMatchObject({ status: 403 });
+  });
+
+  it.each(["program_manager", "program_admin"] as const)(
+    "permits a scoped %s to read only supported Programs with an accessible School",
+    async (role) => {
+    mockQuery
+      .mockResolvedValueOnce([permissionRow(role, {
+        level: 1,
+        school_codes: ["SCH001"],
+        program_ids: [1, 64],
+        user_id: null,
+      })])
+      .mockResolvedValueOnce([{ program_id: "1" }]);
+
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: `${role}@example.com` } },
+      "program_read",
+    )).resolves.toMatchObject({
+      ok: true,
+      canEdit: false,
+      programId: 1,
+      programIds: [1],
+    });
+
+    const [sql, params] = mockQuery.mock.calls[1];
+    expect(String(sql)).toContain("centre.program_id = ANY($1::bigint[])");
+    expect(String(sql)).toContain("school.code = ANY($2::text[])");
+    expect(params).toEqual([[1], ["SCH001"]]);
+  });
+
+  it("preserves scoped progress reads for a read-only Program Manager", async () => {
+    mockQuery
+      .mockResolvedValueOnce([permissionRow("program_manager", {
+        level: 1, school_codes: ["SCH001"], program_ids: [1], user_id: null, read_only: true,
+      })])
+      .mockResolvedValueOnce([{ program_id: 1 }]);
+
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "program_manager@example.com" } },
+      "program_read",
+      { programId: 1 },
+    )).resolves.toMatchObject({ ok: true, canEdit: false, programIds: [1] });
+  });
+
+  it("denies workspace entry when no supported-Program School is in resolved scope", async () => {
+    mockQuery
+      .mockResolvedValueOnce([permissionRow("program_admin", {
+        level: 1, school_codes: [], program_ids: [1], user_id: null,
+      })])
+      .mockResolvedValueOnce([]);
+
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "program_admin@example.com" } },
+      "program_read",
+    )).resolves.toEqual({ ok: false, status: 403, error: "Forbidden" });
+  });
+
+  it("denies a supported Program outside the scoped actor's assigned Programs", async () => {
+    mockQuery.mockResolvedValueOnce([permissionRow("program_manager", {
+      level: 1, school_codes: ["SCH001"], program_ids: [1], user_id: null,
+    })]);
+
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "program_manager@example.com" } },
+      "program_read",
+      { programId: 78 },
+    )).resolves.toEqual({ ok: false, status: 403, error: "Forbidden" });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies a Program Manager's direct progress request for an out-of-scope School", async () => {
+    mockQuery
+      .mockResolvedValueOnce([permissionRow("program_manager", {
+        level: 1, school_codes: ["SCH001"], program_ids: [1], user_id: null,
+      })])
+      .mockResolvedValueOnce([
+        { id: 20, code: "SCH999", name: "Other School", region: "South", program_id: 1 },
+      ]);
+
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "program_manager@example.com" } },
+      "program_read",
+      { programId: 1, schoolCode: "SCH999" },
+    )).resolves.toEqual({ ok: false, status: 403, error: "Forbidden" });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 
   it("denies a read-only Holistic Mentorship Admin write actions", async () => {

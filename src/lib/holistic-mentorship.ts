@@ -6,9 +6,11 @@ import {
 import { query } from "./db";
 import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
+import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
 import {
   canAccessSchoolSync,
   getFeatureAccess,
+  getProgramContextSync,
   getResolvedPermission,
   type UserPermission,
 } from "./permissions";
@@ -39,6 +41,7 @@ export type HolisticMentorshipAccessResult =
       canEdit: boolean;
       actorUserId?: number;
       programId?: number;
+      programIds?: number[];
       school?: HolisticMentorshipSchool;
     }
   | {
@@ -172,10 +175,41 @@ async function ownsActiveMapping(params: {
 
 function allowedActor(permission: UserPermission, action: HolisticMentorshipAction) {
   const programWide = permission.role === "admin" || permission.role === "holistic_mentorship_admin";
+  const scopedRead = permission.role === "program_manager" || permission.role === "program_admin";
   return {
     teacher: permission.role === "teacher" && TEACHER_ACTIONS.has(action),
-    program: programWide && PROGRAM_ACTIONS.has(action),
+    program: (programWide && PROGRAM_ACTIONS.has(action)) || (scopedRead && action === "program_read"),
   };
+}
+
+async function resolveScopedProgramIds(
+  permission: UserPermission,
+  requestedProgramId?: number,
+): Promise<number[]> {
+  const assignedPrograms = getProgramContextSync(permission).programIds;
+  const candidates = HOLISTIC_MENTORSHIP_PROGRAM_IDS.filter((programId) =>
+    assignedPrograms.includes(programId) &&
+    (requestedProgramId === undefined || requestedProgramId === programId)
+  );
+  if (candidates.length === 0) return [];
+
+  const schoolScope = buildHolisticSchoolScopePredicate(permission, {
+    startIndex: 2,
+    schoolCodeColumn: "school.code",
+    schoolRegionColumn: "school.region",
+  });
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
+  const rows = await query<{ program_id: number | string }>(
+    `SELECT DISTINCT centre.program_id
+     FROM centres centre
+     JOIN school ON school.id = centre.school_id
+     WHERE centre.program_id = ANY($1::bigint[])
+       AND centre.is_active IS TRUE
+       ${schoolScopeSql}
+     ORDER BY centre.program_id`,
+    [candidates, ...schoolScope.params],
+  );
+  return rows.map(({ program_id }) => Number(program_id));
 }
 
 async function resolveSchool(
@@ -240,6 +274,7 @@ function programAccess(params: {
   canEdit: boolean;
   action: HolisticMentorshipAction;
   programId?: number;
+  programIds?: number[];
   school?: HolisticMentorshipSchool;
 }): HolisticMentorshipAccessResult {
   const actorUserId = params.permission.user_id == null
@@ -252,6 +287,7 @@ function programAccess(params: {
     canEdit: params.canEdit,
     actorUserId,
     programId: params.school?.programId ?? params.programId,
+    programIds: params.programIds,
     school: params.school,
   };
 }
@@ -336,6 +372,13 @@ export async function requireHolisticMentorshipAccess(
     });
   }
 
+  const scopedProgramRead = action === "program_read" &&
+    (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
+  const programIds = scopedProgramRead
+    ? await resolveScopedProgramIds(actor.permission, requestedProgramId)
+    : [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
+  if (scopedProgramRead && programIds.length === 0) return denied(403, "Forbidden");
+
   if (MAPPING_REQUIRED_ACTIONS.has(action) && options.studentId) {
     await reconcileHolisticMappings({
       academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
@@ -350,7 +393,8 @@ export async function requireHolisticMentorshipAccess(
     permission: actor.permission,
     canEdit: actor.canEdit,
     action,
-    programId,
+    programId: programId ?? programIds[0],
+    programIds,
     school,
   });
 }

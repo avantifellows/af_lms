@@ -9,6 +9,7 @@ import {
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
 import StudentSearch from "@/components/StudentSearch";
@@ -262,12 +263,16 @@ function canViewCurriculumSummary(permission: DashboardPermission, context: Dash
   return supportedRole && context.hasCoEOrNodal && getFeatureAccess(permission, "curriculum").canView;
 }
 
-function dashboardFeatures(permission: DashboardPermission, context: DashboardProgramContext): DashboardFeatures {
+function dashboardFeatures(
+  permission: DashboardPermission,
+  context: DashboardProgramContext,
+  canViewHolisticAdmin: boolean,
+): DashboardFeatures {
   return {
     hasPMAccess: getFeatureAccess(permission, "pm_dashboard").canView,
     canViewVisitSummary: canViewVisitSummary(permission),
     showCurriculumSummary: canViewCurriculumSummary(permission, context),
-    canViewHolisticAdmin: permission.role === "admin" && getFeatureAccess(permission, "holistic_mentorship").canView,
+    canViewHolisticAdmin,
   };
 }
 
@@ -366,7 +371,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect("/admin/holistic-mentorship");
   }
 
-  const features = dashboardFeatures(permission, programContext);
+  const holisticAccess = await requireHolisticMentorshipAccess(
+    { user: { email } },
+    "program_read",
+  );
+  const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
   const data = await loadDashboardData({
     email,
     permission,
