@@ -1443,8 +1443,8 @@ function AdminNotesPanel({ phase }: { phase: OpenSelectedPhase }) {
     </p>
     {submitted
       ? <AdminSubmittedNotes notes={submitted} questions={phase.questions} />
-      : <AdminInfoAlert icon={EyeOff} title="Mentor draft is not visible">
-          This Phase is Pending. Admins can read Notes only after the Mentor submits them.
+      : <AdminInfoAlert icon={EyeOff} title="Pending">
+          Submitted Notes will appear here after the Mentor completes this Phase.
         </AdminInfoAlert>}
   </Card>;
 }

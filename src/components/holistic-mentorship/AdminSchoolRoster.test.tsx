@@ -10,7 +10,7 @@ const students = [
     externalStudentId: "S41",
     grade: 11,
     activePhaseId: 73,
-    activeNotesState: "draft" as const,
+    activeNotesState: null,
     ownership: { mappingId: 8, mentorUserId: 9, mentorName: "Anita Mentor" },
   },
   {
@@ -31,6 +31,8 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
     const table = within(screen.getByRole("region", { name: "School mentorship coverage" }));
+    expect(table.getByText("Pending")).toBeInTheDocument();
+    expect(table.queryByText("Draft saved")).not.toBeInTheDocument();
     expect(table.getByText("Unassigned")).toBeInTheDocument();
     expect(table.getByText("Not assigned")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Asha Rao" })).toHaveAttribute(

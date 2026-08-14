@@ -230,6 +230,7 @@ describe("Holistic Student Phase derivation", () => {
     const [historicalSql, historicalParams] = mockQuery.mock.calls[7];
     expect(String(historicalSql)).toContain("FROM holistic_mentorship_historical_notes notes");
     expect(historicalParams).toEqual([41]);
+    expect(mockQuery.mock.calls[5][1]).toEqual([41, [75], true, 10]);
     expect(result).toMatchObject({
       selectedPhase: {
         context: {
@@ -384,18 +385,14 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it("keeps draft content private from Admin read-only drill-down", async () => {
+  it("makes a draft indistinguishable from no Notes in Admin read-only drill-down", async () => {
     mockQuery
       .mockResolvedValueOnce([{ student_id: 41, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])
       .mockResolvedValueOnce([{ id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, state: "open", guidance_markdown: "Listen first." }])
       .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
       .mockResolvedValueOnce([{ phase_id: 73, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }])
       .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
-      .mockResolvedValueOnce([{
-        notes_id: 101, phase_id: 73, author_user_id: 9, state: "draft", revision: 2,
-        first_submitted_at: null, last_edited_at: "2026-07-02T00:00:00Z",
-        question_id: 91, question: "What helped?", question_position: 1, answer: "private draft",
-      }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{
         title: "Strengths", summary: "Patient problem solver", position: 1,
         regeneration_request_key: "request-1", regeneration_state: "failed",
@@ -415,9 +412,11 @@ describe("Holistic Student Phase derivation", () => {
 
     expect(result).toMatchObject({
       readOnly: true,
+      phases: [{ progress: "pending", draftSaved: false }],
       selectedPhase: {
         canEditNotes: false,
-        draftSaved: true,
+        draftSaved: false,
+        notesRevision: 0,
         context: {
           label: "Student Profile",
           items: [{ label: "Strengths", content: "Patient problem solver" }],
@@ -427,15 +426,15 @@ describe("Holistic Student Phase derivation", () => {
             errorCode: "no_questionnaire_submission",
           },
         },
-        notes: {
-          state: "draft",
-          revision: 2,
-          firstSubmittedAt: null,
-          lastEditedAt: "2026-07-02T00:00:00Z",
-        },
+        notes: null,
       },
     });
-    expect(result?.selectedPhase).not.toHaveProperty("notes.answers");
+    const notesCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM holistic_mentorship_post_session_notes notes")
+    );
+    expect(String(notesCall?.[0])).toContain("notes.state = 'submitted'");
+    expect(String(notesCall?.[0])).toContain("notes.author_user_id = $4");
+    expect(notesCall?.[1]).toEqual([41, [73], false, null]);
   });
 
   it("opens an ended prior-year Mapping read-only with submitted Notes for Admin", async () => {
@@ -498,18 +497,14 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it("shows an erased draft as a blank editable form to the replacement Mentor", async () => {
+  it("makes an erased draft indistinguishable from a new blank form to the replacement Mentor", async () => {
     mockQuery
       .mockResolvedValueOnce([{ student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])
       .mockResolvedValueOnce([{ id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 5, state: "open", guidance_markdown: "Listen first." }])
       .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
       .mockResolvedValueOnce([{ phase_id: 73, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }])
       .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
-      .mockResolvedValueOnce([{
-        notes_id: 101, phase_id: 73, author_user_id: 9, state: "draft", revision: 4,
-        first_submitted_at: null, last_edited_at: "2026-07-02T00:00:00Z",
-        question_id: null, question: null, question_position: null, answer: null,
-      }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
@@ -528,7 +523,7 @@ describe("Holistic Student Phase derivation", () => {
       readOnly: false,
       selectedPhase: {
         draftSaved: false,
-        notesRevision: 4,
+        notesRevision: 0,
         canEditNotes: true,
         notes: null,
       },

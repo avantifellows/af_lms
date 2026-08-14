@@ -181,7 +181,7 @@ describe("Holistic Post-Session Notes", () => {
     })).resolves.toEqual({ ok: false, status: 403, error: "Forbidden" });
   });
 
-  it("lets a replacement Mentor claim an erased empty draft", async () => {
+  it("lets a replacement Mentor claim an erased draft without receiving its revision", async () => {
     const client = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ mapping_id: "301", mentor_user_id: "10", phase_revision: 5, phase_state: "open" }] })
       .mockResolvedValueOnce({ rows: [{ id: "91" }] })
@@ -198,9 +198,13 @@ describe("Holistic Post-Session Notes", () => {
       schoolId: 4,
       academicYear: "2026-2027",
       actorUserId: 10,
-      expectedRevision: 4,
+      expectedRevision: 0,
       answers: [{ questionId: 91, answer: "A fresh start" }],
     })).resolves.toEqual({ ok: true, changed: true, revision: 5 });
+    const update = client.query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE holistic_mentorship_post_session_notes")
+    );
+    expect(update?.[1]).toEqual(["501", 4, "draft", 10]);
   });
 
   it("corrects the author's submitted Notes without another Submit", async () => {

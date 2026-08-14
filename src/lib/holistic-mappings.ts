@@ -473,7 +473,7 @@ export async function listHolisticAssignmentRoster(params: {
     programId: params.programId,
   });
   const schoolScope = buildHolisticSchoolScopePredicate(params.permission, {
-    startIndex: 6,
+    startIndex: 8,
     schoolCodeColumn: "scope_school.code",
     schoolRegionColumn: "scope_school.region",
   });
@@ -491,7 +491,12 @@ export async function listHolisticAssignmentRoster(params: {
             st.student_id AS external_student_id,
             roster_student.grade,
             active_phase.id AS active_phase_id,
-            active_notes.state AS active_notes_state,
+            CASE WHEN active_notes.state = 'submitted' THEN 'submitted'
+                 WHEN $6::boolean
+                  AND active_notes.state = 'draft'
+                  AND active_notes.author_user_id = $7
+                  AND mapping.mentor_user_id = $7 THEN 'draft'
+            END AS active_notes_state,
             mapping.id AS mapping_id,
             mapping.mentor_user_id,
             NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS mentor_name
@@ -530,6 +535,8 @@ export async function listHolisticAssignmentRoster(params: {
       params.programId,
       `%${(params.search ?? "").trim()}%`,
       params.grade ?? null,
+      params.permission.role === "teacher" && params.permission.read_only !== true,
+      params.permission.user_id ?? null,
       ...schoolScope.params,
     ]
   );

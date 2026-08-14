@@ -385,6 +385,7 @@ async function loadPhaseRelations(
   phaseIds: number[],
   academicYears: string[]
 ): Promise<PhaseRelations> {
+  const canReadOwnDraft = params.role === "teacher" && params.canEdit && params.actorUserId !== undefined;
   const [questionRows, transitionRows, mappingRows, notesRows, profileRows, historicalRows] = await Promise.all([
     query<QuestionRow>(
       `SELECT id, phase_id, text, position FROM holistic_mentorship_phase_questions
@@ -415,8 +416,9 @@ async function loadPhaseRelations(
        LEFT JOIN holistic_mentorship_post_session_answers answer ON answer.notes_id = notes.id
        LEFT JOIN holistic_mentorship_phase_questions question ON question.id = answer.question_id
        WHERE notes.student_id = $1 AND notes.phase_id = ANY($2::bigint[])
+         AND (notes.state = 'submitted' OR ($3::boolean AND notes.author_user_id = $4))
        ORDER BY notes.phase_id, question.position`,
-      [params.studentId, phaseIds]
+      [params.studentId, phaseIds, canReadOwnDraft, params.actorUserId ?? null]
     ),
     query<ProfileRow>(
       `SELECT summary.question_set_title AS title, summary.summary, summary.position,

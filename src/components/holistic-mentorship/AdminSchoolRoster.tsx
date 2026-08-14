@@ -11,11 +11,10 @@ import HolisticTutorialLink from "./HolisticTutorialLink";
 import StudentIdentity from "./StudentIdentity";
 
 type AssignmentFilter = "all" | "assigned" | "unassigned";
-type Progress = "completed" | "draft" | "pending" | "none" | "unassigned";
+type Progress = "completed" | "pending" | "none" | "unassigned";
 
 const PROGRESS_LABEL: Record<Progress, string> = {
   completed: "Completed",
-  draft: "Draft saved",
   pending: "Pending",
   none: "No active phase",
   unassigned: "Not assigned",
@@ -23,7 +22,6 @@ const PROGRESS_LABEL: Record<Progress, string> = {
 
 const PROGRESS_CLASSES: Record<Progress, string> = {
   completed: "bg-success-bg text-success",
-  draft: "bg-brand-blue-bg text-text-secondary",
   pending: "border border-border bg-bg-card-alt text-text-muted",
   none: "border border-border bg-bg-card-alt text-text-muted",
   unassigned: "border border-border bg-bg-card-alt text-text-muted",
@@ -33,7 +31,6 @@ function progress(student: Student): Progress {
   if (!student.ownership) return "unassigned";
   if (student.activePhaseId === null) return "none";
   if (student.activeNotesState === "submitted") return "completed";
-  if (student.activeNotesState === "draft") return "draft";
   return "pending";
 }
 

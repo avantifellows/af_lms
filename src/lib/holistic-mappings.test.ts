@@ -35,7 +35,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     );
   });
 
-  it("lists only the limited eligible School roster with active ownership facts", async () => {
+  it("reports an active draft as Pending without selecting its private state", async () => {
     mockQuery.mockResolvedValueOnce([
       {
         student_id: "41",
@@ -43,7 +43,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         external_student_id: "ST-41",
         grade: "11",
         active_phase_id: "73",
-        active_notes_state: "draft",
+        active_notes_state: null,
         mapping_id: "73",
         mentor_user_id: "9",
         mentor_name: "Nila Sen",
@@ -66,7 +66,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
         externalStudentId: "ST-41",
         grade: 11,
         activePhaseId: 73,
-        activeNotesState: "draft",
+        activeNotesState: null,
         ownership: { mappingId: 73, mentorUserId: 9, mentorName: "Nila Sen" },
       },
     ]);
@@ -83,9 +83,13 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(sql).toContain("ORDER BY phase.position DESC");
     expect(sql).toContain("mapping.school_id = $1");
     expect(sql).toContain("mapping.program_id = $3");
+    expect(sql).toContain("WHEN $6::boolean");
+    expect(sql).toContain("active_notes.author_user_id = $7");
+    expect(sql).toContain("mapping.mentor_user_id = $7");
+    expect(sql).not.toContain("active_notes.state AS active_notes_state");
     expect(sql).not.toMatch(/profile|historical|academic_mentorship/i);
     expect(sql).not.toContain("LIMIT 100");
-    expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11]);
+    expect(params).toEqual([4, "2026-2027", 1, "%asha%", 11, false, null]);
     expect(mockReconcile).toHaveBeenCalledWith({
       academicYear: "2026-2027",
       programId: 1,
@@ -111,8 +115,32 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     });
 
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(String(sql)).toContain("scope_school.code = ANY($6::text[])");
-    expect(params).toEqual([4, "2026-2027", 1, "%%", null, ["SCH001"]]);
+    expect(String(sql)).toContain("scope_school.code = ANY($8::text[])");
+    expect(params).toEqual([4, "2026-2027", 1, "%%", null, false, null, ["SCH001"]]);
+  });
+
+  it("returns a draft state only to its authoring current Mentor", async () => {
+    mockQuery.mockResolvedValueOnce([{
+      student_id: "41", name: "Asha Rao", external_student_id: "ST-41", grade: "11",
+      active_phase_id: "73", active_notes_state: "draft", mapping_id: "73",
+      mentor_user_id: "9", mentor_name: "Nila Sen",
+    }]);
+    const teacherPermission: UserPermission = {
+      email: "mentor@example.com", level: 1, role: "teacher", user_id: 9,
+      school_codes: ["SCH001"], program_ids: [1],
+    };
+
+    const result = await listHolisticAssignmentRoster({
+      permission: teacherPermission,
+      programId: 1,
+      schoolId: 4,
+      academicYear: "2026-2027",
+    });
+
+    expect(result[0]?.activeNotesState).toBe("draft");
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      4, "2026-2027", 1, "%%", null, true, 9, ["SCH001"],
+    ]);
   });
 
   it("claims multiple eligible Students atomically with deterministic audit metadata", async () => {

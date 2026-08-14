@@ -170,21 +170,15 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
-  it("hides Mentor draft answers from Admins while the Phase is Pending", () => {
-    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
-      notes: {
-        state: "draft",
-        revision: 2,
-        authorName: "Divya Menon",
-        firstSubmittedAt: null,
-        lastEditedAt: "2026-07-14T09:48:00Z",
-      },
-    })} />);
+  it("shows Admins the same Pending state whether or not a Mentor draft exists", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail()} />);
 
-    expect(screen.getByText("Mentor draft is not visible")).toBeInTheDocument();
-    expect(screen.getByText("This Phase is Pending. Admins can read Notes only after the Mentor submits them."))
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Submitted Notes will appear here after the Mentor completes this Phase."))
       .toBeInTheDocument();
+    expect(screen.queryByText(/Mentor draft/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Draft saved/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Divya Menon")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
