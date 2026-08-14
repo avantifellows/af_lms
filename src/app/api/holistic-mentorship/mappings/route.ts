@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
   const programId = value && holisticProgramId(value.program_id);
   if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
-      typeof value.takeover_confirmed !== "boolean" || !Array.isArray(value.selections) ||
+      !Array.isArray(value.selections) ||
       value.selections.length < 1 || value.selections.length > 50) {
     return holisticApiError("Invalid Mapping selection");
   }
@@ -96,11 +96,12 @@ export async function POST(request: NextRequest) {
 
   return mutationResponse(await assignHolisticMentees({
     actorUserId: access.actorUserId!,
+    auditActorUserId: access.permission.user_id ?? undefined,
+    actorEmail: access.email.trim().toLowerCase(),
     schoolId: access.school!.id,
     programId,
     academicYear: value.academic_year,
     selections: selections as Array<{ studentId: number; expectedMappingId: number | null }>,
-    takeoverConfirmed: value.takeover_confirmed,
   }));
 }
 
@@ -134,6 +135,8 @@ export async function DELETE(request: NextRequest) {
 
   return mutationResponse(await removeHolisticMentees({
     actorUserId: access.actorUserId!,
+    auditActorUserId: access.permission.user_id ?? undefined,
+    actorEmail: access.email.trim().toLowerCase(),
     schoolId: access.school!.id,
     programId,
     academicYear: value.academic_year,

@@ -87,8 +87,9 @@ export async function lockHolisticMentorMappingMutation(
 export async function eraseDraftHolisticNotes(
   client: PoolClient,
   studentIds: number[],
-  actorUserId: number,
-  reason: string
+  actorUserId: number | null,
+  reason: string,
+  actorEmail?: string,
 ): Promise<void> {
   if (studentIds.length === 0) return;
   await client.query(
@@ -109,10 +110,10 @@ export async function eraseDraftHolisticNotes(
        WHERE answers.notes_id = updated_notes.id
      )
      INSERT INTO holistic_mentorship_post_session_note_audits
-       (notes_id, actor_user_id, action, occurred_at, reason, inserted_at, updated_at)
-     SELECT id, $2, 'draft_erased_on_mapping_end', now(), $3, now(), now()
+       (notes_id, actor_user_id, actor_email, action, occurred_at, reason, inserted_at, updated_at)
+     SELECT id, $2, $3, 'draft_erased_on_mapping_end', now(), $4, now(), now()
      FROM updated_notes`,
-    [studentIds, actorUserId, reason]
+    [studentIds, actorUserId, actorEmail ?? null, reason]
   );
 }
 
@@ -218,14 +219,12 @@ function assertAssignmentsCurrent(
   selections: Array<{ studentId: number; expectedMappingId: number | null }>,
   activeByStudent: Map<number, ActiveMappingRow>,
   actorUserId: number,
-  takeoverConfirmed: boolean
 ) {
   for (const selection of selections) {
     assertAssignmentCurrent(
       selection,
       activeByStudent.get(selection.studentId),
       actorUserId,
-      takeoverConfirmed
     );
   }
 }
@@ -234,7 +233,6 @@ function assertAssignmentCurrent(
   selection: { studentId: number; expectedMappingId: number | null },
   current: ActiveMappingRow | undefined,
   actorUserId: number,
-  takeoverConfirmed: boolean
 ) {
   const currentId = current ? Number(current.id) : 0;
   const expectedId = selection.expectedMappingId ?? 0;
@@ -245,30 +243,7 @@ function assertAssignmentCurrent(
   if (Number(current.mentor_user_id) === actorUserId) {
     throw new MappingMutationError(409, "Student is already assigned to you");
   }
-  if (!takeoverConfirmed) {
-    throw new MappingMutationError(409, "Confirm takeover using the refreshed roster");
-  }
-}
-
-async function endMappingsForTakeover(
-  client: PoolClient,
-  active: ActiveMappingRow[],
-  actorUserId: number
-) {
-  if (active.length === 0) return;
-  await client.query(
-    `UPDATE holistic_mentorship_mentor_mentee_mappings
-     SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
-         end_reason = $3, updated_at = now()
-     WHERE id = ANY($4::bigint[])`,
-    [actorUserId, "af_lms_teacher", "teacher_takeover", active.map((row) => Number(row.id))]
-  );
-  await eraseDraftHolisticNotes(
-    client,
-    active.map((row) => Number(row.student_id)),
-    actorUserId,
-    "teacher_takeover"
-  );
+  throw new MappingMutationError(409, "Student is already assigned to another Mentor");
 }
 
 async function insertMappings(
@@ -276,24 +251,24 @@ async function insertMappings(
   params: {
     studentIds: number[];
     actorUserId: number;
+    auditActorUserId?: number;
+    actorEmail: string;
     schoolId: number;
     programId: number;
     academicYear: string;
-    activeByStudent: Map<number, ActiveMappingRow>;
   }
 ) {
   for (const studentId of params.studentIds) {
-    const source = params.activeByStudent.has(studentId)
-      ? "af_lms_teacher_takeover"
-      : "af_lms_teacher_claim";
     await client.query(
       `INSERT INTO holistic_mentorship_mentor_mentee_mappings
          (student_id, mentor_user_id, school_id, program_id, academic_year,
-          started_at, assigned_by_user_id, assignment_source, inserted_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), $6, $7, now(), now())
+          started_at, assigned_by_user_id, assigned_by_email, assignment_source,
+          inserted_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, now(), now())
        RETURNING id`,
       [studentId, params.actorUserId, params.schoolId, params.programId,
-        params.academicYear, params.actorUserId, source]
+        params.academicYear, params.auditActorUserId ?? null, params.actorEmail,
+        "af_lms_teacher_claim"]
     );
   }
 }
@@ -327,10 +302,8 @@ async function assignInTransaction(
     params.selections,
     active.byStudent,
     params.actorUserId,
-    params.takeoverConfirmed
   );
-  await endMappingsForTakeover(client, active.rows, params.actorUserId);
-  await insertMappings(client, { ...params, studentIds, activeByStudent: active.byStudent });
+  await insertMappings(client, { ...params, studentIds });
   return { ok: true, changed: studentIds.length };
 }
 
@@ -360,11 +333,12 @@ async function mutationConflict(
 
 export async function assignHolisticMentees(params: {
   actorUserId: number;
+  auditActorUserId?: number;
+  actorEmail: string;
   schoolId: number;
   programId: number;
   academicYear: string;
   selections: Array<{ studentId: number; expectedMappingId: number | null }>;
-  takeoverConfirmed: boolean;
 }): Promise<HolisticMappingMutationResult> {
   const studentIds = params.selections.map(({ studentId }) => studentId).sort((a, b) => a - b);
   await reconcileHolisticMappings({
@@ -417,17 +391,26 @@ async function removeInTransaction(
   const mappingIds = params.mappings.map(({ expectedMappingId }) => expectedMappingId);
   await client.query(
     `UPDATE holistic_mentorship_mentor_mentee_mappings
-     SET ended_at = now(), ended_by_user_id = $1, end_source = $2,
-         end_reason = $3, updated_at = now()
-     WHERE id = ANY($4::bigint[])`,
-    [params.actorUserId, "af_lms_teacher", "teacher_removal", mappingIds]
+     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
+         end_source = $3, end_reason = $4, updated_at = now()
+     WHERE id = ANY($5::bigint[])`,
+    [params.auditActorUserId ?? null, params.actorEmail, "af_lms_teacher",
+      "teacher_removal", mappingIds]
   );
-  await eraseDraftHolisticNotes(client, studentIds, params.actorUserId, "teacher_removal");
+  await eraseDraftHolisticNotes(
+    client,
+    studentIds,
+    params.auditActorUserId ?? null,
+    "teacher_removal",
+    params.actorEmail,
+  );
   return { ok: true, changed: mappingIds.length };
 }
 
 export async function removeHolisticMentees(params: {
   actorUserId: number;
+  auditActorUserId?: number;
+  actorEmail: string;
   schoolId: number;
   programId: number;
   academicYear: string;

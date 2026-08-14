@@ -29,6 +29,7 @@ const permission = {
   role: "teacher",
   school_codes: ["SCH001"],
   program_ids: [1],
+  user_id: 19,
 };
 
 describe("Holistic Mentorship Mapping API", () => {
@@ -37,6 +38,7 @@ describe("Holistic Mentorship Mapping API", () => {
     mockSession.mockResolvedValue({ user: { email: "teacher@example.com" } });
     mockAccess.mockResolvedValue({
       ok: true,
+      email: " Teacher@Example.com ",
       actorUserId: 9,
       school: { id: 4, code: "SCH001" },
       permission,
@@ -69,19 +71,15 @@ describe("Holistic Mentorship Mapping API", () => {
     });
   });
 
-  it("validates and applies an atomic claim or confirmed takeover selection", async () => {
-    mockAssign.mockResolvedValue({ ok: true, changed: 2 });
+  it("validates and applies an atomic unassigned-only claim with audit identity", async () => {
+    mockAssign.mockResolvedValue({ ok: true, changed: 1 });
     const response = await POST(
       new Request("http://localhost/api/holistic-mentorship/mappings", {
         method: "POST",
         body: JSON.stringify({
           school_code: "SCH001",
           academic_year: "2026-2027",
-          takeover_confirmed: true,
-          selections: [
-            { student_id: 41, expected_mapping_id: null },
-            { student_id: 42, expected_mapping_id: 74 },
-          ],
+          selections: [{ student_id: 41, expected_mapping_id: null }],
         }),
       }) as never
     );
@@ -94,15 +92,47 @@ describe("Holistic Mentorship Mapping API", () => {
     );
     expect(mockAssign).toHaveBeenCalledWith({
       actorUserId: 9,
+      auditActorUserId: 19,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       programId: 1,
       academicYear: "2026-2027",
-      takeoverConfirmed: true,
-      selections: [
-        { studentId: 41, expectedMappingId: null },
-        { studentId: 42, expectedMappingId: 74 },
-      ],
+      selections: [{ studentId: 41, expectedMappingId: null }],
     });
+  });
+
+  it("returns current ownership when an old takeover request names an active Mapping", async () => {
+    const ownership = [{
+      studentId: 42,
+      ownership: { mappingId: 74, mentorUserId: 8, mentorName: "Nila Sen" },
+    }];
+    mockAssign.mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "Student is already assigned to another Mentor",
+      ownership,
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          takeover_confirmed: true,
+          selections: [{ student_id: 42, expected_mapping_id: 74 }],
+        }),
+      }) as never
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Student is already assigned to another Mentor",
+      ownership,
+    });
+    expect(mockAssign).toHaveBeenCalledWith(expect.not.objectContaining({
+      takeoverConfirmed: expect.anything(),
+    }));
   });
 
   it("requires confirmation and current Mapping revisions for removal", async () => {
@@ -122,6 +152,8 @@ describe("Holistic Mentorship Mapping API", () => {
     expect(response.status).toBe(200);
     expect(mockRemove).toHaveBeenCalledWith({
       actorUserId: 9,
+      auditActorUserId: 19,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       programId: 1,
       academicYear: "2026-2027",
@@ -139,7 +171,6 @@ describe("Holistic Mentorship Mapping API", () => {
       ? {
           school_code: "SCH001",
           academic_year: "2025-2026",
-          takeover_confirmed: false,
           selections: [{ student_id: 41, expected_mapping_id: null }],
         }
       : method === "DELETE"

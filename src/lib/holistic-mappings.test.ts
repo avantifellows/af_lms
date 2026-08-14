@@ -161,13 +161,14 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       assignHolisticMentees({
       programId: 1,
         actorUserId: 9,
+        auditActorUserId: undefined,
+        actorEmail: "teacher@example.com",
         schoolId: 4,
         academicYear: "2026-2027",
         selections: [
           { studentId: 41, expectedMappingId: null },
           { studentId: 42, expectedMappingId: null },
         ],
-        takeoverConfirmed: false,
       })
     ).resolves.toEqual({ ok: true, changed: 2 });
 
@@ -187,7 +188,11 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       String(text).includes("INSERT INTO holistic_mentorship_mentor_mentee_mappings")
     );
     expect(inserts).toHaveLength(2);
-    expect(inserts[0][1]).toEqual([41, 9, 4, 1, "2026-2027", 9, "af_lms_teacher_claim"]);
+    expect(String(inserts[0][0])).toContain("assigned_by_email");
+    expect(String(inserts[0][0])).not.toContain("assignment_audit_reason");
+    expect(inserts[0][1]).toEqual([
+      41, 9, 4, 1, "2026-2027", null, "teacher@example.com", "af_lms_teacher_claim",
+    ]);
     const mappingLock = mockClientQuery.mock.calls.find(([text]) =>
       String(text).includes("FROM holistic_mentorship_mentor_mentee_mappings")
     );
@@ -218,6 +223,8 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       removeHolisticMentees({
       programId: 1,
         actorUserId: 9,
+        auditActorUserId: undefined,
+        actorEmail: "teacher@example.com",
         schoolId: 4,
         academicYear: "2026-2027",
         mappings: [
@@ -229,9 +236,12 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ).resolves.toEqual({ ok: true, changed: 2 });
 
     const update = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes("end_reason = $3")
+      String(sql).includes("ended_by_email")
     );
-    expect(update?.[1]).toEqual([9, "af_lms_teacher", "teacher_removal", [73, 74]]);
+    expect(String(update?.[0])).not.toContain("end_audit_reason");
+    expect(update?.[1]).toEqual([
+      null, "teacher@example.com", "af_lms_teacher", "teacher_removal", [73, 74],
+    ]);
     expect(mockClientQuery.mock.calls.some(([sql]) =>
       String(sql).includes("DELETE FROM holistic_mentorship_mentor_mentee_mappings")
     )).toBe(false);
@@ -240,9 +250,13 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     );
     expect(String(cleanup?.[0])).toContain("state = 'draft'");
     expect(String(cleanup?.[0])).toContain("FOR UPDATE");
+    expect(String(cleanup?.[0])).toContain("actor_email");
+    expect(cleanup?.[1]).toEqual([
+      [41, 42], null, "teacher@example.com", "teacher_removal",
+    ]);
   });
 
-  it("takes over only the exact confirmed current Mapping and records both lifecycle actions", async () => {
+  it("rejects an exact current Mapping with ownership and performs no takeover writes", async () => {
     mockClientQuery.mockImplementation((sql: unknown) => {
       const text = String(sql);
       if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
@@ -252,33 +266,36 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       }
       return { rows: [{ id: 81 }] };
     });
+    mockQuery.mockResolvedValueOnce([
+      { id: 73, student_id: 41, mentor_user_id: 8, mentor_name: "Nila Sen" },
+    ]);
 
     await expect(assignHolisticMentees({
       programId: 1,
       actorUserId: 9,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       academicYear: "2026-2027",
       selections: [{ studentId: 41, expectedMappingId: 73 }],
-      takeoverConfirmed: true,
-    })).resolves.toEqual({ ok: true, changed: 1 });
+    })).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Student is already assigned to another Mentor",
+      ownership: [{
+        studentId: 41,
+        ownership: { mappingId: 73, mentorUserId: 8, mentorName: "Nila Sen" },
+      }],
+    });
 
-    const end = mockClientQuery.mock.calls.find(([sql]) => String(sql).includes("end_reason = $3"));
-    expect(end?.[1]).toEqual([9, "af_lms_teacher", "teacher_takeover", [73]]);
-    const insert = mockClientQuery.mock.calls.find(([sql]) =>
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("UPDATE holistic_mentorship_mentor_mentee_mappings")
+    )).toBe(false);
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
       String(sql).includes("INSERT INTO holistic_mentorship_mentor_mentee_mappings")
-    );
-    expect(insert?.[1]).toEqual([41, 9, 4, 1, "2026-2027", 9, "af_lms_teacher_takeover"]);
-    const draftCleanup = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes("holistic_mentorship_post_session_answers")
-    );
-    expect(String(draftCleanup?.[0])).toContain(
-      "holistic_mentorship_post_session_note_audits"
-    );
-    expect(String(draftCleanup?.[0])).toContain("state = 'draft'");
-    expect(draftCleanup?.[1]).toEqual([[41], 9, "teacher_takeover"]);
+    )).toBe(false);
   });
 
-  it("requires a fresh takeover confirmation before ending another Mentor's Mapping", async () => {
+  it("rejects another Mentor's Mapping without ending or replacing it", async () => {
     mockClientQuery.mockImplementation((sql: unknown) => {
       const text = String(sql);
       if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
@@ -295,14 +312,14 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     await expect(assignHolisticMentees({
       programId: 1,
       actorUserId: 9,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       academicYear: "2026-2027",
       selections: [{ studentId: 41, expectedMappingId: 73 }],
-      takeoverConfirmed: false,
     })).resolves.toMatchObject({
       ok: false,
       status: 409,
-      error: "Confirm takeover using the refreshed roster",
+      error: "Student is already assigned to another Mentor",
     });
 
     expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("end_reason = $3"))).toBe(false);
@@ -324,6 +341,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     await expect(removeHolisticMentees({
       programId: 1,
       actorUserId: 9,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       academicYear: "2026-2027",
       mappings: [{ studentId: 41, expectedMappingId: 73 }],
@@ -355,13 +373,13 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     const result = await assignHolisticMentees({
       programId: 1,
       actorUserId: 9,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       academicYear: "2026-2027",
       selections: [
         { studentId: 41, expectedMappingId: null },
         { studentId: 42, expectedMappingId: null },
       ],
-      takeoverConfirmed: false,
     });
     expect(result).toEqual({
       ok: false,
@@ -381,10 +399,10 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     await expect(assignHolisticMentees({
       programId: 1,
       actorUserId: 9,
+      actorEmail: "teacher@example.com",
       schoolId: 4,
       academicYear: "2026-2027",
       selections: [{ studentId: 41, expectedMappingId: null }],
-      takeoverConfirmed: false,
     })).resolves.toEqual({
       ok: false,
       status: 409,

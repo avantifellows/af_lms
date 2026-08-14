@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
@@ -92,6 +92,146 @@ async function applyE2eMigrations(pool: Pool): Promise<void> {
   }
 }
 
+async function seedHolisticE2eRoster(
+  client: Pick<PoolClient, "query">
+): Promise<void> {
+  const schoolResult = await client.query<{ id: number }>(
+    `SELECT id FROM school WHERE code = $1 LIMIT 1`,
+    ["LMS75"]
+  );
+  if (schoolResult.rows.length === 0) {
+    throw new Error("Holistic E2E fixture School LMS75 is missing");
+  }
+  const schoolId = Number(schoolResult.rows[0].id);
+
+  await client.query(
+    `INSERT INTO centres (
+       name, school_id, stream_codes, program_id, is_physical, is_active,
+       inserted_at, updated_at
+     )
+     SELECT $1, $2, ARRAY['jee']::TEXT[], 1, true, true,
+            (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+     WHERE NOT EXISTS (
+       SELECT 1 FROM centres WHERE school_id = $2 AND program_id = 1 AND is_active IS TRUE
+     )`,
+    ["LMS75 Holistic E2E Centre", schoolId]
+  );
+
+  const schoolGroupResult = await client.query<{ id: number }>(
+    `WITH existing AS (
+       SELECT id FROM "group" WHERE type = 'school' AND child_id = $1 LIMIT 1
+     ), inserted AS (
+       INSERT INTO "group" (type, child_id, inserted_at, updated_at)
+       SELECT 'school', $1, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM existing)
+       RETURNING id
+     )
+     SELECT id FROM inserted UNION ALL SELECT id FROM existing LIMIT 1`,
+    [schoolId]
+  );
+  const schoolGroupId = Number(schoolGroupResult.rows[0].id);
+
+  const batchGroupResult = await client.query<{ id: number }>(
+    `WITH existing_batch AS (
+       SELECT id FROM batch WHERE batch_id = $1 LIMIT 1
+     ), inserted_batch AS (
+       INSERT INTO batch (name, batch_id, program_id, inserted_at, updated_at)
+       SELECT $2, $1, 1, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM existing_batch)
+       RETURNING id
+     ), fixture_batch AS (
+       SELECT id FROM inserted_batch UNION ALL SELECT id FROM existing_batch LIMIT 1
+     ), existing_group AS (
+       SELECT roster_group.id
+       FROM "group" roster_group
+       JOIN fixture_batch ON fixture_batch.id = roster_group.child_id
+       WHERE roster_group.type = 'batch'
+       LIMIT 1
+     ), inserted_group AS (
+       INSERT INTO "group" (type, child_id, inserted_at, updated_at)
+       SELECT 'batch', id, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       FROM fixture_batch
+       WHERE NOT EXISTS (SELECT 1 FROM existing_group)
+       RETURNING id
+     )
+     SELECT id FROM inserted_group UNION ALL SELECT id FROM existing_group LIMIT 1`,
+    ["E2E-HOLISTIC-COE", "Holistic E2E CoE Batch"]
+  );
+  const batchGroupId = Number(batchGroupResult.rows[0].id);
+
+  await client.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS e2e_holistic_student_id_unique_idx
+     ON student (student_id)
+     WHERE student_id LIKE 'E2E-HM-%'`
+  );
+
+  const students = [
+    { suffix: "11-A", firstName: "Holistic", lastName: "Eleven A", grade: 11 },
+    { suffix: "11-B", firstName: "Holistic", lastName: "Eleven B", grade: 11 },
+    { suffix: "11-C", firstName: "Holistic", lastName: "Eleven C", grade: 11 },
+    { suffix: "12-A", firstName: "Holistic", lastName: "Twelve A", grade: 12 },
+    { suffix: "12-B", firstName: "Holistic", lastName: "Twelve B", grade: 12 },
+    { suffix: "12-C", firstName: "Holistic", lastName: "Twelve C", grade: 12 },
+  ] as const;
+
+  for (const studentFixture of students) {
+    const email = `e2e-hm-student-${studentFixture.suffix.toLowerCase()}@test.local`;
+    const studentId = `E2E-HM-${studentFixture.suffix}`;
+    const userResult = await client.query<{ id: number }>(
+      `WITH existing AS (
+         SELECT id FROM "user" WHERE LOWER(email) = LOWER($1) LIMIT 1
+       ), inserted AS (
+         INSERT INTO "user" (email, first_name, last_name, role, inserted_at, updated_at)
+         SELECT $1, $2, $3, 'student', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+         WHERE NOT EXISTS (SELECT 1 FROM existing)
+         RETURNING id
+       )
+       SELECT id FROM inserted UNION ALL SELECT id FROM existing LIMIT 1`,
+      [email, studentFixture.firstName, studentFixture.lastName]
+    );
+    const userId = Number(userResult.rows[0].id);
+    const gradeResult = await client.query<{ id: number }>(
+      `SELECT id FROM grade WHERE number = $1 ORDER BY id LIMIT 1`,
+      [studentFixture.grade]
+    );
+    const gradeId = Number(gradeResult.rows[0].id);
+
+    await client.query(
+      `INSERT INTO student (student_id, user_id, grade_id, status, inserted_at, updated_at)
+       VALUES ($1, $2, $3, 'active', (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC'))
+       ON CONFLICT (student_id) WHERE student_id LIKE 'E2E-HM-%'
+       DO UPDATE SET user_id = EXCLUDED.user_id, grade_id = EXCLUDED.grade_id,
+                     status = 'active', updated_at = (NOW() AT TIME ZONE 'UTC')`,
+      [studentId, userId, gradeId]
+    );
+    await client.query(
+      `INSERT INTO group_user (group_id, user_id, inserted_at, updated_at)
+       SELECT fixture_group_id, $3, (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       FROM UNNEST(ARRAY[$1::BIGINT, $2::BIGINT]) AS fixture_group_id
+       WHERE NOT EXISTS (
+         SELECT 1 FROM group_user
+         WHERE group_id = fixture_group_id AND user_id = $3
+       )`,
+      [schoolGroupId, batchGroupId, userId]
+    );
+    await client.query(
+      `WITH updated AS (
+         UPDATE enrollment_record
+         SET academic_year = $3, is_current = true, updated_at = (NOW() AT TIME ZONE 'UTC')
+         WHERE user_id = $1 AND group_type = 'grade' AND group_id = $2
+         RETURNING id
+       )
+       INSERT INTO enrollment_record (
+         user_id, group_id, group_type, academic_year, is_current, inserted_at, updated_at
+       )
+       SELECT $1, $2, 'grade', $3, true,
+              (NOW() AT TIME ZONE 'UTC'), (NOW() AT TIME ZONE 'UTC')
+       WHERE NOT EXISTS (SELECT 1 FROM updated)`,
+      [userId, gradeId, CURRENT_ACADEMIC_YEAR]
+    );
+  }
+}
+
 /**
  * Drop and recreate the test database, load the dump, and insert test users.
  */
@@ -144,6 +284,7 @@ export async function resetDatabase(): Promise<void> {
     const client = await testPool.connect();
     try {
       await client.query("BEGIN");
+      await seedHolisticE2eRoster(client);
       await seedHolisticFixtures(client);
       await client.query("COMMIT");
     } catch (error) {
