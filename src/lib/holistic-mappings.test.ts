@@ -217,6 +217,32 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     const result = await listHolisticAssignmentRoster({
       permission: teacherPermission,
+      actorUserId: 9,
+      programId: 1,
+      schoolId: 4,
+      academicYear: "2026-2027",
+    });
+
+    expect(result[0]?.activeNotesState).toBe("draft");
+    expect(mockQuery.mock.calls[0][1]).toEqual([
+      4, "2026-2027", 1, "%%", null, true, 9, ["SCH001"],
+    ]);
+  });
+
+  it("returns a draft state to its read-only author using the resolved canonical Mentor ID", async () => {
+    mockQuery.mockResolvedValueOnce([{
+      student_id: "41", name: "Asha Rao", external_student_id: "ST-41", grade: "11",
+      active_phase_id: "73", active_notes_state: "draft", mapping_id: "73",
+      mentor_user_id: "9", mentor_name: "Nila Sen",
+    }]);
+    const teacherPermission: UserPermission = {
+      email: "MENTOR@example.com", level: 1, role: "teacher", user_id: null,
+      read_only: true, school_codes: ["SCH001"], program_ids: [1],
+    };
+
+    const result = await listHolisticAssignmentRoster({
+      permission: teacherPermission,
+      actorUserId: 9,
       programId: 1,
       schoolId: 4,
       academicYear: "2026-2027",

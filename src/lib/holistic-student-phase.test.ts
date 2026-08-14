@@ -633,14 +633,19 @@ describe("Holistic Student Phase derivation", () => {
     });
   });
 
-  it("keeps a read-only Teacher's Notes controls read-only", async () => {
+  it("shows a read-only current Mentor their own draft without enabling Notes controls", async () => {
     mockQuery
       .mockResolvedValueOnce([{ student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41", grade: 11, entry_grade: 11 }])
       .mockResolvedValueOnce([{ id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started", position: 1, revision: 5, state: "open", guidance_markdown: "Listen first." }])
       .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        notes_id: 101, phase_id: 73, author_user_id: 10, author_name: "Nila Sen",
+        state: "draft", revision: 2, first_submitted_at: null,
+        last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
+        question: "What helped?", question_position: 1, answer: "A weekly plan",
+      }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
@@ -657,7 +662,21 @@ describe("Holistic Student Phase derivation", () => {
 
     expect(result).toMatchObject({
       readOnly: true,
-      selectedPhase: { canEditNotes: false },
+      phases: [{ progress: "pending", draftSaved: true }],
+      selectedPhase: {
+        canEditNotes: false,
+        draftSaved: true,
+        notesRevision: 2,
+        notes: {
+          state: "draft",
+          lastEditedAt: "2026-07-06T00:00:00Z",
+          answers: [{ questionId: 91, question: "What helped?", answer: "A weekly plan" }],
+        },
+      },
     });
+    const notesCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM holistic_mentorship_post_session_notes notes")
+    );
+    expect(notesCall?.[1]).toEqual([41, [73], true, 10]);
   });
 });

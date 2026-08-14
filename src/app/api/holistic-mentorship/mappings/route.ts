@@ -141,6 +141,7 @@ export async function GET(request: NextRequest) {
     actorUserId: access.actorUserId,
     students: await listHolisticAssignmentRoster({
       permission: access.permission,
+      actorUserId: access.actorUserId,
       schoolId: access.school!.id,
       programId,
       academicYear,

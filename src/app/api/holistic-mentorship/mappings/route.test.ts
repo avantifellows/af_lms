@@ -69,11 +69,40 @@ describe("Holistic Mentorship Mapping API", () => {
     );
     expect(mockRoster).toHaveBeenCalledWith({
       permission,
+      actorUserId: 9,
       schoolId: 4,
       programId: 1,
       academicYear: "2026-2027",
       grade: 11,
       search: "asha",
+    });
+  });
+
+  it("uses the email-resolved canonical Mentor ID for a read-only permission-only Teacher roster", async () => {
+    const permissionOnlyTeacher = { ...permission, user_id: null, read_only: true };
+    mockAccess.mockResolvedValueOnce({
+      ok: true,
+      email: "mentor@example.com",
+      actorUserId: 9,
+      school: { id: 4, code: "SCH001" },
+      permission: permissionOnlyTeacher,
+      canEdit: false,
+    });
+    mockRoster.mockResolvedValue([]);
+
+    const response = await GET(new Request(
+      "http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027",
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(mockRoster).toHaveBeenCalledWith({
+      permission: permissionOnlyTeacher,
+      actorUserId: 9,
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      grade: null,
+      search: "",
     });
   });
 

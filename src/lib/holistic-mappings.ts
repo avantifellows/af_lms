@@ -756,6 +756,7 @@ export async function removeHolisticMentees(params: {
 
 export async function listHolisticAssignmentRoster(params: {
   permission: UserPermission;
+  actorUserId?: number;
   schoolId: number;
   programId: number;
   academicYear: string;
@@ -830,8 +831,8 @@ export async function listHolisticAssignmentRoster(params: {
       params.programId,
       `%${(params.search ?? "").trim()}%`,
       params.grade ?? null,
-      params.permission.role === "teacher" && params.permission.read_only !== true,
-      params.permission.user_id ?? null,
+      params.permission.role === "teacher" && params.actorUserId !== undefined,
+      params.actorUserId ?? null,
       ...schoolScope.params,
     ]
   );

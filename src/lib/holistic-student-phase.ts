@@ -421,7 +421,7 @@ async function loadPhaseRelations(
   phaseIds: number[],
   academicYears: string[]
 ): Promise<PhaseRelations> {
-  const canReadOwnDraft = params.role === "teacher" && params.canEdit && params.actorUserId !== undefined;
+  const canReadOwnDraft = params.role === "teacher" && params.actorUserId !== undefined;
   const [questionRows, transitionRows, mappingRows, notesRows, profileRows, historicalRows] = await Promise.all([
     query<QuestionRow>(
       `SELECT id, phase_id, text, position FROM holistic_mentorship_phase_questions
