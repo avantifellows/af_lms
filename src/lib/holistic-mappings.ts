@@ -1,4 +1,5 @@
 import { query, withTransaction } from "./db";
+import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
@@ -270,6 +271,104 @@ async function insertMappings(
         params.academicYear, params.auditActorUserId ?? null, params.actorEmail,
         "af_lms_teacher_claim"]
     );
+  }
+}
+
+async function assignAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof assignHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  await lockHolisticMentorMappingMutation(client, params.mentorUserId);
+  await lockEligibleStudents(client, {
+    schoolId: params.schoolId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    studentIds: [params.studentId],
+  });
+  const eligibleMentorUserId = await findEligibleHolisticMentorUserId({
+    client,
+    userId: params.mentorUserId,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  });
+  if (eligibleMentorUserId === null) {
+    throw new MappingMutationError(422, "Mentor is not eligible for this School and Program");
+  }
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  if (active.byStudent.has(params.studentId)) {
+    throw new MappingMutationError(409, "Student is already assigned");
+  }
+  await client.query(
+    `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+       (student_id, mentor_user_id, school_id, program_id, academic_year,
+        started_at, assigned_by_user_id, assigned_by_email, assignment_source,
+        assignment_audit_reason, inserted_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9, now(), now())
+     RETURNING id`,
+    [
+      params.studentId,
+      params.mentorUserId,
+      params.schoolId,
+      params.programId,
+      params.academicYear,
+      params.auditActorUserId ?? null,
+      params.actorEmail.trim().toLowerCase(),
+      "af_lms_admin_assign",
+      params.reason.trim(),
+    ],
+  );
+  return { ok: true, changed: 1 };
+}
+
+export async function assignHolisticMenteeAsAdmin(params: {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  mentorUserId: number;
+  expectedMappingId: null;
+  confirmed: boolean;
+  reason: string;
+}): Promise<HolisticMappingMutationResult> {
+  if (!params.confirmed) {
+    return { ok: false, status: 422, error: "Assignment confirmation is required" };
+  }
+  if (!params.reason.trim()) {
+    return { ok: false, status: 422, error: "Assignment reason is required" };
+  }
+  if (params.academicYear !== CURRENT_ACADEMIC_YEAR) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Admin Mapping assignments are limited to the current Academic Year",
+    };
+  }
+  await reconcileHolisticMappings({
+    academicYear: params.academicYear,
+    studentIds: [params.studentId],
+    programId: params.programId,
+  });
+  try {
+    return await withTransaction((client) => assignAdminMappingInTransaction(client, params));
+  } catch (error) {
+    if (error instanceof MappingMutationError || isUniqueViolation(error)) {
+      return mutationConflict(
+        error as MappingMutationError | { code?: unknown },
+        [params.studentId],
+        params.academicYear,
+        params.schoolId,
+        params.programId,
+      );
+    }
+    throw error;
   }
 }
 

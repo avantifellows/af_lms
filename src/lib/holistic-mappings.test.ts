@@ -6,6 +6,7 @@ vi.mock("./holistic-reconciliation", () => ({ reconcileHolisticMappings: vi.fn()
 import { query, withTransaction } from "./db";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
+  assignHolisticMenteeAsAdmin,
   assignHolisticMentees,
   listHolisticAssignmentRoster,
   removeHolisticMentees,
@@ -202,6 +203,152 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       programId: 1,
       studentIds: [41, 42],
     });
+  });
+
+  it("assigns an unassigned Student as Admin with locked eligibility and complete audit metadata", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const text = String(sql);
+      if (text.includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (text.includes("FROM teacher")) return { rows: [{ user_id: 27 }] };
+      if (text.includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [] };
+      }
+      if (text.includes("RETURNING id")) return { rows: [{ id: 81 }] };
+      return { rows: [] };
+    });
+
+    await expect(assignHolisticMenteeAsAdmin({
+      actorEmail: " Admin@Example.com ",
+      auditActorUserId: undefined,
+      schoolId: 4,
+      programId: 78,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: null,
+      confirmed: true,
+      reason: "Student requested a new mentor",
+    })).resolves.toEqual({ ok: true, changed: 1 });
+
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    expect(String(mockClientQuery.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
+    expect(mockClientQuery.mock.calls[0][1]).toEqual(["holistic_mentorship_mentor:27"]);
+    const studentLockIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("FOR UPDATE OF st"));
+    const ownershipLockIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("FROM holistic_mentorship_mentor_mentee_mappings"));
+    const insertIndex = mockClientQuery.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("INSERT INTO holistic_mentorship_mentor_mentee_mappings"));
+    expect(studentLockIndex).toBeGreaterThan(0);
+    expect(ownershipLockIndex).toBeGreaterThan(studentLockIndex);
+    expect(insertIndex).toBeGreaterThan(ownershipLockIndex);
+
+    const insert = mockClientQuery.mock.calls[insertIndex];
+    expect(String(insert[0])).toContain("assigned_by_email");
+    expect(String(insert[0])).toContain("assignment_audit_reason");
+    expect(insert[1]).toEqual([
+      41, 27, 4, 78, "2026-2027", null, "admin@example.com",
+      "af_lms_admin_assign", "Student requested a new mentor",
+    ]);
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      programId: 78,
+      studentIds: [41],
+    });
+  });
+
+  it.each([
+    [{ confirmed: false }, "Assignment confirmation is required"],
+    [{ reason: "   " }, "Assignment reason is required"],
+    [{ academicYear: "2025-2026" }, "Admin Mapping assignments are limited to the current Academic Year"],
+  ] as const)("rejects invalid Admin assignment before reconciliation", async (override, error) => {
+    await expect(assignHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: null,
+      confirmed: true,
+      reason: "Student request",
+      ...override,
+    })).resolves.toEqual({ ok: false, status: 422, error });
+    expect(mockReconcile).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns distinct errors for an ineligible Student and ineligible Mentor", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      if (String(sql).includes("FOR UPDATE OF st")) return { rows: [] };
+      return { rows: [] };
+    });
+    const base = {
+      actorEmail: "admin@example.com",
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: null as null,
+      confirmed: true,
+      reason: "Student request",
+    };
+    await expect(assignHolisticMenteeAsAdmin(base)).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "One or more Students are no longer eligible",
+    });
+
+    mockClientQuery.mockReset();
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      if (String(sql).includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (String(sql).includes("FROM teacher")) return { rows: [] };
+      return { rows: [] };
+    });
+    await expect(assignHolisticMenteeAsAdmin(base)).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "Mentor is not eligible for this School and Program",
+    });
+  });
+
+  it("returns refreshed ownership without an insert when Admin assign loses a race", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const text = String(sql);
+      if (text.includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (text.includes("FROM teacher")) return { rows: [{ user_id: 27 }] };
+      if (text.includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 73, student_id: 41, mentor_user_id: 8 }] };
+      }
+      return { rows: [] };
+    });
+    mockQuery.mockResolvedValueOnce([
+      { id: 73, student_id: 41, mentor_user_id: 8, mentor_name: "Nila Sen" },
+    ]);
+
+    await expect(assignHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: null,
+      confirmed: true,
+      reason: "Student request",
+    })).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Student is already assigned",
+      ownership: [{
+        studentId: 41,
+        ownership: { mappingId: 73, mentorUserId: 8, mentorName: "Nila Sen" },
+      }],
+    });
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("INSERT INTO holistic_mentorship_mentor_mentee_mappings")))
+      .toBe(false);
   });
 
   it("removes only confirmed actor-owned Mappings while retaining history", async () => {

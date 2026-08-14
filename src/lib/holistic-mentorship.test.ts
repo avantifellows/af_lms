@@ -135,6 +135,39 @@ describe("requireHolisticMentorshipAccess", () => {
     ).resolves.toMatchObject({ ok: false, status: 403 });
   });
 
+  it.each([
+    ["admin", false, true],
+    ["holistic_mentorship_admin", false, true],
+    ["teacher", false, false],
+    ["program_manager", false, false],
+    ["program_admin", false, false],
+    ["admin", true, false],
+    ["holistic_mentorship_admin", true, false],
+  ] as const)(
+    "applies Admin Mapping mutation access for %s (read_only=%s)",
+    async (role, readOnly, allowed) => {
+      mockQuery.mockResolvedValueOnce([permissionRow(role, { read_only: readOnly })]);
+
+      const result = await requireHolisticMentorshipAccess(
+        { user: { email: `${role}@example.com` } },
+        "admin_mapping_mutation",
+        { programId: 1 },
+      );
+
+      expect(result.ok).toBe(allowed);
+      if (!allowed) expect(result).toMatchObject({ status: 403 });
+    },
+  );
+
+  it("denies passcode users the Admin Mapping mutation action before data access", async () => {
+    await expect(requireHolisticMentorshipAccess(
+      { user: { email: "passcode@school.local" }, isPasscodeUser: true },
+      "admin_mapping_mutation",
+      { programId: 1 },
+    )).resolves.toMatchObject({ ok: false, status: 403 });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it("allows an active Teacher seat at a Program 1 School", async () => {
     mockTeacherScope();
     mockQuery

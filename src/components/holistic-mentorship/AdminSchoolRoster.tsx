@@ -2,9 +2,10 @@
 
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { Badge, Input, Select } from "@/components/ui";
+import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import type { HolisticAssignmentRosterStudent as Student } from "@/lib/holistic-mappings";
 import HolisticTutorialLink from "./HolisticTutorialLink";
@@ -12,6 +13,7 @@ import StudentIdentity from "./StudentIdentity";
 
 type AssignmentFilter = "all" | "assigned" | "unassigned";
 type Progress = "completed" | "pending" | "none" | "unassigned";
+type EligibleMentor = { userId: number; name: string; email: string | null };
 
 const PROGRESS_LABEL: Record<Progress, string> = {
   completed: "Completed",
@@ -65,10 +67,13 @@ function Summary({ students }: { students: Student[] }) {
   </div>;
 }
 
-function CoverageTable({ students, schoolCode, programId }: {
+function CoverageTable({ students, schoolCode, programId, canAssign, assignDisabled, onAssign }: {
   students: Student[];
   schoolCode: string;
   programId: number;
+  canAssign: boolean;
+  assignDisabled: boolean;
+  onAssign: (student: Student) => void;
 }) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
     <div role="region" aria-label="School mentorship coverage" tabIndex={0}
@@ -95,10 +100,14 @@ function CoverageTable({ students, schoolCode, programId }: {
               className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${PROGRESS_CLASSES[state]}`}>
               {PROGRESS_LABEL[state]}
             </span></td>
-            <td className="px-4 py-3">{href && <Link href={href} aria-label={`Open ${student.name}`}
-              title="Open Student" className="grid h-10 w-10 place-items-center rounded-lg text-text-muted hover:bg-hover-bg hover:text-accent">
-              <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
-            </Link>}</td>
+            <td className="px-4 py-3">{href
+              ? <Link href={href} aria-label={`Open ${student.name}`}
+                title="Open Student" className="grid h-10 w-10 place-items-center rounded-lg text-text-muted hover:bg-hover-bg hover:text-accent">
+                <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
+              </Link>
+              : canAssign && <Button type="button" size="sm" variant="secondary"
+                aria-label={`Assign ${student.name}`} disabled={assignDisabled}
+                onClick={() => onAssign(student)}>Assign</Button>}</td>
           </tr>;
         })}</tbody>
       </table>
@@ -140,27 +149,79 @@ export default function AdminSchoolRoster({
   students,
   schoolCode,
   programId = PROGRAM_IDS.COE,
+  academicYear = CURRENT_ACADEMIC_YEAR,
+  role,
+  canEdit = true,
+  mentors = [],
 }: {
   students: Student[];
   schoolCode: string;
   programId?: number;
+  academicYear?: string;
+  role?: string;
+  canEdit?: boolean;
+  mentors?: EligibleMentor[];
 }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [grade, setGrade] = useState("");
   const [assignment, setAssignment] = useState<AssignmentFilter>("all");
+  const [assigning, setAssigning] = useState<Student | null>(null);
+  const [mentorUserId, setMentorUserId] = useState("");
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const canAssign = (role === "admin" || role === "holistic_mentorship_admin") &&
+    academicYear === CURRENT_ACADEMIC_YEAR;
   const shown = useMemo(
     () => filterStudents(students, search, grade, assignment),
     [assignment, grade, search, students]
   );
 
+  const closeAssign = () => {
+    setAssigning(null);
+    setMentorUserId("");
+    setReason("");
+    setSubmitError("");
+  };
+  const submitAssign = async () => {
+    if (!assigning || !mentorUserId || !reason.trim() || !canEdit) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch("/api/holistic-mentorship/mappings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          program_id: programId,
+          academic_year: academicYear,
+          student_id: assigning.studentId,
+          mentor_user_id: Number(mentorUserId),
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: reason.trim(),
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Unable to assign Mentor");
+      closeAssign();
+      router.refresh();
+    } catch (problem) {
+      setSubmitError(problem instanceof Error ? problem.message : "Unable to assign Mentor");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return <section className="min-w-0 max-w-full space-y-5">
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">Holistic Mentorship</h2>
-        <Badge variant="info">Read-only</Badge>
+        <Badge variant="info">{canEdit ? "Mapping management" : "Read-only"}</Badge>
         <HolisticTutorialLink />
       </div>
-      <p className="mt-1 text-sm text-text-muted">School assignment coverage for {CURRENT_ACADEMIC_YEAR}</p>
+      <p className="mt-1 text-sm text-text-muted">School assignment coverage for {academicYear}</p>
     </div>
     <Summary students={students} />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_12rem]">
@@ -191,6 +252,9 @@ export default function AdminSchoolRoster({
       students={shown}
       schoolCode={schoolCode}
       programId={programId}
+      canAssign={canAssign}
+      assignDisabled={!canEdit}
+      onAssign={setAssigning}
     />
       : <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-bg-card p-8 text-center">
         <div><Users aria-hidden="true" className="mx-auto h-9 w-9 text-text-muted" />
@@ -198,5 +262,41 @@ export default function AdminSchoolRoster({
           <p className="text-sm text-text-muted">Change the search or filters.</p></div>
       </div>}
     <div className="sr-only" role="status">Showing {shown.length} of {students.length} Students</div>
+    <Modal open={assigning !== null} onClose={submitting ? undefined : closeAssign}
+      role="dialog" aria-modal="true" aria-labelledby="assign-mentor-title">
+      <div className="space-y-5 p-6">
+        <div>
+          <h3 id="assign-mentor-title" className="text-lg font-bold text-text-primary">
+            Assign Mentor to {assigning?.name}
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">This assignment is recorded in the audit history.</p>
+        </div>
+        <label className="block text-sm font-bold text-text-primary">
+          Mentor
+          <Select aria-label="Mentor" className="mt-1 w-full" value={mentorUserId}
+            onChange={(event) => setMentorUserId(event.target.value)}>
+            <option value="">Select an eligible Mentor</option>
+            {mentors.map((mentor) => <option key={mentor.userId} value={mentor.userId}>
+              {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
+            </option>)}
+          </Select>
+        </label>
+        <label className="block text-sm font-bold text-text-primary">
+          Audit reason
+          <textarea aria-label="Audit reason" value={reason} rows={4} maxLength={500}
+            onChange={(event) => setReason(event.target.value)}
+            className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+            placeholder="Why is this Mentor being assigned?" />
+        </label>
+        {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={closeAssign} disabled={submitting}>Cancel</Button>
+          <Button type="button" onClick={() => void submitAssign()}
+            disabled={submitting || !mentorUserId || !reason.trim()}>
+            {submitting ? "Assigning…" : "Assign Mentor"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   </section>;
 }

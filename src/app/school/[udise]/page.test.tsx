@@ -17,6 +17,7 @@ const {
   mockListAcademicMentorshipMappings,
   mockListAcademicMentorshipTeacherMentees,
   mockListHolisticAssignmentRoster,
+  mockListEligibleHolisticMentors,
   mockRequireHolisticMentorshipAccess,
   mockGetLmsSupportedProgramIds,
 } = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ const {
   mockListAcademicMentorshipMappings: vi.fn(),
   mockListAcademicMentorshipTeacherMentees: vi.fn(),
   mockListHolisticAssignmentRoster: vi.fn(),
+  mockListEligibleHolisticMentors: vi.fn(),
   mockRequireHolisticMentorshipAccess: vi.fn(),
   mockGetLmsSupportedProgramIds: vi.fn(),
 }));
@@ -79,6 +81,9 @@ vi.mock("@/lib/holistic-mentorship", () => ({
 }));
 vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockListHolisticAssignmentRoster,
+}));
+vi.mock("@/lib/holistic-mentor-eligibility", () => ({
+  listEligibleHolisticMentors: mockListEligibleHolisticMentors,
 }));
 vi.mock("next/link", () => ({
   __esModule: true,
@@ -351,6 +356,7 @@ describe("SchoolPage (server component)", () => {
     mockListAcademicMentorshipMappings.mockResolvedValue([]);
     mockListAcademicMentorshipTeacherMentees.mockResolvedValue([]);
     mockListHolisticAssignmentRoster.mockResolvedValue([]);
+    mockListEligibleHolisticMentors.mockResolvedValue([]);
     mockGetAcademicMentorshipActorUserId.mockResolvedValue(101);
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: false,
@@ -1569,23 +1575,71 @@ describe("SchoolPage (server component)", () => {
     });
   });
 
-  it("keeps the dedicated Admin out of non-Holistic School data", async () => {
+  it("wires eligible Mentors into writable Admin coverage assignments", async () => {
+    const { permission } = setupAdminDefaults({ id: "20", code: "SCH001" });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 78 },
+      actorUserId: 101,
+      canEdit: true,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 42,
+      name: "Ravi Shah",
+      externalStudentId: "S42",
+      grade: 12,
+      activePhaseId: 74,
+      activeNotesState: null,
+      ownership: null,
+    }]);
+    mockListEligibleHolisticMentors.mockResolvedValue([
+      { userId: 27, name: "Nila Mentor", email: "nila@example.com" },
+    ]);
+
+    await renderPage();
+
+    expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();
+    expect(mockListEligibleHolisticMentors).toHaveBeenCalledWith({
+      schoolId: 20,
+      programId: 78,
+    });
+  });
+
+  it("shows the dedicated Admin only Holistic School coverage without reading enrollment data", async () => {
+    const permission = makePermission({
+      email: "holistic@example.com",
+      level: 3,
+      role: "holistic_mentorship_admin",
+      program_ids: [1],
+    });
     mockGetServerSession.mockResolvedValue(
       googleSession({ user: { email: "holistic@example.com" } })
     );
     mockQuery.mockResolvedValueOnce([makeSchool()]);
-    mockGetUserPermission.mockResolvedValue(
-      makePermission({
-        email: "holistic@example.com",
-        level: 3,
-        role: "holistic_mentorship_admin",
-        program_ids: [1],
-      })
-    );
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockGetFeatureAccess.mockReturnValue(featureAccess(true, true));
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "70705", programId: 1 },
+      canEdit: true,
+    });
+    mockListHolisticAssignmentRoster.mockResolvedValue([{
+      studentId: 42,
+      name: "Ravi Shah",
+      externalStudentId: "S42",
+      grade: 12,
+      activePhaseId: 74,
+      activeNotesState: null,
+      ownership: null,
+    }]);
 
-    await expect(
-      SchoolPage({ params: Promise.resolve({ udise: "70705" }) })
-    ).rejects.toThrow("REDIRECT:/admin/holistic-mentorship");
+    await renderPage("70705");
+
+    expect(screen.getByTestId("tab-holistic_mentorship")).toBeInTheDocument();
+    expect(screen.queryByTestId("tab-enrollment")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();
     expect(mockProcessStudents).not.toHaveBeenCalled();
   });
 

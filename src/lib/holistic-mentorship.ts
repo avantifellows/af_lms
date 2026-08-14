@@ -16,6 +16,7 @@ import {
 export type HolisticMentorshipAction =
   | "roster_view"
   | "mapping_mutation"
+  | "admin_mapping_mutation"
   | "mapped_student_read"
   | "notes_draft"
   | "notes_submit"
@@ -66,6 +67,7 @@ const PROGRAM_ACTIONS = new Set<HolisticMentorshipAction>([
   "mapped_student_read",
   "phase_configure",
   "profile_regenerate",
+  "admin_mapping_mutation",
 ]);
 const TEACHER_ACTIONS = new Set<HolisticMentorshipAction>([
   "roster_view",

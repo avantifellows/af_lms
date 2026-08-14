@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSession, mockAccess, mockRoster, mockAssign, mockRemove } = vi.hoisted(
+const { mockSession, mockAccess, mockRoster, mockAssign, mockAdminAssign, mockRemove } = vi.hoisted(
   () => ({
     mockSession: vi.fn(),
     mockAccess: vi.fn(),
     mockRoster: vi.fn(),
     mockAssign: vi.fn(),
+    mockAdminAssign: vi.fn(),
     mockRemove: vi.fn(),
   })
 );
@@ -18,6 +19,7 @@ vi.mock("@/lib/holistic-mentorship", () => ({
 vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockRoster,
   assignHolisticMentees: mockAssign,
+  assignHolisticMenteeAsAdmin: mockAdminAssign,
   removeHolisticMentees: mockRemove,
 }));
 
@@ -98,6 +100,192 @@ describe("Holistic Mentorship Mapping API", () => {
       programId: 1,
       academicYear: "2026-2027",
       selections: [{ studentId: 41, expectedMappingId: null }],
+    });
+  });
+
+  it("accepts the scalar Admin assign contract with normalized audit identity", async () => {
+    mockAdminAssign.mockResolvedValue({ ok: true, changed: 1 });
+
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 78,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: "  Student requested a new mentor  ",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, changed: 1 });
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "teacher@example.com" } },
+      "admin_mapping_mutation",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+    expect(mockAdminAssign).toHaveBeenCalledWith({
+      actorEmail: "teacher@example.com",
+      auditActorUserId: 19,
+      schoolId: 4,
+      programId: 78,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: null,
+      confirmed: true,
+      reason: "Student requested a new mentor",
+    });
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ confirmed: false }, "Assignment confirmation is required"],
+    [{ reason: "   " }, "Assignment reason is required"],
+    [{ academic_year: "2025-2026" }, "Admin Mapping assignments are limited to the current Academic Year"],
+    [{ expected_mapping_id: 73 }, "Expected Mapping must be unassigned"],
+  ] as const)("returns a client-actionable Admin assign validation error", async (override, error) => {
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: "Student request",
+          ...override,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockAdminAssign).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{}, "Program is required"],
+    [{ program_id: 999 }, "Invalid Program"],
+  ])("requires one explicit unambiguous Program for Admin assign", async (program, error) => {
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: "Student request",
+          ...program,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns refreshed ownership when Admin assign loses an ownership race", async () => {
+    const ownership = [{
+      studentId: 41,
+      ownership: { mappingId: 73, mentorUserId: 8, mentorName: "Nila Sen" },
+    }];
+    mockAdminAssign.mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "Student is already assigned",
+      ownership,
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: "Student request",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Student is already assigned",
+      ownership,
+    });
+  });
+
+  it("rejects an ambiguous School/Program resolution before assignment", async () => {
+    mockAccess.mockResolvedValueOnce({ ok: false, status: 404, error: "School not found" });
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "MULTI001",
+          program_id: 78,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: "Student request",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "School not found" });
+    expect(mockAdminAssign).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["apm", 31],
+    ["pm", 32],
+    ["spm", 33],
+    ["ph", 34],
+  ])("surfaces the ineligible %s seat-role error", async (_seatRole, mentorUserId) => {
+    mockAdminAssign.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      error: "Mentor is not eligible for this School and Program",
+    });
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: mentorUserId,
+          expected_mapping_id: null,
+          confirmed: true,
+          reason: "Student request",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Mentor is not eligible for this School and Program",
     });
   });
 

@@ -48,6 +48,7 @@ import {
   type HolisticMentorshipSession,
 } from "@/lib/holistic-mentorship";
 import { listHolisticAssignmentRoster } from "@/lib/holistic-mappings";
+import { listEligibleHolisticMentors } from "@/lib/holistic-mentor-eligibility";
 import { type ReactNode } from "react";
 
 interface School {
@@ -389,12 +390,6 @@ function getProgramAccessMessage(
   );
 }
 
-function redirectHolisticMentorshipAdmin(permission: UserPermission | null): void {
-  if (permission?.role === "holistic_mentorship_admin") {
-    redirect("/admin/holistic-mentorship");
-  }
-}
-
 function getSchoolNavigation(
   session: Session,
   permission: UserPermission | null
@@ -622,15 +617,28 @@ async function buildHolisticMentorshipContent({
       />
     );
   }
-  return <AdminSchoolRoster
-    schoolCode={schoolCode}
-    programId={holisticAccess.school!.programId}
-    students={await listHolisticAssignmentRoster({
+  const [students, mentors] = await Promise.all([
+    listHolisticAssignmentRoster({
       permission: holisticAccess.permission,
       schoolId: holisticAccess.school!.id,
       programId: holisticAccess.school!.programId,
       academicYear: CURRENT_ACADEMIC_YEAR,
-    })}
+    }),
+    holisticAccess.canEdit
+      ? listEligibleHolisticMentors({
+          schoolId: holisticAccess.school!.id,
+          programId: holisticAccess.school!.programId,
+        })
+      : Promise.resolve([]),
+  ]);
+  return <AdminSchoolRoster
+    schoolCode={schoolCode}
+    programId={holisticAccess.school!.programId}
+    academicYear={CURRENT_ACADEMIC_YEAR}
+    role={permission?.role}
+    canEdit={holisticAccess.canEdit}
+    students={students}
+    mentors={mentors}
   />;
 }
 
@@ -786,7 +794,25 @@ export default async function SchoolPage({ params }: PageProps) {
   const permission = await resolveSchoolPermission(session);
   const identityAccessMessage = getSchoolIdentityAccessMessage(session, permission, school);
   if (identityAccessMessage) return identityAccessMessage;
-  redirectHolisticMentorshipAdmin(permission);
+  if (permission?.role === "holistic_mentorship_admin") {
+    const holisticContent = await buildHolisticMentorshipContent({
+      session,
+      permission,
+      schoolCode: school.code,
+      access: getFeatureAccess(permission, "holistic_mentorship"),
+    });
+    if (!holisticContent) redirect("/admin/holistic-mentorship");
+    return <SchoolPageLayout
+      school={school}
+      tabs={[{
+        id: "holistic_mentorship",
+        label: "Holistic Mentorship",
+        content: holisticContent,
+      }]}
+      backHref="/admin/holistic-mentorship"
+      userEmail={session.user?.email ?? undefined}
+    />;
+  }
 
   const programContext = getProgramContextSync(permission);
   const programAccessMessage = getProgramAccessMessage(session, programContext);
