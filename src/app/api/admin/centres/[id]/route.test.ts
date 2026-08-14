@@ -61,7 +61,7 @@ describe("PATCH /api/admin/centres/[id]", () => {
 
   it("returns controlled schema errors without raw schema details", async () => {
     mockQuery.mockResolvedValueOnce([
-      { table_name: "centres", column_name: "stream_codes" },
+      { table_name: "centres", column_name: "program_id" },
     ]);
 
     const res = await PATCH(
@@ -94,7 +94,6 @@ describe("PATCH /api/admin/centres/[id]", () => {
       sub_category_code: null,
       sub_category_label: null,
       sub_category_is_active: null,
-      stream_codes: [],
       stream_options: [],
       is_physical: false,
       is_active: true,

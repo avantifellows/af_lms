@@ -6,9 +6,7 @@ import {
   getCurriculumConfigChapterOptions,
   requireCurriculumConfigAdmin,
 } from "@/lib/curriculum-config";
-import type { ExamTrack } from "@/types/curriculum";
-
-const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+import { isExamTrack } from "@/lib/exam-tracks";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -19,7 +17,7 @@ export async function GET(request: NextRequest) {
   }
 
   const examTrack = request.nextUrl.searchParams.get("exam_track");
-  if (!EXAM_TRACKS.includes(examTrack as ExamTrack)) {
+  if (!isExamTrack(examTrack)) {
     return NextResponse.json(
       {
         error: "Invalid chapter option request",
@@ -30,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   const params = {
-    examTrack: examTrack as ExamTrack,
+    examTrack,
     grade: positiveInteger(request.nextUrl.searchParams.get("grade")),
     subject: request.nextUrl.searchParams.get("subject")?.trim() || null,
     search: request.nextUrl.searchParams.get("search")?.trim() ?? "",

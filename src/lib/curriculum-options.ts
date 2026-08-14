@@ -1,5 +1,8 @@
 import { compareCurriculumCodes } from "./curriculum-code-sort";
+import { EXAM_TRACKS, formatExamTrack, isExamTrack } from "./exam-tracks";
 import { query } from "./db";
+import { resolveActivePhysicalCentre } from "./centre-resolver";
+import { GRADE_IDS } from "@/types/curriculum";
 import {
   PHYSICAL_CENTRE_PROGRAM_IDS,
   canAccessSchoolSync,
@@ -16,18 +19,17 @@ import type {
   Topic,
 } from "@/types/curriculum";
 
-export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet", "cet"];
 // Curriculum applies to every physical-centre program (all non-NVS programs),
 // not just JNV CoE/Nodal — otherwise a Punjab/EMRS/RGNV teacher's programs
 // intersect to empty and their curriculum tab loads blank.
 const CURRICULUM_PROGRAM_IDS: number[] = PHYSICAL_CENTRE_PROGRAM_IDS;
 const SUBJECT_ORDER: SubjectName[] = ["Physics", "Chemistry", "Maths", "Biology"];
-const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
+const EXAM_TRACK_CURRICULUM_IDS = {
   jee_main: 1,
   jee_advanced: 9,
   neet: 2,
-  cet: 10,
-};
+} as const satisfies Partial<Record<ExamTrack, number>>;
+type ContentExamTrack = keyof typeof EXAM_TRACK_CURRICULUM_IDS;
 interface SchoolScopeRow {
   code: string;
   region: string | null;
@@ -44,6 +46,13 @@ interface ConfigScopeRow {
   subject_id: number;
   subject: unknown;
 }
+
+interface CentreExamTrackRow {
+  exam_track: ExamTrack;
+  grade: number;
+}
+
+type HistoricalLogScopeRow = ConfigScopeRow;
 
 interface ChapterScopeRow {
   chapter_id: number;
@@ -110,36 +119,48 @@ function normalizeSubjectName(value: unknown): SubjectName {
   return subject === "Mathematics" ? "Maths" : (subject as SubjectName);
 }
 
-export function isExamTrack(value: string): value is ExamTrack {
-  return EXAM_TRACKS.includes(value as ExamTrack);
-}
-
-export function isGradeNumber(value: number): value is GradeNumber {
+function isGradeNumber(value: number): value is GradeNumber {
   return value === 11 || value === 12;
 }
 
-export function isSubjectName(value: string): value is SubjectName {
+function isSubjectName(value: string): value is SubjectName {
   return SUBJECT_ORDER.includes(value as SubjectName);
 }
 
-export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
-  return EXAM_TRACK_CURRICULUM_IDS[examTrack];
+export function validateCurriculumSelection(params: {
+  examTrack: string;
+  grade: number;
+  subject: string;
+}):
+  | { ok: true; examTrack: ExamTrack; grade: GradeNumber; subject: SubjectName }
+  | CurriculumValidationFailure {
+  if (!isExamTrack(params.examTrack)) {
+    return { ok: false, status: 422, error: "Invalid Exam Track" };
+  }
+  if (!isGradeNumber(params.grade)) {
+    return { ok: false, status: 422, error: "Grade must be 11 or 12" };
+  }
+  if (!isSubjectName(params.subject)) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Subject must be Physics, Chemistry, Maths, or Biology",
+    };
+  }
+  return {
+    ok: true,
+    examTrack: params.examTrack,
+    grade: params.grade,
+    subject: params.subject,
+  };
 }
 
-// The batch stream (as produced by parseBatchStream: "engineering" | "medical") each exam
-// track targets. Used to reject mismatched pairings (e.g. a NEET test on an engineering
-// batch), which would otherwise put a wrong-subject test live for those students.
-// CET papers are PCM/PCB/PCMB, so the track spans both streams. Empty string
-// skips the stream-match guard rather than rejecting half the valid pairings.
-const EXAM_TRACK_STREAMS: Record<ExamTrack, string> = {
-  jee_main: "engineering",
-  jee_advanced: "engineering",
-  neet: "medical",
-  cet: "",
-};
-
-export function streamForExamTrack(examTrack: ExamTrack): string {
-  return EXAM_TRACK_STREAMS[examTrack];
+export function curriculumIdForExamTrack(examTrack: ContentExamTrack): number;
+export function curriculumIdForExamTrack(examTrack: ExamTrack): number | null;
+export function curriculumIdForExamTrack(examTrack: ExamTrack): number | null {
+  return examTrack in EXAM_TRACK_CURRICULUM_IDS
+    ? EXAM_TRACK_CURRICULUM_IDS[examTrack as ContentExamTrack]
+    : null;
 }
 
 // CMS grade id from the grade table (grade number -> id). Both CMS routes resolve it via
@@ -164,7 +185,27 @@ function sortByCurriculumOrder<T extends { examTrack: ExamTrack; grade: number; 
   });
 }
 
-export async function resolveCurriculumProgramScope(
+function mapGradeSubjectRows(rows: ConfigScopeRow[]) {
+  return sortByCurriculumOrder(
+    rows
+      .map((row) => ({
+        examTrack: row.exam_track,
+        grade: row.grade as GradeNumber,
+        gradeId: Number(row.grade_id),
+        subject: normalizeSubjectName(row.subject),
+        subjectId: Number(row.subject_id),
+      }))
+      .filter(
+        (row) =>
+          isExamTrack(row.examTrack) &&
+          isGradeNumber(row.grade) &&
+          isSubjectName(row.subject)
+      )
+  );
+}
+
+// fallow-ignore-next-line complexity
+async function resolveCurriculumProgramScope(
   schoolCode: string,
   permission: UserPermission
 ): Promise<ProgramScopeResult> {
@@ -240,6 +281,19 @@ export async function resolveCurriculumProgramScope(
   };
 }
 
+export async function requireCurriculumProgramAccess(params: {
+  schoolCode: string;
+  programId: number;
+  permission: UserPermission;
+}): Promise<{ ok: true } | ScopeFailure> {
+  const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
+  if (!scope.ok) return scope;
+  return scope.allowedProgramIds.includes(params.programId)
+    ? { ok: true }
+    : { ok: false, status: 403, error: "Forbidden" };
+}
+
+// fallow-ignore-next-line complexity
 export async function getCurriculumOptions(params: {
   schoolCode: string;
   programIdOverride?: number | null;
@@ -253,7 +307,9 @@ export async function getCurriculumOptions(params: {
       ok: true,
       programs: [],
       examTracks: [],
+      centreExamTracks: [],
       gradeSubjects: [],
+      configurationError: null,
       defaults: {
         programId: null,
         examTrack: null,
@@ -264,6 +320,47 @@ export async function getCurriculumOptions(params: {
       },
     };
   }
+
+  const overrideProgramId =
+    params.programIdOverride != null &&
+    scope.allowedProgramIds.includes(params.programIdOverride)
+      ? params.programIdOverride
+      : null;
+  const selectedProgramId =
+    overrideProgramId ?? scope.preferredProgramId ?? scope.programs[0]?.id ?? null;
+  const centre = await resolveActivePhysicalCentre({
+    schoolCode: params.schoolCode,
+    programId: selectedProgramId as number,
+  });
+
+  if (!centre.ok) {
+    return {
+      ok: true,
+      programs: scope.programs,
+      examTracks: [],
+      centreExamTracks: [],
+      gradeSubjects: [],
+      configurationError: centre.error,
+      defaults: {
+        programId: selectedProgramId,
+        examTrack: null,
+        grade: 11,
+        gradeId: GRADE_IDS[11],
+        subject: null,
+        subjectId: null,
+      },
+    };
+  }
+
+  const mappedRows = await query<CentreExamTrackRow>(
+    `SELECT mapping.exam_track_code AS exam_track, grade.number AS grade
+     FROM centre_exam_tracks mapping
+     JOIN grade ON grade.id = mapping.grade_id
+     WHERE mapping.centre_id = $1
+       AND grade.number = ANY($2::int[])
+     ORDER BY grade.number, mapping.exam_track_code`,
+    [centre.centre.id, [11, 12]]
+  );
 
   const configRows = await query<ConfigScopeRow>(
     `SELECT DISTINCT
@@ -278,43 +375,106 @@ export async function getCurriculumOptions(params: {
      JOIN subject s ON s.id = ch.subject_id
      WHERE cfg.is_in_syllabus = true`,
   );
-
-  const gradeSubjects = sortByCurriculumOrder(
-    configRows
-      .map((row) => ({
-        examTrack: row.exam_track,
-        grade: row.grade as GradeNumber,
-        gradeId: Number(row.grade_id),
-        subject: normalizeSubjectName(row.subject),
-        subjectId: Number(row.subject_id),
-      }))
-      .filter(
-        (row) =>
-          isExamTrack(row.examTrack) &&
-          isGradeNumber(row.grade) &&
-          isSubjectName(row.subject)
-      )
+  const historicalLogRows = await query<HistoricalLogScopeRow>(
+    `SELECT DISTINCT
+       logs.exam_track,
+       grade.id AS grade_id,
+       grade.number AS grade,
+       subject.id AS subject_id,
+       subject.name AS subject
+     FROM lms_curriculum_logs logs
+     JOIN grade ON grade.id = logs.grade_id
+     JOIN subject ON subject.id = logs.subject_id
+     WHERE logs.school_code = $1
+       AND logs.program_id = $2
+       AND logs.deleted_at IS NULL`,
+    [params.schoolCode, selectedProgramId]
   );
 
-  const configuredTracks = new Set(gradeSubjects.map((row) => row.examTrack));
-  const examTracks = EXAM_TRACKS.filter((track) => configuredTracks.has(track));
-  const firstGradeSubject = gradeSubjects[0] ?? null;
-  const overrideProgramId =
-    params.programIdOverride != null &&
-    scope.allowedProgramIds.includes(params.programIdOverride)
-      ? params.programIdOverride
-      : null;
+  const mappedKeys = new Set(
+    mappedRows
+      .filter((row) => isExamTrack(row.exam_track) && isGradeNumber(row.grade))
+      .map((row) => `${row.exam_track}:${row.grade}`)
+  );
+  const allGradeSubjects = mapGradeSubjectRows(configRows);
+  const mappedGradeSubjects = allGradeSubjects.filter((row) =>
+    mappedKeys.has(`${row.examTrack}:${row.grade}`)
+  );
+  const configuredKeys = new Set(
+    allGradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
+  );
+  const historicalGradeSubjects = mapGradeSubjectRows(historicalLogRows);
+  const gradeSubjects = sortByCurriculumOrder(
+    [...mappedGradeSubjects, ...historicalGradeSubjects].filter(
+      (row, index, rows) =>
+        rows.findIndex(
+          (candidate) =>
+            candidate.examTrack === row.examTrack &&
+            candidate.grade === row.grade &&
+            candidate.subjectId === row.subjectId
+        ) === index
+    )
+  );
+  const historicalKeys = new Set(
+    historicalGradeSubjects.map((row) => `${row.examTrack}:${row.grade}`)
+  );
+  const centreExamTracks = [...new Set([...mappedKeys, ...historicalKeys])]
+    .map((key) => {
+      const [examTrack, rawGrade] = key.split(":");
+      return { examTrack, grade: Number(rawGrade) };
+    })
+    .filter(
+      (row): row is { examTrack: ExamTrack; grade: GradeNumber } =>
+        isExamTrack(row.examTrack) && isGradeNumber(row.grade)
+    )
+    .map((row) => ({
+      examTrack: row.examTrack,
+      grade: row.grade,
+      hasCurriculumConfig: configuredKeys.has(`${row.examTrack}:${row.grade}`),
+      isMapped: mappedKeys.has(`${row.examTrack}:${row.grade}`),
+      hasHistoricalLogs: historicalKeys.has(`${row.examTrack}:${row.grade}`),
+    }))
+    .sort((a, b) =>
+      a.grade === b.grade
+        ? Number(b.isMapped) - Number(a.isMapped) ||
+          EXAM_TRACKS.indexOf(a.examTrack) - EXAM_TRACKS.indexOf(b.examTrack)
+        : a.grade - b.grade
+    );
+  const defaultGrade = centreExamTracks.find((option) => option.isMapped)?.grade ??
+    centreExamTracks[0]?.grade ??
+    11;
+  const defaultTrackOption =
+    centreExamTracks.find(
+      (option) =>
+        option.grade === defaultGrade &&
+        option.isMapped &&
+        option.hasCurriculumConfig
+    ) ??
+    centreExamTracks.find(
+      (option) => option.grade === defaultGrade && option.isMapped
+    ) ??
+    centreExamTracks.find((option) => option.grade === defaultGrade) ??
+    null;
+  const examTracks = centreExamTracks
+    .filter((option) => option.grade === defaultGrade)
+    .map((option) => option.examTrack);
+  const firstGradeSubject = gradeSubjects.find(
+    (row) =>
+      row.grade === defaultGrade && row.examTrack === defaultTrackOption?.examTrack
+  ) ?? null;
 
   return {
     ok: true,
     programs: scope.programs,
     examTracks,
+    centreExamTracks,
     gradeSubjects,
+    configurationError: null,
     defaults: {
-      programId: overrideProgramId ?? scope.preferredProgramId ?? scope.programs[0]?.id ?? null,
-      examTrack: examTracks[0] ?? null,
-      grade: firstGradeSubject?.grade ?? null,
-      gradeId: firstGradeSubject?.gradeId ?? null,
+      programId: selectedProgramId,
+      examTrack: defaultTrackOption?.examTrack ?? null,
+      grade: defaultGrade,
+      gradeId: GRADE_IDS[defaultGrade],
       subject: firstGradeSubject?.subject ?? null,
       subjectId: firstGradeSubject?.subjectId ?? null,
     },
@@ -329,27 +489,20 @@ export async function getCurriculumChapters(params: {
   subject: string;
   permission: UserPermission;
 }): Promise<CurriculumChaptersResult> {
-  if (!isExamTrack(params.examTrack)) {
-    return { ok: false, status: 422, error: "Invalid Exam Track" };
-  }
-  if (!isGradeNumber(params.grade)) {
-    return { ok: false, status: 422, error: "Grade must be 11 or 12" };
-  }
-  if (!isSubjectName(params.subject)) {
+  const selection = validateCurriculumSelection(params);
+  if (!selection.ok) return selection;
+
+  const curriculumId = curriculumIdForExamTrack(selection.examTrack);
+  if (curriculumId === null) {
     return {
       ok: false,
       status: 422,
-      error: "Subject must be Physics, Chemistry, Maths, or Biology",
+      error: `Curriculum configuration is not available for ${formatExamTrack(selection.examTrack)}`,
     };
   }
 
-  const scope = await resolveCurriculumProgramScope(params.schoolCode, params.permission);
-  if (!scope.ok) return scope;
-  if (!scope.allowedProgramIds.includes(params.programId)) {
-    return { ok: false, status: 403, error: "Forbidden" };
-  }
-  const curriculumId = curriculumIdForExamTrack(params.examTrack);
-
+  const access = await requireCurriculumProgramAccess(params);
+  if (!access.ok) return access;
   const rows = await query<ChapterScopeRow>(
     `SELECT
        ch.id AS chapter_id,
@@ -381,11 +534,9 @@ export async function getCurriculumChapters(params: {
        AND s.id = $3
      ORDER BY cfg.coverage_sequence ASC, ch.code ASC, t.code ASC`,
     [
-      params.examTrack,
-      params.grade,
-      ({ Maths: 1, Chemistry: 2, Biology: 3, Physics: 4 } as Record<SubjectName, number>)[
-        params.subject
-      ],
+      selection.examTrack,
+      selection.grade,
+      ({ Maths: 1, Chemistry: 2, Biology: 3, Physics: 4 } as Record<SubjectName, number>)[selection.subject],
       curriculumId,
     ]
   );

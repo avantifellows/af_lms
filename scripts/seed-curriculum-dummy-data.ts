@@ -15,9 +15,16 @@
 
 import { Pool, type PoolClient } from "pg";
 import * as dotenv from "dotenv";
+import type { ExamTrack } from "../src/lib/exam-tracks";
 
-type ExamTrack = "jee_main" | "jee_advanced" | "neet";
 type Mode = "seed" | "cleanup";
+
+const EXAM_TRACK_CURRICULUM_IDS = {
+  jee_main: 1,
+  jee_advanced: 9,
+  neet: 2,
+} as const satisfies Partial<Record<ExamTrack, number>>;
+type SeedExamTrack = keyof typeof EXAM_TRACK_CURRICULUM_IDS;
 
 interface CliOptions {
   mode: Mode;
@@ -33,7 +40,7 @@ interface SeedCase {
   programId: number;
   grade: 11 | 12;
   subjectName: "Maths" | "Physics" | "Chemistry" | "Biology";
-  examTrack: ExamTrack;
+  examTrack: SeedExamTrack;
   chapterLimit: number;
   logChapterCount: number;
   completionCount: number;
@@ -126,12 +133,6 @@ const SEED_CASES: SeedCase[] = [
     durationMultiplier: 0.25,
   },
 ];
-
-const EXAM_TRACK_CURRICULUM_IDS: Record<SeedCase["examTrack"], number> = {
-  jee_main: 1,
-  jee_advanced: 9,
-  neet: 2,
-};
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
