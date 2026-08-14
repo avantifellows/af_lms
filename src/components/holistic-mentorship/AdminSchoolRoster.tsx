@@ -84,13 +84,15 @@ function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
   </div>;
 }
 
-function CoverageTable({ students, schoolCode, programId, canManage, controlsDisabled, onAssign, onRemove }: {
+function CoverageTable({ students, schoolCode, programId, canManage, controlsDisabled,
+  onAssign, onReassign, onRemove }: {
   students: Student[];
   schoolCode: string;
   programId: number;
   canManage: boolean;
   controlsDisabled: boolean;
   onAssign: (student: Student) => void;
+  onReassign: (student: Student) => void;
   onRemove: (student: Student) => void;
 }) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
@@ -126,6 +128,9 @@ function CoverageTable({ students, schoolCode, programId, canManage, controlsDis
               {student.ownership && canManage && <Button type="button" size="sm" variant="danger-ghost"
                 aria-label={`Remove Mentor from ${student.name}`} disabled={controlsDisabled}
                 onClick={() => onRemove(student)}>Remove</Button>}
+              {student.ownership && canManage && <Button type="button" size="sm" variant="secondary"
+                aria-label={`Reassign Mentor for ${student.name}`} disabled={controlsDisabled}
+                onClick={() => onReassign(student)}>Reassign</Button>}
               {!student.ownership && canManage && <Button type="button" size="sm" variant="secondary"
                 aria-label={`Assign ${student.name}`} disabled={controlsDisabled}
                 onClick={() => onAssign(student)}>Assign</Button>}
@@ -191,6 +196,7 @@ export default function AdminSchoolRoster({
   const [grade, setGrade] = useState("");
   const [assignment, setAssignment] = useState<AssignmentFilter>("all");
   const [assigning, setAssigning] = useState<Student | null>(null);
+  const [reassigning, setReassigning] = useState<Student | null>(null);
   const [removing, setRemoving] = useState<Student | null>(null);
   const [mentorUserId, setMentorUserId] = useState("");
   const [reason, setReason] = useState("");
@@ -242,6 +248,41 @@ export default function AdminSchoolRoster({
     setRemoving(null);
     setReason("");
     setSubmitError("");
+  };
+  const closeReassign = () => {
+    setReassigning(null);
+    setMentorUserId("");
+    setReason("");
+    setSubmitError("");
+  };
+  const submitReassign = async () => {
+    if (!reassigning?.ownership || !mentorUserId || !reason.trim() || !canEdit) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch("/api/holistic-mentorship/mappings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          program_id: programId,
+          academic_year: academicYear,
+          student_id: reassigning.studentId,
+          mentor_user_id: Number(mentorUserId),
+          expected_mapping_id: reassigning.ownership.mappingId,
+          confirmed: true,
+          reason: reason.trim(),
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Unable to reassign Mentor");
+      closeReassign();
+      router.refresh();
+    } catch (problem) {
+      setSubmitError(problem instanceof Error ? problem.message : "Unable to reassign Mentor");
+    } finally {
+      setSubmitting(false);
+    }
   };
   const submitRemove = async () => {
     if (!removing?.ownership || !reason.trim() || !canEdit) return;
@@ -313,6 +354,7 @@ export default function AdminSchoolRoster({
       canManage={canManage}
       controlsDisabled={!canEdit}
       onAssign={setAssigning}
+      onReassign={setReassigning}
       onRemove={setRemoving}
     />
       : <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-bg-card p-8 text-center">
@@ -353,6 +395,45 @@ export default function AdminSchoolRoster({
           <Button type="button" onClick={() => void submitAssign()}
             disabled={submitting || !mentorUserId || !reason.trim()}>
             {submitting ? "Assigning…" : "Assign Mentor"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    <Modal open={reassigning !== null} onClose={submitting ? undefined : closeReassign}
+      role="dialog" aria-modal="true" aria-labelledby="reassign-mentor-title">
+      <div className="space-y-5 p-6">
+        <div>
+          <h3 id="reassign-mentor-title" className="text-lg font-bold text-text-primary">
+            Reassign Mentor for {reassigning?.name}
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
+          </p>
+        </div>
+        <label className="block text-sm font-bold text-text-primary">
+          Replacement Mentor
+          <Select aria-label="Replacement Mentor" className="mt-1 w-full" value={mentorUserId}
+            onChange={(event) => setMentorUserId(event.target.value)}>
+            <option value="">Select an eligible Mentor</option>
+            {mentors.filter((mentor) => mentor.userId !== reassigning?.ownership?.mentorUserId)
+              .map((mentor) => <option key={mentor.userId} value={mentor.userId}>
+                {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
+              </option>)}
+          </Select>
+        </label>
+        <label className="block text-sm font-bold text-text-primary">
+          Reassignment reason
+          <textarea aria-label="Reassignment reason" value={reason} rows={4} maxLength={500}
+            onChange={(event) => setReason(event.target.value)}
+            className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+            placeholder="Why is this Mentor being reassigned?" />
+        </label>
+        {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={closeReassign} disabled={submitting}>Cancel</Button>
+          <Button type="button" onClick={() => void submitReassign()}
+            disabled={submitting || !mentorUserId || !reason.trim()}>
+            {submitting ? "Reassigning…" : "Reassign Mentor"}
           </Button>
         </div>
       </div>

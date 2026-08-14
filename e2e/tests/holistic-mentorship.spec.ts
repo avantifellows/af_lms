@@ -306,6 +306,76 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(holisticTeacherPage.getByText("No response recorded", { exact: true })).toBeVisible();
   });
 
+  test("Holistic Admin confirms reasons for assign, reassign, and remove controls", async ({
+    holisticAdminPage,
+  }) => {
+    const mutationBodies = new Map<string, Record<string, unknown>>();
+    await holisticAdminPage.route("**/api/holistic-mentorship/mappings", async (route) => {
+      const method = route.request().method();
+      if (!(["POST", "PATCH", "DELETE"] as const).includes(method as "POST" | "PATCH" | "DELETE")) {
+        return route.continue();
+      }
+      mutationBodies.set(method, route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, changed: 1 }),
+      });
+    });
+    await holisticAdminPage.goto(`/school/${fixture.schoolCode}`);
+    await holisticAdminPage.getByRole("tab", { name: "Holistic Mentorship", exact: true }).click();
+
+    await holisticAdminPage.getByRole("button", { name: /^Assign / }).first().click();
+    const assignDialog = holisticAdminPage.getByRole("dialog", { name: /^Assign Mentor to / });
+    const assignSubmit = assignDialog.getByRole("button", { name: "Assign Mentor" });
+    await expect(assignSubmit).toBeDisabled();
+    await assignDialog.getByRole("combobox", { name: "Mentor" }).selectOption({ index: 1 });
+    await assignDialog.getByRole("textbox", { name: "Audit reason" }).fill("Student requested assignment");
+    await assignSubmit.click();
+    await expect.poll(() => mutationBodies.get("POST")).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      expected_mapping_id: null,
+      confirmed: true,
+      reason: "Student requested assignment",
+    });
+
+    await holisticAdminPage.getByRole("button", { name: /^Reassign Mentor for / }).first().click();
+    const reassignDialog = holisticAdminPage.getByRole("dialog", { name: /^Reassign Mentor for / });
+    const reassignSubmit = reassignDialog.getByRole("button", { name: "Reassign Mentor" });
+    await expect(reassignSubmit).toBeDisabled();
+    await reassignDialog.getByRole("combobox", { name: "Replacement Mentor" }).selectOption({ index: 1 });
+    await reassignDialog.getByRole("textbox", { name: "Reassignment reason" }).fill("Mentor handover");
+    await reassignSubmit.click();
+    await expect.poll(() => mutationBodies.get("PATCH")).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      confirmed: true,
+      reason: "Mentor handover",
+    });
+    expect(mutationBodies.get("PATCH")).toHaveProperty("student_id");
+    expect(mutationBodies.get("PATCH")).toHaveProperty("mentor_user_id");
+    expect(mutationBodies.get("PATCH")).toHaveProperty("expected_mapping_id");
+
+    await holisticAdminPage.getByRole("button", { name: /^Remove Mentor from / }).first().click();
+    const removeDialog = holisticAdminPage.getByRole("dialog", { name: /^Remove Mentor from / });
+    const removeSubmit = removeDialog.getByRole("button", { name: "Remove Mentor" });
+    await expect(removeSubmit).toBeDisabled();
+    await removeDialog.getByRole("textbox", { name: "Removal reason" }).fill("Mentor left programme");
+    await removeSubmit.click();
+    await expect.poll(() => mutationBodies.get("DELETE")).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      confirmed: true,
+      reason: "Mentor left programme",
+    });
+    expect(mutationBodies.get("DELETE")).toHaveProperty("student_id");
+    expect(mutationBodies.get("DELETE")).toHaveProperty("expected_mapping_id");
+  });
+
   test("eligible Teacher assigns a Student, submits Notes, and edits the official Notes", async ({
     holisticTeacherPage,
   }) => {
@@ -359,42 +429,6 @@ test.describe("Holistic Mentorship release workflows", () => {
     await holisticTeacherPage.getByRole("button", { name: "Save Changes" }).click();
     await expect((await correction).status()).toBe(200);
     await expect(holisticTeacherPage.getByText("Submitted Notes updated.")).toBeVisible();
-  });
-
-  test("Holistic Admin confirms a reason before removing a current Mapping", async ({
-    holisticAdminPage,
-  }) => {
-    let removalBody: Record<string, unknown> | null = null;
-    await holisticAdminPage.route("**/api/holistic-mentorship/mappings", async (route) => {
-      if (route.request().method() !== "DELETE") return route.continue();
-      removalBody = route.request().postDataJSON() as Record<string, unknown>;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ ok: true, changed: 1 }),
-      });
-    });
-    await holisticAdminPage.goto(`/school/${fixture.schoolCode}`);
-    await holisticAdminPage.getByRole("tab", { name: "Holistic Mentorship", exact: true }).click();
-
-    await holisticAdminPage.getByRole("button", { name: /^Remove Mentor from / }).first().click();
-    const dialog = holisticAdminPage.getByRole("dialog", { name: /^Remove Mentor from / });
-    const submit = dialog.getByRole("button", { name: "Remove Mentor" });
-    await expect(submit).toBeDisabled();
-    await dialog.getByRole("textbox", { name: "Removal reason" }).fill("Mentor left programme");
-    await expect(submit).toBeEnabled();
-    await submit.click();
-
-    await expect.poll(() => removalBody).toMatchObject({
-      school_code: fixture.schoolCode,
-      program_id: 1,
-      academic_year: "2026-2027",
-      confirmed: true,
-      reason: "Mentor left programme",
-    });
-    expect(removalBody).toHaveProperty("student_id");
-    expect(removalBody).toHaveProperty("expected_mapping_id");
-    expect(removalBody).not.toHaveProperty("mappings");
   });
 
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({

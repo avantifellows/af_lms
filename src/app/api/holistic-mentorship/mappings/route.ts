@@ -7,6 +7,7 @@ import {
   assignHolisticMenteeAsAdmin,
   assignHolisticMentees,
   listHolisticAssignmentRoster,
+  reassignHolisticMenteeAsAdmin,
   removeHolisticMenteeAsAdmin,
   removeHolisticMentees,
   type HolisticMappingMutationResult,
@@ -190,6 +191,47 @@ export async function POST(request: NextRequest) {
     programId,
     academicYear: value.academic_year,
     selections: selections as Array<{ studentId: number; expectedMappingId: number | null }>,
+  }));
+}
+
+export async function PATCH(request: NextRequest) {
+  const value = await readJsonObject(request);
+  if (!value) return holisticApiError("Invalid Mapping reassignment");
+  if (!("program_id" in value)) return holisticApiError("Program is required");
+  const programId = holisticProgramId(value.program_id);
+  if (!programId) return holisticApiError("Invalid Program");
+  if (!validSchoolCode(value.school_code)) return holisticApiError("Invalid School");
+  if (value.academic_year !== CURRENT_ACADEMIC_YEAR) {
+    return holisticApiError("Admin Mapping reassignments are limited to the current Academic Year");
+  }
+  if (value.confirmed !== true) return holisticApiError("Reassignment confirmation is required");
+  const reason = typeof value.reason === "string" ? value.reason.trim() : "";
+  if (!reason) return holisticApiError("Reassignment reason is required");
+  const studentId = positiveInteger(value.student_id);
+  if (!studentId) return holisticApiError("Invalid Student");
+  const mentorUserId = positiveInteger(value.mentor_user_id);
+  if (!mentorUserId) return holisticApiError("Invalid Mentor");
+  const expectedMappingId = positiveInteger(value.expected_mapping_id);
+  if (!expectedMappingId) return holisticApiError("Invalid expected Mapping");
+
+  const session = await getServerSession(authOptions);
+  const access = await requireHolisticMentorshipAccess(session, "admin_mapping_mutation", {
+    schoolCode: value.school_code,
+    programId,
+  });
+  if (!access.ok) return holisticApiError(access.error, access.status);
+
+  return mutationResponse(await reassignHolisticMenteeAsAdmin({
+    actorEmail: access.email.trim().toLowerCase(),
+    auditActorUserId: access.permission.user_id ?? undefined,
+    schoolId: access.school!.id,
+    programId,
+    academicYear: value.academic_year,
+    studentId,
+    mentorUserId,
+    expectedMappingId,
+    confirmed: true,
+    reason,
   }));
 }
 

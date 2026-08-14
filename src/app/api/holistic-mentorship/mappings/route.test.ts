@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSession, mockAccess, mockRoster, mockAssign, mockAdminAssign, mockAdminRemove, mockRemove } = vi.hoisted(
+const { mockSession, mockAccess, mockRoster, mockAssign, mockAdminAssign, mockAdminReassign, mockAdminRemove, mockRemove } = vi.hoisted(
   () => ({
     mockSession: vi.fn(),
     mockAccess: vi.fn(),
     mockRoster: vi.fn(),
     mockAssign: vi.fn(),
     mockAdminAssign: vi.fn(),
+    mockAdminReassign: vi.fn(),
     mockAdminRemove: vi.fn(),
     mockRemove: vi.fn(),
   })
@@ -21,11 +22,12 @@ vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockRoster,
   assignHolisticMentees: mockAssign,
   assignHolisticMenteeAsAdmin: mockAdminAssign,
+  reassignHolisticMenteeAsAdmin: mockAdminReassign,
   removeHolisticMenteeAsAdmin: mockAdminRemove,
   removeHolisticMentees: mockRemove,
 }));
 
-import { DELETE, GET, POST } from "./route";
+import { DELETE, GET, PATCH, POST } from "./route";
 
 const permission = {
   email: "teacher@example.com",
@@ -389,6 +391,137 @@ describe("Holistic Mentorship Mapping API", () => {
       reason: "Mentor left the programme",
     });
     expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it("accepts the exact Admin reassign PATCH contract with normalized audit values", async () => {
+    mockAdminReassign.mockResolvedValue({ ok: true, changed: 1 });
+
+    const response = await PATCH(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 78,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "  Mentor handover requested  ",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, changed: 1 });
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "teacher@example.com" } },
+      "admin_mapping_mutation",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+    expect(mockAdminReassign).toHaveBeenCalledWith({
+      actorEmail: "teacher@example.com",
+      auditActorUserId: 19,
+      schoolId: 4,
+      programId: 78,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor handover requested",
+    });
+  });
+
+  it.each([
+    [{ confirmed: false }, "Reassignment confirmation is required"],
+    [{ reason: "   " }, "Reassignment reason is required"],
+    [{ academic_year: "2025-2026" }, "Admin Mapping reassignments are limited to the current Academic Year"],
+    [{ student_id: null }, "Invalid Student"],
+    [{ mentor_user_id: null }, "Invalid Mentor"],
+    [{ expected_mapping_id: null }, "Invalid expected Mapping"],
+  ] as const)("returns a client-actionable Admin reassign validation error", async (override, error) => {
+    const response = await PATCH(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "Mentor handover",
+          ...override,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockAdminReassign).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{}, "Program is required"],
+    [{ program_id: 999 }, "Invalid Program"],
+  ])("requires one explicit unambiguous Program for Admin reassign", async (program, error) => {
+    const response = await PATCH(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "Mentor handover",
+          ...program,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns the existing current-ownership shape for a stale Admin reassignment", async () => {
+    const ownership = [{
+      studentId: 41,
+      ownership: { mappingId: 74, mentorUserId: 8, mentorName: "Nila Sen" },
+    }];
+    mockAdminReassign.mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership,
+    });
+
+    const response = await PATCH(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          mentor_user_id: 27,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "Mentor handover",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership,
+    });
   });
 
   it.each([

@@ -10,6 +10,7 @@ import {
   assignHolisticMentees,
   getHolisticAssignmentCoverageSummary,
   listHolisticAssignmentRoster,
+  reassignHolisticMenteeAsAdmin,
   removeHolisticMenteeAsAdmin,
   removeHolisticMentees,
 } from "./holistic-mappings";
@@ -527,6 +528,142 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     ]);
     expect(mockClientQuery.mock.calls.some(([sql]) =>
       String(sql).includes("state = 'submitted'"))).toBe(false);
+  });
+
+  it("reassigns one Mapping as Admin with matching end, start, and draft-erasure audit identity", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const text = String(sql);
+      if (text.includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (text.includes("FROM teacher")) return { rows: [{ user_id: 27 }] };
+      if (text.includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 73, student_id: 41, mentor_user_id: 9 }] };
+      }
+      if (text.includes("RETURNING id")) return { rows: [{ id: 81 }] };
+      return { rows: [] };
+    });
+
+    await expect(reassignHolisticMenteeAsAdmin({
+      actorEmail: " Admin@Example.com ",
+      auditActorUserId: 19,
+      schoolId: 4,
+      programId: 78,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "  Mentor handover requested  ",
+    })).resolves.toEqual({ ok: true, changed: 1 });
+
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    const mappingWrites = mockClientQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes("holistic_mentorship_mentor_mentee_mappings") &&
+      /^(UPDATE|INSERT)/.test(String(sql).trim()));
+    expect(mappingWrites).toHaveLength(2);
+    expect(String(mappingWrites[0][0])).toContain("end_audit_reason");
+    expect(mappingWrites[0][1]).toEqual([
+      19, "admin@example.com", "af_lms_admin_reassign", "admin_reassignment",
+      "Mentor handover requested", 73,
+    ]);
+    expect(String(mappingWrites[1][0])).toContain("assignment_audit_reason");
+    expect(mappingWrites[1][1]).toEqual([
+      41, 27, 4, 78, "2026-2027", 19, "admin@example.com",
+      "af_lms_admin_reassign", "Mentor handover requested",
+    ]);
+    const draftErasure = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_post_session_answers"));
+    expect(String(draftErasure?.[0])).toContain("state = 'draft'");
+    expect(draftErasure?.[1]).toEqual([
+      [41], 19, "admin@example.com", "Mentor handover requested",
+    ]);
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("state = 'submitted'"))).toBe(false);
+  });
+
+  it.each([
+    [{ confirmed: false }, "Reassignment confirmation is required"],
+    [{ reason: "   " }, "Reassignment reason is required"],
+    [{ academicYear: "2025-2026" }, "Admin Mapping reassignments are limited to the current Academic Year"],
+  ] as const)("rejects invalid Admin reassignment before opening a transaction", async (override, error) => {
+    await expect(reassignHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor handover",
+      ...override,
+    })).resolves.toEqual({ ok: false, status: 422, error });
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns refreshed ownership without partial mutation for a stale Admin reassignment", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      const text = String(sql);
+      if (text.includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (text.includes("FROM teacher")) return { rows: [{ user_id: 27 }] };
+      if (text.includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 74, student_id: 41, mentor_user_id: 8 }] };
+      }
+      return { rows: [] };
+    });
+    mockQuery.mockResolvedValueOnce([
+      { id: 74, student_id: 41, mentor_user_id: 8, mentor_name: "Nila Sen" },
+    ]);
+
+    await expect(reassignHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      auditActorUserId: 19,
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 27,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor handover",
+    })).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership: [{
+        studentId: 41,
+        ownership: { mappingId: 74, mentorUserId: 8, mentorName: "Nila Sen" },
+      }],
+    });
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      /^(UPDATE|INSERT)/.test(String(sql).trim()))).toBe(false);
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("holistic_mentorship_post_session_answers"))).toBe(false);
+  });
+
+  it("rejects an ineligible replacement Mentor before ending the current Mapping", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      if (String(sql).includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
+      if (String(sql).includes("FROM teacher")) return { rows: [] };
+      return { rows: [] };
+    });
+
+    await expect(reassignHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      mentorUserId: 31,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor handover",
+    })).resolves.toEqual({
+      ok: false,
+      status: 422,
+      error: "Mentor is not eligible for this School and Program",
+    });
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      /^(UPDATE|INSERT)/.test(String(sql).trim()))).toBe(false);
   });
 
   it.each([

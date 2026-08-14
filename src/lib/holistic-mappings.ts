@@ -483,6 +483,121 @@ export async function assignHolisticMentees(params: {
   }
 }
 
+async function reassignAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof reassignHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  await lockHolisticMentorMappingMutation(client, params.mentorUserId);
+  await lockEligibleStudents(client, {
+    schoolId: params.schoolId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    studentIds: [params.studentId],
+  });
+  const eligibleMentorUserId = await findEligibleHolisticMentorUserId({
+    client,
+    userId: params.mentorUserId,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  });
+  if (eligibleMentorUserId === null) {
+    throw new MappingMutationError(422, "Mentor is not eligible for this School and Program");
+  }
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  const current = active.byStudent.get(params.studentId);
+  if (Number(current?.id ?? 0) !== params.expectedMappingId) {
+    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
+  }
+  if (Number(current?.mentor_user_id) === params.mentorUserId) {
+    throw new MappingMutationError(422, "Replacement Mentor must differ from the current Mentor");
+  }
+
+  const actorEmail = params.actorEmail.trim().toLowerCase();
+  const reason = params.reason.trim();
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
+         end_source = $3, end_reason = $4, end_audit_reason = $5, updated_at = now()
+     WHERE id = $6`,
+    [params.auditActorUserId ?? null, actorEmail, "af_lms_admin_reassign",
+      "admin_reassignment", reason, params.expectedMappingId],
+  );
+  await eraseDraftHolisticNotes(
+    client,
+    [params.studentId],
+    params.auditActorUserId ?? null,
+    reason,
+    actorEmail,
+  );
+  await client.query(
+    `INSERT INTO holistic_mentorship_mentor_mentee_mappings
+       (student_id, mentor_user_id, school_id, program_id, academic_year,
+        started_at, assigned_by_user_id, assigned_by_email, assignment_source,
+        assignment_audit_reason, inserted_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9, now(), now())
+     RETURNING id`,
+    [
+      params.studentId,
+      params.mentorUserId,
+      params.schoolId,
+      params.programId,
+      params.academicYear,
+      params.auditActorUserId ?? null,
+      actorEmail,
+      "af_lms_admin_reassign",
+      reason,
+    ],
+  );
+  return { ok: true, changed: 1 };
+}
+
+export async function reassignHolisticMenteeAsAdmin(params: {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  mentorUserId: number;
+  expectedMappingId: number;
+  confirmed: boolean;
+  reason: string;
+}): Promise<HolisticMappingMutationResult> {
+  if (!params.confirmed) {
+    return { ok: false, status: 422, error: "Reassignment confirmation is required" };
+  }
+  if (!params.reason.trim()) {
+    return { ok: false, status: 422, error: "Reassignment reason is required" };
+  }
+  if (params.academicYear !== CURRENT_ACADEMIC_YEAR) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Admin Mapping reassignments are limited to the current Academic Year",
+    };
+  }
+  try {
+    return await withTransaction((client) => reassignAdminMappingInTransaction(client, params));
+  } catch (error) {
+    if (error instanceof MappingMutationError || isUniqueViolation(error)) {
+      return mutationConflict(
+        error as MappingMutationError | { code?: unknown },
+        [params.studentId],
+        params.academicYear,
+        params.schoolId,
+        params.programId,
+      );
+    }
+    throw error;
+  }
+}
+
 async function removeAdminMappingInTransaction(
   client: PoolClient,
   params: Parameters<typeof removeHolisticMenteeAsAdmin>[0],
