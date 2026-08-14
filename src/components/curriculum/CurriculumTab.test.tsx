@@ -1055,6 +1055,8 @@ describe("CurriculumTab", () => {
     renderTab();
 
     expect(await screen.findByText("No Exam Tracks configured for this Centre and Grade")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Curriculum Progress" })).toBeInTheDocument();
+    expect(screen.queryByText("Curriculum Curriculum Progress")).not.toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/curriculum/chapters"));
   });
 

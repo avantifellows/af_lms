@@ -534,7 +534,9 @@ export default function CurriculumTab({
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              {examTrackLabel(selectedExamTrack)} Curriculum Progress
+              {selectedExamTrack
+                ? `${examTrackLabel(selectedExamTrack)} Curriculum Progress`
+                : "Curriculum Progress"}
             </h2>
             <p className="text-sm text-gray-500">{schoolName}</p>
           </div>

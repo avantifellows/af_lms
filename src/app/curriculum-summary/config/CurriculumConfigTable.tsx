@@ -406,6 +406,7 @@ function AddPanel({
   const [chapterDropdownOpen, setChapterDropdownOpen] = useState(false);
   const [activeChapterIndex, setActiveChapterIndex] = useState(0);
   const [options, setOptions] = useState<CurriculumConfigChapterOption[]>([]);
+  const [chapterOptionsError, setChapterOptionsError] = useState("");
   const [selected, setSelected] = useState<CurriculumConfigChapterOption | null>(null);
   const [prescribedMinutes, setPrescribedMinutes] = useState(0);
   const [coverageSequence, setCoverageSequence] = useState(1);
@@ -428,12 +429,21 @@ function AddPanel({
     if (grade) params.set("grade", grade);
     if (subject) params.set("subject", subject);
     void fetch(`/api/curriculum/configs/chapter-options?${params.toString()}`)
-      .then((response) => response.json())
-      .then((json) => {
+      .then(async (response) => ({ response, json: await readJsonObject(response) }))
+      .then(({ response, json }) => {
         if (!cancelled) {
+          if (!response.ok) {
+            setOptions([]);
+            setChapterOptionsError(
+              jsonError(json, "Could not load chapter options.")
+            );
+            setActiveChapterIndex(0);
+            return;
+          }
           const nextOptions = Array.isArray(json.options)
             ? (json.options as CurriculumConfigChapterOption[])
             : [];
+          setChapterOptionsError("");
           setOptions(
             nextOptions.filter(
               (option) =>
@@ -446,6 +456,7 @@ function AddPanel({
       .catch(() => {
         if (!cancelled) {
           setOptions([]);
+          setChapterOptionsError("Could not load chapter options.");
         }
       });
     return () => {
@@ -710,7 +721,7 @@ function AddPanel({
                   >
                     {options.length === 0 ? (
                       <div className="px-3 py-2 text-sm text-text-muted">
-                        No chapters match the add filters.
+                        {chapterOptionsError || "No chapters match the add filters."}
                       </div>
                     ) : (
                       options.map((option) => (

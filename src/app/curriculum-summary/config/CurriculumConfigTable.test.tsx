@@ -318,6 +318,34 @@ describe("CurriculumConfigTable", () => {
     expect(screen.queryByRole("option", { name: /BIO-01/ })).not.toBeInTheDocument();
   });
 
+  it("shows the API error when chapter options are unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          { error: "Curriculum configuration is not available for CET" },
+          { status: 422 }
+        )
+      )
+    );
+
+    render(
+      <CurriculumConfigTable
+        rows={[]}
+        activeFilters={{ ...baseFilters, examTrack: "cet" }}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByLabelText("Chapter search"));
+
+    expect(
+      await screen.findByText("Curriculum configuration is not available for CET")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No chapters match the add filters.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  });
+
   it("shows an error and re-enables create when POST returns non-JSON", async () => {
     const fetchMock = vi.fn((input, init) => {
       const url = String(input);
