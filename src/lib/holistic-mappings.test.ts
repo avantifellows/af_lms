@@ -9,6 +9,7 @@ import {
   assignHolisticMenteeAsAdmin,
   assignHolisticMentees,
   listHolisticAssignmentRoster,
+  removeHolisticMenteeAsAdmin,
   removeHolisticMentees,
 } from "./holistic-mappings";
 import type { UserPermission } from "./permissions";
@@ -401,6 +402,105 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(cleanup?.[1]).toEqual([
       [41, 42], null, "teacher@example.com", "teacher_removal",
     ]);
+  });
+
+  it("removes one Mapping as Admin and audits the Mapping end and draft erasure atomically", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      if (String(sql).includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 73, student_id: 41, mentor_user_id: 9 }] };
+      }
+      return { rows: [] };
+    });
+
+    await expect(removeHolisticMenteeAsAdmin({
+      actorEmail: " Admin@Example.com ",
+      auditActorUserId: undefined,
+      schoolId: 4,
+      programId: 78,
+      academicYear: "2026-2027",
+      studentId: 41,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "  Mentor left the programme  ",
+    })).resolves.toEqual({ ok: true, changed: 1 });
+
+    expect(mockWithTransaction).toHaveBeenCalledOnce();
+    expect(mockReconcile).not.toHaveBeenCalled();
+    const mappingUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE holistic_mentorship_mentor_mentee_mappings"));
+    expect(String(mappingUpdate?.[0])).toContain("end_audit_reason");
+    expect(mappingUpdate?.[1]).toEqual([
+      null,
+      "admin@example.com",
+      "af_lms_admin_remove",
+      "admin_removal",
+      "Mentor left the programme",
+      73,
+    ]);
+    const draftErasure = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("holistic_mentorship_post_session_answers"));
+    expect(String(draftErasure?.[0])).toContain("state = 'draft'");
+    expect(draftErasure?.[1]).toEqual([
+      [41], null, "admin@example.com", "Mentor left the programme",
+    ]);
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("state = 'submitted'"))).toBe(false);
+  });
+
+  it.each([
+    [{ confirmed: false }, "Removal confirmation is required"],
+    [{ reason: "   " }, "Removal reason is required"],
+    [{ academicYear: "2025-2026" }, "Admin Mapping removals are limited to the current Academic Year"],
+  ] as const)("rejects invalid Admin removal before reconciliation", async (override, error) => {
+    await expect(removeHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor left",
+      ...override,
+    })).resolves.toEqual({ ok: false, status: 422, error });
+    expect(mockReconcile).not.toHaveBeenCalled();
+    expect(mockWithTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns refreshed ownership without partial mutation for a stale Admin removal", async () => {
+    mockClientQuery.mockImplementation((sql: unknown) => {
+      if (String(sql).includes("FROM holistic_mentorship_mentor_mentee_mappings")) {
+        return { rows: [{ id: 74, student_id: 41, mentor_user_id: 8 }] };
+      }
+      return { rows: [] };
+    });
+    mockQuery.mockResolvedValueOnce([
+      { id: 74, student_id: 41, mentor_user_id: 8, mentor_name: "Nila Sen" },
+    ]);
+
+    await expect(removeHolisticMenteeAsAdmin({
+      actorEmail: "admin@example.com",
+      auditActorUserId: 19,
+      schoolId: 4,
+      programId: 1,
+      academicYear: "2026-2027",
+      studentId: 41,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor left",
+    })).resolves.toEqual({
+      ok: false,
+      status: 409,
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership: [{
+        studentId: 41,
+        ownership: { mappingId: 74, mentorUserId: 8, mentorName: "Nila Sen" },
+      }],
+    });
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("UPDATE holistic_mentorship_mentor_mentee_mappings"))).toBe(false);
+    expect(mockClientQuery.mock.calls.some(([sql]) =>
+      String(sql).includes("holistic_mentorship_post_session_answers"))).toBe(false);
   });
 
   it("rejects an exact current Mapping with ownership and performs no takeover writes", async () => {

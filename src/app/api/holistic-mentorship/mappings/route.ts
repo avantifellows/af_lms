@@ -7,6 +7,7 @@ import {
   assignHolisticMenteeAsAdmin,
   assignHolisticMentees,
   listHolisticAssignmentRoster,
+  removeHolisticMenteeAsAdmin,
   removeHolisticMentees,
   type HolisticMappingMutationResult,
 } from "@/lib/holistic-mappings";
@@ -68,6 +69,46 @@ async function adminAssign(value: Record<string, unknown>) {
     studentId,
     mentorUserId,
     expectedMappingId: null,
+    confirmed: true,
+    reason,
+  }));
+}
+
+function isAdminRemoveRequest(value: Record<string, unknown>): boolean {
+  return "student_id" in value || "expected_mapping_id" in value || "reason" in value;
+}
+
+async function adminRemove(value: Record<string, unknown>) {
+  if (!("program_id" in value)) return holisticApiError("Program is required");
+  const programId = holisticProgramId(value.program_id);
+  if (!programId) return holisticApiError("Invalid Program");
+  if (!validSchoolCode(value.school_code)) return holisticApiError("Invalid School");
+  if (value.academic_year !== CURRENT_ACADEMIC_YEAR) {
+    return holisticApiError("Admin Mapping removals are limited to the current Academic Year");
+  }
+  if (value.confirmed !== true) return holisticApiError("Removal confirmation is required");
+  const reason = typeof value.reason === "string" ? value.reason.trim() : "";
+  if (!reason) return holisticApiError("Removal reason is required");
+  const studentId = positiveInteger(value.student_id);
+  if (!studentId) return holisticApiError("Invalid Student");
+  const expectedMappingId = positiveInteger(value.expected_mapping_id);
+  if (!expectedMappingId) return holisticApiError("Invalid expected Mapping");
+
+  const session = await getServerSession(authOptions);
+  const access = await requireHolisticMentorshipAccess(session, "admin_mapping_mutation", {
+    schoolCode: value.school_code,
+    programId,
+  });
+  if (!access.ok) return holisticApiError(access.error, access.status);
+
+  return mutationResponse(await removeHolisticMenteeAsAdmin({
+    actorEmail: access.email.trim().toLowerCase(),
+    auditActorUserId: access.permission.user_id ?? undefined,
+    schoolId: access.school!.id,
+    programId,
+    academicYear: value.academic_year,
+    studentId,
+    expectedMappingId,
     confirmed: true,
     reason,
   }));
@@ -154,6 +195,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const value = await readJsonObject(request);
+  if (value && isAdminRemoveRequest(value)) return adminRemove(value);
   const programId = value && holisticProgramId(value.program_id);
   if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||

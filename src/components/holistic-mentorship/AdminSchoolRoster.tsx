@@ -67,13 +67,14 @@ function Summary({ students }: { students: Student[] }) {
   </div>;
 }
 
-function CoverageTable({ students, schoolCode, programId, canAssign, assignDisabled, onAssign }: {
+function CoverageTable({ students, schoolCode, programId, canManage, controlsDisabled, onAssign, onRemove }: {
   students: Student[];
   schoolCode: string;
   programId: number;
-  canAssign: boolean;
-  assignDisabled: boolean;
+  canManage: boolean;
+  controlsDisabled: boolean;
   onAssign: (student: Student) => void;
+  onRemove: (student: Student) => void;
 }) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
     <div role="region" aria-label="School mentorship coverage" tabIndex={0}
@@ -82,7 +83,7 @@ function CoverageTable({ students, schoolCode, programId, canAssign, assignDisab
         <thead className="sticky top-0 z-10 bg-bg-card-alt text-xs uppercase text-text-muted">
           <tr><th className="px-4 py-3">Student</th><th className="px-4 py-3">Grade</th>
             <th className="px-4 py-3">Assigned Mentor</th><th className="px-4 py-3">Current Progress</th>
-            <th className="w-16 px-4 py-3"><span className="sr-only">Open</span></th></tr>
+            <th className="w-36 px-4 py-3"><span className="sr-only">Actions</span></th></tr>
         </thead>
         <tbody className="divide-y divide-border">{students.map((student) => {
           const href = studentHref(student, schoolCode, programId);
@@ -100,14 +101,18 @@ function CoverageTable({ students, schoolCode, programId, canAssign, assignDisab
               className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${PROGRESS_CLASSES[state]}`}>
               {PROGRESS_LABEL[state]}
             </span></td>
-            <td className="px-4 py-3">{href
-              ? <Link href={href} aria-label={`Open ${student.name}`}
+            <td className="px-4 py-3"><div className="flex items-center justify-end gap-1">
+              {href && <Link href={href} aria-label={`Open ${student.name}`}
                 title="Open Student" className="grid h-10 w-10 place-items-center rounded-lg text-text-muted hover:bg-hover-bg hover:text-accent">
                 <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
-              </Link>
-              : canAssign && <Button type="button" size="sm" variant="secondary"
-                aria-label={`Assign ${student.name}`} disabled={assignDisabled}
-                onClick={() => onAssign(student)}>Assign</Button>}</td>
+              </Link>}
+              {student.ownership && canManage && <Button type="button" size="sm" variant="danger-ghost"
+                aria-label={`Remove Mentor from ${student.name}`} disabled={controlsDisabled}
+                onClick={() => onRemove(student)}>Remove</Button>}
+              {!student.ownership && canManage && <Button type="button" size="sm" variant="secondary"
+                aria-label={`Assign ${student.name}`} disabled={controlsDisabled}
+                onClick={() => onAssign(student)}>Assign</Button>}
+            </div></td>
           </tr>;
         })}</tbody>
       </table>
@@ -167,11 +172,12 @@ export default function AdminSchoolRoster({
   const [grade, setGrade] = useState("");
   const [assignment, setAssignment] = useState<AssignmentFilter>("all");
   const [assigning, setAssigning] = useState<Student | null>(null);
+  const [removing, setRemoving] = useState<Student | null>(null);
   const [mentorUserId, setMentorUserId] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const canAssign = (role === "admin" || role === "holistic_mentorship_admin") &&
+  const canManage = (role === "admin" || role === "holistic_mentorship_admin") &&
     academicYear === CURRENT_ACADEMIC_YEAR;
   const shown = useMemo(
     () => filterStudents(students, search, grade, assignment),
@@ -209,6 +215,39 @@ export default function AdminSchoolRoster({
       router.refresh();
     } catch (problem) {
       setSubmitError(problem instanceof Error ? problem.message : "Unable to assign Mentor");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const closeRemove = () => {
+    setRemoving(null);
+    setReason("");
+    setSubmitError("");
+  };
+  const submitRemove = async () => {
+    if (!removing?.ownership || !reason.trim() || !canEdit) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch("/api/holistic-mentorship/mappings", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          program_id: programId,
+          academic_year: academicYear,
+          student_id: removing.studentId,
+          expected_mapping_id: removing.ownership.mappingId,
+          confirmed: true,
+          reason: reason.trim(),
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Unable to remove Mentor");
+      closeRemove();
+      router.refresh();
+    } catch (problem) {
+      setSubmitError(problem instanceof Error ? problem.message : "Unable to remove Mentor");
     } finally {
       setSubmitting(false);
     }
@@ -252,9 +291,10 @@ export default function AdminSchoolRoster({
       students={shown}
       schoolCode={schoolCode}
       programId={programId}
-      canAssign={canAssign}
-      assignDisabled={!canEdit}
+      canManage={canManage}
+      controlsDisabled={!canEdit}
       onAssign={setAssigning}
+      onRemove={setRemoving}
     />
       : <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-bg-card p-8 text-center">
         <div><Users aria-hidden="true" className="mx-auto h-9 w-9 text-text-muted" />
@@ -294,6 +334,34 @@ export default function AdminSchoolRoster({
           <Button type="button" onClick={() => void submitAssign()}
             disabled={submitting || !mentorUserId || !reason.trim()}>
             {submitting ? "Assigning…" : "Assign Mentor"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    <Modal open={removing !== null} onClose={submitting ? undefined : closeRemove}
+      role="dialog" aria-modal="true" aria-labelledby="remove-mentor-title">
+      <div className="space-y-5 p-6">
+        <div>
+          <h3 id="remove-mentor-title" className="text-lg font-bold text-text-primary">
+            Remove Mentor from {removing?.name}
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
+          </p>
+        </div>
+        <label className="block text-sm font-bold text-text-primary">
+          Removal reason
+          <textarea aria-label="Removal reason" value={reason} rows={4} maxLength={500}
+            onChange={(event) => setReason(event.target.value)}
+            className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+            placeholder="Why is this Mentor being removed?" />
+        </label>
+        {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={closeRemove} disabled={submitting}>Cancel</Button>
+          <Button type="button" variant="danger" onClick={() => void submitRemove()}
+            disabled={submitting || !reason.trim()}>
+            {submitting ? "Removing…" : "Remove Mentor"}
           </Button>
         </div>
       </div>

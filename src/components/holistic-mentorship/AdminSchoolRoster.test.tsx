@@ -113,17 +113,60 @@ describe("AdminSchoolRoster", () => {
     expect(mockRefresh).toHaveBeenCalledOnce();
   });
 
+  it("requires an audit reason before removing an assigned Student Mapping", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, changed: 1 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<AdminSchoolRoster
+      students={students}
+      schoolCode="SCH001"
+      programId={78}
+      role="admin"
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Remove Mentor from Asha Rao" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove Mentor from Asha Rao" });
+    const submit = within(dialog).getByRole("button", { name: "Remove Mentor" });
+    expect(submit).toBeDisabled();
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Removal reason" }),
+      "  Mentor left the programme  ",
+    );
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/holistic-mentorship/mappings", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        school_code: "SCH001",
+        program_id: 78,
+        academic_year: "2026-2027",
+        student_id: 41,
+        expected_mapping_id: 8,
+        confirmed: true,
+        reason: "Mentor left the programme",
+      }),
+    });
+    expect(mockRefresh).toHaveBeenCalledOnce();
+  });
+
   it.each(["admin", "holistic_mentorship_admin"])(
-    "shows current-year assign controls for %s",
+    "shows current-year Mapping controls for %s",
     (role) => {
       render(<AdminSchoolRoster students={students} schoolCode="SCH001" role={role} />);
       expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Remove Mentor from Asha Rao" })).toBeEnabled();
     },
   );
 
-  it("keeps the Admin assign control visible but disabled under read-only", () => {
+  it("keeps Admin Mapping controls visible but disabled under read-only", () => {
     render(<AdminSchoolRoster students={students} schoolCode="SCH001" role="admin" canEdit={false} />);
     expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove Mentor from Asha Rao" })).toBeDisabled();
   });
 
   it.each([
@@ -132,9 +175,10 @@ describe("AdminSchoolRoster", () => {
     ["program_admin", "2026-2027"],
     ["admin", "2025-2026"],
     ["holistic_mentorship_admin", "2025-2026"],
-  ])("hides assign controls for role %s in Academic Year %s", (role, academicYear) => {
+  ])("hides Mapping controls for role %s in Academic Year %s", (role, academicYear) => {
     render(<AdminSchoolRoster students={students} schoolCode="SCH001"
       role={role} academicYear={academicYear} />);
     expect(screen.queryByRole("button", { name: "Assign Ravi Shah" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove Mentor from Asha Rao" })).not.toBeInTheDocument();
   });
 });

@@ -361,6 +361,42 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(holisticTeacherPage.getByText("Submitted Notes updated.")).toBeVisible();
   });
 
+  test("Holistic Admin confirms a reason before removing a current Mapping", async ({
+    holisticAdminPage,
+  }) => {
+    let removalBody: Record<string, unknown> | null = null;
+    await holisticAdminPage.route("**/api/holistic-mentorship/mappings", async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      removalBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, changed: 1 }),
+      });
+    });
+    await holisticAdminPage.goto(`/school/${fixture.schoolCode}`);
+    await holisticAdminPage.getByRole("tab", { name: "Holistic Mentorship", exact: true }).click();
+
+    await holisticAdminPage.getByRole("button", { name: /^Remove Mentor from / }).first().click();
+    const dialog = holisticAdminPage.getByRole("dialog", { name: /^Remove Mentor from / });
+    const submit = dialog.getByRole("button", { name: "Remove Mentor" });
+    await expect(submit).toBeDisabled();
+    await dialog.getByRole("textbox", { name: "Removal reason" }).fill("Mentor left programme");
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect.poll(() => removalBody).toMatchObject({
+      school_code: fixture.schoolCode,
+      program_id: 1,
+      academic_year: "2026-2027",
+      confirmed: true,
+      reason: "Mentor left programme",
+    });
+    expect(removalBody).toHaveProperty("student_id");
+    expect(removalBody).toHaveProperty("expected_mapping_id");
+    expect(removalBody).not.toHaveProperty("mappings");
+  });
+
   test("Holistic Admin verifies progress, CSV, read-only drill-down, Phase setup, and regeneration", async ({
     holisticAdminPage,
   }) => {

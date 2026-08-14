@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSession, mockAccess, mockRoster, mockAssign, mockAdminAssign, mockRemove } = vi.hoisted(
+const { mockSession, mockAccess, mockRoster, mockAssign, mockAdminAssign, mockAdminRemove, mockRemove } = vi.hoisted(
   () => ({
     mockSession: vi.fn(),
     mockAccess: vi.fn(),
     mockRoster: vi.fn(),
     mockAssign: vi.fn(),
     mockAdminAssign: vi.fn(),
+    mockAdminRemove: vi.fn(),
     mockRemove: vi.fn(),
   })
 );
@@ -20,6 +21,7 @@ vi.mock("@/lib/holistic-mappings", () => ({
   listHolisticAssignmentRoster: mockRoster,
   assignHolisticMentees: mockAssign,
   assignHolisticMenteeAsAdmin: mockAdminAssign,
+  removeHolisticMenteeAsAdmin: mockAdminRemove,
   removeHolisticMentees: mockRemove,
 }));
 
@@ -347,6 +349,130 @@ describe("Holistic Mentorship Mapping API", () => {
       academicYear: "2026-2027",
       confirmed: true,
       mappings: [{ studentId: 41, expectedMappingId: 73 }],
+    });
+  });
+
+  it("accepts the scalar Admin remove contract with normalized audit identity", async () => {
+    mockAdminRemove.mockResolvedValue({ ok: true, changed: 1 });
+
+    const response = await DELETE(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "DELETE",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 78,
+          academic_year: "2026-2027",
+          student_id: 41,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "  Mentor left the programme  ",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, changed: 1 });
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "teacher@example.com" } },
+      "admin_mapping_mutation",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+    expect(mockAdminRemove).toHaveBeenCalledWith({
+      actorEmail: "teacher@example.com",
+      auditActorUserId: 19,
+      schoolId: 4,
+      programId: 78,
+      academicYear: "2026-2027",
+      studentId: 41,
+      expectedMappingId: 73,
+      confirmed: true,
+      reason: "Mentor left the programme",
+    });
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ confirmed: false }, "Removal confirmation is required"],
+    [{ reason: "   " }, "Removal reason is required"],
+    [{ academic_year: "2025-2026" }, "Admin Mapping removals are limited to the current Academic Year"],
+  ] as const)("returns a client-actionable Admin remove validation error", async (override, error) => {
+    const response = await DELETE(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "DELETE",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "Mentor left",
+          ...override,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockAdminRemove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{}, "Program is required"],
+    [{ program_id: 999 }, "Invalid Program"],
+  ])("requires one explicit unambiguous Program for Admin remove", async (program, error) => {
+    const response = await DELETE(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "DELETE",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          student_id: 41,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "Mentor left",
+          ...program,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns refreshed ownership when Admin remove loses an ownership race", async () => {
+    const ownership = [{
+      studentId: 41,
+      ownership: { mappingId: 74, mentorUserId: 8, mentorName: "Nila Sen" },
+    }];
+    mockAdminRemove.mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership,
+    });
+
+    const response = await DELETE(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "DELETE",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          program_id: 1,
+          academic_year: "2026-2027",
+          student_id: 41,
+          expected_mapping_id: 73,
+          confirmed: true,
+          reason: "Mentor left",
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Mapping ownership changed; review the refreshed roster",
+      ownership,
     });
   });
 

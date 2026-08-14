@@ -461,6 +461,82 @@ export async function assignHolisticMentees(params: {
   }
 }
 
+async function removeAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof removeHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  const current = active.byStudent.get(params.studentId);
+  if (Number(current?.id ?? 0) !== params.expectedMappingId) {
+    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
+  }
+
+  const actorEmail = params.actorEmail.trim().toLowerCase();
+  const reason = params.reason.trim();
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
+         end_source = $3, end_reason = $4, end_audit_reason = $5, updated_at = now()
+     WHERE id = $6`,
+    [params.auditActorUserId ?? null, actorEmail, "af_lms_admin_remove",
+      "admin_removal", reason, params.expectedMappingId],
+  );
+  await eraseDraftHolisticNotes(
+    client,
+    [params.studentId],
+    params.auditActorUserId ?? null,
+    reason,
+    actorEmail,
+  );
+  return { ok: true, changed: 1 };
+}
+
+export async function removeHolisticMenteeAsAdmin(params: {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  expectedMappingId: number;
+  confirmed: boolean;
+  reason: string;
+}): Promise<HolisticMappingMutationResult> {
+  if (!params.confirmed) {
+    return { ok: false, status: 422, error: "Removal confirmation is required" };
+  }
+  if (!params.reason.trim()) {
+    return { ok: false, status: 422, error: "Removal reason is required" };
+  }
+  if (params.academicYear !== CURRENT_ACADEMIC_YEAR) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Admin Mapping removals are limited to the current Academic Year",
+    };
+  }
+  try {
+    return await withTransaction((client) => removeAdminMappingInTransaction(client, params));
+  } catch (error) {
+    if (error instanceof MappingMutationError) {
+      return mutationConflict(
+        error,
+        [params.studentId],
+        params.academicYear,
+        params.schoolId,
+        params.programId,
+      );
+    }
+    throw error;
+  }
+}
+
 async function removeInTransaction(
   client: PoolClient,
   params: Parameters<typeof removeHolisticMentees>[0],
