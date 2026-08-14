@@ -140,6 +140,57 @@ export async function eraseDraftHolisticNotes(
   );
 }
 
+async function eraseDraftHolisticNotesForMapping(
+  client: PoolClient,
+  params: {
+    studentId: number;
+    mentorUserId: number;
+    programId: number;
+    academicYear: string;
+    actorUserId: number | null;
+    actorEmail: string;
+    reason: string;
+  },
+): Promise<void> {
+  await client.query(
+    `WITH draft_notes AS MATERIALIZED (
+       SELECT notes.id
+       FROM holistic_mentorship_post_session_notes notes
+       JOIN holistic_mentorship_phases phase ON phase.id = notes.phase_id
+       JOIN holistic_mentorship_phase_plans plan ON plan.id = phase.phase_plan_id
+       WHERE notes.student_id = ANY($1::bigint[])
+         AND notes.author_user_id = $2
+         AND plan.program_id = $3
+         AND plan.academic_year = $4
+         AND notes.state = 'draft'
+       FOR UPDATE OF notes
+     ), updated_notes AS (
+       UPDATE holistic_mentorship_post_session_notes notes
+       SET revision = revision + 1, last_edited_at = now(), updated_at = now()
+       FROM draft_notes
+       WHERE notes.id = draft_notes.id
+       RETURNING notes.id
+     ), erased_answers AS (
+       DELETE FROM holistic_mentorship_post_session_answers answers
+       USING updated_notes
+       WHERE answers.notes_id = updated_notes.id
+     )
+     INSERT INTO holistic_mentorship_post_session_note_audits
+       (notes_id, actor_user_id, actor_email, action, occurred_at, reason, inserted_at, updated_at)
+     SELECT id, $5, $6, 'draft_erased_on_mapping_end', now(), $7, now(), now()
+     FROM updated_notes`,
+    [
+      [params.studentId],
+      params.mentorUserId,
+      params.programId,
+      params.academicYear,
+      params.actorUserId,
+      params.actorEmail,
+      params.reason,
+    ],
+  );
+}
+
 async function currentOwnership(
   studentIds: number[],
   academicYear: string,
@@ -624,13 +675,15 @@ async function removeAdminMappingInTransaction(
     [params.auditActorUserId ?? null, actorEmail, "af_lms_admin_remove",
       "admin_removal", reason, params.expectedMappingId],
   );
-  await eraseDraftHolisticNotes(
-    client,
-    [params.studentId],
-    params.auditActorUserId ?? null,
-    reason,
+  await eraseDraftHolisticNotesForMapping(client, {
+    studentId: params.studentId,
+    mentorUserId: Number(current!.mentor_user_id),
+    programId: params.programId,
+    academicYear: params.academicYear,
+    actorUserId: params.auditActorUserId ?? null,
     actorEmail,
-  );
+    reason,
+  });
   return { ok: true, changed: 1 };
 }
 
