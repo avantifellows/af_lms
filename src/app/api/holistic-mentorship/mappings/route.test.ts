@@ -23,6 +23,14 @@ vi.mock("@/lib/holistic-mappings", () => ({
 
 import { DELETE, GET, POST } from "./route";
 
+const permission = {
+  email: "teacher@example.com",
+  level: 1,
+  role: "teacher",
+  school_codes: ["SCH001"],
+  program_ids: [1],
+};
+
 describe("Holistic Mentorship Mapping API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -31,6 +39,7 @@ describe("Holistic Mentorship Mapping API", () => {
       ok: true,
       actorUserId: 9,
       school: { id: 4, code: "SCH001" },
+      permission,
     });
   });
 
@@ -51,6 +60,7 @@ describe("Holistic Mentorship Mapping API", () => {
       { schoolCode: "SCH001", programId: 1 }
     );
     expect(mockRoster).toHaveBeenCalledWith({
+      permission,
       schoolId: 4,
       programId: 1,
       academicYear: "2026-2027",

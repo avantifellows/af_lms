@@ -22,7 +22,7 @@ edges:
     condition: when a user is wrongly denied or wrongly granted access
   - target: patterns/add-api-route.md
     condition: when adding a route that needs gating
-last_updated: 2026-08-05
+last_updated: 2026-08-15
 ---
 
 # Permissions
@@ -70,6 +70,7 @@ Student Addition writes deliberately use a stricter gate than `ownsRecord`: admi
 - **General routes:** `getServerSession(authOptions)` → `isAdmin(email)` (admin-only) or `canAccessSchool(email, code, region?)` / `canAccessStudent(session, studentId, { requireEdit })`.
 - **Academic Mentorship routes:** use `requireAcademicMentorshipAccess(session, "view"|"edit", { schoolCode? })` from `src/lib/academic-mentorship.ts`.
 - **Holistic Mentorship routes:** use `requireHolisticMentorshipAccess(session, action, options)` from `src/lib/holistic-mentorship.ts`; it authenticates before protected data access and applies action-specific Teacher/Admin rules.
+- **Holistic Mentorship list scope:** pass the resolved permission returned by the access helper into progress/options/year/CSV and assignment-coverage domain reads. Those reads use `buildHolisticSchoolScopePredicate` from `src/lib/holistic-scope.ts`; Admin and Holistic Mentorship Admin remain program-wide, while explicit School, region, and Centre-seat-derived scopes produce parameterized, fail-closed SQL predicates.
 - **Holistic Mentorship tutorial:** `/holistic-mentorship/tutorial` uses `program_read` for the Admin guide. Teacher links add `school_code`, and the same route uses `roster_view` for that School before showing the Teacher guide. Program Managers, Program Admins, passcode users, and unsupported Teacher School access remain blocked.
 - **School page Academic Mentorship tab:** visibility comes from `academic_mentorship` feature access, so it is hidden while that feature is disabled. Its prior role-based views remain implemented behind the gate.
 - **Visit routes:** use `src/lib/visits-policy.ts` instead — `requireVisitsAccess(session, "view"|"edit")` then `enforceVisit*`. See `context/visits.md`.

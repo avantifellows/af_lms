@@ -10,11 +10,18 @@ import {
   listHolisticAssignmentRoster,
   removeHolisticMentees,
 } from "./holistic-mappings";
+import type { UserPermission } from "./permissions";
 
 const mockQuery = vi.mocked(query);
 const mockWithTransaction = vi.mocked(withTransaction);
 const mockReconcile = vi.mocked(reconcileHolisticMappings);
 const mockClientQuery = vi.fn();
+const adminPermission: UserPermission = {
+  email: "admin@example.com",
+  level: 3,
+  role: "admin",
+  program_ids: [1, 78],
+};
 
 describe("Holistic Mentor-Mentee Mappings", () => {
   beforeEach(() => {
@@ -45,7 +52,8 @@ describe("Holistic Mentor-Mentee Mappings", () => {
 
     await expect(
       listHolisticAssignmentRoster({
-      programId: 1,
+        permission: adminPermission,
+        programId: 1,
         schoolId: 4,
         academicYear: "2026-2027",
         search: "asha",
@@ -83,6 +91,28 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       programId: 1,
       schoolId: 4,
     });
+  });
+
+  it("applies the shared actor scope to the School assignment-coverage roster", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    };
+
+    await listHolisticAssignmentRoster({
+      permission: scopedPermission,
+      programId: 1,
+      schoolId: 4,
+      academicYear: "2026-2027",
+    });
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(String(sql)).toContain("scope_school.code = ANY($6::text[])");
+    expect(params).toEqual([4, "2026-2027", 1, "%%", null, ["SCH001"]]);
   });
 
   it("claims multiple eligible Students atomically with deterministic audit metadata", async () => {

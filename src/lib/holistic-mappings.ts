@@ -1,6 +1,8 @@
 import { query, withTransaction } from "./db";
 import { findEligibleHolisticMentorUserId } from "./holistic-mentor-eligibility";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
+import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
+import type { UserPermission } from "./permissions";
 import type { PoolClient } from "pg";
 
 interface RosterRow {
@@ -458,6 +460,7 @@ export async function removeHolisticMentees(params: {
 }
 
 export async function listHolisticAssignmentRoster(params: {
+  permission: UserPermission;
   schoolId: number;
   programId: number;
   academicYear: string;
@@ -469,6 +472,18 @@ export async function listHolisticAssignmentRoster(params: {
     schoolId: params.schoolId,
     programId: params.programId,
   });
+  const schoolScope = buildHolisticSchoolScopePredicate(params.permission, {
+    startIndex: 6,
+    schoolCodeColumn: "scope_school.code",
+    schoolRegionColumn: "scope_school.region",
+  });
+  const schoolScopeSql = schoolScope.clause
+    ? `AND EXISTS (
+         SELECT 1
+         FROM school scope_school
+         WHERE scope_school.id = $1 AND ${schoolScope.clause}
+       )`
+    : "";
   const rows = await query<RosterRow>(
     `WITH ${ELIGIBLE_ROSTER_CTE_SQL}
      SELECT st.id AS student_id,
@@ -504,6 +519,7 @@ export async function listHolisticAssignmentRoster(params: {
       AND mapping.ended_at IS NULL
      LEFT JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
      WHERE st.status IS DISTINCT FROM 'dropout'
+       ${schoolScopeSql}
        AND ($4 = '%%' OR st.student_id ILIKE $4 OR
             TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $4)
        AND ($5::int IS NULL OR roster_student.grade = $5)
@@ -514,6 +530,7 @@ export async function listHolisticAssignmentRoster(params: {
       params.programId,
       `%${(params.search ?? "").trim()}%`,
       params.grade ?? null,
+      ...schoolScope.params,
     ]
   );
 

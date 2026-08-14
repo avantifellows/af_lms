@@ -112,8 +112,8 @@ export async function GET(request: Request) {
   });
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
   const result = csv
-    ? await listHolisticProgress(filters, { all: true })
-    : await listHolisticProgress(filters);
+    ? await listHolisticProgress(filters, access.permission, { all: true })
+    : await listHolisticProgress(filters, access.permission);
   if (csv) {
     const content = new TextEncoder().encode(
       formatHolisticProgressCsv(filters.academicYear, filters.programId, result.rows),
@@ -127,8 +127,8 @@ export async function GET(request: Request) {
     });
   }
   const [options, academicYears] = await Promise.all([
-    getHolisticProgressOptions(filters.academicYear, filters.programId),
-    getHolisticProgressAcademicYears(filters.programId),
+    getHolisticProgressOptions(filters.academicYear, filters.programId, access.permission),
+    getHolisticProgressAcademicYears(filters.programId, access.permission),
   ]);
   return NextResponse.json({
     ...result,

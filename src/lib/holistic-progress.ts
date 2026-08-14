@@ -1,6 +1,8 @@
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_ID_TO_LABEL } from "./constants";
 import { query } from "./db";
 import { reconcileHolisticMappings } from "./holistic-reconciliation";
+import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
+import type { UserPermission } from "./permissions";
 import type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
 
 export type { HolisticProgress, HolisticProgressRow } from "@/types/holistic-progress";
@@ -87,6 +89,7 @@ function parsedAnswers(value: unknown): HolisticProgressRow["answers"] {
 
 export async function listHolisticProgress(
   filters: HolisticProgressFilters,
+  permission: UserPermission,
   options: { all?: boolean } = {}
 ): Promise<{
   rows: HolisticProgressRow[];
@@ -101,6 +104,12 @@ export async function listHolisticProgress(
   const order = progressOrder(filters.sort, direction);
   const limit = options.all ? null : 50;
   const offset = options.all ? 0 : (filters.page - 1) * 50;
+  const schoolScope = buildHolisticSchoolScopePredicate(permission, {
+    startIndex: 12,
+    schoolCodeColumn: "school.code",
+    schoolRegionColumn: "school.region",
+  });
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
   const rows = await query<ProgressDatabaseRow>(
     `WITH mapping_history AS (
        SELECT mapping.*,
@@ -210,6 +219,7 @@ export async function listHolisticProgress(
          ORDER BY phase.position DESC LIMIT 1
        ) initial_active ON true
        WHERE COALESCE(current_roster.grade, historical_grade.grade) IS NOT NULL
+         ${schoolScopeSql}
          AND ($4::text IS NULL OR school.code = $4)
          AND ($3::bigint IS NULL OR selected_phase.id IS NOT NULL)
          AND ($5::int IS NULL OR COALESCE(current_roster.grade, historical_grade.grade) = $5)
@@ -264,6 +274,7 @@ export async function listHolisticProgress(
       limit,
       offset,
       CURRENT_ACADEMIC_YEAR,
+      ...schoolScope.params,
     ]
   );
   const first = rows[0];
@@ -301,7 +312,14 @@ export async function listHolisticProgress(
 export async function getHolisticProgressOptions(
   academicYear: string,
   programId: number,
+  permission: UserPermission,
 ): Promise<HolisticProgressOptions> {
+  const schoolScope = buildHolisticSchoolScopePredicate(permission, {
+    startIndex: 4,
+    schoolCodeColumn: "school.code",
+    schoolRegionColumn: "school.region",
+  });
+  const schoolScopeWhere = schoolScope.clause ? `WHERE ${schoolScope.clause}` : "";
   const latestMappings = `WITH mapping_history AS (
          SELECT mapping.*
          FROM holistic_mentorship_mentor_mentee_mappings mapping
@@ -318,8 +336,9 @@ export async function getHolisticProgressOptions(
        SELECT DISTINCT school.code, school.name
        FROM latest_mapping mapping
        JOIN school ON school.id = mapping.school_id
+       ${schoolScopeWhere}
        ORDER BY school.name, school.code`,
-      [programId, academicYear, CURRENT_ACADEMIC_YEAR]
+      [programId, academicYear, CURRENT_ACADEMIC_YEAR, ...schoolScope.params]
     ),
     query<{ user_id: number | string; name: string | null; email: string }>(
       `${latestMappings}
@@ -327,9 +346,11 @@ export async function getHolisticProgressOptions(
               NULLIF(TRIM(COALESCE(mentor.first_name, '') || ' ' || COALESCE(mentor.last_name, '')), '') AS name,
               mentor.email
        FROM latest_mapping mapping
+       JOIN school ON school.id = mapping.school_id
        JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
+       ${schoolScopeWhere}
        ORDER BY name NULLS LAST, mentor.email`,
-      [programId, academicYear, CURRENT_ACADEMIC_YEAR]
+      [programId, academicYear, CURRENT_ACADEMIC_YEAR, ...schoolScope.params]
     ),
     query<{ id: number | string; position: number; title: string; grade: number | string; state: "open" | "locked" }>(
       `SELECT phase.id, phase.position, phase.title, grade.number AS grade, phase.state
@@ -353,7 +374,17 @@ export async function getHolisticProgressOptions(
 
 export async function getHolisticProgressAcademicYears(
   programId: number,
+  permission: UserPermission,
 ): Promise<string[]> {
+  const schoolScope = buildHolisticSchoolScopePredicate(permission, {
+    startIndex: 3,
+    schoolCodeColumn: "school.code",
+    schoolRegionColumn: "school.region",
+  });
+  const schoolScopeJoin = schoolScope.clause
+    ? "JOIN school ON school.id = mapping.school_id"
+    : "";
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
   const rows = await query<{ academic_year: string }>(
     `SELECT available.academic_year
      FROM (
@@ -365,11 +396,13 @@ export async function getHolisticProgressAcademicYears(
        UNION
        SELECT mapping.academic_year
        FROM holistic_mentorship_mentor_mentee_mappings mapping
+       ${schoolScopeJoin}
        WHERE mapping.program_id = $1 AND mapping.academic_year <= $2
+         ${schoolScopeSql}
      ) available
      ORDER BY CASE WHEN available.academic_year = $2 THEN 0 ELSE 1 END,
               available.academic_year DESC`,
-    [programId, CURRENT_ACADEMIC_YEAR]
+    [programId, CURRENT_ACADEMIC_YEAR, ...schoolScope.params]
   );
   return rows.map(({ academic_year }) => academic_year);
 }

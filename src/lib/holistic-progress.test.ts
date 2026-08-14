@@ -13,9 +13,17 @@ import {
   listHolisticProgress,
   type HolisticProgressRow,
 } from "./holistic-progress";
+import type { UserPermission } from "./permissions";
 
 const mockQuery = vi.mocked(query);
 const mockReconcile = vi.mocked(reconcileHolisticMappings);
+
+const adminPermission: UserPermission = {
+  email: "admin@example.com",
+  level: 3,
+  role: "admin",
+  program_ids: [1, 78],
+};
 
 const databaseRow = {
   student_id: "41",
@@ -52,6 +60,38 @@ describe("Holistic progress", () => {
     mockReconcile.mockResolvedValue(0);
   });
 
+  it("applies the actor's School scope before rows, counts, and pagination", async () => {
+    mockQuery.mockResolvedValueOnce([]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001", "SCH002"],
+      program_ids: [1],
+    };
+
+    await listHolisticProgress({
+      programId: 1,
+      academicYear: "2026-2027",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc",
+      page: 1,
+    }, scopedPermission);
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(String(sql)).toContain("school.code = ANY($12::text[])");
+    expect(params).toEqual([
+      1, "2026-2027", null, null, null, null, null, "%%", 50, 0,
+      "2026-2027", ["SCH001", "SCH002"],
+    ]);
+  });
+
   it("returns full-result counts while applying fixed 50-row pagination", async () => {
     mockQuery.mockResolvedValueOnce([databaseRow]);
 
@@ -67,7 +107,7 @@ describe("Holistic progress", () => {
       sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
       direction: "asc",
       page: 2,
-    });
+    }, adminPermission);
 
     expect(mockQuery).toHaveBeenCalledWith(expect.any(String), [
       1,
@@ -175,7 +215,7 @@ describe("Holistic progress", () => {
       .mockResolvedValueOnce([{ user_id: "9", name: "Current Mentor", email: "current@example.com" }])
       .mockResolvedValueOnce([{ id: "70", position: 2, title: "Check-in", grade: "11", state: "open" }]);
 
-    const options = await getHolisticProgressOptions("2025-2026", 1);
+    const options = await getHolisticProgressOptions("2025-2026", 1, adminPermission);
 
     expect(options).toMatchObject({
       schools: [{ code: "SCH001", name: "School One" }],
@@ -189,6 +229,27 @@ describe("Holistic progress", () => {
     }
   });
 
+  it("limits School and Mentor filter options to the actor's School scope", async () => {
+    mockQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const scopedPermission: UserPermission = {
+      email: "pa@example.com",
+      level: 2,
+      role: "program_admin",
+      regions: ["North"],
+      program_ids: [1],
+    };
+
+    await getHolisticProgressOptions("2026-2027", 1, scopedPermission);
+
+    for (const [sql, params] of mockQuery.mock.calls.slice(0, 2)) {
+      expect(String(sql)).toContain("COALESCE(school.region, '') = ANY($4::text[])");
+      expect(params).toEqual([1, "2026-2027", "2026-2027", ["North"]]);
+    }
+  });
+
   it("returns the current Academic Year first, followed by available prior years", async () => {
     mockQuery.mockResolvedValueOnce([
       { academic_year: "2026-2027" },
@@ -196,7 +257,7 @@ describe("Holistic progress", () => {
       { academic_year: "2023-2024" },
     ]);
 
-    await expect(getHolisticProgressAcademicYears(1)).resolves.toEqual([
+    await expect(getHolisticProgressAcademicYears(1, adminPermission)).resolves.toEqual([
       "2026-2027",
       "2025-2026",
       "2023-2024",
@@ -206,6 +267,24 @@ describe("Holistic progress", () => {
     expect(String(sql)).toContain("FROM holistic_mentorship_mentor_mentee_mappings mapping");
     expect(String(sql)).toContain("ORDER BY CASE WHEN available.academic_year = $2 THEN 0 ELSE 1 END");
     expect(params).toEqual([1, "2026-2027"]);
+  });
+
+  it("derives prior Academic Years only from Mapping history in scope", async () => {
+    mockQuery.mockResolvedValueOnce([{ academic_year: "2026-2027" }]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    };
+
+    await getHolisticProgressAcademicYears(1, scopedPermission);
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(String(sql)).toContain("JOIN school ON school.id = mapping.school_id");
+    expect(String(sql)).toContain("school.code = ANY($3::text[])");
+    expect(params).toEqual([1, "2026-2027", ["SCH001"]]);
   });
 
   it("keeps full counts when the requested page has no rows", async () => {
@@ -218,7 +297,7 @@ describe("Holistic progress", () => {
       programId: 1,
       academicYear: "2026-2027", phaseId: null, schoolCode: null, grade: null,
       mentorUserId: null, progress: null, search: "", sort: "student_name", direction: "asc", page: 3,
-    });
+    }, adminPermission);
 
     expect(result.rows).toEqual([]);
     expect(result.counts.totalMapped).toBe(51);

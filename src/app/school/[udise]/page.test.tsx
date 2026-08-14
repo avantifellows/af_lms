@@ -1542,7 +1542,7 @@ describe("SchoolPage (server component)", () => {
     mockRequireHolisticMentorshipAccess.mockResolvedValue({
       ok: true,
       permission,
-      school: { id: 20, code: "SCH001" },
+      school: { id: 20, code: "SCH001", programId: 1 },
       actorUserId: 101,
       canEdit: false,
     });
@@ -1562,7 +1562,9 @@ describe("SchoolPage (server component)", () => {
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(mockListHolisticAssignmentRoster).toHaveBeenCalledWith({
+      permission,
       schoolId: 20,
+      programId: 1,
       academicYear: "2026-2027",
     });
   });

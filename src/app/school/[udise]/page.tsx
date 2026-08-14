@@ -626,6 +626,7 @@ async function buildHolisticMentorshipContent({
     schoolCode={schoolCode}
     programId={holisticAccess.school!.programId}
     students={await listHolisticAssignmentRoster({
+      permission: holisticAccess.permission,
       schoolId: holisticAccess.school!.id,
       programId: holisticAccess.school!.programId,
       academicYear: CURRENT_ACADEMIC_YEAR,

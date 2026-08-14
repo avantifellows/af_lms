@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     actorUserId: access.actorUserId,
     students: await listHolisticAssignmentRoster({
+      permission: access.permission,
       schoolId: access.school!.id,
       programId,
       academicYear,
