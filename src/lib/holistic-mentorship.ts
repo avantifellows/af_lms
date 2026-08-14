@@ -182,7 +182,11 @@ function allowedActor(permission: UserPermission, action: HolisticMentorshipActi
   return {
     teacher: permission.role === "teacher" && TEACHER_ACTIONS.has(action),
     program: (programWide && PROGRAM_ACTIONS.has(action)) ||
-      (scopedRead && (action === "program_read" || action === "assignment_coverage_read")),
+      (scopedRead && (
+        action === "program_read" ||
+        action === "assignment_coverage_read" ||
+        action === "mapped_student_read"
+      )),
   };
 }
 
@@ -380,13 +384,15 @@ export async function requireHolisticMentorshipAccess(
     (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
   const scopedCoverageRead = action === "assignment_coverage_read" &&
     (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
-  if (scopedCoverageRead && (
+  const scopedStudentRead = action === "mapped_student_read" &&
+    (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
+  if ((scopedCoverageRead || scopedStudentRead) && (
     programId === undefined ||
     !getProgramContextSync(actor.permission).programIds.includes(programId)
   )) return denied(403, "Forbidden");
   const programIds = scopedProgramRead
     ? await resolveScopedProgramIds(actor.permission, requestedProgramId)
-    : scopedCoverageRead
+    : scopedCoverageRead || scopedStudentRead
       ? [programId!]
       : [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
   if (scopedProgramRead && programIds.length === 0) return denied(403, "Forbidden");

@@ -510,18 +510,37 @@ describe("requireHolisticMentorshipAccess", () => {
   );
 
   it.each(["program_manager", "program_admin"] as const)(
-    "denies %s Student drill-down before protected Student data access",
+    "allows %s read-only Student drill-down inside resolved School and Program scope",
     async (role) => {
-      mockQuery.mockResolvedValueOnce([permissionRow(role)]);
+      mockQuery
+        .mockResolvedValueOnce([permissionRow(role, {
+          level: 1,
+          school_codes: ["SCH001"],
+          program_ids: [1],
+          user_id: null,
+        })])
+        .mockResolvedValueOnce([
+          { id: 20, code: "SCH001", name: "School One", region: "North", program_id: 1 },
+        ]);
 
       await expect(
         requireHolisticMentorshipAccess(
           { user: { email: `${role}@example.com` } },
           "mapped_student_read",
-          { schoolCode: "SCH001", studentId: 41, academicYear: "2026-2027" }
+          {
+            schoolCode: "SCH001",
+            studentId: 41,
+            programId: 1,
+            academicYear: "2026-2027",
+          }
         )
-      ).resolves.toMatchObject({ ok: false, status: 403 });
-      expect(mockQuery).toHaveBeenCalledTimes(1);
+      ).resolves.toMatchObject({
+        ok: true,
+        canEdit: false,
+        programId: 1,
+        programIds: [1],
+        school: { id: 20, code: "SCH001", programId: 1 },
+      });
     }
   );
 

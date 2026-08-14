@@ -164,7 +164,6 @@ export default function HolisticMentorshipWorkspace({
             academicYear={academicYear}
             programId={selectedProgramId}
             onAcademicYears={updateAcademicYears}
-            showStudentLinks={canEdit}
           />
         )}
       </div>

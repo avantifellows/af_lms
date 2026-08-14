@@ -849,6 +849,8 @@ export default function StudentPhaseWorkspace({
   programId = PROGRAM_IDS.COE,
   source,
   backHref,
+  canRegenerateProfile = true,
+  viewerRole = "admin",
 }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
@@ -856,12 +858,15 @@ export default function StudentPhaseWorkspace({
   programId?: number;
   source?: "school";
   backHref?: string;
+  canRegenerateProfile?: boolean;
+  viewerRole?: string;
 }) {
   const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<number>>(() => new Set());
   if (detail.readOnly) {
     return <AdminReadOnlyWorkspace detail={detail} schoolCode={schoolCode}
       academicYear={academicYear} programId={programId}
-      source={source} backHref={backHref} />;
+      source={source} backHref={backHref} canRegenerateProfile={canRegenerateProfile}
+      viewerRole={viewerRole} />;
   }
   const phases = detail.phases.map((phase) =>
     phase.phaseId !== null && "locked" in phase && !phase.locked && completedPhaseIds.has(phase.phaseId)
@@ -889,17 +894,20 @@ export default function StudentPhaseWorkspace({
   );
 }
 
-function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, source, backHref }: {
+function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, source, backHref,
+  canRegenerateProfile, viewerRole }: {
   detail: HolisticStudentPhaseDetail;
   schoolCode: string;
   academicYear: string;
   programId: number;
   source?: "school";
   backHref?: string;
+  canRegenerateProfile: boolean;
+  viewerRole: string;
 }) {
   return (
     <div className="space-y-6">
-      <AdminStudentHeader student={detail.student} backHref={backHref} />
+      <AdminStudentHeader student={detail.student} backHref={backHref} viewerRole={viewerRole} />
       <InactivePhasePanels studentId={detail.student.id} phases={detail.phases}
         selectedPhaseId={detail.selectedPhase.phaseId} />
       <Card elevation="sm" className="overflow-hidden">
@@ -907,7 +915,8 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, s
           selectedPhaseId={detail.selectedPhase.phaseId} schoolCode={schoolCode}
           academicYear={academicYear} programId={programId} source={source} />
         <AdminSelectedPhase phase={selectedOpenPhase(detail)} selectedPhase={detail.selectedPhase}
-          studentId={detail.student.id} academicYear={academicYear} programId={programId} />
+          studentId={detail.student.id} academicYear={academicYear} programId={programId}
+          canRegenerateProfile={canRegenerateProfile} />
       </Card>
     </div>
   );
@@ -934,9 +943,16 @@ function StudentIdentity({ student, backHref }: {
   </header>;
 }
 
-function AdminStudentHeader({ student, backHref }: {
+function readOnlyViewerLabel(role: string) {
+  if (role === "program_manager") return "Program Manager";
+  if (role === "program_admin") return "Program Admin";
+  return "Admin";
+}
+
+function AdminStudentHeader({ student, backHref, viewerRole }: {
   student: HolisticStudentPhaseDetail["student"];
   backHref?: string;
+  viewerRole: string;
 }) {
   return <header className="flex items-center gap-4">
     {backHref && <Link href={backHref} aria-label="Back to Students and Progress"
@@ -945,7 +961,7 @@ function AdminStudentHeader({ student, backHref }: {
     </Link>}
     <div>
       <h1 className="text-2xl font-bold text-text-primary">{student.name}</h1>
-      <p className="text-sm text-text-muted">Admin read-only view</p>
+      <p className="text-sm text-text-muted">{readOnlyViewerLabel(viewerRole)} read-only view</p>
     </div>
   </header>;
 }
@@ -1152,12 +1168,14 @@ function PreparationSwitch({ mobilePanel, onSelect }: {
   </div>;
 }
 
-function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear, programId }: {
+function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear, programId,
+  canRegenerateProfile }: {
   phase: OpenSelectedPhase | null;
   selectedPhase: HolisticStudentPhaseDetail["selectedPhase"];
   studentId: number;
   academicYear: string;
   programId: number;
+  canRegenerateProfile: boolean;
 }) {
   const [mobilePanel, setMobilePanel] = useState<"context" | "guidance">("context");
   const tabId = phaseTabId(studentId, selectedPhase);
@@ -1174,7 +1192,7 @@ function AdminSelectedPhase({ phase, selectedPhase, studentId, academicYear, pro
           <h3 className="text-base font-semibold text-text-primary">Student Context</h3>
           <AdminContextSourceBadge context={phase.context} />
         </div>
-        {contextSourceIsProfile(phase.context) && <AdminProfileRegeneration
+        {canRegenerateProfile && contextSourceIsProfile(phase.context) && <AdminProfileRegeneration
           studentId={studentId} academicYear={academicYear} programId={programId}
           initial={phase.context.regeneration ?? null}
         />}
@@ -1574,7 +1592,7 @@ function PostSessionNotes({ phase, studentId, readOnly, schoolCode, academicYear
     <Card elevation="sm" className="space-y-4 p-4 sm:p-5">
       <PostSessionNotesEditor key={`${phase.phaseId}-${phase.mappingId}-${phase.revision}`}
         studentId={studentId} phaseId={phase.phaseId} phaseRevision={phase.revision}
-        mappingId={phase.mappingId} notesRevision={phase.notesRevision} schoolCode={schoolCode}
+        mappingId={phase.mappingId!} notesRevision={phase.notesRevision} schoolCode={schoolCode}
         academicYear={academicYear} programId={programId}
         editable={!readOnly && phase.canEditNotes}
         questions={phase.questions} notes={phase.notes} timestampNotes={visibleNotes}

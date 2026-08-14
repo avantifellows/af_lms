@@ -104,6 +104,76 @@ describe("Holistic Student Phase API", () => {
     });
   });
 
+  it.each(["program_manager", "program_admin"] as const)(
+    "returns an in-scope unassigned Student detail read-only for a %s",
+    async (role) => {
+      mockSession.mockResolvedValue({ user: { email: `${role}@example.com` } });
+      mockAccess.mockResolvedValue({
+        ok: true,
+        permission: { role },
+        canEdit: false,
+        school: { id: 4 },
+      });
+      mockDetail.mockResolvedValue({
+        student: { id: 41, name: "Asha Rao" },
+        phases: [{ phaseId: 73, progress: "pending", draftSaved: false }],
+        selectedPhase: {
+          phaseId: 73,
+          mappingId: null,
+          notesRevision: 0,
+          canEditNotes: false,
+          guidanceMarkdown: "Listen first.",
+          context: {
+            label: "Student Profile",
+            items: [{ label: "Strengths", content: "Patient problem solver" }],
+          },
+          notes: null,
+        },
+        readOnly: true,
+      });
+
+      const response = await GET(
+        new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027") as never,
+        context,
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockAccess).toHaveBeenCalledWith(
+        { user: { email: `${role}@example.com` } },
+        "mapped_student_read",
+        { schoolCode: "SCH001", studentId: 41, programId: 1, academicYear: "2026-2027" },
+      );
+      expect(mockDetail).toHaveBeenCalledWith(expect.objectContaining({
+        studentId: 41,
+        schoolId: 4,
+        role,
+        canEdit: false,
+      }));
+      await expect(response.json()).resolves.toEqual(expect.objectContaining({
+        readOnly: true,
+        selectedPhase: expect.objectContaining({
+          mappingId: null,
+          canEditNotes: false,
+          notesRevision: 0,
+          notes: null,
+        }),
+      }));
+    },
+  );
+
+  it("denies an out-of-scope Program Manager before reading direct Student detail", async () => {
+    mockSession.mockResolvedValue({ user: { email: "manager@example.com" } });
+    mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
+
+    const response = await GET(
+      new Request("http://localhost/api/holistic-mentorship/students/41/phases/73?school_code=SCH999&academic_year=2026-2027") as never,
+      context,
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockDetail).not.toHaveBeenCalled();
+  });
+
   it("does not read protected Phase data after a stale bookmark loses access", async () => {
     mockAccess.mockResolvedValue({ ok: false, status: 404, error: "Not found" });
 

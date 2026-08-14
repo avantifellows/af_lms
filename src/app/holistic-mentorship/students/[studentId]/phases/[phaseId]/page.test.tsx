@@ -15,8 +15,13 @@ vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: mockRedire
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: mockAccess }));
 vi.mock("@/lib/holistic-student-phase", () => ({ getHolisticStudentPhase: mockDetail }));
 vi.mock("@/components/holistic-mentorship/StudentPhaseWorkspace", () => ({
-  default: ({ detail, backHref }: { detail: { student: { name: string } }; backHref?: string }) => (
-    <div>
+  default: ({ detail, backHref, canRegenerateProfile }: {
+    detail: { student: { name: string } };
+    backHref?: string;
+    canRegenerateProfile?: boolean;
+  }) => (
+    <div data-testid="student-phase-workspace"
+      data-can-regenerate-profile={String(canRegenerateProfile)}>
       {backHref && <a href={backHref}>Back to Students and Progress</a>}
       <h1>{detail.student.name}</h1>
     </div>
@@ -71,6 +76,31 @@ describe("StudentPhasePage", () => {
       studentId: 41,
       phaseId: 73,
       role: "holistic_mentorship_admin",
+    }));
+  });
+
+  it("renders a scoped Program Manager detail without Profile regeneration capability", async () => {
+    mockSession.mockResolvedValue({ user: { email: "manager@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "program_manager" },
+      school: { id: 4, name: "School One" },
+      canEdit: false,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [],
+      selectedPhase: { phaseId: 73, locked: false },
+      readOnly: true,
+    });
+
+    render(await StudentPhasePage(props));
+
+    expect(screen.getByTestId("student-phase-workspace"))
+      .toHaveAttribute("data-can-regenerate-profile", "false");
+    expect(mockDetail).toHaveBeenCalledWith(expect.objectContaining({
+      role: "program_manager",
+      canEdit: false,
     }));
   });
 

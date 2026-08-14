@@ -126,7 +126,7 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(screen.getByLabelText("Program")).toHaveValue("78");
   });
 
-  it("renders scoped Program Manager and Program Admin workspaces without edit or detail affordances", async () => {
+  it("renders scoped Program Manager and Program Admin workspaces with read-only Student detail links", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -157,6 +157,9 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(screen.getByLabelText("Program")).toHaveValue("78");
     expect(screen.getAllByRole("option", { name: "78 - EMRS CoE" })).toHaveLength(1);
     expect(screen.queryByRole("tab", { name: "Phase Setup" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Open Student One" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Student One" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=78",
+    );
   });
 });

@@ -202,6 +202,29 @@ describe("StudentPhaseWorkspace", () => {
     expect(JSON.parse(String(post[1].body))).toMatchObject({ force: true });
   });
 
+  it("shows Profile context read-only without regeneration for a Program Manager", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
+      viewerRole="program_manager" canRegenerateProfile={false} detail={adminDetail({
+        context: {
+          label: "Student Profile",
+          items: [{ label: "Journey", content: "Patient problem solver" }],
+          regeneration: {
+            requestKey: "request-1",
+            state: "failed",
+            errorCode: "no_questionnaire_submission",
+          },
+        },
+      })} />);
+
+    expect(screen.getByText("Patient problem solver")).toBeInTheDocument();
+    expect(screen.getByText("Listen first.")).toBeInTheDocument();
+    expect(screen.getByText("Program Manager read-only view")).toBeInTheDocument();
+    expect(screen.queryByText("Admin read-only view")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request Profile regeneration" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
   it("polls a queued Profile request and explains a missing questionnaire", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({

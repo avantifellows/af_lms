@@ -437,6 +437,63 @@ describe("Holistic Student Phase derivation", () => {
     expect(notesCall?.[1]).toEqual([41, [73], false, null]);
   });
 
+  it("opens an eligible unassigned Student read-only for a Program Manager without selecting drafts", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: null, name: "Asha", external_student_id: "S41",
+        grade: 11, entry_grade: 11,
+      }])
+      .mockResolvedValueOnce([{
+        id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started",
+        position: 1, revision: 2, state: "open", guidance_markdown: "Listen first.",
+      }])
+      .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
+      .mockResolvedValueOnce([{ phase_id: 73, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        title: "Strengths", summary: "Patient problem solver", position: 1,
+        regeneration_request_key: null, regeneration_state: null, regeneration_error_code: null,
+      }])
+      .mockResolvedValueOnce([]);
+
+    const result = await getHolisticStudentPhase({
+      programId: 1,
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      role: "program_manager",
+      canEdit: false,
+    });
+
+    const [studentSql, studentParams] = mockQuery.mock.calls[0];
+    expect(String(studentSql)).toContain("FROM centre_students roster_student");
+    expect(String(studentSql)).toContain("LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping");
+    expect(studentParams).toEqual([41, 4, 1, "2026-2027"]);
+    expect(result).toMatchObject({
+      readOnly: true,
+      student: { id: 41, name: "Asha", grade: 11 },
+      phases: [{ progress: "pending", draftSaved: false }],
+      selectedPhase: {
+        mappingId: null,
+        canEditNotes: false,
+        notesRevision: 0,
+        guidanceMarkdown: "Listen first.",
+        context: {
+          label: "Student Profile",
+          items: [{ label: "Strengths", content: "Patient problem solver" }],
+        },
+        notes: null,
+      },
+    });
+    const notesCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("FROM holistic_mentorship_post_session_notes notes")
+    );
+    expect(String(notesCall?.[0])).toContain("notes.state = 'submitted'");
+    expect(notesCall?.[1]).toEqual([41, [73], false, null]);
+  });
+
   it("opens an ended prior-year Mapping read-only with submitted Notes for Admin", async () => {
     mockQuery
       .mockResolvedValueOnce([{
@@ -526,6 +583,52 @@ describe("Holistic Student Phase derivation", () => {
         notesRevision: 0,
         canEditNotes: true,
         notes: null,
+      },
+    });
+  });
+
+  it("lets the current Mentor read prior-author submitted Notes without editing them", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{
+        student_id: 41, mapping_id: 301, name: "Asha", external_student_id: "S41",
+        grade: 11, entry_grade: 11,
+      }])
+      .mockResolvedValueOnce([{
+        id: 73, academic_year: "2026-2027", grade: 11, title: "Getting started",
+        position: 1, revision: 5, state: "open", guidance_markdown: "Listen first.",
+      }])
+      .mockResolvedValueOnce([{ id: 91, phase_id: 73, text: "What helped?", position: 1 }])
+      .mockResolvedValueOnce([{ phase_id: 73, to_state: "open", occurred_at: "2026-06-01T00:00:00Z" }])
+      .mockResolvedValueOnce([{ academic_year: "2026-2027", started_at: "2026-07-01T00:00:00Z" }])
+      .mockResolvedValueOnce([{
+        notes_id: 101, phase_id: 73, author_user_id: 9, author_name: "Divya Rao",
+        state: "submitted", revision: 2, first_submitted_at: "2026-07-05T00:00:00Z",
+        last_edited_at: "2026-07-06T00:00:00Z", question_id: 91,
+        question: "What helped?", question_position: 1, answer: "A weekly plan",
+      }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await getHolisticStudentPhase({
+      programId: 1,
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 10,
+      role: "teacher",
+      canEdit: true,
+    });
+
+    expect(result).toMatchObject({
+      readOnly: false,
+      selectedPhase: {
+        canEditNotes: false,
+        notes: {
+          state: "submitted",
+          authorName: "Divya Rao",
+          answers: [{ questionId: 91, question: "What helped?", answer: "A weekly plan" }],
+        },
       },
     });
   });

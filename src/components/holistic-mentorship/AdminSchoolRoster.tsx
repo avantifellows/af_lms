@@ -37,7 +37,7 @@ function progress(student: Student): Progress {
 }
 
 function studentHref(student: Student, schoolCode: string, programId: number) {
-  if (!student.ownership || !student.activePhaseId) return null;
+  if (!student.activePhaseId) return null;
   const params = new URLSearchParams({
     school_code: schoolCode,
     academic_year: CURRENT_ACADEMIC_YEAR,

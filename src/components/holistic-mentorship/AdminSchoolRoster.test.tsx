@@ -34,7 +34,7 @@ describe("AdminSchoolRoster", () => {
     vi.clearAllMocks();
   });
 
-  it("shows read-only School coverage and links assigned Students back to the School source", () => {
+  it("shows read-only School coverage and links assigned and unassigned Students to detail", () => {
     render(<AdminSchoolRoster students={students} schoolCode="SCH001" />);
 
     expect(screen.getByText("50%")).toBeInTheDocument();
@@ -47,7 +47,10 @@ describe("AdminSchoolRoster", () => {
       "href",
       "/holistic-mentorship/students/41/phases/73?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
     );
-    expect(screen.queryByRole("link", { name: "Open Ravi Shah" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Ravi Shah" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/42/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
+    );
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View tutorial" })).toHaveAttribute(
       "href",

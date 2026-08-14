@@ -157,6 +157,10 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
     request.programId,
     source,
   );
+  const canRegenerateProfile = access.canEdit && (
+    access.permission.role === "admin" ||
+    access.permission.role === "holistic_mentorship_admin"
+  );
   return (
     <div className="min-h-screen bg-bg">
       <PageHeader
@@ -169,7 +173,9 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
         <StudentPhaseWorkspace key={detail.student.id} detail={detail}
           schoolCode={request.schoolCode} academicYear={request.academicYear}
           programId={request.programId}
-          source={source} backHref={backHref} />
+          source={source} backHref={backHref}
+          canRegenerateProfile={canRegenerateProfile}
+          viewerRole={access.permission.role} />
       </main>
     </div>
   );
