@@ -26,7 +26,7 @@ edges:
     condition: when working on teacher feedback setup, the feedback form, or its report
   - target: patterns/INDEX.md
     condition: when starting a task — check the pattern index for a matching pattern file
-last_updated: 2026-08-07
+last_updated: 2026-08-14
 ---
 
 # Session Bootstrap
@@ -50,7 +50,9 @@ Then read this file fully before doing anything else in this session.
 - Academic Mentorship is temporarily disabled for every role through the `academic_mentorship` feature matrix. Its UI, routes, APIs, mappings, and Staff Management data safeguards remain in place so the original role access can be restored without database changes.
 - Holistic Mentorship: dedicated `holistic_mentorship_admin` role and a Program allowlist covering JNV CoE (`1`) and EMRS CoE (`78`), separate School-page Academic/Holistic tabs, Admin yearly Phase Plan configuration (with prior-year copy offered only when that Program's prior Plan exists), and an Admin Academic Year selector that shows the current year plus only earlier years with Plan or Mapping data in the selected Program. Teacher self-service Mentor-Mentee Mapping claim/takeover/removal, stable Student/Phase workspaces with derived progress, live Context, draft autosave, Submit/correction flows, and a read-only Admin progress workspace with filtering, CSV export, and drill-down; global Admins also have a read-only School assignment coverage view for eligible assigned and unassigned Students, with Student drill-down returning to the School tab. Current-year Holistic eligibility, Notes, progress, assignment, and Student detail use one unambiguous Centre roster Grade and fail closed on conflicting Grades or ambiguous Program scope; historical progress keeps the yearly Grade enrollment fallback. Plans, Mappings, progress, profiles, Notes, reconciliation, CSV exports, and rollover are Program-scoped. Student Context loads imported Historical Notes for both Programs; the guarded operator import selects Program 1 or 78, keeps the fixed Program 1 baseline, and requires reviewed Program 78 dry-run counts before apply. Live eligibility remains the access boundary, while demand-driven AF LMS reconciliation is current-year only, closes stale Mappings, and erases drafts before protected Holistic work. Phase configuration audits require the authenticated email and optionally link a canonical User ID, so permission-only Admins can configure Phases without creating a User row. Profile summaries, regeneration status, safe failure reasons, automatic status polling, and the Admin regeneration action live in the first-Phase Student Context rather than a separate Profile panel. The Admin Student/Phase drill-down is prototype-aligned (back icon-button header with "Admin read-only view" subtitle, underline Phase tabs, panelled Context/Guidance, and Admin-only Notes visibility notices). Guarded operator commands import Historical Notes and roll Mappings into a new Academic Year; global Admins can execute approved content erasure with an immutable Student tombstone that prevents content restoration. Staff lifecycle cleanup ends Mappings and erases drafts. Release readiness includes local-only synthetic fixtures, a read-only production preflight, release Playwright workflows, and a non-destructive operator runbook.
 - Holistic Mentorship Teacher and Admin workspaces link to role-specific, LMS-hosted tutorials in a new tab. The tutorial route reuses `roster_view` with the Teacher's School or `program_read` for Admins instead of adding a separate tutorial permission.
-- Deploy via AWS Amplify; ~2979 unit tests (Vitest/RTL) + 71 E2E (Playwright).
+- Pull requests run a standalone Node 22 production-build check (`npm ci` then
+  `npm run build`) in GitHub Actions; deploys continue through AWS Amplify.
+  The suite also has ~2979 unit tests (Vitest/RTL) + 71 E2E (Playwright).
 
 **Not yet built / in progress:**
 

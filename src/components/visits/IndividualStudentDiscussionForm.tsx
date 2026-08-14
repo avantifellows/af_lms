@@ -11,7 +11,7 @@ import {
   type IndividualStudentRef,
   type ValidGrade,
 } from "@/lib/individual-student-discussion";
-import { getStudentDisplayName, type Student } from "@/lib/student-utils";
+import { getStudentDisplayName, type StudentRef } from "@/lib/student-utils";
 import { isPlainObject } from "@/lib/visit-form-utils";
 import { FormSection, RadioPair, Select, StickyProgressBar } from "@/components/ui";
 
@@ -51,7 +51,7 @@ function parseGrade(value: string): ValidGrade | null {
 /* -- Searchable multi-select picker -------------------------------------- */
 
 interface SearchableStudentSelectProps {
-  students: Student[];
+  students: StudentRef[];
   disabled: boolean;
   onToggle: (id: number) => void;
   emptyMessage: string;
@@ -203,7 +203,7 @@ export default function IndividualStudentDiscussionForm({
   disabled,
   schoolCode,
 }: IndividualStudentDiscussionFormProps) {
-  const [availableStudents, setAvailableStudents] = useState<Student[]>([]);
+  const [availableStudents, setAvailableStudents] = useState<StudentRef[]>([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState<string | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<ValidGrade | null>(null);
@@ -264,7 +264,7 @@ export default function IndividualStudentDiscussionForm({
     () =>
       pendingStudentIds
         .map((id) => availableStudents.find((student) => Number(student.id) === id))
-        .filter((student): student is Student => student !== undefined),
+        .filter((student): student is StudentRef => student !== undefined),
     [availableStudents, pendingStudentIds]
   );
 
@@ -302,7 +302,7 @@ export default function IndividualStudentDiscussionForm({
 
       const selectedStudents = pendingStudentIds
         .map((id) => availableStudentsRef.current.find((student) => Number(student.id) === id))
-        .filter((student): student is Student => student !== undefined);
+        .filter((student): student is StudentRef => student !== undefined);
       if (selectedStudents.length === 0) return;
 
       const entryId = globalThis.crypto.randomUUID();

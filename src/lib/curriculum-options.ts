@@ -16,7 +16,7 @@ import type {
   Topic,
 } from "@/types/curriculum";
 
-export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet"];
+export const EXAM_TRACKS: ExamTrack[] = ["jee_main", "jee_advanced", "neet", "cet"];
 // Curriculum applies to every physical-centre program (all non-NVS programs),
 // not just JNV CoE/Nodal — otherwise a Punjab/EMRS/RGNV teacher's programs
 // intersect to empty and their curriculum tab loads blank.
@@ -26,6 +26,7 @@ const EXAM_TRACK_CURRICULUM_IDS: Record<ExamTrack, number> = {
   jee_main: 1,
   jee_advanced: 9,
   neet: 2,
+  cet: 10,
 };
 interface SchoolScopeRow {
   code: string;
@@ -128,10 +129,13 @@ export function curriculumIdForExamTrack(examTrack: ExamTrack): number {
 // The batch stream (as produced by parseBatchStream: "engineering" | "medical") each exam
 // track targets. Used to reject mismatched pairings (e.g. a NEET test on an engineering
 // batch), which would otherwise put a wrong-subject test live for those students.
+// CET papers are PCM/PCB/PCMB, so the track spans both streams. Empty string
+// skips the stream-match guard rather than rejecting half the valid pairings.
 const EXAM_TRACK_STREAMS: Record<ExamTrack, string> = {
   jee_main: "engineering",
   jee_advanced: "engineering",
   neet: "medical",
+  cet: "",
 };
 
 export function streamForExamTrack(examTrack: ExamTrack): string {
