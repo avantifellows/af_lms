@@ -370,11 +370,11 @@ describe("requireHolisticMentorshipAccess", () => {
     }
   );
 
-  it("allows only a writable global Admin to execute approved privacy deletion", async () => {
+  it("denies approved privacy deletion to a writable global Admin", async () => {
     mockQuery.mockResolvedValueOnce([permissionRow("admin")]);
     await expect(requireHolisticMentorshipAccess(
       { user: { email: "admin@example.com" } }, "privacy_delete"
-    )).resolves.toMatchObject({ ok: true, canEdit: true, actorUserId: 10 });
+    )).resolves.toMatchObject({ ok: false, status: 403 });
   });
 
   it("fails closed when a global Admin has no canonical User ID", async () => {

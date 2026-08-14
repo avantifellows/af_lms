@@ -52,6 +52,28 @@ describe("Holistic Post-Session Notes", () => {
     expect(client.query).toHaveBeenCalledTimes(2);
   });
 
+  it("does not restore Notes content for a tombstoned Student", async () => {
+    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [] }) };
+    mockWithTransaction.mockImplementation(async (work) => work(client as never));
+
+    await expect(saveHolisticNotes({
+      programId: 1,
+      mode: "draft",
+      studentId: 41,
+      phaseId: 73,
+      schoolId: 4,
+      academicYear: "2026-2027",
+      actorUserId: 9,
+      expectedRevision: 0,
+      answers: [{ questionId: 91, answer: "Do not restore this content" }],
+    })).resolves.toEqual({ ok: false, status: 404, error: "Not found" });
+
+    expect(client.query).toHaveBeenCalledOnce();
+    expect(String(client.query.mock.calls[0][0])).toContain(
+      "holistic_mentorship_privacy_deletions"
+    );
+  });
+
   it("allows applicable prior-year Grade 11 Notes for a current Grade 12 Mentee", async () => {
     const client = { query: vi.fn()
       .mockResolvedValueOnce({ rows: [{ mapping_id: "300", mentor_user_id: "9", phase_revision: 5, phase_state: "open" }] })

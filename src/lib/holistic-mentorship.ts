@@ -174,8 +174,7 @@ function allowedActor(permission: UserPermission, action: HolisticMentorshipActi
   const programWide = permission.role === "admin" || permission.role === "holistic_mentorship_admin";
   return {
     teacher: permission.role === "teacher" && TEACHER_ACTIONS.has(action),
-    program: (action === "privacy_delete" && permission.role === "admin") ||
-      (programWide && PROGRAM_ACTIONS.has(action)),
+    program: programWide && PROGRAM_ACTIONS.has(action),
   };
 }
 
@@ -246,12 +245,6 @@ function programAccess(params: {
   const actorUserId = params.permission.user_id == null
     ? undefined
     : Number(params.permission.user_id);
-  if (
-    params.action === "privacy_delete" &&
-    (!Number.isSafeInteger(actorUserId) || (actorUserId ?? 0) < 1)
-  ) {
-    return denied(403, "Forbidden");
-  }
   return {
     ok: true,
     email: params.email,
@@ -289,6 +282,7 @@ async function resolveActorAccess(
 }> {
   const actor = await resolveAuthenticatedActor(session);
   if (accessDenied(actor)) return actor;
+  if (action === "privacy_delete") return denied(403, "Forbidden");
   const allowed = allowedActor(actor.permission, action);
   if (!allowed.program && !allowed.teacher) return denied(403, "Forbidden");
   if (!READ_ONLY_ACTIONS.has(action) && !actor.canEdit) return denied(403, "Forbidden");
@@ -326,7 +320,7 @@ export async function requireHolisticMentorshipAccess(
   if (resolvedSchool && "ok" in resolvedSchool) return resolvedSchool;
   const school = resolvedSchool as HolisticMentorshipSchool | undefined;
   const programId = school?.programId ?? requestedProgramId;
-  if (action !== "program_read" && action !== "privacy_delete" && programId === undefined) {
+  if (action !== "program_read" && programId === undefined) {
     return denied(404, "Not found");
   }
 

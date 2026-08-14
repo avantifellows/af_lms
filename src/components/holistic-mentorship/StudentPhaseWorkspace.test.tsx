@@ -258,6 +258,25 @@ describe("StudentPhaseWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Request Profile regeneration" })).not.toBeInTheDocument();
   });
 
+  it("keeps the erased-content notice visible for a previously erased Student", () => {
+    render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027" detail={adminDetail({
+      context: {
+        label: null,
+        items: [],
+        missing: "Profile unavailable",
+        regeneration: {
+          requestKey: "request-erased",
+          state: "failed",
+          errorCode: "privacy_erased",
+        },
+      },
+    })} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "A Profile cannot be generated because this Student's Holistic Mentorship data was deleted."
+    );
+  });
+
   it("autosaves a partial answer only after a short pause", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ ok: true, changed: true, revision: 1 }),

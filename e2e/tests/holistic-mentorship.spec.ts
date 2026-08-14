@@ -469,16 +469,20 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(holisticAdminPage.getByText("Regeneration queued.", { exact: true })).toBeVisible();
   });
 
-  test("global Admin and Holistic Admin have distinct role and deletion gates", async ({
+  test("every role is denied Holistic privacy deletion while Admin roles stay distinct", async ({
     adminPage,
     holisticAdminPage,
+    holisticTeacherPage,
+    pmPage,
+    programAdminPage,
+    passcodePage,
   }) => {
-    const adminDeletion = await apiStatus(adminPage,
-      `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
-    expect(adminDeletion).toBe(422);
-    const scopedDeletion = await apiStatus(holisticAdminPage,
-      `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
-    expect(scopedDeletion).toBe(403);
+    for (const page of [adminPage, holisticAdminPage, holisticTeacherPage,
+      pmPage, programAdminPage, passcodePage]) {
+      const deletion = await apiStatus(page,
+        `/api/holistic-mentorship/privacy-deletions/${fixture.draftStudentId}`, "POST", {});
+      expect(deletion).toBe(403);
+    }
     const adminRole = await apiStatus(adminPage, "/api/admin/users", "POST", {});
     expect(adminRole).not.toBe(403);
     const scopedRole = await apiStatus(holisticAdminPage, "/api/admin/users", "POST", {});
