@@ -91,6 +91,12 @@ describe("Holistic progress", () => {
       1, "2026-2027", null, null, null, null, null, "%%", 50, 0,
       "2026-2027", ["SCH001", "SCH002"],
     ]);
+    expect(mockReconcile).toHaveBeenCalledWith({
+      academicYear: "2026-2027",
+      programId: 1,
+      schoolCode: undefined,
+      permission: scopedPermission,
+    });
   });
 
   it("keeps an in-scope Mapping in rows, counts, and CSV after an out-of-scope School transfer", async () => {
@@ -207,6 +213,7 @@ describe("Holistic progress", () => {
       academicYear: "2026-2027",
       programId: 1,
       schoolCode: undefined,
+      permission: adminPermission,
     });
     expect(sql).toContain("$3::bigint IS NULL OR selected_phase.id IS NOT NULL");
     expect(sql).toContain("THEN 'active'");

@@ -99,6 +99,7 @@ export async function listHolisticProgress(
     academicYear: filters.academicYear,
     schoolCode: filters.schoolCode ?? undefined,
     programId: filters.programId,
+    permission,
   });
   const direction = filters.direction === "desc" ? "DESC" : "ASC";
   const order = progressOrder(filters.sort, direction);
