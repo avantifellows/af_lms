@@ -208,6 +208,10 @@ describe("Holistic Mentorship Mapping API", () => {
 
   it.each([
     [{}, "Program is required"],
+    [{ program_id: null }, "Invalid Program"],
+    [{ program_id: "" }, "Invalid Program"],
+    [{ program_id: "1" }, "Invalid Program"],
+    [{ program_id: 1.5 }, "Invalid Program"],
     [{ program_id: 999 }, "Invalid Program"],
   ])("requires one explicit unambiguous Program for Admin assign", async (program, error) => {
     const response = await POST(
@@ -228,7 +232,9 @@ describe("Holistic Mentorship Mapping API", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error });
+    expect(mockSession).not.toHaveBeenCalled();
     expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockAdminAssign).not.toHaveBeenCalled();
   });
 
   it("returns refreshed ownership when Admin assign loses an ownership race", async () => {
