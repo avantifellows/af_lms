@@ -22,28 +22,34 @@ export async function getHolisticProfileAdmin(
          ON configuration.id = profile.prompt_configuration_id AND configuration.state = 'active'
        JOIN holistic_mentorship_student_profile_summaries summary ON summary.student_profile_id = profile.id
        WHERE journey.student_id = $1
-         AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
-                     WHERE mapping.student_id = journey.student_id AND mapping.program_id = $2
-                       AND mapping.academic_year = $3
-                       AND ($3 <> $4 OR (
-                         mapping.ended_at IS NULL
-                         AND EXISTS (
-                           SELECT 1
-                           FROM student live_student
-                           JOIN centre_students roster_student
-                             ON roster_student.user_id = live_student.user_id
-                           JOIN centres roster_centre
-                             ON roster_centre.id = roster_student.centre_id
-                            AND roster_centre.school_id = mapping.school_id
-                            AND roster_centre.program_id = mapping.program_id
-                            AND roster_centre.is_active IS TRUE
-                           WHERE live_student.id = mapping.student_id
-                             AND live_student.status IS DISTINCT FROM 'dropout'
-                             AND roster_student.academic_year = mapping.academic_year
-                             AND roster_student.program_id = mapping.program_id
-                             AND roster_student.grade IN (11, 12)
-                         )
-                       )))
+         AND EXISTS (
+           SELECT 1
+           FROM student scoped_student
+           WHERE scoped_student.id = journey.student_id
+             AND scoped_student.status IS DISTINCT FROM 'dropout'
+             AND (
+               ($3 = $4 AND EXISTS (
+                 SELECT 1
+                 FROM centre_students roster_student
+                 JOIN centres roster_centre
+                   ON roster_centre.id = roster_student.centre_id
+                  AND roster_centre.program_id = $2
+                  AND roster_centre.is_active IS TRUE
+                 WHERE roster_student.user_id = scoped_student.user_id
+                   AND roster_student.academic_year = $3
+                   AND roster_student.program_id = $2
+                   AND roster_student.grade IN (11, 12)
+                 HAVING COUNT(DISTINCT roster_student.grade) = 1
+               ))
+               OR ($3 <> $4 AND EXISTS (
+                 SELECT 1
+                 FROM holistic_mentorship_mentor_mentee_mappings mapping
+                 WHERE mapping.student_id = scoped_student.id
+                   AND mapping.program_id = $2
+                   AND mapping.academic_year = $3
+               ))
+             )
+         )
        ORDER BY summary.position`,
       [studentId, programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
@@ -53,28 +59,34 @@ export async function getHolisticProfileAdmin(
        JOIN holistic_mentorship_prompt_configurations configuration
          ON configuration.id = request.prompt_configuration_id AND configuration.state = 'active'
        WHERE request.student_id = $1
-         AND EXISTS (SELECT 1 FROM holistic_mentorship_mentor_mentee_mappings mapping
-                     WHERE mapping.student_id = $1 AND mapping.program_id = $2
-                       AND mapping.academic_year = $3
-                       AND ($3 <> $4 OR (
-                         mapping.ended_at IS NULL
-                         AND EXISTS (
-                           SELECT 1
-                           FROM student live_student
-                           JOIN centre_students roster_student
-                             ON roster_student.user_id = live_student.user_id
-                           JOIN centres roster_centre
-                             ON roster_centre.id = roster_student.centre_id
-                            AND roster_centre.school_id = mapping.school_id
-                            AND roster_centre.program_id = mapping.program_id
-                            AND roster_centre.is_active IS TRUE
-                           WHERE live_student.id = mapping.student_id
-                             AND live_student.status IS DISTINCT FROM 'dropout'
-                             AND roster_student.academic_year = mapping.academic_year
-                             AND roster_student.program_id = mapping.program_id
-                             AND roster_student.grade IN (11, 12)
-                         )
-                       )))
+         AND EXISTS (
+           SELECT 1
+           FROM student scoped_student
+           WHERE scoped_student.id = request.student_id
+             AND scoped_student.status IS DISTINCT FROM 'dropout'
+             AND (
+               ($3 = $4 AND EXISTS (
+                 SELECT 1
+                 FROM centre_students roster_student
+                 JOIN centres roster_centre
+                   ON roster_centre.id = roster_student.centre_id
+                  AND roster_centre.program_id = $2
+                  AND roster_centre.is_active IS TRUE
+                 WHERE roster_student.user_id = scoped_student.user_id
+                   AND roster_student.academic_year = $3
+                   AND roster_student.program_id = $2
+                   AND roster_student.grade IN (11, 12)
+                 HAVING COUNT(DISTINCT roster_student.grade) = 1
+               ))
+               OR ($3 <> $4 AND EXISTS (
+                 SELECT 1
+                 FROM holistic_mentorship_mentor_mentee_mappings mapping
+                 WHERE mapping.student_id = scoped_student.id
+                   AND mapping.program_id = $2
+                   AND mapping.academic_year = $3
+               ))
+             )
+         )
        ORDER BY request.inserted_at DESC, request.id DESC LIMIT 1`,
       [studentId, programId, academicYear, CURRENT_ACADEMIC_YEAR]
     ),
