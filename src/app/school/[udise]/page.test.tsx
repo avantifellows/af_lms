@@ -1761,6 +1761,10 @@ describe("SchoolPage (server component)", () => {
 
     await renderPage("70705");
 
+    expect(screen.getByTestId("school-tabs")).toHaveAttribute(
+      "data-default-tab",
+      "holistic_mentorship",
+    );
     expect(screen.getByTestId("tab-holistic_mentorship")).toBeInTheDocument();
     expect(screen.queryByTestId("tab-enrollment")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Assign Ravi Shah" })).toBeEnabled();

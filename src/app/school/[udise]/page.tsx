@@ -768,7 +768,7 @@ function SchoolPageLayout({
         userEmail={userEmail}
       />
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <SchoolTabs tabs={tabs} defaultTab="enrollment" />
+        <SchoolTabs tabs={tabs} defaultTab={tabs[0]?.id} />
       </main>
     </div>
   );
