@@ -797,16 +797,47 @@ function canDropoutStudent(
   return ["admin", "program_manager", "program_admin"].includes(permission?.role ?? "");
 }
 
+function requestedHolisticProgramId(rawValue: string | string[] | undefined) {
+  if (rawValue === undefined) return undefined;
+  if (typeof rawValue !== "string") return null;
+  const programId = Number(rawValue);
+  return isHolisticMentorshipProgramId(programId) ? programId : null;
+}
+
+function isAdminPermission(permission: UserPermission | null) {
+  return permission?.role === "admin";
+}
+
+async function holisticAdminSchoolLayout(params: {
+  session: Session;
+  permission: UserPermission;
+  school: School;
+  programId?: number | null;
+}) {
+  const holisticContent = await buildHolisticMentorshipContent({
+    session: params.session,
+    permission: params.permission,
+    schoolCode: params.school.code,
+    programId: params.programId,
+    access: getFeatureAccess(params.permission, "holistic_mentorship"),
+  });
+  if (!holisticContent) redirect("/admin/holistic-mentorship");
+  return <SchoolPageLayout
+    school={params.school}
+    tabs={[{
+      id: "holistic_mentorship",
+      label: "Holistic Mentorship",
+      content: holisticContent,
+    }]}
+    backHref="/admin/holistic-mentorship"
+    userEmail={params.session.user?.email ?? undefined}
+  />;
+}
+
 export default async function SchoolPage({ params, searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
-  const rawHolisticProgramId = (await searchParams)?.program_id;
-  const requestedHolisticProgramId = rawHolisticProgramId === undefined
-    ? undefined
-    : typeof rawHolisticProgramId === "string" &&
-        isHolisticMentorshipProgramId(Number(rawHolisticProgramId))
-      ? Number(rawHolisticProgramId)
-      : null;
+  const holisticProgramId = requestedHolisticProgramId((await searchParams)?.program_id);
 
   if (!session) {
     redirect("/");
@@ -822,24 +853,12 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
   const identityAccessMessage = getSchoolIdentityAccessMessage(session, permission, school);
   if (identityAccessMessage) return identityAccessMessage;
   if (permission?.role === "holistic_mentorship_admin") {
-    const holisticContent = await buildHolisticMentorshipContent({
+    return holisticAdminSchoolLayout({
       session,
       permission,
-      schoolCode: school.code,
-      programId: requestedHolisticProgramId,
-      access: getFeatureAccess(permission, "holistic_mentorship"),
+      school,
+      programId: holisticProgramId,
     });
-    if (!holisticContent) redirect("/admin/holistic-mentorship");
-    return <SchoolPageLayout
-      school={school}
-      tabs={[{
-        id: "holistic_mentorship",
-        label: "Holistic Mentorship",
-        content: holisticContent,
-      }]}
-      backHref="/admin/holistic-mentorship"
-      userEmail={session.user?.email ?? undefined}
-    />;
   }
 
   const programContext = getProgramContextSync(permission);
@@ -871,7 +890,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
   ]);
 
   const nvsStreams = getDistinctNVSStreams(batches);
-  const isAdmin = permission?.role === "admin";
+  const isAdmin = isAdminPermission(permission);
   const navigation = getSchoolNavigation(session, permission);
   const enrollmentContent = (
     <EnrollmentSchoolTab
@@ -899,7 +918,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     session,
     permission,
     school,
-    holisticProgramId: requestedHolisticProgramId,
+    holisticProgramId,
     enrollmentContent,
     academicMentorshipContent,
     curriculumAccess: access.curriculum,

@@ -398,6 +398,15 @@ function accessDenied(
 
 type ScopedReadKind = "program" | "coverage" | "student" | null;
 
+function resourceScopedRead(kind: ScopedReadKind) {
+  return kind === "coverage" || kind === "student";
+}
+
+function hasScopedProgram(permission: UserPermission, programId?: number) {
+  if (programId === undefined) return false;
+  return getProgramContextSync(permission).programIds.includes(programId);
+}
+
 function scopedReadKind(
   permission: UserPermission,
   action: HolisticMentorshipAction,
@@ -417,11 +426,9 @@ async function validateScopedProgramResource(params: {
   options: HolisticMentorshipAccessOptions;
   school?: HolisticMentorshipSchool;
 }): Promise<HolisticMentorshipAccessDenied | undefined> {
-  const resourceScoped = params.kind === "coverage" || params.kind === "student";
-  const permittedPrograms = getProgramContextSync(params.permission).programIds;
-  if (resourceScoped && (
-    params.programId === undefined || !permittedPrograms.includes(params.programId)
-  )) return denied(403, "Forbidden");
+  if (resourceScopedRead(params.kind) && !hasScopedProgram(params.permission, params.programId)) {
+    return denied(403, "Forbidden");
+  }
   if (params.kind !== "student" || !params.options.studentId || !params.school) return undefined;
   const inScope = await studentBelongsToSchoolScope({
     schoolId: params.school.id,

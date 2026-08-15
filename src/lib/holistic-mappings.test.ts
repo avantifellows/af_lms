@@ -27,6 +27,30 @@ const adminPermission: UserPermission = {
   program_ids: [1, 78],
 };
 
+function teacherUnassignQuery(sql: unknown) {
+  const text = String(sql);
+  if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
+  if (text.includes("FOR UPDATE")) {
+    return {
+      rows: [
+        { id: 73, student_id: 41, mentor_user_id: 9 },
+        { id: 74, student_id: 42, mentor_user_id: 9 },
+      ],
+    };
+  }
+  return { rows: [] };
+}
+
+function clientQueryCallContaining(fragment: string) {
+  const call = mockClientQuery.mock.calls.find(([sql]) => String(sql).includes(fragment));
+  if (!call) throw new Error(`Expected a client query containing ${fragment}`);
+  return call;
+}
+
+function hasClientQueryContaining(fragment: string) {
+  return mockClientQuery.mock.calls.some(([sql]) => String(sql).includes(fragment));
+}
+
 describe("Holistic Mentor-Mentee Mappings", () => {
   beforeEach(() => {
     mockQuery.mockReset();
@@ -462,19 +486,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
   });
 
   it("self-unassigns exact Mappings and erases only their Mentor, Program, and year drafts", async () => {
-    mockClientQuery.mockImplementation((sql: unknown) => {
-      const text = String(sql);
-      if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
-      if (text.includes("FOR UPDATE")) {
-        return {
-          rows: [
-            { id: 73, student_id: 41, mentor_user_id: 9 },
-            { id: 74, student_id: 42, mentor_user_id: 9 },
-          ],
-        };
-      }
-      return { rows: [] };
-    });
+    mockClientQuery.mockImplementation(teacherUnassignQuery);
 
     await expect(
       removeHolisticMentees({
@@ -492,26 +504,21 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       })
     ).resolves.toEqual({ ok: true, changed: 2 });
 
-    const update = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes("ended_by_email")
-    );
-    expect(String(update?.[0])).not.toContain("end_audit_reason");
-    expect(update?.[1]).toEqual([
+    const update = clientQueryCallContaining("ended_by_email");
+    expect(String(update[0])).not.toContain("end_audit_reason");
+    expect(update[1]).toEqual([
       null, "teacher@example.com", "af_lms_teacher", "teacher_removal", [73, 74],
     ]);
-    expect(mockClientQuery.mock.calls.some(([sql]) =>
-      String(sql).includes("DELETE FROM holistic_mentorship_mentor_mentee_mappings")
-    )).toBe(false);
-    const cleanup = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes("holistic_mentorship_post_session_answers")
-    );
-    expect(String(cleanup?.[0])).toContain("state = 'draft'");
-    expect(String(cleanup?.[0])).toContain("FOR UPDATE");
-    expect(String(cleanup?.[0])).toContain("actor_email");
-    expect(String(cleanup?.[0])).toContain("notes.author_user_id = $2");
-    expect(String(cleanup?.[0])).toContain("plan.program_id = $3");
-    expect(String(cleanup?.[0])).toContain("plan.academic_year = $4");
-    expect(cleanup?.[1]).toEqual([
+    expect(hasClientQueryContaining("DELETE FROM holistic_mentorship_mentor_mentee_mappings"))
+      .toBe(false);
+    const cleanup = clientQueryCallContaining("holistic_mentorship_post_session_answers");
+    expect(String(cleanup[0])).toContain("state = 'draft'");
+    expect(String(cleanup[0])).toContain("FOR UPDATE");
+    expect(String(cleanup[0])).toContain("actor_email");
+    expect(String(cleanup[0])).toContain("notes.author_user_id = $2");
+    expect(String(cleanup[0])).toContain("plan.program_id = $3");
+    expect(String(cleanup[0])).toContain("plan.academic_year = $4");
+    expect(cleanup[1]).toEqual([
       [41, 42], 9, 1, "2026-2027", null, "teacher@example.com", "teacher_removal",
     ]);
   });

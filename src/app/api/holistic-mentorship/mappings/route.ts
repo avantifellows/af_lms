@@ -41,6 +41,51 @@ function parsingFailed<T>(result: ParsedAdminMutation<T>): result is { response:
   return "response" in result;
 }
 
+function parseExplicitProgramId(
+  value: Record<string, unknown>,
+): ParsedAdminMutation<number> {
+  if (!("program_id" in value)) return { response: holisticApiError("Program is required") };
+  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
+    return { response: holisticApiError("Invalid Program") };
+  }
+  const programId = holisticProgramId(value.program_id);
+  return programId
+    ? { value: programId }
+    : { response: holisticApiError("Invalid Program") };
+}
+
+function parseTeacherMutation(
+  value: Record<string, unknown> | null,
+  invalidMessage: string,
+): ParsedAdminMutation<{ payload: Record<string, unknown>; programId: number }> {
+  if (!value) return { response: holisticApiError(invalidMessage) };
+  const parsedProgramId = parseExplicitProgramId(value);
+  if (parsingFailed(parsedProgramId)) return parsedProgramId;
+  return { value: { payload: value, programId: parsedProgramId.value } };
+}
+
+async function respondToAdminMutation(
+  schoolCode: string,
+  programId: number,
+  mutate: (actor: {
+    actorEmail: string;
+    auditActorUserId?: number;
+    schoolId: number;
+  }) => Promise<HolisticMappingMutationResult>,
+) {
+  const session = await getServerSession(authOptions);
+  const access = await requireHolisticMentorshipAccess(session, "admin_mapping_mutation", {
+    schoolCode,
+    programId,
+  });
+  if (!access.ok) return holisticApiError(access.error, access.status);
+  return mutationResponse(await mutate({
+    actorEmail: access.email.trim().toLowerCase(),
+    auditActorUserId: access.permission.user_id ?? undefined,
+    schoolId: access.school!.id,
+  }));
+}
+
 function parseAdminMutationBase(
   value: Record<string, unknown>,
   messages: { year: string; confirmation: string; reason: string },
@@ -50,12 +95,8 @@ function parseAdminMutationBase(
   academicYear: string;
   reason: string;
 }> {
-  if (!("program_id" in value)) return { response: holisticApiError("Program is required") };
-  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
-    return { response: holisticApiError("Invalid Program") };
-  }
-  const programId = holisticProgramId(value.program_id);
-  if (!programId) return { response: holisticApiError("Invalid Program") };
+  const parsedProgramId = parseExplicitProgramId(value);
+  if (parsingFailed(parsedProgramId)) return parsedProgramId;
   if (!validSchoolCode(value.school_code)) {
     return { response: holisticApiError("Invalid School") };
   }
@@ -68,11 +109,31 @@ function parseAdminMutationBase(
   return {
     value: {
       schoolCode: value.school_code,
-      programId,
+      programId: parsedProgramId.value,
       academicYear: value.academic_year,
       reason,
     },
   };
+}
+
+function parseAdminMentorMutation(
+  value: Record<string, unknown>,
+  messages: { year: string; confirmation: string; reason: string },
+): ParsedAdminMutation<{
+  schoolCode: string;
+  programId: number;
+  academicYear: string;
+  reason: string;
+  studentId: number;
+  mentorUserId: number;
+}> {
+  const base = parseAdminMutationBase(value, messages);
+  if (parsingFailed(base)) return base;
+  const studentId = positiveInteger(value.student_id);
+  if (!studentId) return { response: holisticApiError("Invalid Student") };
+  const mentorUserId = positiveInteger(value.mentor_user_id);
+  if (!mentorUserId) return { response: holisticApiError("Invalid Mentor") };
+  return { value: { ...base.value, studentId, mentorUserId } };
 }
 
 function parseAdminAssign(value: Record<string, unknown>): ParsedAdminMutation<{
@@ -83,20 +144,16 @@ function parseAdminAssign(value: Record<string, unknown>): ParsedAdminMutation<{
   studentId: number;
   mentorUserId: number;
 }> {
-  const base = parseAdminMutationBase(value, {
+  const base = parseAdminMentorMutation(value, {
     year: "Admin Mapping assignments are limited to the current Academic Year",
     confirmation: "Assignment confirmation is required",
     reason: "Assignment reason is required",
   });
   if (parsingFailed(base)) return base;
-  const studentId = positiveInteger(value.student_id);
-  if (!studentId) return { response: holisticApiError("Invalid Student") };
-  const mentorUserId = positiveInteger(value.mentor_user_id);
-  if (!mentorUserId) return { response: holisticApiError("Invalid Mentor") };
   if (value.expected_mapping_id !== null) {
     return { response: holisticApiError("Expected Mapping must be unassigned") };
   }
-  return { value: { ...base.value, studentId, mentorUserId } };
+  return base;
 }
 
 async function adminAssign(value: Record<string, unknown>) {
@@ -104,25 +161,37 @@ async function adminAssign(value: Record<string, unknown>) {
   if (parsingFailed(parsed)) return parsed.response;
   const { schoolCode, programId, academicYear, reason, studentId, mentorUserId } = parsed.value;
 
-  const session = await getServerSession(authOptions);
-  const access = await requireHolisticMentorshipAccess(session, "admin_mapping_mutation", {
-    schoolCode,
-    programId,
-  });
-  if (!access.ok) return holisticApiError(access.error, access.status);
+  return respondToAdminMutation(schoolCode, programId, (actor) =>
+    assignHolisticMenteeAsAdmin({
+      ...actor,
+      programId,
+      academicYear,
+      studentId,
+      mentorUserId,
+      expectedMappingId: null,
+      confirmed: true,
+      reason,
+    }));
+}
 
-  return mutationResponse(await assignHolisticMenteeAsAdmin({
-    actorEmail: access.email.trim().toLowerCase(),
-    auditActorUserId: access.permission.user_id ?? undefined,
-    schoolId: access.school!.id,
-    programId,
-    academicYear,
-    studentId,
-    mentorUserId,
-    expectedMappingId: null,
-    confirmed: true,
-    reason,
-  }));
+function parseAdminReassign(value: Record<string, unknown>): ParsedAdminMutation<{
+  schoolCode: string;
+  programId: number;
+  academicYear: string;
+  reason: string;
+  studentId: number;
+  mentorUserId: number;
+  expectedMappingId: number;
+}> {
+  const base = parseAdminMentorMutation(value, {
+    year: "Admin Mapping reassignments are limited to the current Academic Year",
+    confirmation: "Reassignment confirmation is required",
+    reason: "Reassignment reason is required",
+  });
+  if (parsingFailed(base)) return base;
+  const expectedMappingId = positiveInteger(value.expected_mapping_id);
+  if (!expectedMappingId) return { response: holisticApiError("Invalid expected Mapping") };
+  return { value: { ...base.value, expectedMappingId } };
 }
 
 function isAdminRemoveRequest(value: Record<string, unknown>): boolean {
@@ -155,24 +224,16 @@ async function adminRemove(value: Record<string, unknown>) {
   if (parsingFailed(parsed)) return parsed.response;
   const { schoolCode, programId, academicYear, reason, studentId, expectedMappingId } = parsed.value;
 
-  const session = await getServerSession(authOptions);
-  const access = await requireHolisticMentorshipAccess(session, "admin_mapping_mutation", {
-    schoolCode,
-    programId,
-  });
-  if (!access.ok) return holisticApiError(access.error, access.status);
-
-  return mutationResponse(await removeHolisticMenteeAsAdmin({
-    actorEmail: access.email.trim().toLowerCase(),
-    auditActorUserId: access.permission.user_id ?? undefined,
-    schoolId: access.school!.id,
-    programId,
-    academicYear,
-    studentId,
-    expectedMappingId,
-    confirmed: true,
-    reason,
-  }));
+  return respondToAdminMutation(schoolCode, programId, (actor) =>
+    removeHolisticMenteeAsAdmin({
+      ...actor,
+      programId,
+      academicYear,
+      studentId,
+      expectedMappingId,
+      confirmed: true,
+      reason,
+    }));
 }
 
 export async function GET(request: NextRequest) {
@@ -212,15 +273,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const value = await readJsonObject(request);
-  if (value && isAdminAssignRequest(value)) return adminAssign(value);
-  if (!value) return holisticApiError("Invalid Mapping selection");
-  if (!("program_id" in value)) return holisticApiError("Program is required");
-  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
-    return holisticApiError("Invalid Program");
-  }
-  const programId = holisticProgramId(value.program_id);
-  if (!programId) return holisticApiError("Invalid Program");
+  const requestValue = await readJsonObject(request);
+  if (requestValue && isAdminAssignRequest(requestValue)) return adminAssign(requestValue);
+  const parsed = parseTeacherMutation(requestValue, "Invalid Mapping selection");
+  if (parsingFailed(parsed)) return parsed.response;
+  const { payload: value, programId } = parsed.value;
   if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       !Array.isArray(value.selections) ||
@@ -264,57 +321,37 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const value = await readJsonObject(request);
   if (!value) return holisticApiError("Invalid Mapping reassignment");
-  if (!("program_id" in value)) return holisticApiError("Program is required");
-  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
-    return holisticApiError("Invalid Program");
-  }
-  const programId = holisticProgramId(value.program_id);
-  if (!programId) return holisticApiError("Invalid Program");
-  if (!validSchoolCode(value.school_code)) return holisticApiError("Invalid School");
-  if (value.academic_year !== CURRENT_ACADEMIC_YEAR) {
-    return holisticApiError("Admin Mapping reassignments are limited to the current Academic Year");
-  }
-  if (value.confirmed !== true) return holisticApiError("Reassignment confirmation is required");
-  const reason = typeof value.reason === "string" ? value.reason.trim() : "";
-  if (!reason) return holisticApiError("Reassignment reason is required");
-  const studentId = positiveInteger(value.student_id);
-  if (!studentId) return holisticApiError("Invalid Student");
-  const mentorUserId = positiveInteger(value.mentor_user_id);
-  if (!mentorUserId) return holisticApiError("Invalid Mentor");
-  const expectedMappingId = positiveInteger(value.expected_mapping_id);
-  if (!expectedMappingId) return holisticApiError("Invalid expected Mapping");
-
-  const session = await getServerSession(authOptions);
-  const access = await requireHolisticMentorshipAccess(session, "admin_mapping_mutation", {
-    schoolCode: value.school_code,
+  const parsed = parseAdminReassign(value);
+  if (parsingFailed(parsed)) return parsed.response;
+  const {
+    schoolCode,
     programId,
-  });
-  if (!access.ok) return holisticApiError(access.error, access.status);
-
-  return mutationResponse(await reassignHolisticMenteeAsAdmin({
-    actorEmail: access.email.trim().toLowerCase(),
-    auditActorUserId: access.permission.user_id ?? undefined,
-    schoolId: access.school!.id,
-    programId,
-    academicYear: value.academic_year,
+    academicYear,
+    reason,
     studentId,
     mentorUserId,
     expectedMappingId,
-    confirmed: true,
-    reason,
-  }));
+  } = parsed.value;
+
+  return respondToAdminMutation(schoolCode, programId, (actor) =>
+    reassignHolisticMenteeAsAdmin({
+      ...actor,
+      programId,
+      academicYear,
+      studentId,
+      mentorUserId,
+      expectedMappingId,
+      confirmed: true,
+      reason,
+    }));
 }
 
 export async function DELETE(request: NextRequest) {
-  const value = await readJsonObject(request);
-  if (value && isAdminRemoveRequest(value)) return adminRemove(value);
-  if (!value) return holisticApiError("Invalid Mapping removal");
-  if (!("program_id" in value)) return holisticApiError("Program is required");
-  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
-    return holisticApiError("Invalid Program");
-  }
-  const programId = holisticProgramId(value.program_id);
-  if (!programId) return holisticApiError("Invalid Program");
+  const requestValue = await readJsonObject(request);
+  if (requestValue && isAdminRemoveRequest(requestValue)) return adminRemove(requestValue);
+  const parsed = parseTeacherMutation(requestValue, "Invalid Mapping removal");
+  if (parsingFailed(parsed)) return parsed.response;
+  const { payload: value, programId } = parsed.value;
   if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       value.confirmed !== true || !Array.isArray(value.mappings) ||

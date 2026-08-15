@@ -3,7 +3,7 @@
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
@@ -84,8 +84,7 @@ function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
   </div>;
 }
 
-function CoverageTable({ students, schoolCode, programId, canManage, controlsDisabled,
-  onAssign, onReassign, onRemove }: {
+type CoverageTableProps = {
   students: Student[];
   schoolCode: string;
   programId: number;
@@ -94,7 +93,10 @@ function CoverageTable({ students, schoolCode, programId, canManage, controlsDis
   onAssign: (student: Student) => void;
   onReassign: (student: Student) => void;
   onRemove: (student: Student) => void;
-}) {
+};
+
+function CoverageTable({ students, schoolCode, programId, canManage, controlsDisabled,
+  onAssign, onReassign, onRemove }: CoverageTableProps) {
   return <div className="overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm">
     <div role="region" aria-label="School mentorship coverage" tabIndex={0}
       className="max-h-[36rem] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
@@ -209,6 +211,66 @@ type MentorModalProps = {
   onSubmit: () => void;
 };
 
+function MentorSelectField({ label, mentors, value, excludedUserId, onChange }: {
+  label: string;
+  mentors: EligibleMentor[];
+  value: string;
+  excludedUserId?: number;
+  onChange: (value: string) => void;
+}) {
+  const options = excludedUserId === undefined
+    ? mentors
+    : mentors.filter((mentor) => mentor.userId !== excludedUserId);
+  return <label className="block text-sm font-bold text-text-primary">
+    {label}
+    <Select aria-label={label} className="mt-1 w-full" value={value}
+      onChange={(event) => onChange(event.target.value)}>
+      <option value="">Select an eligible Mentor</option>
+      {options.map((mentor) => <option key={mentor.userId} value={mentor.userId}>
+        {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
+      </option>)}
+    </Select>
+  </label>;
+}
+
+function AuditReasonField({ label, value, placeholder, onChange }: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return <label className="block text-sm font-bold text-text-primary">
+    {label}
+    <textarea aria-label={label} value={value} rows={4} maxLength={500}
+      onChange={(event) => onChange(event.target.value)}
+      className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+      placeholder={placeholder} />
+  </label>;
+}
+
+function MutationModalFooter({ submitError, submitting, submitDisabled, progressLabel, submitLabel,
+  danger = false, onClose, onSubmit }: {
+  submitError: string;
+  submitting: boolean;
+  submitDisabled: boolean;
+  progressLabel: string;
+  submitLabel: string;
+  danger?: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return <>
+    {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+    <div className="flex justify-end gap-2">
+      <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
+      <Button type="button" variant={danger ? "danger" : undefined} onClick={onSubmit}
+        disabled={submitDisabled}>
+        {submitting ? progressLabel : submitLabel}
+      </Button>
+    </div>
+  </>;
+}
+
 function AssignMentorModal({ student, mentors, mentorUserId, reason, submitting, submitError,
   onMentorChange, onReasonChange, onClose, onSubmit }: MentorModalProps) {
   return <Modal open={student !== null} onClose={submitting ? undefined : onClose}
@@ -220,31 +282,14 @@ function AssignMentorModal({ student, mentors, mentorUserId, reason, submitting,
         </h3>
         <p className="mt-1 text-sm text-text-muted">This assignment is recorded in the audit history.</p>
       </div>
-      <label className="block text-sm font-bold text-text-primary">
-        Mentor
-        <Select aria-label="Mentor" className="mt-1 w-full" value={mentorUserId}
-          onChange={(event) => onMentorChange(event.target.value)}>
-          <option value="">Select an eligible Mentor</option>
-          {mentors.map((mentor) => <option key={mentor.userId} value={mentor.userId}>
-            {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
-          </option>)}
-        </Select>
-      </label>
-      <label className="block text-sm font-bold text-text-primary">
-        Audit reason
-        <textarea aria-label="Audit reason" value={reason} rows={4} maxLength={500}
-          onChange={(event) => onReasonChange(event.target.value)}
-          className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          placeholder="Why is this Mentor being assigned?" />
-      </label>
-      {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
-        <Button type="button" onClick={onSubmit}
-          disabled={submitting || !mentorUserId || !reason.trim()}>
-          {submitting ? "Assigning…" : "Assign Mentor"}
-        </Button>
-      </div>
+      <MentorSelectField label="Mentor" mentors={mentors} value={mentorUserId}
+        onChange={onMentorChange} />
+      <AuditReasonField label="Audit reason" value={reason}
+        placeholder="Why is this Mentor being assigned?" onChange={onReasonChange} />
+      <MutationModalFooter submitError={submitError} submitting={submitting}
+        submitDisabled={submitting || !mentorUserId || !reason.trim()}
+        progressLabel="Assigning…" submitLabel="Assign Mentor" onClose={onClose}
+        onSubmit={onSubmit} />
     </div>
   </Modal>;
 }
@@ -262,32 +307,14 @@ function ReassignMentorModal({ student, mentors, mentorUserId, reason, submittin
           This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
         </p>
       </div>
-      <label className="block text-sm font-bold text-text-primary">
-        Replacement Mentor
-        <Select aria-label="Replacement Mentor" className="mt-1 w-full" value={mentorUserId}
-          onChange={(event) => onMentorChange(event.target.value)}>
-          <option value="">Select an eligible Mentor</option>
-          {mentors.filter((mentor) => mentor.userId !== student?.ownership?.mentorUserId)
-            .map((mentor) => <option key={mentor.userId} value={mentor.userId}>
-              {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
-            </option>)}
-        </Select>
-      </label>
-      <label className="block text-sm font-bold text-text-primary">
-        Reassignment reason
-        <textarea aria-label="Reassignment reason" value={reason} rows={4} maxLength={500}
-          onChange={(event) => onReasonChange(event.target.value)}
-          className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          placeholder="Why is this Mentor being reassigned?" />
-      </label>
-      {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
-        <Button type="button" onClick={onSubmit}
-          disabled={submitting || !mentorUserId || !reason.trim()}>
-          {submitting ? "Reassigning…" : "Reassign Mentor"}
-        </Button>
-      </div>
+      <MentorSelectField label="Replacement Mentor" mentors={mentors} value={mentorUserId}
+        excludedUserId={student?.ownership?.mentorUserId} onChange={onMentorChange} />
+      <AuditReasonField label="Reassignment reason" value={reason}
+        placeholder="Why is this Mentor being reassigned?" onChange={onReasonChange} />
+      <MutationModalFooter submitError={submitError} submitting={submitting}
+        submitDisabled={submitting || !mentorUserId || !reason.trim()}
+        progressLabel="Reassigning…" submitLabel="Reassign Mentor" onClose={onClose}
+        onSubmit={onSubmit} />
     </div>
   </Modal>;
 }
@@ -305,21 +332,11 @@ function RemoveMentorModal({ student, reason, submitting, submitError, onReasonC
           This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
         </p>
       </div>
-      <label className="block text-sm font-bold text-text-primary">
-        Removal reason
-        <textarea aria-label="Removal reason" value={reason} rows={4} maxLength={500}
-          onChange={(event) => onReasonChange(event.target.value)}
-          className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          placeholder="Why is this Mentor being removed?" />
-      </label>
-      {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
-        <Button type="button" variant="danger" onClick={onSubmit}
-          disabled={submitting || !reason.trim()}>
-          {submitting ? "Removing…" : "Remove Mentor"}
-        </Button>
-      </div>
+      <AuditReasonField label="Removal reason" value={reason}
+        placeholder="Why is this Mentor being removed?" onChange={onReasonChange} />
+      <MutationModalFooter submitError={submitError} submitting={submitting}
+        submitDisabled={submitting || !reason.trim()} progressLabel="Removing…"
+        submitLabel="Remove Mentor" danger onClose={onClose} onSubmit={onSubmit} />
     </div>
   </Modal>;
 }
@@ -354,6 +371,165 @@ function matchesStudentQuery(student: Student, query: string) {
     (student.externalStudentId ?? "").toLowerCase().includes(query);
 }
 
+async function requestMappingMutation(
+  method: "POST" | "PATCH" | "DELETE",
+  payload: Record<string, unknown>,
+  fallbackError: string,
+) {
+  const response = await fetch("/api/holistic-mentorship/mappings", {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || fallbackError);
+}
+
+function useMappingDialogs({ schoolCode, programId, academicYear, canEdit, students }: {
+  schoolCode: string;
+  programId: number;
+  academicYear: string;
+  canEdit: boolean;
+  students: Student[];
+}) {
+  const router = useRouter();
+  const [assigning, setAssigning] = useState<Student | null>(null);
+  const [reassigning, setReassigning] = useState<Student | null>(null);
+  const [removing, setRemoving] = useState<Student | null>(null);
+  const [mentorUserId, setMentorUserId] = useState("");
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [staleStudents, setStaleStudents] = useState<Student[] | null>(null);
+  const resetFields = () => {
+    setMentorUserId("");
+    setReason("");
+    setSubmitError("");
+  };
+  const closeAssign = () => {
+    setAssigning(null);
+    resetFields();
+  };
+  const closeRemove = () => {
+    setRemoving(null);
+    resetFields();
+  };
+  const closeReassign = () => {
+    setReassigning(null);
+    resetFields();
+  };
+  const submitAssign = async () => {
+    if (!assigning || !mentorUserId || !reason.trim() || !canEdit) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await requestMappingMutation("POST", {
+        school_code: schoolCode,
+        program_id: programId,
+        academic_year: academicYear,
+        student_id: assigning.studentId,
+        mentor_user_id: Number(mentorUserId),
+        expected_mapping_id: null,
+        confirmed: true,
+        reason: reason.trim(),
+      }, "Unable to assign Mentor");
+      closeAssign();
+      router.refresh();
+    } catch (problem) {
+      setSubmitError(problem instanceof Error ? problem.message : "Unable to assign Mentor");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const submitReassign = async () => {
+    if (!reassigning?.ownership || !mentorUserId || !reason.trim() || !canEdit) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await requestMappingMutation("PATCH", {
+        school_code: schoolCode,
+        program_id: programId,
+        academic_year: academicYear,
+        student_id: reassigning.studentId,
+        mentor_user_id: Number(mentorUserId),
+        expected_mapping_id: reassigning.ownership.mappingId,
+        confirmed: true,
+        reason: reason.trim(),
+      }, "Unable to reassign Mentor");
+      setStaleStudents(students);
+      closeReassign();
+      router.refresh();
+    } catch (problem) {
+      setSubmitError(problem instanceof Error ? problem.message : "Unable to reassign Mentor");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const submitRemove = async () => {
+    if (!removing?.ownership || !reason.trim() || !canEdit) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await requestMappingMutation("DELETE", {
+        school_code: schoolCode,
+        program_id: programId,
+        academic_year: academicYear,
+        student_id: removing.studentId,
+        expected_mapping_id: removing.ownership.mappingId,
+        confirmed: true,
+        reason: reason.trim(),
+      }, "Unable to remove Mentor");
+      closeRemove();
+      router.refresh();
+    } catch (problem) {
+      setSubmitError(problem instanceof Error ? problem.message : "Unable to remove Mentor");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return {
+    assigning, reassigning, removing, mentorUserId, reason, submitting, submitError,
+    rosterStale: staleStudents === students,
+    setAssigning, setReassigning, setRemoving, setMentorUserId, setReason,
+    closeAssign, closeReassign, closeRemove, submitAssign, submitReassign, submitRemove,
+  };
+}
+
+function canManageMappings(role: string | undefined, academicYear: string) {
+  const adminRole = role === "admin" || role === "holistic_mentorship_admin";
+  return adminRole && academicYear === CURRENT_ACADEMIC_YEAR;
+}
+
+function CoverageResults({ students, schoolCode, programId, canManage, controlsDisabled,
+  onAssign, onReassign, onRemove }: CoverageTableProps) {
+  if (students.length === 0) return <NoMatchingStudents />;
+  return <CoverageTable students={students} schoolCode={schoolCode} programId={programId}
+    canManage={canManage} controlsDisabled={controlsDisabled} onAssign={onAssign}
+    onReassign={onReassign} onRemove={onRemove} />;
+}
+
+function MappingDialogs({ dialogs, mentors }: {
+  dialogs: ReturnType<typeof useMappingDialogs>;
+  mentors: EligibleMentor[];
+}) {
+  return <>
+    <AssignMentorModal student={dialogs.assigning} mentors={mentors}
+      mentorUserId={dialogs.mentorUserId} reason={dialogs.reason} submitting={dialogs.submitting}
+      submitError={dialogs.submitError} onMentorChange={dialogs.setMentorUserId}
+      onReasonChange={dialogs.setReason} onClose={dialogs.closeAssign}
+      onSubmit={() => void dialogs.submitAssign()} />
+    <ReassignMentorModal student={dialogs.reassigning} mentors={mentors}
+      mentorUserId={dialogs.mentorUserId} reason={dialogs.reason} submitting={dialogs.submitting}
+      submitError={dialogs.submitError} onMentorChange={dialogs.setMentorUserId}
+      onReasonChange={dialogs.setReason} onClose={dialogs.closeReassign}
+      onSubmit={() => void dialogs.submitReassign()} />
+    <RemoveMentorModal student={dialogs.removing} reason={dialogs.reason}
+      submitting={dialogs.submitting} submitError={dialogs.submitError}
+      onReasonChange={dialogs.setReason} onClose={dialogs.closeRemove}
+      onSubmit={() => void dialogs.submitRemove()} />
+  </>;
+}
+
 export default function AdminSchoolRoster({
   students,
   schoolCode,
@@ -373,163 +549,26 @@ export default function AdminSchoolRoster({
   mentors?: EligibleMentor[];
   summary?: HolisticAssignmentCoverageSummary;
 }) {
-  const router = useRouter();
   const [search, setSearch] = useState("");
   const [grade, setGrade] = useState("");
   const [assignment, setAssignment] = useState<AssignmentFilter>("all");
-  const [assigning, setAssigning] = useState<Student | null>(null);
-  const [reassigning, setReassigning] = useState<Student | null>(null);
-  const [removing, setRemoving] = useState<Student | null>(null);
-  const [mentorUserId, setMentorUserId] = useState("");
-  const [reason, setReason] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [rosterStudents, setRosterStudents] = useState(students);
-  const [rosterStale, setRosterStale] = useState(false);
-  const canManage = (role === "admin" || role === "holistic_mentorship_admin") &&
-    academicYear === CURRENT_ACADEMIC_YEAR;
+  const dialogs = useMappingDialogs({ schoolCode, programId, academicYear, canEdit, students });
+  const canManage = canManageMappings(role, academicYear);
   const shown = useMemo(
-    () => filterStudents(rosterStudents, search, grade, assignment),
-    [assignment, grade, rosterStudents, search]
+    () => filterStudents(students, search, grade, assignment),
+    [assignment, grade, students, search]
   );
-
-  useEffect(() => {
-    setRosterStudents(students);
-    setRosterStale(false);
-  }, [students]);
-
-  const closeAssign = () => {
-    setAssigning(null);
-    setMentorUserId("");
-    setReason("");
-    setSubmitError("");
-  };
-  const submitAssign = async () => {
-    if (!assigning || !mentorUserId || !reason.trim() || !canEdit) return;
-    setSubmitting(true);
-    setSubmitError("");
-    try {
-      const response = await fetch("/api/holistic-mentorship/mappings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_code: schoolCode,
-          program_id: programId,
-          academic_year: academicYear,
-          student_id: assigning.studentId,
-          mentor_user_id: Number(mentorUserId),
-          expected_mapping_id: null,
-          confirmed: true,
-          reason: reason.trim(),
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to assign Mentor");
-      closeAssign();
-      router.refresh();
-    } catch (problem) {
-      setSubmitError(problem instanceof Error ? problem.message : "Unable to assign Mentor");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-  const closeRemove = () => {
-    setRemoving(null);
-    setReason("");
-    setSubmitError("");
-  };
-  const closeReassign = () => {
-    setReassigning(null);
-    setMentorUserId("");
-    setReason("");
-    setSubmitError("");
-  };
-  const submitReassign = async () => {
-    if (!reassigning?.ownership || !mentorUserId || !reason.trim() || !canEdit) return;
-    setSubmitting(true);
-    setSubmitError("");
-    try {
-      const response = await fetch("/api/holistic-mentorship/mappings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_code: schoolCode,
-          program_id: programId,
-          academic_year: academicYear,
-          student_id: reassigning.studentId,
-          mentor_user_id: Number(mentorUserId),
-          expected_mapping_id: reassigning.ownership.mappingId,
-          confirmed: true,
-          reason: reason.trim(),
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to reassign Mentor");
-      setRosterStale(true);
-      closeReassign();
-      router.refresh();
-    } catch (problem) {
-      setSubmitError(problem instanceof Error ? problem.message : "Unable to reassign Mentor");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-  const submitRemove = async () => {
-    if (!removing?.ownership || !reason.trim() || !canEdit) return;
-    setSubmitting(true);
-    setSubmitError("");
-    try {
-      const response = await fetch("/api/holistic-mentorship/mappings", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_code: schoolCode,
-          program_id: programId,
-          academic_year: academicYear,
-          student_id: removing.studentId,
-          expected_mapping_id: removing.ownership.mappingId,
-          confirmed: true,
-          reason: reason.trim(),
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to remove Mentor");
-      closeRemove();
-      router.refresh();
-    } catch (problem) {
-      setSubmitError(problem instanceof Error ? problem.message : "Unable to remove Mentor");
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return <section className="min-w-0 max-w-full space-y-5">
     <RosterHeader canEdit={canEdit} academicYear={academicYear} />
-    <Summary summary={summary ?? derivedSummary(rosterStudents)} />
+    <Summary summary={summary ?? derivedSummary(students)} />
     <RosterFilters search={search} grade={grade} assignment={assignment}
       onSearchChange={setSearch} onGradeChange={setGrade} onAssignmentChange={setAssignment} />
-    {shown.length ? <CoverageTable
-      students={shown}
-      schoolCode={schoolCode}
-      programId={programId}
-      canManage={canManage}
-      controlsDisabled={!canEdit || submitting || rosterStale}
-      onAssign={setAssigning}
-      onReassign={setReassigning}
-      onRemove={setRemoving}
-    />
-      : <NoMatchingStudents />}
-    <div className="sr-only" role="status">Showing {shown.length} of {rosterStudents.length} Students</div>
-    <AssignMentorModal student={assigning} mentors={mentors} mentorUserId={mentorUserId}
-      reason={reason} submitting={submitting} submitError={submitError}
-      onMentorChange={setMentorUserId} onReasonChange={setReason} onClose={closeAssign}
-      onSubmit={() => void submitAssign()} />
-    <ReassignMentorModal student={reassigning} mentors={mentors} mentorUserId={mentorUserId}
-      reason={reason} submitting={submitting} submitError={submitError}
-      onMentorChange={setMentorUserId} onReasonChange={setReason} onClose={closeReassign}
-      onSubmit={() => void submitReassign()} />
-    <RemoveMentorModal student={removing} reason={reason} submitting={submitting}
-      submitError={submitError} onReasonChange={setReason} onClose={closeRemove}
-      onSubmit={() => void submitRemove()} />
+    <CoverageResults students={shown} schoolCode={schoolCode} programId={programId}
+      canManage={canManage} controlsDisabled={!canEdit || dialogs.submitting || dialogs.rosterStale}
+      onAssign={dialogs.setAssigning} onReassign={dialogs.setReassigning}
+      onRemove={dialogs.setRemoving} />
+    <div className="sr-only" role="status">Showing {shown.length} of {students.length} Students</div>
+    <MappingDialogs dialogs={dialogs} mentors={mentors} />
   </section>;
 }

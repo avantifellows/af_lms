@@ -347,10 +347,21 @@ async function insertMappings(
   }
 }
 
-async function assignAdminMappingInTransaction(
+type AdminMappingWriteParams = {
+  actorEmail: string;
+  auditActorUserId?: number;
+  schoolId: number;
+  programId: number;
+  academicYear: string;
+  studentId: number;
+  expectedMappingId: number | null;
+  reason: string;
+};
+
+async function lockEligibleAdminMentor(
   client: PoolClient,
-  params: Parameters<typeof assignHolisticMenteeAsAdmin>[0],
-): Promise<HolisticMappingMutationResult> {
+  params: AdminMappingWriteParams & { mentorUserId: number },
+) {
   await lockHolisticMentorMappingMutation(client, params.mentorUserId);
   await lockEligibleStudents(client, {
     schoolId: params.schoolId,
@@ -367,16 +378,13 @@ async function assignAdminMappingInTransaction(
   if (eligibleMentorUserId === null) {
     throw new MappingMutationError(422, "Mentor is not eligible for this School and Program");
   }
-  const active = await lockActiveMappings(
-    client,
-    [params.studentId],
-    params.academicYear,
-    params.schoolId,
-    params.programId,
-  );
-  if (active.byStudent.has(params.studentId)) {
-    throw new MappingMutationError(409, "Student is already assigned");
-  }
+}
+
+async function insertAdminMapping(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { mentorUserId: number },
+  source: "af_lms_admin_assign" | "af_lms_admin_reassign",
+) {
   await client.query(
     `INSERT INTO holistic_mentorship_mentor_mentee_mappings
        (student_id, mentor_user_id, school_id, program_id, academic_year,
@@ -392,10 +400,74 @@ async function assignAdminMappingInTransaction(
       params.academicYear,
       params.auditActorUserId ?? null,
       params.actorEmail.trim().toLowerCase(),
-      "af_lms_admin_assign",
+      source,
       params.reason.trim(),
     ],
   );
+}
+
+async function lockExpectedAdminMapping(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { expectedMappingId: number },
+) {
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  const current = active.byStudent.get(params.studentId);
+  if (Number(current?.id ?? 0) !== params.expectedMappingId) {
+    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
+  }
+  return current!;
+}
+
+async function endAdminMapping(
+  client: PoolClient,
+  params: AdminMappingWriteParams & { expectedMappingId: number },
+  currentMentorUserId: number,
+  source: "af_lms_admin_reassign" | "af_lms_admin_remove",
+  endReason: "admin_reassignment" | "admin_removal",
+) {
+  const actorEmail = params.actorEmail.trim().toLowerCase();
+  const reason = params.reason.trim();
+  await client.query(
+    `UPDATE holistic_mentorship_mentor_mentee_mappings
+     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
+         end_source = $3, end_reason = $4, end_audit_reason = $5, updated_at = now()
+     WHERE id = $6`,
+    [params.auditActorUserId ?? null, actorEmail, source,
+      endReason, reason, params.expectedMappingId],
+  );
+  await eraseDraftHolisticNotesForMapping(client, {
+    studentIds: [params.studentId],
+    mentorUserId: currentMentorUserId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    actorUserId: params.auditActorUserId ?? null,
+    actorEmail,
+    reason,
+  });
+}
+
+async function assignAdminMappingInTransaction(
+  client: PoolClient,
+  params: Parameters<typeof assignHolisticMenteeAsAdmin>[0],
+): Promise<HolisticMappingMutationResult> {
+  await lockEligibleAdminMentor(client, params);
+  const active = await lockActiveMappings(
+    client,
+    [params.studentId],
+    params.academicYear,
+    params.schoolId,
+    params.programId,
+  );
+  if (active.byStudent.has(params.studentId)) {
+    throw new MappingMutationError(409, "Student is already assigned");
+  }
+  await insertAdminMapping(client, params, "af_lms_admin_assign");
   return { ok: true, changed: 1 };
 }
 
@@ -429,20 +501,13 @@ export async function assignHolisticMenteeAsAdmin(params: {
     studentIds: [params.studentId],
     programId: params.programId,
   });
-  try {
-    return await withTransaction((client) => assignAdminMappingInTransaction(client, params));
-  } catch (error) {
-    if (error instanceof MappingMutationError || isUniqueViolation(error)) {
-      return mutationConflict(
-        error as MappingMutationError | { code?: unknown },
-        [params.studentId],
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
-    }
-    throw error;
-  }
+  return runMappingMutation({
+    studentIds: [params.studentId],
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+    handlesUniqueViolation: true,
+  }, () => withTransaction((client) => assignAdminMappingInTransaction(client, params)));
 }
 
 async function assignInTransaction(
@@ -503,6 +568,34 @@ async function mutationConflict(
   };
 }
 
+async function runMappingMutation(
+  params: {
+    studentIds: number[];
+    academicYear: string;
+    schoolId: number;
+    programId: number;
+    handlesUniqueViolation?: boolean;
+  },
+  mutation: () => Promise<HolisticMappingMutationResult>,
+) {
+  try {
+    return await mutation();
+  } catch (error) {
+    const knownConflict = error instanceof MappingMutationError;
+    const uniqueConflict = params.handlesUniqueViolation && isUniqueViolation(error);
+    if (knownConflict || uniqueConflict) {
+      return mutationConflict(
+        error as MappingMutationError | { code?: unknown },
+        params.studentIds,
+        params.academicYear,
+        params.schoolId,
+        params.programId,
+      );
+    }
+    throw error;
+  }
+}
+
 export async function assignHolisticMentees(params: {
   actorUserId: number;
   auditActorUserId?: number;
@@ -518,95 +611,32 @@ export async function assignHolisticMentees(params: {
     studentIds,
     programId: params.programId,
   });
-  try {
-    return await withTransaction((client) => assignInTransaction(client, params, studentIds));
-  } catch (error) {
-    if (error instanceof MappingMutationError || isUniqueViolation(error)) {
-      return mutationConflict(
-        error as MappingMutationError | { code?: unknown },
-        studentIds,
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
-    }
-    throw error;
-  }
+  return runMappingMutation({
+    studentIds,
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+    handlesUniqueViolation: true,
+  }, () => withTransaction((client) => assignInTransaction(client, params, studentIds)));
 }
 
 async function reassignAdminMappingInTransaction(
   client: PoolClient,
   params: Parameters<typeof reassignHolisticMenteeAsAdmin>[0],
 ): Promise<HolisticMappingMutationResult> {
-  await lockHolisticMentorMappingMutation(client, params.mentorUserId);
-  await lockEligibleStudents(client, {
-    schoolId: params.schoolId,
-    programId: params.programId,
-    academicYear: params.academicYear,
-    studentIds: [params.studentId],
-  });
-  const eligibleMentorUserId = await findEligibleHolisticMentorUserId({
-    client,
-    userId: params.mentorUserId,
-    schoolId: params.schoolId,
-    programId: params.programId,
-  });
-  if (eligibleMentorUserId === null) {
-    throw new MappingMutationError(422, "Mentor is not eligible for this School and Program");
-  }
-  const active = await lockActiveMappings(
-    client,
-    [params.studentId],
-    params.academicYear,
-    params.schoolId,
-    params.programId,
-  );
-  const current = active.byStudent.get(params.studentId);
-  if (Number(current?.id ?? 0) !== params.expectedMappingId) {
-    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
-  }
-  if (Number(current?.mentor_user_id) === params.mentorUserId) {
+  await lockEligibleAdminMentor(client, params);
+  const current = await lockExpectedAdminMapping(client, params);
+  if (Number(current.mentor_user_id) === params.mentorUserId) {
     throw new MappingMutationError(422, "Replacement Mentor must differ from the current Mentor");
   }
-
-  const actorEmail = params.actorEmail.trim().toLowerCase();
-  const reason = params.reason.trim();
-  await client.query(
-    `UPDATE holistic_mentorship_mentor_mentee_mappings
-     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
-         end_source = $3, end_reason = $4, end_audit_reason = $5, updated_at = now()
-     WHERE id = $6`,
-    [params.auditActorUserId ?? null, actorEmail, "af_lms_admin_reassign",
-      "admin_reassignment", reason, params.expectedMappingId],
+  await endAdminMapping(
+    client,
+    params,
+    Number(current.mentor_user_id),
+    "af_lms_admin_reassign",
+    "admin_reassignment",
   );
-  await eraseDraftHolisticNotesForMapping(client, {
-    studentIds: [params.studentId],
-    mentorUserId: Number(current!.mentor_user_id),
-    programId: params.programId,
-    academicYear: params.academicYear,
-    actorUserId: params.auditActorUserId ?? null,
-    actorEmail,
-    reason,
-  });
-  await client.query(
-    `INSERT INTO holistic_mentorship_mentor_mentee_mappings
-       (student_id, mentor_user_id, school_id, program_id, academic_year,
-        started_at, assigned_by_user_id, assigned_by_email, assignment_source,
-        assignment_audit_reason, inserted_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9, now(), now())
-     RETURNING id`,
-    [
-      params.studentId,
-      params.mentorUserId,
-      params.schoolId,
-      params.programId,
-      params.academicYear,
-      params.auditActorUserId ?? null,
-      actorEmail,
-      "af_lms_admin_reassign",
-      reason,
-    ],
-  );
+  await insertAdminMapping(client, params, "af_lms_admin_reassign");
   return { ok: true, changed: 1 };
 }
 
@@ -635,57 +665,27 @@ export async function reassignHolisticMenteeAsAdmin(params: {
       error: "Admin Mapping reassignments are limited to the current Academic Year",
     };
   }
-  try {
-    return await withTransaction((client) => reassignAdminMappingInTransaction(client, params));
-  } catch (error) {
-    if (error instanceof MappingMutationError || isUniqueViolation(error)) {
-      return mutationConflict(
-        error as MappingMutationError | { code?: unknown },
-        [params.studentId],
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
-    }
-    throw error;
-  }
+  return runMappingMutation({
+    studentIds: [params.studentId],
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+    handlesUniqueViolation: true,
+  }, () => withTransaction((client) => reassignAdminMappingInTransaction(client, params)));
 }
 
 async function removeAdminMappingInTransaction(
   client: PoolClient,
   params: Parameters<typeof removeHolisticMenteeAsAdmin>[0],
 ): Promise<HolisticMappingMutationResult> {
-  const active = await lockActiveMappings(
+  const current = await lockExpectedAdminMapping(client, params);
+  await endAdminMapping(
     client,
-    [params.studentId],
-    params.academicYear,
-    params.schoolId,
-    params.programId,
+    params,
+    Number(current.mentor_user_id),
+    "af_lms_admin_remove",
+    "admin_removal",
   );
-  const current = active.byStudent.get(params.studentId);
-  if (Number(current?.id ?? 0) !== params.expectedMappingId) {
-    throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
-  }
-
-  const actorEmail = params.actorEmail.trim().toLowerCase();
-  const reason = params.reason.trim();
-  await client.query(
-    `UPDATE holistic_mentorship_mentor_mentee_mappings
-     SET ended_at = now(), ended_by_user_id = $1, ended_by_email = $2,
-         end_source = $3, end_reason = $4, end_audit_reason = $5, updated_at = now()
-     WHERE id = $6`,
-    [params.auditActorUserId ?? null, actorEmail, "af_lms_admin_remove",
-      "admin_removal", reason, params.expectedMappingId],
-  );
-  await eraseDraftHolisticNotesForMapping(client, {
-    studentIds: [params.studentId],
-    mentorUserId: Number(current!.mentor_user_id),
-    programId: params.programId,
-    academicYear: params.academicYear,
-    actorUserId: params.auditActorUserId ?? null,
-    actorEmail,
-    reason,
-  });
   return { ok: true, changed: 1 };
 }
 
@@ -713,19 +713,26 @@ export async function removeHolisticMenteeAsAdmin(params: {
       error: "Admin Mapping removals are limited to the current Academic Year",
     };
   }
-  try {
-    return await withTransaction((client) => removeAdminMappingInTransaction(client, params));
-  } catch (error) {
-    if (error instanceof MappingMutationError) {
-      return mutationConflict(
-        error,
-        [params.studentId],
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
+  return runMappingMutation({
+    studentIds: [params.studentId],
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  }, () => withTransaction((client) => removeAdminMappingInTransaction(client, params)));
+}
+
+function assertTeacherMappingsCurrent(
+  mappings: Array<{ studentId: number; expectedMappingId: number }>,
+  activeByStudent: Map<number, ActiveMappingRow>,
+  actorUserId: number,
+) {
+  for (const expected of mappings) {
+    const current = activeByStudent.get(expected.studentId);
+    const mappingChanged = Number(current?.id ?? 0) !== expected.expectedMappingId;
+    const ownerChanged = Number(current?.mentor_user_id ?? 0) !== actorUserId;
+    if (mappingChanged || ownerChanged) {
+      throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
     }
-    throw error;
   }
 }
 
@@ -748,13 +755,7 @@ async function removeInTransaction(
     params.schoolId,
     params.programId,
   );
-  for (const expected of params.mappings) {
-    const current = active.byStudent.get(expected.studentId);
-    if (Number(current?.id ?? 0) !== expected.expectedMappingId ||
-        Number(current?.mentor_user_id ?? 0) !== params.actorUserId) {
-      throw new MappingMutationError(409, "Mapping ownership changed; review the refreshed roster");
-    }
-  }
+  assertTeacherMappingsCurrent(params.mappings, active.byStudent, params.actorUserId);
   const mappingIds = params.mappings.map(({ expectedMappingId }) => expectedMappingId);
   await client.query(
     `UPDATE holistic_mentorship_mentor_mentee_mappings
@@ -795,20 +796,12 @@ export async function removeHolisticMentees(params: {
     studentIds,
     programId: params.programId,
   });
-  try {
-    return await withTransaction((client) => removeInTransaction(client, params, studentIds));
-  } catch (error) {
-    if (error instanceof MappingMutationError) {
-      return mutationConflict(
-        error,
-        studentIds,
-        params.academicYear,
-        params.schoolId,
-        params.programId,
-      );
-    }
-    throw error;
-  }
+  return runMappingMutation({
+    studentIds,
+    academicYear: params.academicYear,
+    schoolId: params.schoolId,
+    programId: params.programId,
+  }, () => withTransaction((client) => removeInTransaction(client, params, studentIds)));
 }
 
 export async function listHolisticAssignmentRoster(params: {
