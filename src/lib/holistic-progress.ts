@@ -106,16 +106,22 @@ export async function listHolisticProgress(
   const offset = options.all ? 0 : (filters.page - 1) * 50;
   const schoolScope = buildHolisticSchoolScopePredicate(permission, {
     startIndex: 12,
-    schoolCodeColumn: "school.code",
-    schoolRegionColumn: "school.region",
+    schoolCodeColumn: "mapping_school.code",
+    schoolRegionColumn: "mapping_school.region",
   });
   const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
   const rows = await query<ProgressDatabaseRow>(
-    `WITH mapping_history AS (
+    `WITH scoped_mappings AS (
+       SELECT mapping.*
+       FROM holistic_mentorship_mentor_mentee_mappings mapping
+       JOIN school mapping_school ON mapping_school.id = mapping.school_id
+       WHERE mapping.program_id = $1 AND mapping.academic_year = $2
+         ${schoolScopeSql}
+         AND ($4::text IS NULL OR mapping_school.code = $4)
+     ), mapping_history AS (
        SELECT mapping.*,
               MIN(mapping.started_at) OVER (PARTITION BY mapping.student_id) AS first_started_at
-       FROM holistic_mentorship_mentor_mentee_mappings mapping
-       WHERE mapping.program_id = $1 AND mapping.academic_year = $2
+       FROM scoped_mappings mapping
      ), mapped AS (
        SELECT DISTINCT ON (mapping.student_id)
               mapping.student_id, mapping.school_id, mapping.mentor_user_id,
@@ -219,8 +225,6 @@ export async function listHolisticProgress(
          ORDER BY phase.position DESC LIMIT 1
        ) initial_active ON true
        WHERE COALESCE(current_roster.grade, historical_grade.grade) IS NOT NULL
-         ${schoolScopeSql}
-         AND ($4::text IS NULL OR school.code = $4)
          AND ($3::bigint IS NULL OR selected_phase.id IS NOT NULL)
          AND ($5::int IS NULL OR COALESCE(current_roster.grade, historical_grade.grade) = $5)
          AND ($6::bigint IS NULL OR mapped.mentor_user_id = $6)
@@ -316,17 +320,19 @@ export async function getHolisticProgressOptions(
 ): Promise<HolisticProgressOptions> {
   const schoolScope = buildHolisticSchoolScopePredicate(permission, {
     startIndex: 4,
-    schoolCodeColumn: "school.code",
-    schoolRegionColumn: "school.region",
+    schoolCodeColumn: "mapping_school.code",
+    schoolRegionColumn: "mapping_school.region",
   });
-  const schoolScopeWhere = schoolScope.clause ? `WHERE ${schoolScope.clause}` : "";
-  const latestMappings = `WITH mapping_history AS (
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
+  const latestMappings = `WITH scoped_mappings AS (
          SELECT mapping.*
          FROM holistic_mentorship_mentor_mentee_mappings mapping
+         JOIN school mapping_school ON mapping_school.id = mapping.school_id
          WHERE mapping.program_id = $1 AND mapping.academic_year = $2
+           ${schoolScopeSql}
        ), latest_mapping AS (
          SELECT DISTINCT ON (mapping.student_id) mapping.*
-         FROM mapping_history mapping
+         FROM scoped_mappings mapping
          WHERE ($2 <> $3 OR mapping.ended_at IS NULL)
          ORDER BY mapping.student_id, mapping.started_at DESC, mapping.id DESC
        )`;
@@ -336,7 +342,6 @@ export async function getHolisticProgressOptions(
        SELECT DISTINCT school.code, school.name
        FROM latest_mapping mapping
        JOIN school ON school.id = mapping.school_id
-       ${schoolScopeWhere}
        ORDER BY school.name, school.code`,
       [programId, academicYear, CURRENT_ACADEMIC_YEAR, ...schoolScope.params]
     ),
@@ -348,7 +353,6 @@ export async function getHolisticProgressOptions(
        FROM latest_mapping mapping
        JOIN school ON school.id = mapping.school_id
        JOIN "user" mentor ON mentor.id = mapping.mentor_user_id
-       ${schoolScopeWhere}
        ORDER BY name NULLS LAST, mentor.email`,
       [programId, academicYear, CURRENT_ACADEMIC_YEAR, ...schoolScope.params]
     ),

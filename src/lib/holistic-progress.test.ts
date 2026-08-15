@@ -85,11 +85,80 @@ describe("Holistic progress", () => {
     }, scopedPermission);
 
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(String(sql)).toContain("school.code = ANY($12::text[])");
+    expect(String(sql)).toContain("mapping_school.code = ANY($12::text[])");
     expect(params).toEqual([
       1, "2026-2027", null, null, null, null, null, "%%", 50, 0,
       "2026-2027", ["SCH001", "SCH002"],
     ]);
+  });
+
+  it("keeps an in-scope Mapping in rows, counts, and CSV after an out-of-scope School transfer", async () => {
+    mockQuery.mockResolvedValueOnce([{ ...databaseRow, total_mapped: "1" }]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    };
+
+    const result = await listHolisticProgress({
+      programId: 1,
+      academicYear: "2025-2026",
+      phaseId: null,
+      schoolCode: null,
+      grade: null,
+      mentorUserId: null,
+      progress: null,
+      search: "",
+      sort: DEFAULT_HOLISTIC_PROGRESS_SORT,
+      direction: "asc",
+      page: 1,
+    }, scopedPermission, { all: true });
+
+    const sql = String(mockQuery.mock.calls[0][0]);
+    const scopedMappings = sql.indexOf("WITH scoped_mappings AS");
+    const mappingHistory = sql.indexOf("mapping_history AS");
+    const latestMapping = sql.indexOf("SELECT DISTINCT ON (mapping.student_id)");
+    expect(scopedMappings).toBeGreaterThanOrEqual(0);
+    expect(sql.indexOf("mapping_school.code = ANY($12::text[])")).toBeGreaterThan(scopedMappings);
+    expect(sql.indexOf("mapping_school.code = ANY($12::text[])")).toBeLessThan(mappingHistory);
+    expect(mappingHistory).toBeLessThan(latestMapping);
+    expect(result.rows.map(({ studentId, schoolCode }) => ({ studentId, schoolCode }))).toEqual([
+      { studentId: 41, schoolCode: "SCH001" },
+    ]);
+    expect(result.counts.totalMapped).toBe(1);
+    const csv = formatHolisticProgressCsv("2025-2026", 1, result.rows);
+    expect(csv).toContain("School, One");
+    expect(csv).toContain("AF-41");
+  });
+
+  it("scopes Mapping history before choosing School and Mentor filter options after a transfer", async () => {
+    mockQuery
+      .mockResolvedValueOnce([{ code: "SCH001", name: "School One" }])
+      .mockResolvedValueOnce([{ user_id: "9", name: "In-scope Mentor", email: "mentor@example.com" }])
+      .mockResolvedValueOnce([]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    };
+
+    const options = await getHolisticProgressOptions("2025-2026", 1, scopedPermission);
+
+    for (const [sql] of mockQuery.mock.calls.slice(0, 2)) {
+      const text = String(sql);
+      expect(text.indexOf("WITH scoped_mappings AS")).toBeGreaterThanOrEqual(0);
+      expect(text.indexOf("mapping_school.code = ANY($4::text[])")).toBeLessThan(
+        text.indexOf("SELECT DISTINCT ON (mapping.student_id)"),
+      );
+    }
+    expect(options).toMatchObject({
+      schools: [{ code: "SCH001", name: "School One" }],
+      mentors: [{ userId: 9, name: "In-scope Mentor" }],
+    });
   });
 
   it("returns full-result counts while applying fixed 50-row pagination", async () => {
@@ -266,7 +335,7 @@ describe("Holistic progress", () => {
     await getHolisticProgressOptions("2026-2027", 1, scopedPermission);
 
     for (const [sql, params] of mockQuery.mock.calls.slice(0, 2)) {
-      expect(String(sql)).toContain("COALESCE(school.region, '') = ANY($4::text[])");
+      expect(String(sql)).toContain("COALESCE(mapping_school.region, '') = ANY($4::text[])");
       expect(params).toEqual([1, "2026-2027", "2026-2027", ["North"]]);
     }
   });
