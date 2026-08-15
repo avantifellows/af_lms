@@ -588,6 +588,10 @@ describe("Holistic Mentorship Mapping API", () => {
 
   it.each([
     [{}, "Program is required"],
+    [{ program_id: null }, "Invalid Program"],
+    [{ program_id: "" }, "Invalid Program"],
+    [{ program_id: "1" }, "Invalid Program"],
+    [{ program_id: 1.5 }, "Invalid Program"],
     [{ program_id: 999 }, "Invalid Program"],
   ])("requires one explicit unambiguous Program for Admin remove", async (program, error) => {
     const response = await DELETE(

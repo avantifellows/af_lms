@@ -84,6 +84,9 @@ function isAdminRemoveRequest(value: Record<string, unknown>): boolean {
 
 async function adminRemove(value: Record<string, unknown>) {
   if (!("program_id" in value)) return holisticApiError("Program is required");
+  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
+    return holisticApiError("Invalid Program");
+  }
   const programId = holisticProgramId(value.program_id);
   if (!programId) return holisticApiError("Invalid Program");
   if (!validSchoolCode(value.school_code)) return holisticApiError("Invalid School");
