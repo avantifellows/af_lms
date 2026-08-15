@@ -560,7 +560,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       String(sql).includes("state = 'submitted'"))).toBe(false);
   });
 
-  it("reassigns one Mapping as Admin with matching end, start, and draft-erasure audit identity", async () => {
+  it("reassigns one Mapping as Admin and erases only the outgoing Mapping draft context", async () => {
     mockClientQuery.mockImplementation((sql: unknown) => {
       const text = String(sql);
       if (text.includes("FOR UPDATE OF st")) return { rows: [{ student_id: 41 }] };
@@ -603,8 +603,12 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     const draftErasure = mockClientQuery.mock.calls.find(([sql]) =>
       String(sql).includes("holistic_mentorship_post_session_answers"));
     expect(String(draftErasure?.[0])).toContain("state = 'draft'");
+    expect(String(draftErasure?.[0])).toContain("notes.author_user_id = $2");
+    expect(String(draftErasure?.[0])).toContain("plan.program_id = $3");
+    expect(String(draftErasure?.[0])).toContain("plan.academic_year = $4");
     expect(draftErasure?.[1]).toEqual([
-      [41], 19, "admin@example.com", "Mentor handover requested",
+      [41], 9, 78, "2026-2027", 19, "admin@example.com",
+      "Mentor handover requested",
     ]);
     expect(mockClientQuery.mock.calls.some(([sql]) =>
       String(sql).includes("state = 'submitted'"))).toBe(false);

@@ -579,13 +579,15 @@ async function reassignAdminMappingInTransaction(
     [params.auditActorUserId ?? null, actorEmail, "af_lms_admin_reassign",
       "admin_reassignment", reason, params.expectedMappingId],
   );
-  await eraseDraftHolisticNotes(
-    client,
-    [params.studentId],
-    params.auditActorUserId ?? null,
-    reason,
+  await eraseDraftHolisticNotesForMapping(client, {
+    studentId: params.studentId,
+    mentorUserId: Number(current!.mentor_user_id),
+    programId: params.programId,
+    academicYear: params.academicYear,
+    actorUserId: params.auditActorUserId ?? null,
     actorEmail,
-  );
+    reason,
+  });
   await client.query(
     `INSERT INTO holistic_mentorship_mentor_mentee_mappings
        (student_id, mentor_user_id, school_id, program_id, academic_year,
