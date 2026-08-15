@@ -143,7 +143,7 @@ export async function eraseDraftHolisticNotes(
 async function eraseDraftHolisticNotesForMapping(
   client: PoolClient,
   params: {
-    studentId: number;
+    studentIds: number[];
     mentorUserId: number;
     programId: number;
     academicYear: string;
@@ -180,7 +180,7 @@ async function eraseDraftHolisticNotesForMapping(
      SELECT id, $5, $6, 'draft_erased_on_mapping_end', now(), $7, now(), now()
      FROM updated_notes`,
     [
-      [params.studentId],
+      params.studentIds,
       params.mentorUserId,
       params.programId,
       params.academicYear,
@@ -580,7 +580,7 @@ async function reassignAdminMappingInTransaction(
       "admin_reassignment", reason, params.expectedMappingId],
   );
   await eraseDraftHolisticNotesForMapping(client, {
-    studentId: params.studentId,
+    studentIds: [params.studentId],
     mentorUserId: Number(current!.mentor_user_id),
     programId: params.programId,
     academicYear: params.academicYear,
@@ -678,7 +678,7 @@ async function removeAdminMappingInTransaction(
       "admin_removal", reason, params.expectedMappingId],
   );
   await eraseDraftHolisticNotesForMapping(client, {
-    studentId: params.studentId,
+    studentIds: [params.studentId],
     mentorUserId: Number(current!.mentor_user_id),
     programId: params.programId,
     academicYear: params.academicYear,
@@ -764,13 +764,15 @@ async function removeInTransaction(
     [params.auditActorUserId ?? null, params.actorEmail, "af_lms_teacher",
       "teacher_removal", mappingIds]
   );
-  await eraseDraftHolisticNotes(
-    client,
+  await eraseDraftHolisticNotesForMapping(client, {
     studentIds,
-    params.auditActorUserId ?? null,
-    "teacher_removal",
-    params.actorEmail,
-  );
+    mentorUserId: params.actorUserId,
+    programId: params.programId,
+    academicYear: params.academicYear,
+    actorUserId: params.auditActorUserId ?? null,
+    actorEmail: params.actorEmail,
+    reason: "teacher_removal",
+  });
   return { ok: true, changed: mappingIds.length };
 }
 

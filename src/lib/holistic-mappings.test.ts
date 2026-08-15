@@ -461,7 +461,7 @@ describe("Holistic Mentor-Mentee Mappings", () => {
       .toBe(false);
   });
 
-  it("removes only confirmed actor-owned Mappings while retaining history", async () => {
+  it("self-unassigns exact Mappings and erases only their Mentor, Program, and year drafts", async () => {
     mockClientQuery.mockImplementation((sql: unknown) => {
       const text = String(sql);
       if (text.includes("FROM teacher")) return { rows: [{ user_id: 9 }] };
@@ -508,8 +508,11 @@ describe("Holistic Mentor-Mentee Mappings", () => {
     expect(String(cleanup?.[0])).toContain("state = 'draft'");
     expect(String(cleanup?.[0])).toContain("FOR UPDATE");
     expect(String(cleanup?.[0])).toContain("actor_email");
+    expect(String(cleanup?.[0])).toContain("notes.author_user_id = $2");
+    expect(String(cleanup?.[0])).toContain("plan.program_id = $3");
+    expect(String(cleanup?.[0])).toContain("plan.academic_year = $4");
     expect(cleanup?.[1]).toEqual([
-      [41, 42], null, "teacher@example.com", "teacher_removal",
+      [41, 42], 9, 1, "2026-2027", null, "teacher@example.com", "teacher_removal",
     ]);
   });
 
