@@ -15,14 +15,17 @@ vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: mockRedire
 vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: mockAccess }));
 vi.mock("@/lib/holistic-student-phase", () => ({ getHolisticStudentPhase: mockDetail }));
 vi.mock("@/components/holistic-mentorship/StudentPhaseWorkspace", () => ({
-  default: ({ detail, backHref, canRegenerateProfile }: {
+  default: ({ detail, source, backHref, canRegenerateProfile }: {
     detail: { student: { name: string } };
+    source?: "school" | "progress";
     backHref?: string;
     canRegenerateProfile?: boolean;
   }) => (
     <div data-testid="student-phase-workspace"
       data-can-regenerate-profile={String(canRegenerateProfile)}>
-      {backHref && <a href={backHref}>Back to Students and Progress</a>}
+      {backHref && <a href={backHref}>{source === "school"
+        ? "Back to Assignment Coverage"
+        : "Back to Students and Progress"}</a>}
       <h1>{detail.student.name}</h1>
     </div>
   ),
@@ -185,15 +188,17 @@ describe("StudentPhasePage", () => {
       searchParams: Promise.resolve({
         school_code: "SCH001",
         academic_year: "2026-2027",
+        program_id: "78",
         source: "school",
       }),
     };
 
-    const { container } = render(await StudentPhasePage(schoolProps));
+    render(await StudentPhasePage(schoolProps));
 
-    expect(container.querySelector(
-      'a[href="/school/SCH001?tab=holistic_mentorship"]'
-    )).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?tab=holistic_mentorship&program_id=78",
+    );
   });
 
   it("returns a Holistic Mentorship Admin opened from School coverage to that School tab", async () => {
@@ -215,15 +220,17 @@ describe("StudentPhasePage", () => {
       searchParams: Promise.resolve({
         school_code: "SCH001",
         academic_year: "2026-2027",
+        program_id: "78",
         source: "school",
       }),
     };
 
-    const { container } = render(await StudentPhasePage(schoolProps));
+    render(await StudentPhasePage(schoolProps));
 
-    expect(container.querySelector(
-      'a[href="/school/SCH001?tab=holistic_mentorship"]'
-    )).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?tab=holistic_mentorship&program_id=78",
+    );
   });
 
   it("opens a prior-year Admin drill-down from Progress without requiring a current Mapping", async () => {
@@ -316,12 +323,13 @@ describe("StudentPhasePage", () => {
       searchParams: Promise.resolve({
         school_code: "SCH001",
         academic_year: "2026-2027",
+        program_id: "78",
         source: "school",
       }),
     };
 
     await expect(StudentPhasePage(schoolProps)).rejects.toThrow(
-      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
+      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=78&source=school"
     );
   });
 

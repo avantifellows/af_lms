@@ -137,8 +137,13 @@ describe("StudentPhaseWorkspace", () => {
 
   it("preserves the School source while an Admin changes Phase", () => {
     render(<StudentPhaseWorkspace schoolCode="SCH001" academicYear="2026-2027"
-      source="school" backHref="/school/SCH001?tab=holistic_mentorship" detail={adminDetail()} />);
+      source="school" backHref="/school/SCH001?tab=holistic_mentorship&program_id=1"
+      detail={adminDetail()} />);
 
+    expect(screen.getByRole("link", { name: "Back to Assignment Coverage" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?tab=holistic_mentorship&program_id=1",
+    );
     expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
@@ -150,6 +155,10 @@ describe("StudentPhaseWorkspace", () => {
       source="progress" backHref="/admin/holistic-mentorship?program_id=1"
       detail={adminDetail()} />);
 
+    expect(screen.getByRole("link", { name: "Back to Students and Progress" })).toHaveAttribute(
+      "href",
+      "/admin/holistic-mentorship?program_id=1",
+    );
     expect(screen.getByRole("tab", { name: /Phase 5/ })).toHaveAttribute(
       "href",
       "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=progress"

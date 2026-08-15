@@ -907,7 +907,8 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, s
 }) {
   return (
     <div className="space-y-6">
-      <AdminStudentHeader student={detail.student} backHref={backHref} viewerRole={viewerRole} />
+      <AdminStudentHeader student={detail.student} source={source}
+        backHref={backHref} viewerRole={viewerRole} />
       <InactivePhasePanels studentId={detail.student.id} phases={detail.phases}
         selectedPhaseId={detail.selectedPhase.phaseId} />
       <Card elevation="sm" className="overflow-hidden">
@@ -950,13 +951,16 @@ function readOnlyViewerLabel(role: string) {
   return "Admin";
 }
 
-function AdminStudentHeader({ student, backHref, viewerRole }: {
+function AdminStudentHeader({ student, source, backHref, viewerRole }: {
   student: HolisticStudentPhaseDetail["student"];
+  source?: "school" | "progress";
   backHref?: string;
   viewerRole: string;
 }) {
   return <header className="flex items-center gap-4">
-    {backHref && <Link href={backHref} aria-label="Back to Students and Progress"
+    {backHref && <Link href={backHref} aria-label={source === "school"
+      ? "Back to Assignment Coverage"
+      : "Back to Students and Progress"}
       className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-card text-text-primary shadow-sm hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
       <ArrowLeft aria-hidden="true" className="h-5 w-5" />
     </Link>}

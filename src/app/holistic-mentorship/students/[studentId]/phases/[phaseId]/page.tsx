@@ -83,7 +83,9 @@ function studentPhaseBackHref(
   source?: StudentPhaseSource,
 ) {
   if (source === "progress") return `/admin/holistic-mentorship?program_id=${programId}`;
-  if (source === "school") return `/school/${schoolCode}?tab=holistic_mentorship`;
+  if (source === "school") {
+    return `/school/${schoolCode}?tab=holistic_mentorship&program_id=${programId}`;
+  }
   const admin = role === "admin" || role === "holistic_mentorship_admin";
   return admin
     ? `/admin/holistic-mentorship?program_id=${programId}`
