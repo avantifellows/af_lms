@@ -107,3 +107,4 @@
 {"timestamp":"2026-08-14T23:46:11.227Z","kind":"decision","message":"Holistic program_read remains a workspace/list gate; Student Profile reads bind the exact Student and School scope, while Phase Plan reads use a separate Admin-only action.","files":[],"cwd":"."}
 {"timestamp":"2026-08-14T23:51:44.007Z","kind":"note","message":"Scoped Admin Holistic Mapping removal draft erasure to the outgoing Mentor, Program, and Academic Year so unrelated drafts survive.","files":[],"cwd":"."}
 {"timestamp":"2026-08-15T00:14:37.854Z","kind":"note","message":"Scope Admin reassignment draft erasure to the exact outgoing Mentor-Mentee Mapping context so unrelated drafts remain private history","files":[],"cwd":"."}
+{"timestamp":"2026-08-15T00:35:06.269Z","kind":"decision","message":"Holistic Student/Phase return navigation follows the explicit progress or School origin across roles and locked-Phase redirects.","files":[],"cwd":"."}

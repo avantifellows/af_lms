@@ -56,7 +56,7 @@ describe("ProgressWorkspace", () => {
     );
     expect(screen.getByText(/Last refreshed/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open Student One/ })).toHaveAttribute(
-      "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1"
+      "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=progress"
     );
   });
 

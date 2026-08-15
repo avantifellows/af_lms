@@ -104,6 +104,68 @@ describe("StudentPhasePage", () => {
     }));
   });
 
+  it("returns a Program Manager opened from Progress to the selected Program workspace", async () => {
+    mockSession.mockResolvedValue({ user: { email: "manager@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "program_manager" },
+      school: { id: 4, name: "School One" },
+      canEdit: false,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [],
+      selectedPhase: { phaseId: 73, locked: false },
+      readOnly: true,
+    });
+    const progressProps = {
+      ...props,
+      searchParams: Promise.resolve({
+        school_code: "SCH001",
+        academic_year: "2026-2027",
+        program_id: "78",
+        source: "progress",
+      }),
+    };
+
+    const { container } = render(await StudentPhasePage(progressProps));
+
+    expect(container.querySelector(
+      'a[href="/admin/holistic-mentorship?program_id=78"]'
+    )).toBeInTheDocument();
+  });
+
+  it("returns a Program Admin opened from Progress to the selected Program workspace", async () => {
+    mockSession.mockResolvedValue({ user: { email: "program-admin@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "program_admin" },
+      school: { id: 4, name: "School One" },
+      canEdit: false,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [],
+      selectedPhase: { phaseId: 73, locked: false },
+      readOnly: true,
+    });
+    const progressProps = {
+      ...props,
+      searchParams: Promise.resolve({
+        school_code: "SCH001",
+        academic_year: "2026-2027",
+        program_id: "78",
+        source: "progress",
+      }),
+    };
+
+    const { container } = render(await StudentPhasePage(progressProps));
+
+    expect(container.querySelector(
+      'a[href="/admin/holistic-mentorship?program_id=78"]'
+    )).toBeInTheDocument();
+  });
+
   it("returns a global Admin opened from School coverage to that School tab", async () => {
     mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
     mockAccess.mockResolvedValue({
@@ -111,6 +173,36 @@ describe("StudentPhasePage", () => {
       permission: { role: "admin" },
       school: { id: 4, name: "School One" },
       canEdit: false,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [],
+      selectedPhase: { phaseId: 73, locked: false },
+      readOnly: true,
+    });
+    const schoolProps = {
+      ...props,
+      searchParams: Promise.resolve({
+        school_code: "SCH001",
+        academic_year: "2026-2027",
+        source: "school",
+      }),
+    };
+
+    const { container } = render(await StudentPhasePage(schoolProps));
+
+    expect(container.querySelector(
+      'a[href="/school/SCH001?tab=holistic_mentorship"]'
+    )).toBeInTheDocument();
+  });
+
+  it("returns a Holistic Mentorship Admin opened from School coverage to that School tab", async () => {
+    mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "holistic_mentorship_admin" },
+      school: { id: 4, name: "School One" },
+      canEdit: true,
     });
     mockDetail.mockResolvedValue({
       student: { name: "Asha Rao" },
@@ -199,6 +291,69 @@ describe("StudentPhasePage", () => {
 
     await expect(StudentPhasePage(props)).rejects.toThrow(
       "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1"
+    );
+  });
+
+  it("preserves School origin when a Holistic Mentorship Admin is redirected from a Locked Phase", async () => {
+    mockSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "holistic_mentorship_admin" },
+      school: { id: 4, name: "School One" },
+      canEdit: true,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [
+        { phaseId: 73, number: 1, title: "Locked", locked: true },
+        { phaseId: 74, number: 2, title: "Current", locked: false, active: true, academicYear: "2026-2027" },
+      ],
+      selectedPhase: { phaseId: 73, number: 1, title: "Locked", locked: true },
+      readOnly: true,
+    });
+    const schoolProps = {
+      ...props,
+      searchParams: Promise.resolve({
+        school_code: "SCH001",
+        academic_year: "2026-2027",
+        source: "school",
+      }),
+    };
+
+    await expect(StudentPhasePage(schoolProps)).rejects.toThrow(
+      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=1&source=school"
+    );
+  });
+
+  it("preserves Progress origin when a Program Admin is redirected from a Locked Phase", async () => {
+    mockSession.mockResolvedValue({ user: { email: "program-admin@example.com" } });
+    mockAccess.mockResolvedValue({
+      ok: true,
+      permission: { role: "program_admin" },
+      school: { id: 4, name: "School One" },
+      canEdit: false,
+    });
+    mockDetail.mockResolvedValue({
+      student: { name: "Asha Rao" },
+      phases: [
+        { phaseId: 73, number: 1, title: "Locked", locked: true },
+        { phaseId: 74, number: 2, title: "Current", locked: false, active: true, academicYear: "2026-2027" },
+      ],
+      selectedPhase: { phaseId: 73, number: 1, title: "Locked", locked: true },
+      readOnly: true,
+    });
+    const progressProps = {
+      ...props,
+      searchParams: Promise.resolve({
+        school_code: "SCH001",
+        academic_year: "2026-2027",
+        program_id: "78",
+        source: "progress",
+      }),
+    };
+
+    await expect(StudentPhasePage(progressProps)).rejects.toThrow(
+      "REDIRECT:/holistic-mentorship/students/41/phases/74?school_code=SCH001&academic_year=2026-2027&program_id=78&source=progress"
     );
   });
 });

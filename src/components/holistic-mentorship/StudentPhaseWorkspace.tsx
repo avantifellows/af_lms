@@ -856,7 +856,7 @@ export default function StudentPhaseWorkspace({
   schoolCode: string;
   academicYear: string;
   programId?: number;
-  source?: "school";
+  source?: "school" | "progress";
   backHref?: string;
   canRegenerateProfile?: boolean;
   viewerRole?: string;
@@ -900,7 +900,7 @@ function AdminReadOnlyWorkspace({ detail, schoolCode, academicYear, programId, s
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school";
+  source?: "school" | "progress";
   backHref?: string;
   canRegenerateProfile: boolean;
   viewerRole: string;
@@ -993,7 +993,7 @@ function PhaseNavigation({ studentId, phases, selectedPhaseId, schoolCode, acade
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school";
+  source?: "school" | "progress";
   readOnly?: boolean;
 }) {
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -1034,7 +1034,7 @@ type PhaseTabProps = {
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school";
+  source?: "school" | "progress";
   admin: boolean;
 };
 

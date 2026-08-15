@@ -565,6 +565,7 @@ function ProgressActions({ row, academicYear, programId }: {
         school_code: row.schoolCode,
         academic_year: academicYear,
         program_id: String(programId),
+        source: "progress",
       })}`}>
       Open Student
     </Link> : <Button type="button" variant="secondary" className="text-xs" disabled title="Phase is locked">Open Student</Button>}

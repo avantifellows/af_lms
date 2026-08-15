@@ -26,6 +26,8 @@ type StudentPhasePageProps = {
   }>;
 };
 
+type StudentPhaseSource = "school" | "progress";
+
 function positiveInteger(value: string) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -47,7 +49,9 @@ async function studentPhaseRequest({ params, searchParams }: StudentPhasePagePro
   const schoolCode = queryParams.school_code ?? "";
   const academicYear = queryParams.academic_year ?? "";
   const programId = Number(queryParams.program_id ?? PROGRAM_IDS.COE);
-  const source = queryParams.source === "school" ? "school" as const : undefined;
+  const source = queryParams.source === "school" || queryParams.source === "progress"
+    ? queryParams.source as StudentPhaseSource
+    : undefined;
   const valid = [
     Boolean(schoolCode),
     isHolisticMentorshipProgramId(programId),
@@ -76,11 +80,10 @@ function studentPhaseBackHref(
   role: string,
   schoolCode: string,
   programId: number,
-  source?: "school",
+  source?: StudentPhaseSource,
 ) {
-  if (role === "admin" && source === "school") {
-    return `/school/${schoolCode}?tab=holistic_mentorship`;
-  }
+  if (source === "progress") return `/admin/holistic-mentorship?program_id=${programId}`;
+  if (source === "school") return `/school/${schoolCode}?tab=holistic_mentorship`;
   const admin = role === "admin" || role === "holistic_mentorship_admin";
   return admin
     ? `/admin/holistic-mentorship?program_id=${programId}`
@@ -112,10 +115,10 @@ function redirectFromLockedPhase(detail: HolisticStudentPhaseDetail, request: {
   schoolCode: string;
   academicYear: string;
   programId: number;
-  source?: "school";
+  source?: StudentPhaseSource;
 }, role: string) {
   if (!("locked" in detail.selectedPhase) || !detail.selectedPhase.locked) return;
-  const source = role === "admin" ? request.source : undefined;
+  const source = request.source;
   const phaseId = fallbackPhaseId(detail, request.academicYear);
   if (phaseId) {
     redirect(holisticStudentPhaseHref({
@@ -150,7 +153,7 @@ export default async function StudentPhasePage(props: StudentPhasePageProps) {
   if (!detail) notFound();
   redirectFromLockedPhase(detail, request, access.permission.role);
 
-  const source = access.permission.role === "admin" ? request.source : undefined;
+  const source = request.source;
   const backHref = studentPhaseBackHref(
     access.permission.role,
     request.schoolCode,
