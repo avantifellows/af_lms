@@ -356,6 +356,13 @@ type AuthenticatedHolisticActor = {
   canEdit: boolean;
 };
 
+type HolisticMentorshipAccessOptions = {
+  schoolCode?: string;
+  studentId?: number;
+  academicYear?: string;
+  programId?: number;
+};
+
 async function resolveAuthenticatedActor(
   session: HolisticMentorshipSession,
 ): Promise<HolisticMentorshipAccessDenied | AuthenticatedHolisticActor> {
@@ -389,15 +396,110 @@ function accessDenied(
   return "ok" in value;
 }
 
+type ScopedReadKind = "program" | "coverage" | "student" | null;
+
+function scopedReadKind(
+  permission: UserPermission,
+  action: HolisticMentorshipAction,
+): ScopedReadKind {
+  const scopedRole = permission.role === "program_manager" || permission.role === "program_admin";
+  if (!scopedRole) return null;
+  if (action === "program_read") return "program";
+  if (action === "assignment_coverage_read") return "coverage";
+  if (action === "mapped_student_read") return "student";
+  return null;
+}
+
+async function validateScopedProgramResource(params: {
+  kind: ScopedReadKind;
+  permission: UserPermission;
+  programId?: number;
+  options: HolisticMentorshipAccessOptions;
+  school?: HolisticMentorshipSchool;
+}): Promise<HolisticMentorshipAccessDenied | undefined> {
+  const resourceScoped = params.kind === "coverage" || params.kind === "student";
+  const permittedPrograms = getProgramContextSync(params.permission).programIds;
+  if (resourceScoped && (
+    params.programId === undefined || !permittedPrograms.includes(params.programId)
+  )) return denied(403, "Forbidden");
+  if (params.kind !== "student" || !params.options.studentId || !params.school) return undefined;
+  const inScope = await studentBelongsToSchoolScope({
+    schoolId: params.school.id,
+    studentId: params.options.studentId,
+    academicYear: params.options.academicYear ?? CURRENT_ACADEMIC_YEAR,
+    programId: params.programId!,
+  });
+  return inScope ? undefined : denied(404, "Not found");
+}
+
+async function programIdsForAccess(params: {
+  kind: ScopedReadKind;
+  permission: UserPermission;
+  requestedProgramId?: number;
+  programId?: number;
+}) {
+  if (params.kind === "program") {
+    return resolveScopedProgramIds(params.permission, params.requestedProgramId);
+  }
+  if (params.kind === "coverage" || params.kind === "student") return [params.programId!];
+  return [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
+}
+
+async function reconcileProgramStudentIfRequired(params: {
+  action: HolisticMentorshipAction;
+  options: HolisticMentorshipAccessOptions;
+  school?: HolisticMentorshipSchool;
+  programId?: number;
+}) {
+  if (!MAPPING_REQUIRED_ACTIONS.has(params.action) || !params.options.studentId) return;
+  await reconcileHolisticMappings({
+    academicYear: params.options.academicYear ?? CURRENT_ACADEMIC_YEAR,
+    schoolId: params.school?.id,
+    studentIds: [params.options.studentId],
+    programId: params.programId!,
+  });
+}
+
+async function resolveProgramActorAccess(params: {
+  actor: AuthenticatedHolisticActor;
+  action: HolisticMentorshipAction;
+  options: HolisticMentorshipAccessOptions;
+  requestedProgramId?: number;
+  programId?: number;
+  school?: HolisticMentorshipSchool;
+}): Promise<HolisticMentorshipAccessResult> {
+  const kind = scopedReadKind(params.actor.permission, params.action);
+  const scopeDenial = await validateScopedProgramResource({
+    kind,
+    permission: params.actor.permission,
+    programId: params.programId,
+    options: params.options,
+    school: params.school,
+  });
+  if (scopeDenial) return scopeDenial;
+  const programIds = await programIdsForAccess({
+    kind,
+    permission: params.actor.permission,
+    requestedProgramId: params.requestedProgramId,
+    programId: params.programId,
+  });
+  if (kind === "program" && programIds.length === 0) return denied(403, "Forbidden");
+  await reconcileProgramStudentIfRequired(params);
+  return programAccess({
+    email: params.actor.email,
+    permission: params.actor.permission,
+    canEdit: params.actor.canEdit,
+    action: params.action,
+    programId: params.programId ?? programIds[0],
+    programIds,
+    school: params.school,
+  });
+}
+
 export async function requireHolisticMentorshipAccess(
   session: HolisticMentorshipSession,
   action: HolisticMentorshipAction,
-  options: {
-    schoolCode?: string;
-    studentId?: number;
-    academicYear?: string;
-    programId?: number;
-  } = {}
+  options: HolisticMentorshipAccessOptions = {}
 ): Promise<HolisticMentorshipAccessResult> {
   const actor = await resolveActorAccess(session, action);
   if (accessDenied(actor)) return actor;
@@ -430,48 +532,12 @@ export async function requireHolisticMentorshipAccess(
     });
   }
 
-  const scopedProgramRead = action === "program_read" &&
-    (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
-  const scopedCoverageRead = action === "assignment_coverage_read" &&
-    (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
-  const scopedStudentRead = action === "mapped_student_read" &&
-    (actor.permission.role === "program_manager" || actor.permission.role === "program_admin");
-  if ((scopedCoverageRead || scopedStudentRead) && (
-    programId === undefined ||
-    !getProgramContextSync(actor.permission).programIds.includes(programId)
-  )) return denied(403, "Forbidden");
-  if (scopedStudentRead && options.studentId && school &&
-      !await studentBelongsToSchoolScope({
-        schoolId: school.id,
-        studentId: options.studentId,
-        academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
-        programId: programId!,
-      })) {
-    return denied(404, "Not found");
-  }
-  const programIds = scopedProgramRead
-    ? await resolveScopedProgramIds(actor.permission, requestedProgramId)
-    : scopedCoverageRead || scopedStudentRead
-      ? [programId!]
-      : [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
-  if (scopedProgramRead && programIds.length === 0) return denied(403, "Forbidden");
-
-  if (MAPPING_REQUIRED_ACTIONS.has(action) && options.studentId) {
-    await reconcileHolisticMappings({
-      academicYear: options.academicYear ?? CURRENT_ACADEMIC_YEAR,
-      schoolId: school?.id,
-      studentIds: [options.studentId],
-      programId: programId!,
-    });
-  }
-
-  return programAccess({
-    email: actor.email,
-    permission: actor.permission,
-    canEdit: actor.canEdit,
+  return resolveProgramActorAccess({
+    actor,
     action,
-    programId: programId ?? programIds[0],
-    programIds,
+    options,
+    requestedProgramId,
+    programId,
     school,
   });
 }
