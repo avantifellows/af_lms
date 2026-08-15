@@ -54,7 +54,7 @@ Then read this file fully before doing anything else in this session.
 - Holistic Mentorship profile-status APIs bind reads to the exact Student, School, Program, and Academic Year; the generic workspace `program_read` gate cannot authorize Student or Phase Setup data. After that resource authorization, current-year Profile summaries and regeneration polling use the eligible Centre roster rather than requiring an active Mapping, so permitted unassigned Students retain queued/running status; historical reads still require Program/year Mapping history. Phase Plan reads remain Admin-only. Global Admins and Holistic Mentorship Admins marked `read_only` retain the Phase Setup view without any Phase Plan mutation controls.
 - Pull requests run a standalone Node 22 production-build check (`npm ci` then
   `npm run build`) in GitHub Actions; deploys continue through AWS Amplify.
-  The suite also has 3261 unit tests (Vitest/RTL) + 76 E2E (Playwright).
+  The suite also has 3344 unit tests (Vitest/RTL) + 76 E2E (Playwright).
 
 **Not yet built / in progress:**
 

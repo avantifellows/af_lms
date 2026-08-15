@@ -142,6 +142,188 @@ function CoverageTable({ students, schoolCode, programId, canManage, controlsDis
   </div>;
 }
 
+function RosterHeader({ canEdit, academicYear }: { canEdit: boolean; academicYear: string }) {
+  return <div>
+    <div className="flex flex-wrap items-center gap-2">
+      <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">Holistic Mentorship</h2>
+      <Badge variant="info">{canEdit ? "Mapping management" : "Read-only"}</Badge>
+      <HolisticTutorialLink />
+    </div>
+    <p className="mt-1 text-sm text-text-muted">School assignment coverage for {academicYear}</p>
+  </div>;
+}
+
+function RosterFilters({ search, grade, assignment, onSearchChange, onGradeChange,
+  onAssignmentChange }: {
+  search: string;
+  grade: string;
+  assignment: AssignmentFilter;
+  onSearchChange: (value: string) => void;
+  onGradeChange: (value: string) => void;
+  onAssignmentChange: (value: AssignmentFilter) => void;
+}) {
+  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_12rem]">
+    <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+      Search Student
+      <span className="relative mt-1 block">
+        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
+        <Input aria-label="Search Students" value={search} placeholder="Name or Student ID" className="pl-9"
+          onChange={(event) => onSearchChange(event.target.value)} />
+      </span>
+    </label>
+    <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+      Grade
+      <Select aria-label="Filter by Grade" className="mt-1 w-full" value={grade}
+        onChange={(event) => onGradeChange(event.target.value)}>
+        <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
+      </Select>
+    </label>
+    <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
+      Assignment
+      <Select aria-label="Filter by Assignment" className="mt-1 w-full" value={assignment}
+        onChange={(event) => onAssignmentChange(event.target.value as AssignmentFilter)}>
+        <option value="all">All Students</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
+      </Select>
+    </label>
+  </div>;
+}
+
+function NoMatchingStudents() {
+  return <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-bg-card p-8 text-center">
+    <div><Users aria-hidden="true" className="mx-auto h-9 w-9 text-text-muted" />
+      <p className="mt-2 text-sm font-bold text-text-primary">No Students match</p>
+      <p className="text-sm text-text-muted">Change the search or filters.</p></div>
+  </div>;
+}
+
+type MentorModalProps = {
+  student: Student | null;
+  mentors: EligibleMentor[];
+  mentorUserId: string;
+  reason: string;
+  submitting: boolean;
+  submitError: string;
+  onMentorChange: (value: string) => void;
+  onReasonChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+};
+
+function AssignMentorModal({ student, mentors, mentorUserId, reason, submitting, submitError,
+  onMentorChange, onReasonChange, onClose, onSubmit }: MentorModalProps) {
+  return <Modal open={student !== null} onClose={submitting ? undefined : onClose}
+    role="dialog" aria-modal="true" aria-labelledby="assign-mentor-title">
+    <div className="space-y-5 p-6">
+      <div>
+        <h3 id="assign-mentor-title" className="text-lg font-bold text-text-primary">
+          Assign Mentor to {student?.name}
+        </h3>
+        <p className="mt-1 text-sm text-text-muted">This assignment is recorded in the audit history.</p>
+      </div>
+      <label className="block text-sm font-bold text-text-primary">
+        Mentor
+        <Select aria-label="Mentor" className="mt-1 w-full" value={mentorUserId}
+          onChange={(event) => onMentorChange(event.target.value)}>
+          <option value="">Select an eligible Mentor</option>
+          {mentors.map((mentor) => <option key={mentor.userId} value={mentor.userId}>
+            {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
+          </option>)}
+        </Select>
+      </label>
+      <label className="block text-sm font-bold text-text-primary">
+        Audit reason
+        <textarea aria-label="Audit reason" value={reason} rows={4} maxLength={500}
+          onChange={(event) => onReasonChange(event.target.value)}
+          className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          placeholder="Why is this Mentor being assigned?" />
+      </label>
+      {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
+        <Button type="button" onClick={onSubmit}
+          disabled={submitting || !mentorUserId || !reason.trim()}>
+          {submitting ? "Assigning…" : "Assign Mentor"}
+        </Button>
+      </div>
+    </div>
+  </Modal>;
+}
+
+function ReassignMentorModal({ student, mentors, mentorUserId, reason, submitting, submitError,
+  onMentorChange, onReasonChange, onClose, onSubmit }: MentorModalProps) {
+  return <Modal open={student !== null} onClose={submitting ? undefined : onClose}
+    role="dialog" aria-modal="true" aria-labelledby="reassign-mentor-title">
+    <div className="space-y-5 p-6">
+      <div>
+        <h3 id="reassign-mentor-title" className="text-lg font-bold text-text-primary">
+          Reassign Mentor for {student?.name}
+        </h3>
+        <p className="mt-1 text-sm text-text-muted">
+          This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
+        </p>
+      </div>
+      <label className="block text-sm font-bold text-text-primary">
+        Replacement Mentor
+        <Select aria-label="Replacement Mentor" className="mt-1 w-full" value={mentorUserId}
+          onChange={(event) => onMentorChange(event.target.value)}>
+          <option value="">Select an eligible Mentor</option>
+          {mentors.filter((mentor) => mentor.userId !== student?.ownership?.mentorUserId)
+            .map((mentor) => <option key={mentor.userId} value={mentor.userId}>
+              {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
+            </option>)}
+        </Select>
+      </label>
+      <label className="block text-sm font-bold text-text-primary">
+        Reassignment reason
+        <textarea aria-label="Reassignment reason" value={reason} rows={4} maxLength={500}
+          onChange={(event) => onReasonChange(event.target.value)}
+          className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          placeholder="Why is this Mentor being reassigned?" />
+      </label>
+      {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
+        <Button type="button" onClick={onSubmit}
+          disabled={submitting || !mentorUserId || !reason.trim()}>
+          {submitting ? "Reassigning…" : "Reassign Mentor"}
+        </Button>
+      </div>
+    </div>
+  </Modal>;
+}
+
+function RemoveMentorModal({ student, reason, submitting, submitError, onReasonChange,
+  onClose, onSubmit }: Omit<MentorModalProps, "mentors" | "mentorUserId" | "onMentorChange">) {
+  return <Modal open={student !== null} onClose={submitting ? undefined : onClose}
+    role="dialog" aria-modal="true" aria-labelledby="remove-mentor-title">
+    <div className="space-y-5 p-6">
+      <div>
+        <h3 id="remove-mentor-title" className="text-lg font-bold text-text-primary">
+          Remove Mentor from {student?.name}
+        </h3>
+        <p className="mt-1 text-sm text-text-muted">
+          This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
+        </p>
+      </div>
+      <label className="block text-sm font-bold text-text-primary">
+        Removal reason
+        <textarea aria-label="Removal reason" value={reason} rows={4} maxLength={500}
+          onChange={(event) => onReasonChange(event.target.value)}
+          className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          placeholder="Why is this Mentor being removed?" />
+      </label>
+      {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
+        <Button type="button" variant="danger" onClick={onSubmit}
+          disabled={submitting || !reason.trim()}>
+          {submitting ? "Removing…" : "Remove Mentor"}
+        </Button>
+      </div>
+    </div>
+  </Modal>;
+}
+
 function filterStudents(
   students: Student[],
   search: string,
@@ -322,39 +504,10 @@ export default function AdminSchoolRoster({
   };
 
   return <section className="min-w-0 max-w-full space-y-5">
-    <div>
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-bold uppercase tracking-wide text-text-primary">Holistic Mentorship</h2>
-        <Badge variant="info">{canEdit ? "Mapping management" : "Read-only"}</Badge>
-        <HolisticTutorialLink />
-      </div>
-      <p className="mt-1 text-sm text-text-muted">School assignment coverage for {academicYear}</p>
-    </div>
+    <RosterHeader canEdit={canEdit} academicYear={academicYear} />
     <Summary summary={summary ?? derivedSummary(rosterStudents)} />
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_12rem]">
-      <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
-        Search Student
-        <span className="relative mt-1 block">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
-          <Input aria-label="Search Students" value={search} placeholder="Name or Student ID" className="pl-9"
-            onChange={(event) => setSearch(event.target.value)} />
-        </span>
-      </label>
-      <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
-        Grade
-        <Select aria-label="Filter by Grade" className="mt-1 w-full" value={grade}
-          onChange={(event) => setGrade(event.target.value)}>
-          <option value="">All Grades</option><option value="11">Grade 11</option><option value="12">Grade 12</option>
-        </Select>
-      </label>
-      <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
-        Assignment
-        <Select aria-label="Filter by Assignment" className="mt-1 w-full" value={assignment}
-          onChange={(event) => setAssignment(event.target.value as AssignmentFilter)}>
-          <option value="all">All Students</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
-        </Select>
-      </label>
-    </div>
+    <RosterFilters search={search} grade={grade} assignment={assignment}
+      onSearchChange={setSearch} onGradeChange={setGrade} onAssignmentChange={setAssignment} />
     {shown.length ? <CoverageTable
       students={shown}
       schoolCode={schoolCode}
@@ -365,114 +518,18 @@ export default function AdminSchoolRoster({
       onReassign={setReassigning}
       onRemove={setRemoving}
     />
-      : <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-bg-card p-8 text-center">
-        <div><Users aria-hidden="true" className="mx-auto h-9 w-9 text-text-muted" />
-          <p className="mt-2 text-sm font-bold text-text-primary">No Students match</p>
-          <p className="text-sm text-text-muted">Change the search or filters.</p></div>
-      </div>}
+      : <NoMatchingStudents />}
     <div className="sr-only" role="status">Showing {shown.length} of {rosterStudents.length} Students</div>
-    <Modal open={assigning !== null} onClose={submitting ? undefined : closeAssign}
-      role="dialog" aria-modal="true" aria-labelledby="assign-mentor-title">
-      <div className="space-y-5 p-6">
-        <div>
-          <h3 id="assign-mentor-title" className="text-lg font-bold text-text-primary">
-            Assign Mentor to {assigning?.name}
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">This assignment is recorded in the audit history.</p>
-        </div>
-        <label className="block text-sm font-bold text-text-primary">
-          Mentor
-          <Select aria-label="Mentor" className="mt-1 w-full" value={mentorUserId}
-            onChange={(event) => setMentorUserId(event.target.value)}>
-            <option value="">Select an eligible Mentor</option>
-            {mentors.map((mentor) => <option key={mentor.userId} value={mentor.userId}>
-              {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
-            </option>)}
-          </Select>
-        </label>
-        <label className="block text-sm font-bold text-text-primary">
-          Audit reason
-          <textarea aria-label="Audit reason" value={reason} rows={4} maxLength={500}
-            onChange={(event) => setReason(event.target.value)}
-            className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-            placeholder="Why is this Mentor being assigned?" />
-        </label>
-        {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={closeAssign} disabled={submitting}>Cancel</Button>
-          <Button type="button" onClick={() => void submitAssign()}
-            disabled={submitting || !mentorUserId || !reason.trim()}>
-            {submitting ? "Assigning…" : "Assign Mentor"}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-    <Modal open={reassigning !== null} onClose={submitting ? undefined : closeReassign}
-      role="dialog" aria-modal="true" aria-labelledby="reassign-mentor-title">
-      <div className="space-y-5 p-6">
-        <div>
-          <h3 id="reassign-mentor-title" className="text-lg font-bold text-text-primary">
-            Reassign Mentor for {reassigning?.name}
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">
-            This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
-          </p>
-        </div>
-        <label className="block text-sm font-bold text-text-primary">
-          Replacement Mentor
-          <Select aria-label="Replacement Mentor" className="mt-1 w-full" value={mentorUserId}
-            onChange={(event) => setMentorUserId(event.target.value)}>
-            <option value="">Select an eligible Mentor</option>
-            {mentors.filter((mentor) => mentor.userId !== reassigning?.ownership?.mentorUserId)
-              .map((mentor) => <option key={mentor.userId} value={mentor.userId}>
-                {mentor.name}{mentor.email ? ` (${mentor.email})` : ""}
-              </option>)}
-          </Select>
-        </label>
-        <label className="block text-sm font-bold text-text-primary">
-          Reassignment reason
-          <textarea aria-label="Reassignment reason" value={reason} rows={4} maxLength={500}
-            onChange={(event) => setReason(event.target.value)}
-            className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-            placeholder="Why is this Mentor being reassigned?" />
-        </label>
-        {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={closeReassign} disabled={submitting}>Cancel</Button>
-          <Button type="button" onClick={() => void submitReassign()}
-            disabled={submitting || !mentorUserId || !reason.trim()}>
-            {submitting ? "Reassigning…" : "Reassign Mentor"}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-    <Modal open={removing !== null} onClose={submitting ? undefined : closeRemove}
-      role="dialog" aria-modal="true" aria-labelledby="remove-mentor-title">
-      <div className="space-y-5 p-6">
-        <div>
-          <h3 id="remove-mentor-title" className="text-lg font-bold text-text-primary">
-            Remove Mentor from {removing?.name}
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">
-            This ends the current Mapping. Submitted Notes remain in the Student&apos;s history.
-          </p>
-        </div>
-        <label className="block text-sm font-bold text-text-primary">
-          Removal reason
-          <textarea aria-label="Removal reason" value={reason} rows={4} maxLength={500}
-            onChange={(event) => setReason(event.target.value)}
-            className="mt-1 w-full rounded-lg border-2 border-border bg-bg-card px-3 py-2.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-            placeholder="Why is this Mentor being removed?" />
-        </label>
-        {submitError && <p role="alert" className="text-sm text-danger">{submitError}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={closeRemove} disabled={submitting}>Cancel</Button>
-          <Button type="button" variant="danger" onClick={() => void submitRemove()}
-            disabled={submitting || !reason.trim()}>
-            {submitting ? "Removing…" : "Remove Mentor"}
-          </Button>
-        </div>
-      </div>
-    </Modal>
+    <AssignMentorModal student={assigning} mentors={mentors} mentorUserId={mentorUserId}
+      reason={reason} submitting={submitting} submitError={submitError}
+      onMentorChange={setMentorUserId} onReasonChange={setReason} onClose={closeAssign}
+      onSubmit={() => void submitAssign()} />
+    <ReassignMentorModal student={reassigning} mentors={mentors} mentorUserId={mentorUserId}
+      reason={reason} submitting={submitting} submitError={submitError}
+      onMentorChange={setMentorUserId} onReasonChange={setReason} onClose={closeReassign}
+      onSubmit={() => void submitReassign()} />
+    <RemoveMentorModal student={removing} reason={reason} submitting={submitting}
+      submitError={submitError} onReasonChange={setReason} onClose={closeRemove}
+      onSubmit={() => void submitRemove()} />
   </section>;
 }
