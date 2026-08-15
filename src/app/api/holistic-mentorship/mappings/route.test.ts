@@ -113,6 +113,7 @@ describe("Holistic Mentorship Mapping API", () => {
         method: "POST",
         body: JSON.stringify({
           school_code: "SCH001",
+          program_id: 1,
           academic_year: "2026-2027",
           selections: [{ student_id: 41, expected_mapping_id: null }],
         }),
@@ -134,6 +135,33 @@ describe("Holistic Mentorship Mapping API", () => {
       academicYear: "2026-2027",
       selections: [{ studentId: 41, expectedMappingId: null }],
     });
+  });
+
+  it.each([
+    [{}, "Program is required"],
+    [{ program_id: null }, "Invalid Program"],
+    [{ program_id: "" }, "Invalid Program"],
+    [{ program_id: "1" }, "Invalid Program"],
+    [{ program_id: 1.5 }, "Invalid Program"],
+    [{ program_id: 999 }, "Invalid Program"],
+  ])("requires one explicit supported Program for Teacher claim", async (program, error) => {
+    const response = await POST(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "POST",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          selections: [{ student_id: 41, expected_mapping_id: null }],
+          ...program,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockSession).not.toHaveBeenCalled();
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockAssign).not.toHaveBeenCalled();
   });
 
   it("accepts the scalar Admin assign contract with normalized audit identity", async () => {
@@ -345,6 +373,7 @@ describe("Holistic Mentorship Mapping API", () => {
         method: "POST",
         body: JSON.stringify({
           school_code: "SCH001",
+          program_id: 1,
           academic_year: "2026-2027",
           takeover_confirmed: true,
           selections: [{ student_id: 42, expected_mapping_id: 74 }],
@@ -369,6 +398,7 @@ describe("Holistic Mentorship Mapping API", () => {
         method: "DELETE",
         body: JSON.stringify({
           school_code: "SCH001",
+          program_id: 1,
           academic_year: "2026-2027",
           confirmed: true,
           mappings: [{ student_id: 41, expected_mapping_id: 73 }],
@@ -387,6 +417,34 @@ describe("Holistic Mentorship Mapping API", () => {
       confirmed: true,
       mappings: [{ studentId: 41, expectedMappingId: 73 }],
     });
+  });
+
+  it.each([
+    [{}, "Program is required"],
+    [{ program_id: null }, "Invalid Program"],
+    [{ program_id: "" }, "Invalid Program"],
+    [{ program_id: "1" }, "Invalid Program"],
+    [{ program_id: 1.5 }, "Invalid Program"],
+    [{ program_id: 999 }, "Invalid Program"],
+  ])("requires one explicit supported Program for Teacher self-unassign", async (program, error) => {
+    const response = await DELETE(
+      new Request("http://localhost/api/holistic-mentorship/mappings", {
+        method: "DELETE",
+        body: JSON.stringify({
+          school_code: "SCH001",
+          academic_year: "2026-2027",
+          confirmed: true,
+          mappings: [{ student_id: 41, expected_mapping_id: 73 }],
+          ...program,
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mockSession).not.toHaveBeenCalled();
+    expect(mockAccess).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
   });
 
   it("accepts the scalar Admin remove contract with normalized audit identity", async () => {
@@ -662,12 +720,14 @@ describe("Holistic Mentorship Mapping API", () => {
     const body = method === "POST"
       ? {
           school_code: "SCH001",
+          program_id: 1,
           academic_year: "2025-2026",
           selections: [{ student_id: 41, expected_mapping_id: null }],
         }
       : method === "DELETE"
         ? {
             school_code: "SCH001",
+            program_id: 1,
             academic_year: "2025-2026",
             confirmed: true,
             mappings: [{ student_id: 41, expected_mapping_id: 73 }],

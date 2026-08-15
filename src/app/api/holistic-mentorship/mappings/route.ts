@@ -160,7 +160,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const value = await readJsonObject(request);
   if (value && isAdminAssignRequest(value)) return adminAssign(value);
-  const programId = value && holisticProgramId(value.program_id);
+  if (!value) return holisticApiError("Invalid Mapping selection");
+  if (!("program_id" in value)) return holisticApiError("Program is required");
+  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
+    return holisticApiError("Invalid Program");
+  }
+  const programId = holisticProgramId(value.program_id);
+  if (!programId) return holisticApiError("Invalid Program");
   if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       !Array.isArray(value.selections) ||
@@ -248,7 +254,13 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const value = await readJsonObject(request);
   if (value && isAdminRemoveRequest(value)) return adminRemove(value);
-  const programId = value && holisticProgramId(value.program_id);
+  if (!value) return holisticApiError("Invalid Mapping removal");
+  if (!("program_id" in value)) return holisticApiError("Program is required");
+  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
+    return holisticApiError("Invalid Program");
+  }
+  const programId = holisticProgramId(value.program_id);
+  if (!programId) return holisticApiError("Invalid Program");
   if (!value || !programId || !validSchoolCode(value.school_code) ||
       value.academic_year !== CURRENT_ACADEMIC_YEAR ||
       value.confirmed !== true || !Array.isArray(value.mappings) ||
