@@ -38,6 +38,7 @@ export default function HolisticMentorshipWorkspace({
   initialProgramId = PROGRAM_IDS.COE,
   availableProgramIds = [...HOLISTIC_MENTORSHIP_PROGRAM_IDS],
   canEdit = true,
+  canViewPhaseSetup = canEdit,
 }: {
   mode: WorkspaceMode;
   schoolCode?: string;
@@ -45,8 +46,9 @@ export default function HolisticMentorshipWorkspace({
   initialProgramId?: number;
   availableProgramIds?: number[];
   canEdit?: boolean;
+  canViewPhaseSetup?: boolean;
 }) {
-  const workspaces = canEdit ? WORKSPACES.admin : WORKSPACES.admin.slice(0, 1);
+  const workspaces = canViewPhaseSetup ? WORKSPACES.admin : WORKSPACES.admin.slice(0, 1);
   const [activeId, setActiveId] = useState<string>(workspaces[0].id);
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? workspaces[0];
   const tabSetId = useId();
@@ -158,6 +160,7 @@ export default function HolisticMentorshipWorkspace({
           <PhasePlanSetup
             academicYear={academicYear}
             programId={selectedProgramId}
+            canEdit={canEdit}
           />
         ) : (
           <ProgressWorkspace

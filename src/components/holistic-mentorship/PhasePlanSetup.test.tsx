@@ -239,4 +239,23 @@ describe("PhasePlanSetup", () => {
     expect(screen.getByRole("button", { name: "Save Phase" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Return to Locked" })).toBeDisabled();
   });
+
+  it("renders an otherwise editable Phase Plan without mutation controls when access is read-only", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: {
+      id: 7, academicYear: "2026-2027", editable: true, phases: [{
+        id: 21, number: 1, grade: 11, title: "Current title", state: "locked",
+        guidanceMarkdown: "Current Guidance", revision: 2, frozen: false,
+        everOpened: false, used: false, active: false,
+        questions: [{ id: 41, text: "Current Question" }],
+      }],
+    } }) }));
+
+    render(<PhasePlanSetup canEdit={false} />);
+
+    expect(await screen.findByRole("button", { name: /Current title/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Phase" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toBeDisabled();
+    expect(screen.getByLabelText("Guidance Markdown")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Save Phase" })).not.toBeInTheDocument();
+  });
 });

@@ -101,6 +101,30 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(screen.getByLabelText("Academic Year")).toHaveValue("2026-2027");
   });
 
+  it("keeps Phase Setup visible without mutation controls for a read-only program-wide Admin", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: async () => url.includes("/progress?") ? {
+        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      } : { plan: null },
+    })));
+    const user = userEvent.setup();
+
+    render(<HolisticMentorshipWorkspace
+      mode="admin"
+      canEdit={false}
+      canViewPhaseSetup
+    />);
+
+    await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
+
+    expect(await screen.findByRole("region", { name: "Phase Setup" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start blank" })).not.toBeInTheDocument();
+  });
+
   it("loads EMRS data after the Admin selects Program 78", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

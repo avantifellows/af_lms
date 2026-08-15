@@ -28,6 +28,8 @@ export default async function HolisticMentorshipAdminPage({
     availableProgramIds.includes(requestedProgramId)
     ? requestedProgramId
     : access.programId ?? availableProgramIds[0];
+  const canViewPhaseSetup = access.permission.role === "admin" ||
+    access.permission.role === "holistic_mentorship_admin";
 
   return (
     <div className="min-h-screen overflow-x-clip bg-bg">
@@ -48,6 +50,7 @@ export default async function HolisticMentorshipAdminPage({
           initialProgramId={initialProgramId}
           availableProgramIds={availableProgramIds}
           canEdit={access.canEdit}
+          canViewPhaseSetup={canViewPhaseSetup}
         />
       </main>
     </div>
