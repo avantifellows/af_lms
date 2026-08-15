@@ -376,6 +376,30 @@ export async function getHolisticProgressOptions(
   };
 }
 
+export async function getHolisticCoverageSchools(
+  programId: number,
+  permission: UserPermission,
+): Promise<Array<{ code: string; name: string }>> {
+  const schoolScope = buildHolisticSchoolScopePredicate(permission, {
+    startIndex: 2,
+    schoolCodeColumn: "school.code",
+    schoolRegionColumn: "school.region",
+  });
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
+  return query<{ code: string; name: string }>(
+    `SELECT DISTINCT school.code, school.name
+     FROM school
+     JOIN centres centre
+       ON centre.school_id = school.id
+      AND centre.program_id = $1
+      AND centre.is_active IS TRUE
+     WHERE 1 = 1
+       ${schoolScopeSql}
+     ORDER BY school.name, school.code`,
+    [programId, ...schoolScope.params],
+  );
+}
+
 export async function getHolisticProgressAcademicYears(
   programId: number,
   permission: UserPermission,

@@ -6,6 +6,7 @@ vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: v
 vi.mock("@/lib/holistic-progress", () => ({
   DEFAULT_HOLISTIC_PROGRESS_SORT: "school",
   listHolisticProgress: vi.fn(),
+  getHolisticCoverageSchools: vi.fn(),
   getHolisticProgressOptions: vi.fn(),
   getHolisticProgressAcademicYears: vi.fn(),
   formatHolisticProgressCsv: vi.fn(),
@@ -16,6 +17,7 @@ import { GET } from "./route";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
   formatHolisticProgressCsv,
+  getHolisticCoverageSchools,
   getHolisticProgressAcademicYears,
   getHolisticProgressOptions,
   listHolisticProgress,
@@ -24,6 +26,7 @@ import {
 const mockSession = vi.mocked(getServerSession);
 const mockAccess = vi.mocked(requireHolisticMentorshipAccess);
 const mockList = vi.mocked(listHolisticProgress);
+const mockCoverageSchools = vi.mocked(getHolisticCoverageSchools);
 const mockOptions = vi.mocked(getHolisticProgressOptions);
 const mockAcademicYears = vi.mocked(getHolisticProgressAcademicYears);
 const mockCsv = vi.mocked(formatHolisticProgressCsv);
@@ -41,6 +44,10 @@ describe("Holistic progress API", () => {
     mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission } as never);
     mockList.mockResolvedValue({ rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
     mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
+    mockCoverageSchools.mockResolvedValue([
+      { code: "SCH001", name: "School One" },
+      { code: "SCH002", name: "School Without Mappings" },
+    ]);
     mockAcademicYears.mockResolvedValue(["2026-2027", "2025-2026"]);
   });
 
@@ -68,6 +75,10 @@ describe("Holistic progress API", () => {
     expect(body).toMatchObject({
       rows: [],
       options: { schools: [], mentors: [], phases: [] },
+      coverageSchools: [
+        { code: "SCH001", name: "School One" },
+        { code: "SCH002", name: "School Without Mappings" },
+      ],
       academicYears: ["2026-2027", "2025-2026"],
     });
     expect(body.refreshedAt).toEqual(expect.any(String));
@@ -76,6 +87,7 @@ describe("Holistic progress API", () => {
       permission,
     );
     expect(mockOptions).toHaveBeenCalledWith("2026-2027", 1, permission);
+    expect(mockCoverageSchools).toHaveBeenCalledWith(1, permission);
     expect(mockAcademicYears).toHaveBeenCalledWith(1, permission);
   });
 

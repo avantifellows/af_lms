@@ -17,7 +17,11 @@ type Options = {
 type Payload = {
   rows: Row[];
   counts: { totalMapped: number; pending: number; completed: number; skipped: number; noActivePhase: number };
-  options: Options; academicYears: string[]; refreshedAt: string; pageSize: 50;
+  options: Options;
+  coverageSchools: Array<{ code: string; name: string }>;
+  academicYears: string[];
+  refreshedAt: string;
+  pageSize: 50;
 };
 type ProgressFilters = {
   school: string;
@@ -39,7 +43,7 @@ type StoredProgressView = {
 
 const EMPTY: Payload = {
   rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
-  options: { schools: [], mentors: [], phases: [] }, academicYears: [CURRENT_ACADEMIC_YEAR],
+  options: { schools: [], mentors: [], phases: [] }, coverageSchools: [], academicYears: [CURRENT_ACADEMIC_YEAR],
   refreshedAt: "", pageSize: 50,
 };
 const INITIAL_FILTERS: ProgressFilters = {
@@ -266,6 +270,7 @@ export default function ProgressWorkspace({
     <div aria-busy={loading} className="w-full min-w-0 max-w-full space-y-5">
       <ProgressIntro academicYear={academicYear} exporting={exporting} exportError={exportError}
         onExport={exportProgress} />
+      <AssignmentCoverageSchools schools={data.coverageSchools ?? []} programId={programId} />
       <ProgressFilterPanel filters={filters} options={data.options} onChange={update} />
       <ProgressCounts counts={data.counts} />
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -301,6 +306,33 @@ export default function ProgressWorkspace({
         totalMapped={data.counts.totalMapped} onPageChange={setPage} />
     </div>
   );
+}
+
+function AssignmentCoverageSchools({ schools, programId }: {
+  schools: Array<{ code: string; name: string }>;
+  programId: number;
+}) {
+  if (schools.length === 0) return null;
+  return <section aria-labelledby="assignment-coverage-heading" className="space-y-3 rounded-md border border-border bg-bg-card p-4">
+    <div>
+      <h3 id="assignment-coverage-heading" className="text-sm font-semibold text-text-primary">School Assignment Coverage</h3>
+      <p className="text-xs text-text-muted">Open a School to review coverage and manage current-year Mappings when permitted.</p>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {schools.map((school) => <Link
+        key={school.code}
+        aria-label={`Open Assignment Coverage for ${school.name}`}
+        className="inline-flex min-h-11 items-center rounded-lg border border-border bg-bg px-3 py-2 text-sm font-semibold text-text-primary hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        href={`/school/${school.code}?${new URLSearchParams({
+          tab: "holistic_mentorship",
+          program_id: String(programId),
+        })}`}
+      >
+        <span>{school.name}</span>
+        <span className="ml-2 font-mono text-xs text-text-muted">{school.code}</span>
+      </Link>)}
+    </div>
+  </section>;
 }
 
 function ProgressIntro({ academicYear, exporting, exportError, onExport }: {

@@ -18,6 +18,10 @@ const payload = {
     mentors: [{ userId: 9, name: "Mentor One" }],
     phases: [{ id: 70, number: 2, title: "Check-in", grade: 11, state: "open" }],
   },
+  coverageSchools: [
+    { code: "SCH001", name: "School One" },
+    { code: "SCH002", name: "School Without Mappings" },
+  ],
   academicYears: ["2026-2027", "2025-2026", "2023-2024"],
   pageSize: 50,
   refreshedAt: "2026-07-17T10:00:00.000Z",
@@ -58,6 +62,15 @@ describe("ProgressWorkspace", () => {
     expect(screen.getByRole("link", { name: /Open Student One/ })).toHaveAttribute(
       "href", "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=1&source=progress"
     );
+  });
+
+  it("links every permitted School to Assignment Coverage, including a School without Mappings", async () => {
+    render(<ProgressWorkspace programId={78} />);
+
+    expect(await screen.findByRole("link", { name: "Open Assignment Coverage for School One" }))
+      .toHaveAttribute("href", "/school/SCH001?tab=holistic_mentorship&program_id=78");
+    expect(screen.getByRole("link", { name: "Open Assignment Coverage for School Without Mappings" }))
+      .toHaveAttribute("href", "/school/SCH002?tab=holistic_mentorship&program_id=78");
   });
 
   it("loads on filter change and manual Refresh without polling", async () => {

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   DEFAULT_HOLISTIC_PROGRESS_SORT,
   formatHolisticProgressCsv,
+  getHolisticCoverageSchools,
   getHolisticProgressAcademicYears,
   getHolisticProgressOptions,
   listHolisticProgress,
@@ -127,13 +128,15 @@ export async function GET(request: Request) {
       },
     });
   }
-  const [options, academicYears] = await Promise.all([
+  const [options, coverageSchools, academicYears] = await Promise.all([
     getHolisticProgressOptions(filters.academicYear, filters.programId, access.permission),
+    getHolisticCoverageSchools(filters.programId, access.permission),
     getHolisticProgressAcademicYears(filters.programId, access.permission),
   ]);
   return NextResponse.json({
     ...result,
     options,
+    coverageSchools,
     academicYears,
     pageSize: 50,
     refreshedAt: new Date().toISOString(),

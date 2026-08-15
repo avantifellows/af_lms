@@ -8,6 +8,7 @@ import { reconcileHolisticMappings } from "./holistic-reconciliation";
 import {
   DEFAULT_HOLISTIC_PROGRESS_SORT,
   formatHolisticProgressCsv,
+  getHolisticCoverageSchools,
   getHolisticProgressAcademicYears,
   getHolisticProgressOptions,
   listHolisticProgress,
@@ -317,6 +318,33 @@ describe("Holistic progress", () => {
       expect(sql).toContain("FROM latest_mapping mapping");
       expect(call[1]).toEqual([1, "2025-2026", "2026-2027"]);
     }
+  });
+
+  it("lists every active in-scope Program School for Assignment Coverage without requiring a Mapping", async () => {
+    mockQuery.mockResolvedValueOnce([
+      { code: "SCH001", name: "School One" },
+      { code: "SCH002", name: "School Without Mappings" },
+    ]);
+    const scopedPermission: UserPermission = {
+      email: "pm@example.com",
+      level: 1,
+      role: "program_manager",
+      school_codes: ["SCH001", "SCH002"],
+      program_ids: [78],
+    };
+
+    await expect(getHolisticCoverageSchools(78, scopedPermission)).resolves.toEqual([
+      { code: "SCH001", name: "School One" },
+      { code: "SCH002", name: "School Without Mappings" },
+    ]);
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(String(sql)).toContain("JOIN centres centre");
+    expect(String(sql)).toContain("centre.program_id = $1");
+    expect(String(sql)).toContain("centre.is_active IS TRUE");
+    expect(String(sql)).toContain("school.code = ANY($2::text[])");
+    expect(String(sql)).not.toContain("holistic_mentorship_mentor_mentee_mappings");
+    expect(params).toEqual([78, ["SCH001", "SCH002"]]);
   });
 
   it("limits School and Mentor filter options to the actor's School scope", async () => {
