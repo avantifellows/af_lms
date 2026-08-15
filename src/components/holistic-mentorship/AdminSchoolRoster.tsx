@@ -3,7 +3,7 @@
 import { ArrowUpRight, Search, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge, Button, Input, Modal, Select } from "@/components/ui";
 import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
@@ -202,12 +202,19 @@ export default function AdminSchoolRoster({
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [rosterStudents, setRosterStudents] = useState(students);
+  const [rosterStale, setRosterStale] = useState(false);
   const canManage = (role === "admin" || role === "holistic_mentorship_admin") &&
     academicYear === CURRENT_ACADEMIC_YEAR;
   const shown = useMemo(
-    () => filterStudents(students, search, grade, assignment),
-    [assignment, grade, search, students]
+    () => filterStudents(rosterStudents, search, grade, assignment),
+    [assignment, grade, rosterStudents, search]
   );
+
+  useEffect(() => {
+    setRosterStudents(students);
+    setRosterStale(false);
+  }, [students]);
 
   const closeAssign = () => {
     setAssigning(null);
@@ -276,6 +283,7 @@ export default function AdminSchoolRoster({
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to reassign Mentor");
+      setRosterStale(true);
       closeReassign();
       router.refresh();
     } catch (problem) {
@@ -322,7 +330,7 @@ export default function AdminSchoolRoster({
       </div>
       <p className="mt-1 text-sm text-text-muted">School assignment coverage for {academicYear}</p>
     </div>
-    <Summary summary={summary ?? derivedSummary(students)} />
+    <Summary summary={summary ?? derivedSummary(rosterStudents)} />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10rem_12rem]">
       <label className="block text-[11px] font-extrabold uppercase tracking-wide text-text-muted">
         Search Student
@@ -352,7 +360,7 @@ export default function AdminSchoolRoster({
       schoolCode={schoolCode}
       programId={programId}
       canManage={canManage}
-      controlsDisabled={!canEdit}
+      controlsDisabled={!canEdit || submitting || rosterStale}
       onAssign={setAssigning}
       onReassign={setReassigning}
       onRemove={setRemoving}
@@ -362,7 +370,7 @@ export default function AdminSchoolRoster({
           <p className="mt-2 text-sm font-bold text-text-primary">No Students match</p>
           <p className="text-sm text-text-muted">Change the search or filters.</p></div>
       </div>}
-    <div className="sr-only" role="status">Showing {shown.length} of {students.length} Students</div>
+    <div className="sr-only" role="status">Showing {shown.length} of {rosterStudents.length} Students</div>
     <Modal open={assigning !== null} onClose={submitting ? undefined : closeAssign}
       role="dialog" aria-modal="true" aria-labelledby="assign-mentor-title">
       <div className="space-y-5 p-6">

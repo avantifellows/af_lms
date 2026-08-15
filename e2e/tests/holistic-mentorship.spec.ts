@@ -239,7 +239,10 @@ test.describe("Holistic Mentorship release workflows", () => {
     await expect(progressTab).toBeFocused();
     await expect(progressTab).toHaveAttribute("aria-selected", "true");
 
-    const openStudent = holisticAdminPage.getByRole("link", { name: /^Open / }).first();
+    const openStudent = holisticAdminPage
+      .getByRole("table", { name: "Student progress results" })
+      .getByRole("link", { name: /^Open / })
+      .first();
     await openStudent.focus();
     await expect(openStudent).toBeFocused();
     await openStudent.press("Enter");
@@ -504,7 +507,11 @@ test.describe("Holistic Mentorship release workflows", () => {
     expect(csvBody).toContain("Notes Author Name,Notes Author Email,Notes Last Edited At");
     expect(csvBody).not.toMatch(/Student Profile|Student Context|profile_journey_id|mapping_id/i);
 
-    await holisticAdminPage.getByRole("link", { name: /^Open / }).first().click();
+    await holisticAdminPage
+      .getByRole("table", { name: "Student progress results" })
+      .getByRole("link", { name: /^Open / })
+      .first()
+      .click();
     await expect(holisticAdminPage.getByText("Admin read-only view", { exact: true })).toBeVisible();
     await holisticAdminPage.goto("/admin/holistic-mentorship");
     await holisticAdminPage.getByRole("tab", { name: "Phase Setup" }).click();
@@ -605,7 +612,10 @@ test.describe("Holistic Mentorship release workflows", () => {
       await expect(page.getByRole("heading", { name: "Students & Progress" })).toBeVisible();
       await expect(page.getByText("Read only", { exact: true })).toBeVisible();
       await expect(page.getByRole("tab", { name: "Phase Setup" })).toHaveCount(0);
-      const detailLink = page.getByRole("link", { name: /^Open / }).first();
+      const detailLink = page
+        .getByRole("table", { name: "Student progress results" })
+        .getByRole("link", { name: /^Open / })
+        .first();
       await expect(detailLink).toBeVisible();
       await detailLink.click();
       await expect(page.getByText(`${roleLabel} read-only view`, { exact: true })).toBeVisible();

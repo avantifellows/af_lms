@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -244,6 +244,70 @@ describe("AdminSchoolRoster", () => {
       }),
     });
     expect(mockRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("uses each refreshed Mapping ID across assign, reassign, and immediate remove", async () => {
+    const afterAssign = students.map((student) => student.studentId === 42
+      ? { ...student, ownership: { mappingId: 81, mentorUserId: 27, mentorName: "Nila Mentor" } }
+      : student);
+    const afterReassign = afterAssign.map((student) => student.studentId === 42
+      ? { ...student, ownership: { mappingId: 82, mentorUserId: 28, mentorName: "Meera Mentor" } }
+      : student);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, changed: 1 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, changed: 1 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, changed: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const rosterProps = {
+      schoolCode: "SCH001",
+      programId: 78,
+      role: "admin",
+      mentors: [
+        { userId: 27, name: "Nila Mentor", email: "nila@example.com" },
+        { userId: 28, name: "Meera Mentor", email: "meera@example.com" },
+      ],
+    };
+    const { rerender } = render(<AdminSchoolRoster
+      students={students}
+      {...rosterProps}
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Assign Ravi Shah" }));
+    let dialog = screen.getByRole("dialog", { name: "Assign Mentor to Ravi Shah" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Mentor" }), "27");
+    await user.type(within(dialog).getByRole("textbox", { name: "Audit reason" }), "Student request");
+    await user.click(within(dialog).getByRole("button", { name: "Assign Mentor" }));
+
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1));
+    rerender(<AdminSchoolRoster students={afterAssign} {...rosterProps} />);
+    await user.click(screen.getByRole("button", { name: "Reassign Mentor for Ravi Shah" }));
+    dialog = screen.getByRole("dialog", { name: "Reassign Mentor for Ravi Shah" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Replacement Mentor" }), "28");
+    await user.type(within(dialog).getByRole("textbox", { name: "Reassignment reason" }), "Mentor handover");
+    await user.click(within(dialog).getByRole("button", { name: "Reassign Mentor" }));
+
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Remove Mentor from Ravi Shah" })).toBeDisabled();
+    rerender(<AdminSchoolRoster students={afterReassign} {...rosterProps} />);
+    await user.click(await screen.findByRole("button", { name: "Remove Mentor from Ravi Shah" }));
+    dialog = screen.getByRole("dialog", { name: "Remove Mentor from Ravi Shah" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Removal reason" }), "Mapping no longer needed");
+    await user.click(within(dialog).getByRole("button", { name: "Remove Mentor" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/holistic-mentorship/mappings", expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"expected_mapping_id":null'),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/holistic-mentorship/mappings", expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"expected_mapping_id":81'),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/holistic-mentorship/mappings", expect.objectContaining({
+      method: "DELETE",
+      body: expect.stringContaining('"expected_mapping_id":82'),
+    }));
   });
 
   it.each(["admin", "holistic_mentorship_admin"])(
