@@ -542,6 +542,12 @@ describe("requireHolisticMentorshipAccess", () => {
         programIds: [1],
         school: { id: 20, code: "SCH001", programId: 1 },
       });
+      expect(mockReconcile).toHaveBeenCalledWith({
+        academicYear: "2026-2027",
+        programId: 1,
+        schoolId: 20,
+        studentIds: [41],
+      });
     }
   );
 

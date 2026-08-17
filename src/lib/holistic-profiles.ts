@@ -12,7 +12,6 @@ export async function getHolisticProfileAdmin(
   summaries: Array<{ position: number; title: string; summary: string }>;
   regeneration: null | { requestKey: string; state: RegenerationState; requestedAt: string; errorCode: string | null };
 }> {
-  await reconcileHolisticMappings({ academicYear, studentIds: [studentId], programId });
   const [summaries, requests] = await Promise.all([
     query<{ position: number; title: string; summary: string }>(
       `SELECT summary.position, summary.question_set_title AS title, summary.summary

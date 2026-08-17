@@ -42,7 +42,7 @@ describe("Holistic Profile regeneration", () => {
     process.env.HOLISTIC_PROFILE_ETL_TOKEN = "machine-token";
   });
 
-  it("returns Profile and polling reads for an eligible current-year Student without requiring a Mapping", async () => {
+  it("returns Profile and polling reads without a second reconciliation", async () => {
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{
@@ -69,11 +69,7 @@ describe("Holistic Profile regeneration", () => {
       expect(String(sql)).toContain("mapping.academic_year = $3");
     }
     expect(mockQuery.mock.calls[1][0]).toContain("configuration.id = request.prompt_configuration_id");
-    expect(mockReconcile).toHaveBeenCalledWith({
-      academicYear: "2026-2027",
-      programId: 1,
-      studentIds: [41],
-    });
+    expect(mockReconcile).not.toHaveBeenCalled();
   });
 
   it("records actor, Student, Active configuration and force before sending only the request reference", async () => {
