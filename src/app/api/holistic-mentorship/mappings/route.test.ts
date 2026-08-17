@@ -38,6 +38,46 @@ const permission = {
   user_id: 19,
 };
 
+type AdminMutationKind = "assign" | "reassign" | "remove";
+
+function adminMutationBody(kind: AdminMutationKind, reason: string) {
+  const common = {
+    school_code: "SCH001",
+    program_id: 1,
+    academic_year: "2026-2027",
+    student_id: 41,
+    confirmed: true,
+    reason,
+  };
+  if (kind === "assign") {
+    return { ...common, mentor_user_id: 27, expected_mapping_id: null };
+  }
+  if (kind === "reassign") {
+    return { ...common, mentor_user_id: 27, expected_mapping_id: 73 };
+  }
+  return { ...common, expected_mapping_id: 73 };
+}
+
+async function callAdminMutation(kind: AdminMutationKind, reason: string) {
+  const body = JSON.stringify(adminMutationBody(kind, reason));
+  if (kind === "assign") {
+    return POST(new Request("http://localhost/api/holistic-mentorship/mappings", {
+      method: "POST",
+      body,
+    }) as never);
+  }
+  if (kind === "reassign") {
+    return PATCH(new Request("http://localhost/api/holistic-mentorship/mappings", {
+      method: "PATCH",
+      body,
+    }) as never);
+  }
+  return DELETE(new Request("http://localhost/api/holistic-mentorship/mappings", {
+    method: "DELETE",
+    body,
+  }) as never);
+}
+
 describe("Holistic Mentorship Mapping API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -233,6 +273,43 @@ describe("Holistic Mentorship Mapping API", () => {
     expect(mockAccess).not.toHaveBeenCalled();
     expect(mockAdminAssign).not.toHaveBeenCalled();
   });
+
+  it.each(["assign", "reassign", "remove"] as const)(
+    "accepts an exactly 500-character Admin %s reason",
+    async (kind) => {
+      mockAdminAssign.mockResolvedValue({ ok: true, changed: 1 });
+      mockAdminReassign.mockResolvedValue({ ok: true, changed: 1 });
+      mockAdminRemove.mockResolvedValue({ ok: true, changed: 1 });
+      const reason = "r".repeat(500);
+
+      const response = await callAdminMutation(kind, reason);
+
+      expect(response.status).toBe(200);
+      const mutationMock = {
+        assign: mockAdminAssign,
+        reassign: mockAdminReassign,
+        remove: mockAdminRemove,
+      }[kind];
+      expect(mutationMock).toHaveBeenCalledWith(expect.objectContaining({ reason }));
+    },
+  );
+
+  it.each(["assign", "reassign", "remove"] as const)(
+    "rejects a 501-character Admin %s reason before authorization or mutation",
+    async (kind) => {
+      const response = await callAdminMutation(kind, "r".repeat(501));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "Audit reason must be 500 characters or fewer",
+      });
+      expect(mockSession).not.toHaveBeenCalled();
+      expect(mockAccess).not.toHaveBeenCalled();
+      expect(mockAdminAssign).not.toHaveBeenCalled();
+      expect(mockAdminReassign).not.toHaveBeenCalled();
+      expect(mockAdminRemove).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     [{}, "Program is required"],

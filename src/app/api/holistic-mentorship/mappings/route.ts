@@ -106,6 +106,9 @@ function parseAdminMutationBase(
   if (value.confirmed !== true) return { response: holisticApiError(messages.confirmation) };
   const reason = typeof value.reason === "string" ? value.reason.trim() : "";
   if (!reason) return { response: holisticApiError(messages.reason) };
+  if (reason.length > 500) {
+    return { response: holisticApiError("Audit reason must be 500 characters or fewer") };
+  }
   return {
     value: {
       schoolCode: value.school_code,
