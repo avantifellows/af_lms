@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
+import { isHolisticMentorshipProgramId } from "@/lib/constants";
 import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipAction,
@@ -43,9 +43,19 @@ export function positiveIntegerString(value: string): number | null {
 }
 
 export function holisticProgramId(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return PROGRAM_IDS.COE;
+  // Query-string values arrive as strings, while JSON mutation bodies should
+  // be checked for a numeric type by their route before calling this helper.
+  // Missing/null/empty input is never a valid Holistic Program.
+  if (value === null || value === undefined || value === "") return null;
   const parsed = typeof value === "string" ? Number(value) : value;
   return isHolisticMentorshipProgramId(parsed) ? parsed : null;
+}
+
+/** Parse the numeric Program contract used by Holistic JSON mutation bodies. */
+export function holisticJsonProgramId(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? holisticProgramId(value)
+    : null;
 }
 
 export function validSchoolCode(value: unknown): value is string {

@@ -371,7 +371,12 @@ describe("DashboardPage (server component)", () => {
   it("redirects single-school user to their school page (no search)", async () => {
     mockGetServerSession.mockResolvedValue(teacherSession);
     mockGetUserPermission.mockResolvedValue(singleSchoolPermission);
-    mockGetProgramContextSync.mockReturnValue(defaultProgramContext);
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [64],
+      isNVSOnly: true,
+      hasCoEOrNodal: false,
+    });
     mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
     mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
 
@@ -379,6 +384,44 @@ describe("DashboardPage (server component)", () => {
       DashboardPage({ searchParams: defaultSearchParams })
     ).rejects.toThrow("REDIRECT:/school/SC001");
     expect(mockRedirect).toHaveBeenCalledWith("/school/SC001");
+  });
+
+  it("carries a single resolved JNV CoE Program into the School redirect", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue({
+      ...singleSchoolPermission,
+      program_ids: [1],
+    });
+    mockGetProgramContextSync.mockReturnValue({
+      ...defaultProgramContext,
+      programIds: [1],
+    });
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+
+    await expect(
+      DashboardPage({ searchParams: defaultSearchParams })
+    ).rejects.toThrow("REDIRECT:/school/SC001?program_id=1");
+    expect(mockRedirect).toHaveBeenCalledWith("/school/SC001?program_id=1");
+  });
+
+  it("carries a single resolved EMRS Holistic Program into the School redirect", async () => {
+    mockGetServerSession.mockResolvedValue(teacherSession);
+    mockGetUserPermission.mockResolvedValue({
+      ...singleSchoolPermission,
+      program_ids: [78],
+    });
+    mockGetProgramContextSync.mockReturnValue({
+      ...defaultProgramContext,
+      programIds: [78],
+    });
+    mockGetFeatureAccess.mockReturnValue({ canView: false, canEdit: false });
+    mockGetAccessibleSchoolCodes.mockResolvedValue(["SC001"]);
+
+    await expect(
+      DashboardPage({ searchParams: defaultSearchParams })
+    ).rejects.toThrow("REDIRECT:/school/SC001?program_id=78");
+    expect(mockRedirect).toHaveBeenCalledWith("/school/SC001?program_id=78");
   });
 
   it("does NOT redirect single-school user when search is active", async () => {
@@ -671,6 +714,27 @@ describe("DashboardPage (server component)", () => {
     expect(card).toHaveAttribute("data-href", "/school/SC001");
     expect(card).toHaveAttribute("data-show-student-count", "true");
     expect(card).toHaveAttribute("data-show-grade-breakdown", "true");
+  });
+
+  it("carries a single resolved Holistic Program into School card links", async () => {
+    const school = makeSchool();
+    setupPM([school], 1);
+    mockGetProgramContextSync.mockReturnValue({
+      ...defaultProgramContext,
+      programIds: [78],
+    });
+    mockGetUserPermission.mockResolvedValue({
+      ...pmPermission,
+      program_ids: [78],
+    });
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.getByTestId("school-card-SC001")).toHaveAttribute(
+      "data-href",
+      "/school/SC001?program_id=78",
+    );
   });
 
   it("shows Start Visit action for PM users", async () => {

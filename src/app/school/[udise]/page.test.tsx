@@ -1689,6 +1689,90 @@ describe("SchoolPage (server component)", () => {
     );
   });
 
+  it("offers an explicit choice when an Admin opens a dual-Program School without a selection", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    const permission = makePermission({ role: "admin", program_ids: [1] });
+    mockGetUserPermission.mockResolvedValue(permission);
+
+    await renderPage();
+
+    expect(screen.getByTestId("tab-holistic_mentorship")).toHaveTextContent(
+      "Choose a Holistic Mentorship Program",
+    );
+    expect(screen.getByRole("link", { name: "JNV CoE" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?program_id=1",
+    );
+    expect(screen.getByRole("link", { name: "EMRS CoE" })).toHaveAttribute(
+      "href",
+      "/school/SCH001?program_id=78",
+    );
+    expect(mockRequireHolisticMentorshipAccess).not.toHaveBeenCalled();
+  });
+
+  it("scopes the dual-Program choice to a Program Manager's permitted Program", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [1, 78] });
+    const permission = makePermission({
+      email: "pm@example.com",
+      role: "program_manager",
+      level: 1,
+      school_codes: ["SCH001"],
+      program_ids: [1],
+    });
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "pm@example.com" } }),
+    );
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 1 },
+      programId: 1,
+      programIds: [1],
+      canEdit: false,
+    });
+
+    await renderPage();
+
+    expect(screen.queryByRole("link", { name: "EMRS CoE" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Choose a Holistic Mentorship Program")).not.toBeInTheDocument();
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ user: { email: "pm@example.com" } }),
+      "assignment_coverage_read",
+      { schoolCode: "SCH001", programId: 1 },
+    );
+  });
+
+  it("resolves a single supported Program before the School Holistic access gate", async () => {
+    setupAdminDefaults({ id: "20", code: "SCH001", centre_program_ids: [78] });
+    const permission = makePermission({ role: "teacher", program_ids: [78] });
+    mockGetUserPermission.mockResolvedValue(permission);
+    mockGetServerSession.mockResolvedValue(
+      googleSession({ user: { email: "teacher@avantifellows.org" } }),
+    );
+    mockGetProgramContextSync.mockReturnValue({
+      hasAccess: true,
+      programIds: [78],
+      isNVSOnly: false,
+      hasCoEOrNodal: true,
+    });
+    mockRequireHolisticMentorshipAccess.mockResolvedValue({
+      ok: true,
+      permission,
+      school: { id: 20, code: "SCH001", programId: 78 },
+      actorUserId: 101,
+      canEdit: false,
+    });
+
+    await renderPage();
+
+    expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "roster_view",
+      { schoolCode: "SCH001", programId: 78 },
+    );
+  });
+
   it("does not expose Holistic coverage for a forged unsupported Program URL", async () => {
     setupAdminDefaults({ id: "20", code: "SCH001" });
 

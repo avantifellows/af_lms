@@ -16,10 +16,35 @@ const mockWithTransaction = vi.mocked(withTransaction);
 describe("/api/holistic-mentorship/phase-plans", () => {
   beforeEach(() => vi.resetAllMocks());
 
+  it.each(["", "null", undefined])("rejects missing Phase Plan Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `&program_id=${programId}`;
+    const response = await GET(new NextRequest(
+      `http://localhost/api/holistic-mentorship/phase-plans?academic_year=2026-2027${query}`,
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid Program" });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { program_id: null }, { program_id: "" }, { program_id: "1" }])(
+    "rejects missing or non-numeric mutation Program context",
+    async (program) => {
+      const response = await POST(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans", {
+        method: "POST",
+        body: JSON.stringify({ action: "create", academic_year: "2026-2027", ...program }),
+      }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Invalid request body" });
+      expect(mockGetServerSession).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects unauthenticated reads before database access", async () => {
     mockGetServerSession.mockResolvedValue(null);
 
-    const response = await GET(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans?academic_year=2026-2027"));
+    const response = await GET(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans?academic_year=2026-2027&program_id=1"));
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Unauthorized" });
@@ -33,7 +58,7 @@ describe("/api/holistic-mentorship/phase-plans", () => {
       school_codes: null, regions: null, program_ids: [1], read_only: false, user_id: 9,
     }]);
 
-    const response = await GET(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans?academic_year=2026-2028"));
+    const response = await GET(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans?academic_year=2026-2028&program_id=1"));
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid Academic Year" });
@@ -91,7 +116,7 @@ describe("/api/holistic-mentorship/phase-plans", () => {
 
     const response = await POST(new NextRequest("http://localhost/api/holistic-mentorship/phase-plans", {
       method: "POST",
-      body: JSON.stringify({ action: "create", academic_year: "2026-2027" }),
+      body: JSON.stringify({ action: "create", academic_year: "2026-2027", program_id: 1 }),
     }));
 
     expect(response.status).toBe(200);
@@ -122,6 +147,7 @@ describe("/api/holistic-mentorship/phase-plans", () => {
       method: "PATCH",
       body: JSON.stringify({
         action: "update",
+        program_id: 1,
         phase_id: 21,
         expected_revision: 2,
         confirmed: true,

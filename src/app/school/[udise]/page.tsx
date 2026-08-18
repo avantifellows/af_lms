@@ -22,7 +22,9 @@ import {
 } from "@/lib/permissions";
 import {
   CURRENT_ACADEMIC_YEAR,
+  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
   isHolisticMentorshipProgramId,
+  PROGRAM_ID_TO_LABEL,
   PROGRAM_IDS,
 } from "@/lib/constants";
 import { getLmsSupportedProgramIds } from "@/lib/lms-programs";
@@ -601,15 +603,20 @@ async function buildHolisticMentorshipContent({
   permission,
   schoolCode,
   programId,
+  programChoices,
   access,
 }: {
   session: HolisticMentorshipSession;
   permission: UserPermission | null;
   schoolCode: string;
   programId?: number | null;
+  programChoices?: number[];
   access: FeatureAccessResult;
 }): Promise<ReactNode | null> {
   if (!access.canView || programId === null) return null;
+  if (programId === undefined && (programChoices?.length ?? 0) > 1) {
+    return <HolisticProgramChoice schoolCode={schoolCode} programIds={programChoices!} />;
+  }
   const isTeacher = permission?.role === "teacher";
   const holisticAccess = await requireHolisticMentorshipAccess(
     session,
@@ -664,6 +671,7 @@ async function buildSchoolTabs({
   permission,
   school,
   holisticProgramId,
+  holisticProgramChoices,
   enrollmentContent,
   academicMentorshipContent,
   curriculumAccess,
@@ -678,6 +686,7 @@ async function buildSchoolTabs({
   permission: UserPermission | null;
   school: School;
   holisticProgramId?: number | null;
+  holisticProgramChoices?: number[];
   enrollmentContent: ReactNode;
   academicMentorshipContent: ReactNode;
   curriculumAccess: FeatureAccessResult;
@@ -693,6 +702,7 @@ async function buildSchoolTabs({
     permission,
     schoolCode: school.code,
     programId: holisticProgramId,
+    programChoices: holisticProgramChoices,
     access: holisticMentorshipAccess,
   });
   const tabs: SchoolTab[] = [
@@ -804,6 +814,53 @@ function requestedHolisticProgramId(rawValue: string | string[] | undefined) {
   return isHolisticMentorshipProgramId(programId) ? programId : null;
 }
 
+function holisticProgramChoices(
+  school: School,
+  permission: UserPermission | null,
+): number[] {
+  const actorPrograms = permission?.role === "admin" ||
+    permission?.role === "holistic_mentorship_admin"
+    ? [...HOLISTIC_MENTORSHIP_PROGRAM_IDS]
+    : getProgramContextSync(permission).programIds.filter(isHolisticMentorshipProgramId);
+  const allowed = new Set(actorPrograms);
+  return (school.centre_program_ids ?? [])
+    .map(Number)
+    .filter((programId, index, values) =>
+      isHolisticMentorshipProgramId(programId) &&
+      allowed.has(programId) &&
+      values.indexOf(programId) === index,
+    );
+}
+
+function holisticProgramHref(schoolCode: string, programId: number): string {
+  return `/school/${schoolCode}?program_id=${programId}`;
+}
+
+function HolisticProgramChoice({ schoolCode, programIds }: {
+  schoolCode: string;
+  programIds: number[];
+}) {
+  return (
+    <Card elevation="sm" className="border-accent/30 p-6">
+      <h2 className="text-lg font-bold text-text-primary">Choose a Holistic Mentorship Program</h2>
+      <p className="mt-1 text-sm text-text-muted">
+        This School supports more than one Holistic Mentorship Program. Choose one to continue.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        {programIds.map((programId) => (
+          <Link
+            key={programId}
+            href={holisticProgramHref(schoolCode, programId)}
+            className="rounded-lg border border-accent px-4 py-2 text-sm font-bold text-accent hover:bg-accent/10"
+          >
+            {PROGRAM_ID_TO_LABEL[programId] ?? `Program ${programId}`}
+          </Link>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function isAdminPermission(permission: UserPermission | null) {
   return permission?.role === "admin";
 }
@@ -813,12 +870,14 @@ async function holisticAdminSchoolLayout(params: {
   permission: UserPermission;
   school: School;
   programId?: number | null;
+  programChoices?: number[];
 }) {
   const holisticContent = await buildHolisticMentorshipContent({
     session: params.session,
     permission: params.permission,
     schoolCode: params.school.code,
     programId: params.programId,
+    programChoices: params.programChoices,
     access: getFeatureAccess(params.permission, "holistic_mentorship"),
   });
   if (!holisticContent) redirect("/admin/holistic-mentorship");
@@ -837,7 +896,7 @@ async function holisticAdminSchoolLayout(params: {
 export default async function SchoolPage({ params, searchParams }: PageProps) {
   const session = await getServerSession(authOptions);
   const { udise } = await params;
-  const holisticProgramId = requestedHolisticProgramId((await searchParams)?.program_id);
+  const requestedProgramId = requestedHolisticProgramId((await searchParams)?.program_id);
 
   if (!session) {
     redirect("/");
@@ -852,12 +911,17 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
   const permission = await resolveSchoolPermission(session);
   const identityAccessMessage = getSchoolIdentityAccessMessage(session, permission, school);
   if (identityAccessMessage) return identityAccessMessage;
+  const programChoices = holisticProgramChoices(school, permission);
+  const holisticProgramId = requestedProgramId === null
+    ? null
+    : requestedProgramId ?? (programChoices.length === 1 ? programChoices[0] : undefined);
   if (permission?.role === "holistic_mentorship_admin") {
     return holisticAdminSchoolLayout({
       session,
       permission,
       school,
       programId: holisticProgramId,
+      programChoices,
     });
   }
 
@@ -919,6 +983,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     permission,
     school,
     holisticProgramId,
+    holisticProgramChoices: programChoices,
     enrollmentContent,
     academicMentorshipContent,
     curriculumAccess: access.curriculum,

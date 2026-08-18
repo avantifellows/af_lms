@@ -22,6 +22,32 @@ describe("Holistic Profile admin API", () => {
     mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission: { role: "admin" } } as never);
   });
 
+  it.each(["", "null", undefined])("rejects missing Profile Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `&program_id=${programId}`;
+    const response = await GET(
+      new Request(`http://localhost/api/holistic-mentorship/profiles/41?academic_year=2026-2027&school_code=SCH001${query}`) as never,
+      { params: Promise.resolve({ studentId: "41" }) },
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "null", undefined])("rejects missing Profile regeneration Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `?program_id=${programId}`;
+    const response = await POST(
+      new Request(`http://localhost/api/holistic-mentorship/profiles/41${query}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", force: true }),
+      }) as never,
+      { params: Promise.resolve({ studentId: "41" }) },
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
   it("returns only stored Active-configuration summaries and regeneration status", async () => {
     vi.mocked(getHolisticProfileAdmin).mockResolvedValue({
       summaries: [{ position: 1, title: "Strengths", summary: "Works with peers" }],
@@ -39,7 +65,7 @@ describe("Holistic Profile admin API", () => {
   it("requires an opaque idempotency key and the regeneration action policy", async () => {
     vi.mocked(requestHolisticProfileRegeneration).mockResolvedValue({ ok: true, requestKey: "d16e7d82-dc60-4b79-a064-9ed80badc119", state: "queued" });
     const response = await POST(
-      new Request("http://localhost/api/holistic-mentorship/profiles/41", {
+      new Request("http://localhost/api/holistic-mentorship/profiles/41?program_id=1", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ request_key: "d16e7d82-dc60-4b79-a064-9ed80badc119", force: true }),
       }) as never,

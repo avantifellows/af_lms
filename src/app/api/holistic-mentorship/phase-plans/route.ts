@@ -17,6 +17,7 @@ import {
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
   holisticApiError,
+  holisticJsonProgramId,
   holisticProgramId,
   positiveInteger,
   readJsonObject,
@@ -51,7 +52,7 @@ async function sessionAccess(
 
 async function configurationAction(request: NextRequest) {
   const value = await readJsonObject(request);
-  const programId = value && holisticProgramId(value.program_id);
+  const programId = value && holisticJsonProgramId(value.program_id);
   if (!value || !programId || typeof value.action !== "string") {
     return { ok: false as const, response: holisticApiError("Invalid request body") };
   }
@@ -226,7 +227,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const value = await readJsonObject(request);
-  const programId = value && holisticProgramId(value.program_id);
+  const programId = value && holisticJsonProgramId(value.program_id);
   if (!programId) return holisticApiError("Invalid Program");
   const { access } = await sessionAccess("phase_configure", programId);
   if (!access.ok) return holisticApiError(access.error, access.status);

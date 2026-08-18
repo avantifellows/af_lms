@@ -51,6 +51,16 @@ describe("Holistic progress API", () => {
     mockAcademicYears.mockResolvedValue(["2026-2027", "2025-2026"]);
   });
 
+  it.each(["", "null", undefined])("rejects missing Progress Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `&program_id=${programId}`;
+    const response = await GET(new Request(
+      `http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027${query}`,
+    ) as never);
+
+    expect(response.status).toBe(422);
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
   it.each([
     "sort=sql", "sort=", "direction=sideways", "direction=", "format=", "progress=unknown", "grade=10", "phase_id=0",
     "mentor_user_id=-1", "page=0", "school_code=bad%20code", `search=${"x".repeat(101)}`,
@@ -68,7 +78,7 @@ describe("Holistic progress API", () => {
   });
 
   it("returns current results, selectors, and a refresh timestamp", async () => {
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&page=1") as never);
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=1") as never);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -123,7 +133,7 @@ describe("Holistic progress API", () => {
 
   it("exports all matching rows with the same filters and sort", async () => {
     mockCsv.mockReturnValue("Academic Year\r\n2026-2027");
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=csv&direction=desc") as never);
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&format=csv&direction=desc") as never);
 
     expect(response.headers.get("content-type")).toContain("text/csv");
     expect(mockList).toHaveBeenCalledWith(
@@ -138,7 +148,7 @@ describe("Holistic progress API", () => {
   it("returns policy denial before reading progress", async () => {
     mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
 
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027") as never);
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1") as never);
 
     expect(response.status).toBe(403);
     expect(mockList).not.toHaveBeenCalled();

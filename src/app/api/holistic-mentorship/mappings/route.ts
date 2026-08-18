@@ -15,6 +15,7 @@ import {
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
   holisticApiError,
+  holisticJsonProgramId,
   holisticProgramId,
   positiveInteger,
   readJsonObject,
@@ -45,10 +46,7 @@ function parseExplicitProgramId(
   value: Record<string, unknown>,
 ): ParsedAdminMutation<number> {
   if (!("program_id" in value)) return { response: holisticApiError("Program is required") };
-  if (typeof value.program_id !== "number" || !Number.isSafeInteger(value.program_id)) {
-    return { response: holisticApiError("Invalid Program") };
-  }
-  const programId = holisticProgramId(value.program_id);
+  const programId = holisticJsonProgramId(value.program_id);
   return programId
     ? { value: programId }
     : { response: holisticApiError("Invalid Program") };

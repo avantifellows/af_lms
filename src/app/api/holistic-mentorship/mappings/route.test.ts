@@ -91,12 +91,23 @@ describe("Holistic Mentorship Mapping API", () => {
     });
   });
 
+  it.each(["", "null", undefined])("rejects missing roster Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `&program_id=${programId}`;
+    const response = await GET(new Request(
+      `http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027${query}`,
+    ) as never);
+
+    expect(response.status).toBe(400);
+    expect(mockSession).not.toHaveBeenCalled();
+    expect(mockAccess).not.toHaveBeenCalled();
+  });
+
   it("returns the eligible roster even when the Teacher has zero Mappings", async () => {
     mockRoster.mockResolvedValue([]);
 
     const response = await GET(
       new Request(
-        "http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&grade=11&search=asha"
+        "http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&program_id=1&grade=11&search=asha"
       ) as never
     );
 
@@ -131,7 +142,7 @@ describe("Holistic Mentorship Mapping API", () => {
     mockRoster.mockResolvedValue([]);
 
     const response = await GET(new Request(
-      "http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027",
+      "http://localhost/api/holistic-mentorship/mappings?school_code=SCH001&academic_year=2026-2027&program_id=1",
     ) as never);
 
     expect(response.status).toBe(200);
