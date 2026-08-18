@@ -598,6 +598,13 @@ async function buildAcademicMentorshipContent({
 
 type SchoolTab = { id: string; label: string; content: ReactNode };
 
+function shouldChooseHolisticProgram(
+  programId: number | null | undefined,
+  programChoices?: number[],
+): boolean {
+  return programId === undefined && (programChoices?.length ?? 0) > 1;
+}
+
 async function buildHolisticMentorshipContent({
   session,
   permission,
@@ -614,10 +621,11 @@ async function buildHolisticMentorshipContent({
   access: FeatureAccessResult;
 }): Promise<ReactNode | null> {
   if (!access.canView || programId === null) return null;
-  if (programId === undefined && (programChoices?.length ?? 0) > 1) {
+  if (shouldChooseHolisticProgram(programId, programChoices)) {
     return <HolisticProgramChoice schoolCode={schoolCode} programIds={programChoices!} />;
   }
-  const isTeacher = permission?.role === "teacher";
+  const role = permission?.role;
+  const isTeacher = role === "teacher";
   const holisticAccess = await requireHolisticMentorshipAccess(
     session,
     isTeacher ? "roster_view" : "assignment_coverage_read",
@@ -658,7 +666,7 @@ async function buildHolisticMentorshipContent({
     schoolCode={schoolCode}
     programId={holisticAccess.school!.programId}
     academicYear={CURRENT_ACADEMIC_YEAR}
-    role={permission?.role}
+    role={role}
     canEdit={holisticAccess.canEdit}
     students={students}
     summary={summary}
@@ -814,6 +822,15 @@ function requestedHolisticProgramId(rawValue: string | string[] | undefined) {
   return isHolisticMentorshipProgramId(programId) ? programId : null;
 }
 
+function resolveHolisticProgramId(
+  requestedProgramId: number | null | undefined,
+  programChoices: number[],
+): number | null | undefined {
+  return requestedProgramId === null
+    ? null
+    : requestedProgramId ?? (programChoices.length === 1 ? programChoices[0] : undefined);
+}
+
 function holisticProgramChoices(
   school: School,
   permission: UserPermission | null,
@@ -912,9 +929,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
   const identityAccessMessage = getSchoolIdentityAccessMessage(session, permission, school);
   if (identityAccessMessage) return identityAccessMessage;
   const programChoices = holisticProgramChoices(school, permission);
-  const holisticProgramId = requestedProgramId === null
-    ? null
-    : requestedProgramId ?? (programChoices.length === 1 ? programChoices[0] : undefined);
+  const holisticProgramId = resolveHolisticProgramId(requestedProgramId, programChoices);
   if (permission?.role === "holistic_mentorship_admin") {
     return holisticAdminSchoolLayout({
       session,
