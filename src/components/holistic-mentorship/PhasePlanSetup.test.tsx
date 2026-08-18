@@ -254,7 +254,7 @@ describe("PhasePlanSetup", () => {
 
     expect(await screen.findByRole("button", { name: /Current title/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Phase" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Title")).toBeDisabled();
+    expect(await screen.findByLabelText("Title")).toBeDisabled();
     expect(screen.getByLabelText("Guidance Markdown")).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save Phase" })).not.toBeInTheDocument();
   });
