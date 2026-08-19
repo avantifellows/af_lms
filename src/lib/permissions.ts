@@ -515,25 +515,36 @@ export async function canAccessStudent(
   const email = session.user?.email;
   if (!email) return false;
   const permission = await getResolvedPermission(email);
-  if (!canAccessSchoolSync(permission, school.code, school.region || undefined)) {
-    // Level-2 region users may still match via the async fallback path that
-    // canAccessSchool does (querying school.region when not provided). We've
-    // already passed region in, so the sync check is sufficient here.
-    if (!permission || permission.level !== 2) return false;
-    const ok = await canAccessSchool(email, school.code, school.region || undefined);
-    if (!ok) return false;
-  }
-  if (options?.requireEdit) {
-    const { canEdit } = getFeatureAccess(permission, "students");
-    if (!canEdit) return false;
-    // Per-program ownership — mirrors the UI's per-row canEditStudent check.
-    // ownsRecord returns true for admins, true for null program_id
-    // (unassigned student), and true if the user's program_ids includes the
-    // student's program. Without this, a COE-only user could POST/DELETE
-    // documents for an NVS student in a mixed school.
-    if (!ownsRecord(permission, school.program_id)) return false;
-  }
+  if (!(await hasStudentSchoolAccess(email, permission, school))) return false;
+  if (options?.requireEdit && !canEditStudentRecords(permission, school)) return false;
   return true;
+}
+
+async function hasStudentSchoolAccess(
+  email: string,
+  permission: UserPermission | null,
+  school: StudentScope,
+): Promise<boolean> {
+  if (canAccessSchoolSync(permission, school.code, school.region || undefined)) return true;
+  // Level-2 region users may still match via the async fallback path that
+  // canAccessSchool does (querying school.region when not provided). We've
+  // already passed region in, so the sync check is sufficient here.
+  if (!permission || permission.level !== 2) return false;
+  return canAccessSchool(email, school.code, school.region || undefined);
+}
+
+function canEditStudentRecords(
+  permission: UserPermission | null,
+  school: StudentScope,
+): boolean {
+  const { canEdit } = getFeatureAccess(permission, "students");
+  if (!canEdit) return false;
+  // Per-program ownership — mirrors the UI's per-row canEditStudent check.
+  // ownsRecord returns true for admins, true for null program_id
+  // (unassigned student), and true if the user's program_ids includes the
+  // student's program. Without this, a COE-only user could POST/DELETE
+  // documents for an NVS student in a mixed school.
+  return ownsRecord(permission, school.program_id);
 }
 
 // Synchronous helper to get program context from a permission object
