@@ -170,9 +170,8 @@ async function regenerateFromCms(
   const quizId = currentSession.platform_id;
   const cmsTestId = metaString(metaData, "cms_test_id");
 
-  // The test id is the only identifier needed: the CMS resolves a test by id alone and
-  // nex-gen-cms#177 removed the last reader of curriculum_id/grade_id. Requiring them here
-  // would 422 every session created after we stopped persisting them.
+  // Test id only: requiring curriculum/grade would 422 every session created after we
+  // stopped persisting them (nex-gen-cms#177).
   if (!quizId || !cmsTestId) {
     console.error(
       `Session ${sessionId} is CMS-sourced but missing regenerate identifiers ` +

@@ -44,9 +44,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid type" }, { status: 400 });
   }
 
-  // A test is identified by its id alone. The CMS's PDF handler never read
-  // curriculum_id/grade_id, and nex-gen-cms#177 removed the last param reader on the
-  // single-test fetch it shares, so sending them only risked a stale/wrong pair.
+  // The CMS resolves a test by id alone (nex-gen-cms#177).
   const cmsUrl =
     `${CMS_SERVICE_URL.replace(/\/$/, "")}/api/service/test-pdf` +
     `?id=${encodeURIComponent(testId)}` +

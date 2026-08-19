@@ -226,7 +226,6 @@ describe("POST /api/quiz-sessions/[id]/regenerate", () => {
       const call = fetchCall("http://quiz-backend.local/quiz/quiz-abc123/from-cms");
       expect(call).toBeDefined();
       expect((call?.[1] as RequestInit)?.method).toBe("PUT");
-      // No curriculum_id/grade_id: the CMS resolves a test by id alone (nex-gen-cms#177).
       expect(JSON.parse(String((call?.[1] as RequestInit)?.body))).toEqual({
         test_id: 504,
         quiz_type: "assessment",
@@ -288,8 +287,7 @@ describe("POST /api/quiz-sessions/[id]/regenerate", () => {
     });
 
     it("regenerates from cms_test_id alone, without curriculum/grade", async () => {
-      // Sessions created after we stopped persisting cms_curriculum_id/cms_grade_id carry
-      // only the test id. Requiring the other two here would 422 every one of them.
+      // Sessions created after we stopped persisting curriculum/grade carry only the id.
       const { POST } = await loadRouteModule();
       mocks.mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
       mocks.mockQuery.mockResolvedValue([
