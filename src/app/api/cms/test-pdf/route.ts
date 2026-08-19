@@ -34,29 +34,22 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const testId = (searchParams.get("testId") || "").trim();
-  const curriculumId = (searchParams.get("curriculumId") || "").trim();
-  const gradeId = (searchParams.get("gradeId") || "").trim();
   const type = (searchParams.get("type") || "questions").trim();
   const download = (searchParams.get("download") || "").trim() === "1";
 
   if (!testId) {
     return NextResponse.json({ error: "testId is required" }, { status: 400 });
   }
-  if (!curriculumId || !gradeId) {
-    return NextResponse.json(
-      { error: "curriculumId and gradeId are required" },
-      { status: 400 }
-    );
-  }
   if (!PDF_TYPES.includes(type)) {
     return NextResponse.json({ error: "Invalid type" }, { status: 400 });
   }
 
+  // A test is identified by its id alone. The CMS's PDF handler never read
+  // curriculum_id/grade_id, and nex-gen-cms#177 removed the last param reader on the
+  // single-test fetch it shares, so sending them only risked a stale/wrong pair.
   const cmsUrl =
     `${CMS_SERVICE_URL.replace(/\/$/, "")}/api/service/test-pdf` +
     `?id=${encodeURIComponent(testId)}` +
-    `&curriculum_id=${encodeURIComponent(curriculumId)}` +
-    `&grade_id=${encodeURIComponent(gradeId)}` +
     `&type=${encodeURIComponent(type)}`;
 
   let response: Response;

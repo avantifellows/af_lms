@@ -2813,14 +2813,12 @@ function CmsAwarePaperLinks({
   const cmsSource = getMetaString(meta, "cms_source");
   // Ids may be stored as numbers (older sessions) or strings — accept both.
   const cmsTestId = getMetaScalar(meta, "cms_test_id");
-  const curriculumId = getMetaScalar(meta, "cms_curriculum_id");
-  const gradeId = getMetaScalar(meta, "cms_grade_id");
 
-  if (cmsSource && cmsTestId && curriculumId && gradeId) {
-    const base =
-      `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}` +
-      `&curriculumId=${encodeURIComponent(curriculumId)}` +
-      `&gradeId=${encodeURIComponent(gradeId)}`;
+  // Gated on the test id alone. Gating on cms_curriculum_id/cms_grade_id too would silently
+  // fall through to the legacy stored-URL branch — i.e. no PDF links at all — for every
+  // session created after we stopped persisting them (nex-gen-cms#177).
+  if (cmsSource && cmsTestId) {
+    const base = `/api/cms/test-pdf?testId=${encodeURIComponent(cmsTestId)}`;
     return (
       <PaperResourceLinks
         questionHref={`${base}&type=questions`}

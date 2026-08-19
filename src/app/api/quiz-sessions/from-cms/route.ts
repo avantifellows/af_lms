@@ -9,7 +9,6 @@ import {
 import { istWallClockWindowEnd, utcToISTDate } from "@/lib/quiz-session-time";
 import {
   EXAM_TRACKS,
-  curriculumIdForExamTrack,
   resolveGradeId,
   streamForExamTrack,
 } from "@/lib/curriculum-options";
@@ -217,7 +216,9 @@ export async function POST(request: NextRequest) {
   }
   const { group, authType } = resolved;
 
-  const curriculumId = curriculumIdForExamTrack(body.examTrack);
+  // resolveGradeId is kept as a VALIDATION step even though the id is no longer sent
+  // anywhere: a grade with no row is a bad request and should fail here rather than
+  // producing a session against a grade the CMS has never heard of.
   const gradeId = await resolveGradeId(body.grade);
   if (!gradeId) {
     return NextResponse.json(
@@ -246,8 +247,6 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", accept: "application/json" },
       body: JSON.stringify({
         test_id: Number(body.cmsTestId),
-        curriculum_id: curriculumId,
-        grade_id: gradeId,
         quiz_type: "assessment",
         shuffle,
         show_scores: showScores,
@@ -363,9 +362,9 @@ export async function POST(request: NextRequest) {
       cms_source: CMS_SOURCE,
       cms_test_id: String(body.cmsTestId),
       cms_source_id: String(body.cmsTestId),
-      // Persist what the on-demand PDF proxy needs to re-fetch the test from the CMS.
-      cms_curriculum_id: String(curriculumId),
-      cms_grade_id: String(gradeId),
+      // No cms_curriculum_id/cms_grade_id: the CMS resolves a test by id alone, so the PDF
+      // proxy and the regenerate path both need only cms_test_id (nex-gen-cms#177). Older
+      // sessions keep the keys they were created with; nothing reads them any more.
       has_synced_to_bq: false,
       infinite_session: false,
       report_link: reportLink,
