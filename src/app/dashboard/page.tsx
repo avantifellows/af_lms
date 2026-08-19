@@ -8,11 +8,7 @@ import {
   getFeatureAccess,
 } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import {
-  CURRENT_ACADEMIC_YEAR,
-  HOLISTIC_MENTORSHIP_PROGRAM_IDS,
-  isHolisticMentorshipProgramId,
-} from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import Link from "next/link";
 import SchoolSearch from "@/components/SchoolSearch";
@@ -257,27 +253,6 @@ type DashboardData = {
   recentVisits: Visit[];
 };
 
-function dashboardHolisticProgramIds(
-  permission: DashboardPermission,
-  holisticAccess: Awaited<ReturnType<typeof requireHolisticMentorshipAccess>>,
-): number[] {
-  // These roles are intentionally program-wide for Holistic Mentorship, even
-  // when their legacy permission row does not list every supported Program.
-  if (permission.role === "admin" || permission.role === "holistic_mentorship_admin") {
-    return [...HOLISTIC_MENTORSHIP_PROGRAM_IDS];
-  }
-  const resolved = holisticAccess.ok && holisticAccess.programIds
-    ? holisticAccess.programIds
-    : getProgramContextSync(permission).programIds;
-  return resolved.filter(isHolisticMentorshipProgramId);
-}
-
-function schoolHref(schoolCode: string, holisticProgramId?: number): string {
-  return holisticProgramId === undefined
-    ? `/school/${schoolCode}`
-    : `/school/${schoolCode}?program_id=${holisticProgramId}`;
-}
-
 function canViewVisitSummary(permission: DashboardPermission) {
   const supportedRole = permission.role === "admin" || permission.role === "program_admin";
   return supportedRole && getFeatureAccess(permission, "visits").canView;
@@ -338,18 +313,16 @@ async function loadDashboardData({
   searchQuery,
   currentPage,
   hasPMAccess,
-  holisticProgramId,
 }: {
   email: string;
   permission: DashboardPermission;
   searchQuery?: string;
   currentPage: number;
   hasPMAccess: boolean;
-  holisticProgramId?: number;
 }): Promise<DashboardData> {
   const schoolCodes = await getAccessibleSchoolCodes(email, permission);
   if (schoolCodes !== "all" && schoolCodes.length === 1 && !searchQuery) {
-    redirect(schoolHref(schoolCodes[0], holisticProgramId));
+    redirect(`/school/${schoolCodes[0]}`);
   }
   const { schools, totalCount } = await getSchools(schoolCodes, searchQuery, currentPage);
   const [gradeCounts, recentVisits] = await Promise.all([
@@ -402,10 +375,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     { user: { email } },
     "program_read",
   );
-  const resolvedHolisticPrograms = dashboardHolisticProgramIds(permission, holisticAccess);
-  const holisticProgramId = resolvedHolisticPrograms.length === 1
-    ? resolvedHolisticPrograms[0]
-    : undefined;
   const features = dashboardFeatures(permission, programContext, holisticAccess.ok);
   const data = await loadDashboardData({
     email,
@@ -413,7 +382,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     searchQuery,
     currentPage,
     hasPMAccess: features.hasPMAccess,
-    holisticProgramId,
   });
 
   return (
@@ -427,7 +395,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         schools={data.schools}
         recentVisits={data.recentVisits}
         hasPMAccess={features.hasPMAccess}
-        holisticProgramId={holisticProgramId}
       />
     </div>
   );
@@ -493,7 +460,7 @@ function DashboardAccountLinks({ email, isAdmin, canViewHolisticAdmin }: {
   </div>;
 }
 
-function DashboardMain({ searchQuery, currentPage, totalPages, totalCount, schools, recentVisits, hasPMAccess, holisticProgramId }: {
+function DashboardMain({ searchQuery, currentPage, totalPages, totalCount, schools, recentVisits, hasPMAccess }: {
   searchQuery?: string;
   currentPage: number;
   totalPages: number;
@@ -501,7 +468,6 @@ function DashboardMain({ searchQuery, currentPage, totalPages, totalCount, schoo
   schools: DashboardSchool[];
   recentVisits: Visit[];
   hasPMAccess: boolean;
-  holisticProgramId?: number;
 }) {
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     <PMStats enabled={hasPMAccess} totalCount={totalCount} recentVisitCount={recentVisits.length} />
@@ -513,7 +479,6 @@ function DashboardMain({ searchQuery, currentPage, totalPages, totalCount, schoo
       searchQuery={searchQuery}
       currentPage={currentPage}
       totalPages={totalPages}
-      holisticProgramId={holisticProgramId}
     />
   </main>;
 }
@@ -585,20 +550,19 @@ function VisitRow({ visit }: { visit: Visit }) {
   </tr>;
 }
 
-function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalPages, holisticProgramId }: {
+function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalPages }: {
   schools: DashboardSchool[];
   hasPMAccess: boolean;
   searchQuery?: string;
   currentPage: number;
   totalPages: number;
-  holisticProgramId?: number;
 }) {
   return <div>
     {hasPMAccess && <div className="flex justify-between items-center mb-4 border-b-2 border-brand-gold pb-3">
       <h2 className="text-lg font-bold text-text-primary uppercase tracking-wide">My Schools</h2>
     </div>}
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {schools.map((school) => <DashboardSchoolCard key={school.id} school={school} hasPMAccess={hasPMAccess} holisticProgramId={holisticProgramId} />)}
+      {schools.map((school) => <DashboardSchoolCard key={school.id} school={school} hasPMAccess={hasPMAccess} />)}
     </div>
     {schools.length === 0 && <div className="text-center py-12 text-text-muted">
       {searchQuery ? `No schools found matching "${searchQuery}"` : "No schools found"}
@@ -608,15 +572,11 @@ function SchoolsSection({ schools, hasPMAccess, searchQuery, currentPage, totalP
   </div>;
 }
 
-function DashboardSchoolCard({ school, hasPMAccess, holisticProgramId }: {
-  school: DashboardSchool;
-  hasPMAccess: boolean;
-  holisticProgramId?: number;
-}) {
+function DashboardSchoolCard({ school, hasPMAccess }: { school: DashboardSchool; hasPMAccess: boolean }) {
   const actions = hasPMAccess ? <Link href={`/school/${school.code}/visit/new`}
     className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold text-text-on-accent bg-accent shadow-sm hover:bg-accent-hover active:bg-accent-hover/90 transition-colors">
     Start Visit
   </Link> : undefined;
-  return <SchoolCard school={school} href={schoolHref(school.code, holisticProgramId)} showStudentCount showGradeBreakdown
+  return <SchoolCard school={school} href={`/school/${school.code}`} showStudentCount showGradeBreakdown
     showRegion={hasPMAccess} actions={actions} />;
 }
