@@ -713,32 +713,27 @@ async function buildSchoolTabs({
     programChoices: holisticProgramChoices,
     access: holisticMentorshipAccess,
   });
-  const tabs: SchoolTab[] = [
-    { id: "enrollment", label: "Enrollment", content: enrollmentContent },
-  ];
-  if (curriculumAccess.canView) {
-    tabs.push({
+  const candidates: Array<SchoolTab & { show: boolean }> = [
+    { id: "enrollment", label: "Enrollment", content: enrollmentContent, show: true },
+    {
       id: "curriculum",
       label: "Curriculum",
       content: <CurriculumTab schoolCode={school.code} schoolName={school.name} canEdit={curriculumAccess.canEdit} />,
-    });
-  }
-  if (performanceAccess.canView) {
-    tabs.push({
+      show: curriculumAccess.canView,
+    },
+    {
       id: "performance",
       label: "Performance",
       content: <PerformanceTab schoolUdise={school.udise_code || school.code} />,
-    });
-  }
-  if (quizSessionsAccess.canView) {
-    tabs.push({
+      show: performanceAccess.canView,
+    },
+    {
       id: "quiz_sessions",
       label: "Quiz Sessions",
       content: <QuizSessionsTab schoolId={school.id} canEdit={quizSessionsAccess.canEdit} />,
-    });
-  }
-  if (teacherFeedbackAccess.canView) {
-    tabs.push({
+      show: quizSessionsAccess.canView,
+    },
+    {
       id: "teacher_feedback",
       label: "Teacher Feedback",
       content: (
@@ -747,22 +742,30 @@ async function buildSchoolTabs({
           canEdit={teacherFeedbackAccess.canEdit}
         />
       ),
-    });
-  }
-  if (mentorshipAccess.canView) {
-    tabs.push({ id: "mentorship", label: "Academic Mentorship", content: academicMentorshipContent });
-  }
-  if (holisticContent) {
-    tabs.push({ id: "holistic_mentorship", label: "Holistic Mentorship", content: holisticContent });
-  }
-  if (visitsAccess.canView) {
-    tabs.push({
+      show: teacherFeedbackAccess.canView,
+    },
+    {
+      id: "mentorship",
+      label: "Academic Mentorship",
+      content: academicMentorshipContent,
+      show: mentorshipAccess.canView,
+    },
+    {
+      id: "holistic_mentorship",
+      label: "Holistic Mentorship",
+      content: holisticContent,
+      show: Boolean(holisticContent),
+    },
+    {
       id: "visits",
       label: "School Visits",
       content: <VisitsTab schoolCode={school.code} canEdit={visitsAccess.canEdit} />,
-    });
-  }
-  return tabs;
+      show: visitsAccess.canView,
+    },
+  ];
+  return candidates
+    .filter((tab) => tab.show)
+    .map(({ id, label, content }) => ({ id, label, content }));
 }
 
 function SchoolPageLayout({
