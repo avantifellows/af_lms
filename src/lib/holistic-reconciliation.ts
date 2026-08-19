@@ -1,5 +1,7 @@
 import { CURRENT_ACADEMIC_YEAR } from "./constants";
 import { withTransaction } from "./db";
+import { buildHolisticSchoolScopePredicate } from "./holistic-scope";
+import type { UserPermission } from "./permissions";
 
 export async function reconcileHolisticMappings(params: {
   programId: number;
@@ -7,12 +9,24 @@ export async function reconcileHolisticMappings(params: {
   schoolCode?: string;
   schoolId?: number;
   studentIds?: number[];
+  permission?: UserPermission;
 }): Promise<number> {
   const studentIds = params.studentIds?.length ? [...new Set(params.studentIds)] : null;
   if (params.academicYear && params.academicYear !== CURRENT_ACADEMIC_YEAR) return 0;
   if (!params.academicYear && !studentIds) {
     throw new Error("Holistic Mapping reconciliation requires a bounded scope");
   }
+  const schoolScope = params.permission
+    ? buildHolisticSchoolScopePredicate(params.permission, {
+        startIndex: 6,
+        schoolCodeColumn: "mapping_school.code",
+        schoolRegionColumn: "mapping_school.region",
+      })
+    : { clause: "", params: [] };
+  const schoolScopeJoin = schoolScope.clause
+    ? "JOIN school mapping_school ON mapping_school.id = mapping.school_id"
+    : "";
+  const schoolScopeSql = schoolScope.clause ? `AND ${schoolScope.clause}` : "";
 
   return withTransaction(async (client) => {
     const result = await client.query<{ ended_count: number | string }>(
@@ -25,6 +39,7 @@ export async function reconcileHolisticMappings(params: {
                 END AS reason
          FROM holistic_mentorship_mentor_mentee_mappings mapping
          JOIN student ON student.id = mapping.student_id
+         ${schoolScopeJoin}
          WHERE mapping.program_id = $1
            AND mapping.ended_at IS NULL
            AND mapping.academic_year = $2
@@ -34,6 +49,7 @@ export async function reconcileHolisticMappings(params: {
              WHERE school.id = mapping.school_id AND school.code = $4
            ))
            AND ($5::bigint[] IS NULL OR mapping.student_id = ANY($5))
+           ${schoolScopeSql}
            AND NOT (
              student.status IS DISTINCT FROM 'dropout'
              AND EXISTS (
@@ -99,6 +115,7 @@ export async function reconcileHolisticMappings(params: {
         params.schoolId ?? null,
         params.schoolCode ?? null,
         studentIds,
+        ...schoolScope.params,
       ]
     );
     return Number(result.rows[0]?.ended_count ?? 0);

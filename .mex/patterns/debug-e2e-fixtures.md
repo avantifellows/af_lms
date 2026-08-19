@@ -14,7 +14,7 @@ edges:
     condition: when failures are in PM school visit flows
   - target: context/data-access.md
     condition: when fixture rows need to match schema/read-path expectations
-last_updated: 2026-06-30
+last_updated: 2026-08-15
 ---
 
 # Debug E2E Fixtures
@@ -33,6 +33,7 @@ expectations, or fixture rows missing a relationship the app now requires.
 
 ## Gotchas
 - Student e2e seeds must use `CURRENT_ACADEMIC_YEAR`; hard-coded academic-year strings can make `/api/pm/students` return an empty roster.
+- Holistic fixture selection needs one School with an active supported-Program Centre, Batch membership, current-year Grade enrollment, and at least three eligible Students in each configured Grade. Seed that prerequisite roster before calling the shared Holistic fixture helper when the local dump does not provide it.
 - Curriculum topics need `topic_curriculum` rows in the fixture migration, not just `chapter` and `topic` rows.
 - Responsive visit lists can render hidden duplicate links; target visible links or rows.
 - Program-admin `/visits` redirects to `/school-visit-summary`; go directly to visit detail when asserting read-only access.

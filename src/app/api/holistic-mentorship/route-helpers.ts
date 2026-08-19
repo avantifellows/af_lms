@@ -2,11 +2,18 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { isHolisticMentorshipProgramId, PROGRAM_IDS } from "@/lib/constants";
 import {
   requireHolisticMentorshipAccess,
   type HolisticMentorshipAction,
 } from "@/lib/holistic-mentorship";
+
+export {
+  holisticJsonProgramId,
+  holisticProgramId,
+  positiveInteger,
+  positiveIntegerString,
+  validSchoolCode,
+} from "@/lib/holistic-request-validation";
 
 export function holisticApiError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -29,25 +36,4 @@ export async function readJsonObject(request: Request): Promise<Record<string, u
   } catch {
     return null;
   }
-}
-
-export function positiveInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
-}
-
-export function positiveIntegerString(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-export function holisticProgramId(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return PROGRAM_IDS.COE;
-  const parsed = typeof value === "string" ? Number(value) : value;
-  return isHolisticMentorshipProgramId(parsed) ? parsed : null;
-}
-
-export function validSchoolCode(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
 }

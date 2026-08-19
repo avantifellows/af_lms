@@ -75,6 +75,8 @@ export const test = base.extend<{
   programAdminPage: Page;
   teacherPage: Page;
   holisticAdminPage: Page;
+  holisticPmPage: Page;
+  holisticProgramAdminPage: Page;
   holisticTeacherPage: Page;
   formerMentorPage: Page;
   passcodePage: Page;
@@ -124,6 +126,32 @@ export const test = base.extend<{
     const context = await browser.newContext();
     const page = await context.newPage();
     await authenticatedPage(page, googleUserPayload("holisticAdmin"));
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
+  holisticPmPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, {
+      name: "Synthetic Holistic PM",
+      email: "e2e-holistic-pm@test.local",
+      sub: "e2e-holistic-pm-sub",
+    });
+    await startCoverage(page, testInfo);
+    await use(page);
+    await stopCoverage(page, testInfo);
+    await context.close();
+  },
+  holisticProgramAdminPage: async ({ browser }, use, testInfo) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await authenticatedPage(page, {
+      name: "Synthetic Holistic Program Admin",
+      email: "e2e-holistic-program-admin@test.local",
+      sub: "e2e-holistic-program-admin-sub",
+    });
     await startCoverage(page, testInfo);
     await use(page);
     await stopCoverage(page, testInfo);

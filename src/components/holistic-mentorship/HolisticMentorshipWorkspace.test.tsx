@@ -101,6 +101,30 @@ describe("HolisticMentorshipWorkspace", () => {
     expect(screen.getByLabelText("Academic Year")).toHaveValue("2026-2027");
   });
 
+  it("keeps Phase Setup visible without mutation controls for a read-only program-wide Admin", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: async () => url.includes("/progress?") ? {
+        rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [], mentors: [], phases: [] }, pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      } : { plan: null },
+    })));
+    const user = userEvent.setup();
+
+    render(<HolisticMentorshipWorkspace
+      mode="admin"
+      canEdit={false}
+      canViewPhaseSetup
+    />);
+
+    await user.click(screen.getByRole("tab", { name: "Phase Setup" }));
+
+    expect(await screen.findByRole("region", { name: "Phase Setup" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start blank" })).not.toBeInTheDocument();
+  });
+
   it("loads EMRS data after the Admin selects Program 78", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -124,5 +148,42 @@ describe("HolisticMentorshipWorkspace", () => {
       expect.anything()
     ));
     expect(screen.getByLabelText("Program")).toHaveValue("78");
+  });
+
+  it("renders scoped Program Manager and Program Admin workspaces with read-only Student detail links", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rows: [{
+          studentId: 41, studentName: "Student One", externalStudentId: "AF-41", grade: 11,
+          schoolName: "School One", schoolCode: "SCH001", mentorName: "Mentor One",
+          mentorEmail: "mentor@example.com", phaseId: 70, phaseNumber: 1,
+          phaseTitle: "Check-in", phaseState: "active", progress: "pending",
+          completedAt: null, notesAuthor: null, notesAuthorEmail: null,
+          notesLastEditedAt: null, answers: [],
+        }],
+        counts: { totalMapped: 1, pending: 1, completed: 0, skipped: 0, noActivePhase: 0 },
+        options: { schools: [{ code: "SCH001", name: "School One" }], mentors: [], phases: [] },
+        pageSize: 50,
+        academicYears: ["2026-2027"],
+        refreshedAt: "2026-07-17T10:00:00.000Z",
+      }),
+    }));
+
+    render(<HolisticMentorshipWorkspace
+      mode="admin"
+      canEdit={false}
+      initialProgramId={78}
+      availableProgramIds={[78]}
+    />);
+
+    expect(await screen.findByText("Student One")).toBeInTheDocument();
+    expect(screen.getByLabelText("Program")).toHaveValue("78");
+    expect(screen.getAllByRole("option", { name: "78 - EMRS CoE" })).toHaveLength(1);
+    expect(screen.queryByRole("tab", { name: "Phase Setup" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Student One" })).toHaveAttribute(
+      "href",
+      "/holistic-mentorship/students/41/phases/70?school_code=SCH001&academic_year=2026-2027&program_id=78&source=progress",
+    );
   });
 });

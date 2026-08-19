@@ -6,6 +6,7 @@ vi.mock("@/lib/holistic-mentorship", () => ({ requireHolisticMentorshipAccess: v
 vi.mock("@/lib/holistic-progress", () => ({
   DEFAULT_HOLISTIC_PROGRESS_SORT: "school",
   listHolisticProgress: vi.fn(),
+  getHolisticCoverageSchools: vi.fn(),
   getHolisticProgressOptions: vi.fn(),
   getHolisticProgressAcademicYears: vi.fn(),
   formatHolisticProgressCsv: vi.fn(),
@@ -16,6 +17,7 @@ import { GET } from "./route";
 import { requireHolisticMentorshipAccess } from "@/lib/holistic-mentorship";
 import {
   formatHolisticProgressCsv,
+  getHolisticCoverageSchools,
   getHolisticProgressAcademicYears,
   getHolisticProgressOptions,
   listHolisticProgress,
@@ -24,18 +26,39 @@ import {
 const mockSession = vi.mocked(getServerSession);
 const mockAccess = vi.mocked(requireHolisticMentorshipAccess);
 const mockList = vi.mocked(listHolisticProgress);
+const mockCoverageSchools = vi.mocked(getHolisticCoverageSchools);
 const mockOptions = vi.mocked(getHolisticProgressOptions);
 const mockAcademicYears = vi.mocked(getHolisticProgressAcademicYears);
 const mockCsv = vi.mocked(formatHolisticProgressCsv);
+const permission = {
+  email: "admin@example.com",
+  level: 3,
+  role: "admin",
+  program_ids: [1, 78],
+} as const;
 
 describe("Holistic progress API", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockSession.mockResolvedValue({ user: { email: "admin@example.com" } });
-    mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission: { role: "admin" } } as never);
+    mockAccess.mockResolvedValue({ ok: true, email: "admin@example.com", canEdit: true, permission } as never);
     mockList.mockResolvedValue({ rows: [], counts: { totalMapped: 0, pending: 0, completed: 0, skipped: 0, noActivePhase: 0 } });
     mockOptions.mockResolvedValue({ schools: [], mentors: [], phases: [] });
+    mockCoverageSchools.mockResolvedValue([
+      { code: "SCH001", name: "School One" },
+      { code: "SCH002", name: "School Without Mappings" },
+    ]);
     mockAcademicYears.mockResolvedValue(["2026-2027", "2025-2026"]);
+  });
+
+  it.each(["", "null", undefined])("rejects missing Progress Program context (%s)", async (programId) => {
+    const query = programId === undefined ? "" : `&program_id=${programId}`;
+    const response = await GET(new Request(
+      `http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027${query}`,
+    ) as never);
+
+    expect(response.status).toBe(422);
+    expect(mockList).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -55,17 +78,27 @@ describe("Holistic progress API", () => {
   });
 
   it("returns current results, selectors, and a refresh timestamp", async () => {
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&page=1") as never);
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&page=1") as never);
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
       rows: [],
       options: { schools: [], mentors: [], phases: [] },
+      coverageSchools: [
+        { code: "SCH001", name: "School One" },
+        { code: "SCH002", name: "School Without Mappings" },
+      ],
       academicYears: ["2026-2027", "2025-2026"],
     });
     expect(body.refreshedAt).toEqual(expect.any(String));
-    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ sort: "school", page: 1 }));
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: "school", page: 1 }),
+      permission,
+    );
+    expect(mockOptions).toHaveBeenCalledWith("2026-2027", 1, permission);
+    expect(mockCoverageSchools).toHaveBeenCalledWith(1, permission);
+    expect(mockAcademicYears).toHaveBeenCalledWith(1, permission);
   });
 
   it("carries EMRS Program 78 into access and progress queries", async () => {
@@ -79,15 +112,35 @@ describe("Holistic progress API", () => {
       "program_read",
       { programId: 78 }
     );
-    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ programId: 78 }));
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({ programId: 78 }),
+      permission,
+    );
+  });
+
+  it("authorizes a requested School before reading scoped progress", async () => {
+    const response = await GET(new Request(
+      "http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&school_code=SCH001"
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(mockAccess).toHaveBeenCalledWith(
+      { user: { email: "admin@example.com" } },
+      "program_read",
+      { programId: 1, schoolCode: "SCH001" },
+    );
   });
 
   it("exports all matching rows with the same filters and sort", async () => {
     mockCsv.mockReturnValue("Academic Year\r\n2026-2027");
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&format=csv&direction=desc") as never);
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1&format=csv&direction=desc") as never);
 
     expect(response.headers.get("content-type")).toContain("text/csv");
-    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ direction: "desc" }), { all: true });
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({ direction: "desc" }),
+      permission,
+      { all: true },
+    );
     expect(mockOptions).not.toHaveBeenCalled();
     expect(mockAcademicYears).not.toHaveBeenCalled();
   });
@@ -95,7 +148,7 @@ describe("Holistic progress API", () => {
   it("returns policy denial before reading progress", async () => {
     mockAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
 
-    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027") as never);
+    const response = await GET(new Request("http://localhost/api/holistic-mentorship/progress?academic_year=2026-2027&program_id=1") as never);
 
     expect(response.status).toBe(403);
     expect(mockList).not.toHaveBeenCalled();

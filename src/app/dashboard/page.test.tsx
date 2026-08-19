@@ -11,6 +11,7 @@ const {
   mockGetAccessibleSchoolCodes,
   mockQuery,
   mockRedirect,
+  mockRequireHolisticAccess,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockGetUserPermission: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
+  mockRequireHolisticAccess: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -34,6 +36,9 @@ vi.mock("@/lib/permissions", () => ({
   getAccessibleSchoolCodes: mockGetAccessibleSchoolCodes,
 }));
 vi.mock("@/lib/db", () => ({ query: mockQuery }));
+vi.mock("@/lib/holistic-mentorship", () => ({
+  requireHolisticMentorshipAccess: mockRequireHolisticAccess,
+}));
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({
@@ -294,6 +299,7 @@ const defaultSearchParams = Promise.resolve({});
 describe("DashboardPage (server component)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockRequireHolisticAccess.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" });
   });
 
   // --- Auth redirects ---
@@ -515,6 +521,28 @@ describe("DashboardPage (server component)", () => {
     expect(screen.queryByRole("link", { name: "Visits" })).not.toBeInTheDocument();
   });
 
+  it("shows Holistic Mentorship navigation when the shared helper resolves non-empty PM scope", async () => {
+    setupPM([], 0);
+    mockRequireHolisticAccess.mockResolvedValue({
+      ok: true,
+      canEdit: false,
+      programId: 1,
+      programIds: [1],
+      permission: pmPermission,
+    });
+
+    render(await DashboardPage({ searchParams: defaultSearchParams }));
+
+    expect(screen.getByRole("link", { name: "Holistic Mentorship" })).toHaveAttribute(
+      "href",
+      "/admin/holistic-mentorship",
+    );
+    expect(mockRequireHolisticAccess).toHaveBeenCalledWith(
+      pmSession,
+      "program_read",
+    );
+  });
+
   it("does not show Visit Summary nav for NVS-only program_admin users", async () => {
     mockGetServerSession.mockResolvedValue({
       user: { email: "nvs-only@avantifellows.org" },
@@ -643,6 +671,27 @@ describe("DashboardPage (server component)", () => {
     expect(card).toHaveAttribute("data-href", "/school/SC001");
     expect(card).toHaveAttribute("data-show-student-count", "true");
     expect(card).toHaveAttribute("data-show-grade-breakdown", "true");
+  });
+
+  it("keeps School card links clean for users with a single Holistic Program", async () => {
+    const school = makeSchool();
+    setupPM([school], 1);
+    mockGetProgramContextSync.mockReturnValue({
+      ...defaultProgramContext,
+      programIds: [78],
+    });
+    mockGetUserPermission.mockResolvedValue({
+      ...pmPermission,
+      program_ids: [78],
+    });
+
+    const jsx = await DashboardPage({ searchParams: defaultSearchParams });
+    render(jsx);
+
+    expect(screen.getByTestId("school-card-SC001")).toHaveAttribute(
+      "data-href",
+      "/school/SC001",
+    );
   });
 
   it("shows Start Visit action for PM users", async () => {

@@ -93,7 +93,7 @@ export type HolisticStudentPhaseDetail = {
   phases: HolisticPhaseSummary[];
   selectedPhase: HolisticPhaseSummary | (Extract<HolisticPhaseSummary, { locked: false }> & {
     revision: number;
-    mappingId: number;
+    mappingId: number | null;
     notesRevision: number;
     canEditNotes: boolean;
     guidanceMarkdown: string;
@@ -198,7 +198,7 @@ export function deriveHolisticPhaseProgress(
 
 type StudentRow = {
   student_id: number | string;
-  mapping_id: number | string;
+  mapping_id: number | string | null;
   name: string | null;
   external_student_id: string | null;
   grade: number | string;
@@ -302,7 +302,7 @@ type OpenSelectedPhaseParams = {
   actorUserId?: number;
   role: string;
   canEdit: boolean;
-  mappingId: number;
+  mappingId: number | null;
 };
 
 function previousAcademicYear(academicYear: string): string {
@@ -364,6 +364,42 @@ async function loadMappedStudent(params: StudentPhaseParams): Promise<StudentRow
   return students[0] ?? null;
 }
 
+async function loadEligibleCurrentStudent(params: StudentPhaseParams): Promise<StudentRow | null> {
+  const students = await query<StudentRow>(
+    `WITH eligible_roster AS MATERIALIZED (
+       SELECT roster_student.user_id, MIN(roster_student.grade) AS grade
+       FROM centre_students roster_student
+       JOIN centres roster_centre
+         ON roster_centre.id = roster_student.centre_id
+        AND roster_centre.school_id = $2
+        AND roster_centre.program_id = $3
+        AND roster_centre.is_active IS TRUE
+       WHERE roster_student.academic_year = $4
+         AND roster_student.program_id = $3
+         AND roster_student.grade IN (11, 12)
+       GROUP BY roster_student.user_id
+       HAVING COUNT(DISTINCT roster_student.grade) = 1
+     )
+     SELECT st.id AS student_id, mapping.id AS mapping_id,
+            NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
+            st.student_id AS external_student_id, roster_student.grade, journey.entry_grade
+     FROM eligible_roster roster_student
+     JOIN "user" u ON u.id = roster_student.user_id
+     JOIN student st ON st.user_id = u.id AND st.status IS DISTINCT FROM 'dropout'
+     LEFT JOIN holistic_mentorship_mentor_mentee_mappings mapping
+       ON mapping.student_id = st.id
+      AND mapping.school_id = $2
+      AND mapping.program_id = $3
+      AND mapping.academic_year = $4
+      AND mapping.ended_at IS NULL
+     LEFT JOIN holistic_mentorship_profile_journeys journey ON journey.student_id = st.id
+     WHERE st.id = $1
+     LIMIT 1`,
+    [params.studentId, params.schoolId, params.programId, params.academicYear],
+  );
+  return students[0] ?? null;
+}
+
 async function loadPhaseRows(
   academicYears: string[],
   programId: number,
@@ -385,6 +421,7 @@ async function loadPhaseRelations(
   phaseIds: number[],
   academicYears: string[]
 ): Promise<PhaseRelations> {
+  const canReadOwnDraft = params.role === "teacher" && params.actorUserId !== undefined;
   const [questionRows, transitionRows, mappingRows, notesRows, profileRows, historicalRows] = await Promise.all([
     query<QuestionRow>(
       `SELECT id, phase_id, text, position FROM holistic_mentorship_phase_questions
@@ -415,8 +452,9 @@ async function loadPhaseRelations(
        LEFT JOIN holistic_mentorship_post_session_answers answer ON answer.notes_id = notes.id
        LEFT JOIN holistic_mentorship_phase_questions question ON question.id = answer.question_id
        WHERE notes.student_id = $1 AND notes.phase_id = ANY($2::bigint[])
+         AND (notes.state = 'submitted' OR ($3::boolean AND notes.author_user_id = $4))
        ORDER BY notes.phase_id, question.position`,
-      [params.studentId, phaseIds]
+      [params.studentId, phaseIds, canReadOwnDraft, params.actorUserId ?? null]
     ),
     query<ProfileRow>(
       `SELECT summary.question_set_title AS title, summary.summary, summary.position,
@@ -709,7 +747,9 @@ export async function getHolisticStudentPhase(params: {
   role: string;
   canEdit: boolean;
 }): Promise<HolisticStudentPhaseDetail | null> {
-  const student = await loadMappedStudent(params);
+  const student = params.role !== "teacher" && params.academicYear === CURRENT_ACADEMIC_YEAR
+    ? await loadEligibleCurrentStudent(params)
+    : await loadMappedStudent(params);
   if (!student) return null;
 
   const priorYear = previousAcademicYear(params.academicYear);
@@ -780,7 +820,7 @@ export async function getHolisticStudentPhase(params: {
       actorUserId: params.actorUserId,
       role: params.role,
       canEdit: params.canEdit,
-      mappingId: Number(student.mapping_id),
+      mappingId: student.mapping_id === null ? null : Number(student.mapping_id),
     }),
     readOnly,
   };

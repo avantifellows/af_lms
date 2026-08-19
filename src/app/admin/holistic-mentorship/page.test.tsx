@@ -70,6 +70,56 @@ describe("HolisticMentorshipAdminPage", () => {
     );
   });
 
+  it.each(["admin", "holistic_mentorship_admin"] as const)(
+    "keeps Phase Setup visible for a read-only %s",
+    async (role) => {
+      mockGetServerSession.mockResolvedValue({ user: { email: `${role}@example.com` } });
+      mockRequireAccess.mockResolvedValue({
+        ok: true,
+        canEdit: false,
+        programId: 1,
+        programIds: [1, 78],
+        permission: { role, read_only: true },
+      });
+
+      render(await HolisticMentorshipAdminPage());
+
+      expect(mockWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "admin",
+          canEdit: false,
+          canViewPhaseSetup: true,
+        }),
+        undefined,
+      );
+    },
+  );
+
+  it("renders scoped Program Manager progress access read-only from the helper result", async () => {
+    mockGetServerSession.mockResolvedValue({ user: { email: "pm@example.com" } });
+    mockRequireAccess.mockResolvedValue({
+      ok: true,
+      canEdit: false,
+      programId: 78,
+      programIds: [78],
+      permission: { role: "program_manager" },
+    });
+
+    render(await HolisticMentorshipAdminPage());
+
+    expect(mockWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "admin",
+        canEdit: false,
+        canViewPhaseSetup: false,
+        initialProgramId: 78,
+        availableProgramIds: [78],
+      }),
+      undefined,
+    );
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+  });
+
   it("does not link the dedicated Admin back to its redirecting dashboard", async () => {
     mockGetServerSession.mockResolvedValue({ user: { email: "holistic@example.com" } });
     mockRequireAccess.mockResolvedValue({
