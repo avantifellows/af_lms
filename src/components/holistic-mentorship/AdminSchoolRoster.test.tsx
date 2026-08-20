@@ -103,7 +103,7 @@ function expectSummaryMetrics(expected: typeof wholeSchoolSummary) {
     ["Assigned", expected.assigned],
     ["Unassigned", expected.unassigned],
     ["Active Mentors", expected.activeMentors],
-    ["Coverage", `${expected.coveragePercentage}%`],
+    ["Coverage", `${expected.coveragePercentage.toFixed(1)}%`],
     ["Completed", expected.completed],
     ["Pending", expected.pending],
     ["No active Phase", expected.noActivePhase],
@@ -122,7 +122,7 @@ describe("AdminSchoolRoster", () => {
   it("shows read-only School coverage and links assigned and unassigned Students to detail", () => {
     render(<AdminSchoolRoster students={students} schoolCode="SCH001" />);
 
-    expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("50.0%")).toBeInTheDocument();
     expect(screen.getByText("Anita Mentor")).toBeInTheDocument();
     const table = within(screen.getByRole("region", { name: "School mentorship coverage" }));
     expect(table.getAllByText("Pending")).toHaveLength(2);
@@ -143,7 +143,7 @@ describe("AdminSchoolRoster", () => {
     );
   });
 
-  it("renders the complete server-provided Assignment Coverage summary for a Program Manager", () => {
+  it("uses the complete server-provided Assignment Coverage summary without filters", () => {
     render(<AdminSchoolRoster
       students={[
         ...students,
@@ -208,7 +208,7 @@ describe("AdminSchoolRoster", () => {
     });
   });
 
-  it("derives every summary metric from assignment-filtered rows", () => {
+  it("keeps the whole-school summary when only the assignment filter is active", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), {
@@ -219,16 +219,7 @@ describe("AdminSchoolRoster", () => {
     expect(screen.getByText("Ishaan Kumar")).toBeInTheDocument();
     expect(screen.queryByText("Asha Rao")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Showing 2 of 6 Students");
-    expectSummaryMetrics({
-      eligible: 2,
-      assigned: 0,
-      unassigned: 2,
-      activeMentors: 0,
-      coveragePercentage: 0,
-      completed: 0,
-      pending: 1,
-      noActivePhase: 1,
-    });
+    expectSummaryMetrics(wholeSchoolSummary);
   });
 
   it("derives every summary metric from search-filtered rows", () => {
@@ -274,29 +265,29 @@ describe("AdminSchoolRoster", () => {
     });
   });
 
-  it("combines search, grade, and assignment filters for internally consistent metrics", () => {
+  it("derives summary from search and grade while the table also applies assignment", () => {
     render(<AdminSchoolRoster students={coverageStudents} schoolCode="SCH001" summary={wholeSchoolSummary} />);
 
     fireEvent.change(screen.getByRole("textbox", { name: "Search Students" }), {
       target: { value: "a" },
     });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Grade" }), {
-      target: { value: "11" },
+      target: { value: "12" },
     });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by Assignment" }), {
       target: { value: "assigned" },
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent("Showing 3 of 6 Students");
-    expect(screen.getByText("Asha Rao")).toBeInTheDocument();
-    expect(screen.getByText("Meera Das")).toBeInTheDocument();
-    expect(screen.getByText("Nisha Patel")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 1 of 6 Students");
+    expect(screen.getByText("Kabir Singh")).toBeInTheDocument();
+    expect(screen.queryByText("Ravi Shah")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ishaan Kumar")).not.toBeInTheDocument();
     expectSummaryMetrics({
       eligible: 3,
-      assigned: 3,
-      unassigned: 0,
-      activeMentors: 2,
-      coveragePercentage: 100,
+      assigned: 1,
+      unassigned: 2,
+      activeMentors: 1,
+      coveragePercentage: 33.3,
       completed: 1,
       pending: 1,
       noActivePhase: 1,

@@ -47,17 +47,12 @@ function studentHref(student: Student, schoolCode: string, programId: number) {
   return `/holistic-mentorship/students/${student.studentId}/phases/${student.activePhaseId}?${params}`;
 }
 
-function derivedSummary(
-  students: Student[],
-  coveragePrecision: "whole" | "tenth" = "whole",
-): HolisticAssignmentCoverageSummary {
+function derivedSummary(students: Student[]): HolisticAssignmentCoverageSummary {
   const assigned = students.filter((student) => student.ownership).length;
   const mentors = new Set(students.flatMap((student) =>
     student.ownership ? [student.ownership.mentorUserId] : [])).size;
   const coveragePercentage = students.length
-    ? coveragePrecision === "tenth"
-      ? Math.round((assigned / students.length) * 1000) / 10
-      : Math.round((assigned / students.length) * 100)
+    ? Math.round((assigned / students.length) * 1000) / 10
     : 0;
   return {
     eligible: students.length,
@@ -77,7 +72,7 @@ function Summary({ summary }: { summary: HolisticAssignmentCoverageSummary }) {
     ["Assigned", summary.assigned],
     ["Unassigned", summary.unassigned],
     ["Active Mentors", summary.activeMentors],
-    ["Coverage", `${summary.coveragePercentage}%`],
+    ["Coverage", `${summary.coveragePercentage.toFixed(1)}%`],
     ["Completed", summary.completed],
     ["Pending", summary.pending],
     ["No active Phase", summary.noActivePhase],
@@ -566,9 +561,9 @@ export default function AdminSchoolRoster({
     () => filterStudents(students, search, grade, assignment),
     [assignment, grade, students, search]
   );
-  const hasActiveFilter = search.trim().length > 0 || Boolean(grade) || assignment !== "all";
-  const displayedSummary = hasActiveFilter
-    ? derivedSummary(shown, "tenth")
+  const hasSearchOrGradeFilter = search.trim().length > 0 || Boolean(grade);
+  const displayedSummary = hasSearchOrGradeFilter
+    ? derivedSummary(filterStudents(students, search, grade, "all"))
     : summary ?? derivedSummary(students);
 
   return <section className="min-w-0 max-w-full space-y-5">

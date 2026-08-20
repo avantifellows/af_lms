@@ -1636,7 +1636,7 @@ describe("SchoolPage (server component)", () => {
 
     expect(screen.getByText("School assignment coverage for 2026-2027")).toBeInTheDocument();
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
-    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByText("100.0%")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Assign|Remove Mentor/ })).not.toBeInTheDocument();
     expect(mockRequireHolisticMentorshipAccess).toHaveBeenCalledWith(
       expect.objectContaining({ user: { email: `${role}@example.com` } }),
