@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import JSZip from "jszip";
 
 const {
   mockGetServerSession,
@@ -25,7 +27,7 @@ vi.mock("@/lib/registration-mode", async () => {
   };
 });
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import { PROGRAM_IDS } from "@/lib/constants";
 import { jsonRequest, routeParams, ADMIN_SESSION } from "../../../__test-utils__/api-test-helpers";
 
@@ -171,5 +173,49 @@ describe("POST /api/school/[udise]/students in Phone Registration Mode", () => {
       results: [{ status: "rejected", field_errors: { phone: "Enter a valid phone number" } }],
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/school/[udise]/students template in Phone Registration Mode", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    vi.resetAllMocks();
+    mockGetServerSession.mockResolvedValue(ADMIN_SESSION);
+    mockQuery.mockResolvedValue([school]);
+    mockRequireStudentAdditionAccess.mockResolvedValue({
+      ok: true,
+      programId: PROGRAM_IDS.NVS,
+      permission: { role: "admin" },
+      actor: {
+        user_id: 501,
+        email: "admin@avantifellows.org",
+        login_type: "google",
+        role: "admin",
+      },
+    });
+  });
+
+  it("serves the HQ workbook byte-for-byte with its raw x14 dropdown validations", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/school/12345678901/students") as never,
+      routeParams({ udise: "12345678901" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx"',
+    );
+
+    const workbookBytes = Buffer.from(await response.arrayBuffer());
+    expect(createHash("sha256").update(workbookBytes).digest("hex")).toBe(
+      "657f236c35bda1d01375126394091a68ff7a4e3753c8036a030835762739c6e7",
+    );
+
+    const zip = await JSZip.loadAsync(workbookBytes);
+    const workbookXml = await zip.file("xl/workbook.xml")?.async("string");
+    const templateXml = await zip.file("xl/worksheets/sheet1.xml")?.async("string");
+    expect(workbookXml).toContain('name="Template"');
+    expect(workbookXml).toContain('name="Dropdown values"');
+    expect(templateXml).toContain('<x14:dataValidations count="7"');
   });
 });

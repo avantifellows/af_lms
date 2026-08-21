@@ -9,9 +9,13 @@ import { query } from "@/lib/db";
 import { getDbServiceConfig } from "@/lib/db-service-config";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
+  ACTIVE_REGISTRATION_MODE,
+  APPROVED_REGISTRATION_MODE,
   getRegistrationModeHandshake,
   isRegistrationModeMismatchResponse,
+  PHONE_REGISTRATION_MODE,
   REGISTRATION_MODE_MISMATCH_MESSAGE,
+  type RegistrationMode,
 } from "@/lib/registration-mode";
 import {
   parseStudentAdditionUpload,
@@ -56,11 +60,18 @@ const EMPTY_TOTALS = {
   rejected: 0,
 };
 const MAX_STUDENT_ADDITION_UPLOAD_BYTES = 5 * 1024 * 1024;
-const STUDENT_ADDITION_TEMPLATE = path.join(
-  process.cwd(),
-  process.env.NODE_ENV === "production" ? ".next/server/assets" : "src/assets",
-  "nvs-student-addition-template.xlsx",
-);
+const STUDENT_ADDITION_TEMPLATE_FILENAMES: Record<RegistrationMode, string> = {
+  [PHONE_REGISTRATION_MODE]: "NVS_Lakshya_Data_Template_updated_19th_August_2026.xlsx",
+  [APPROVED_REGISTRATION_MODE]: "nvs-student-addition-template.xlsx",
+};
+
+function studentAdditionTemplatePath(mode: RegistrationMode = ACTIVE_REGISTRATION_MODE) {
+  return path.join(
+    process.cwd(),
+    process.env.NODE_ENV === "production" ? ".next/server/assets" : "src/assets",
+    STUDENT_ADDITION_TEMPLATE_FILENAMES[mode],
+  );
+}
 
 function safeFields(value: unknown, keys: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -354,11 +365,12 @@ export async function GET(
   const resolved = await resolveRouteContext(params);
   if (resolved.response) return resolved.response;
 
-  const workbook = await readFile(STUDENT_ADDITION_TEMPLATE);
+  const filename = STUDENT_ADDITION_TEMPLATE_FILENAMES[ACTIVE_REGISTRATION_MODE];
+  const workbook = await readFile(studentAdditionTemplatePath());
   return new NextResponse(new Uint8Array(workbook), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": 'attachment; filename="nvs-student-addition-template.xlsx"',
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }
