@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { PHONE_REGISTRATION_MODE } from "@/lib/registration-mode";
+import {
+  APPROVED_REGISTRATION_MODE,
+  PHONE_REGISTRATION_MODE,
+} from "@/lib/registration-mode";
 import BulkStudentUploadModal from "./BulkStudentUploadModal";
 
 const baseProps = {
@@ -11,6 +14,7 @@ const baseProps = {
   schoolCode: "JNV001",
   onClose: vi.fn(),
   onUploaded: vi.fn(),
+  registrationMode: APPROVED_REGISTRATION_MODE,
 };
 
 describe("BulkStudentUploadModal", () => {
