@@ -102,12 +102,18 @@ const ACTIVE_STATUSES = new Set(["queued", "started", "processing"]);
 export function evaluateGenerationEligibility(
   window: SessionWindow,
   jobs: JobLike[],
+  // Set when the caller is deliberately asking for a fresh copy. The
+  // once-per-test rule exists to stop accidental duplicate PDFs, not to make a
+  // report permanently unfixable: a PDF built before an upstream data fix stays
+  // wrong forever otherwise, and the underlying reports are regenerated
+  // independently of these jobs.
+  { regenerate = false }: { regenerate?: boolean } = {},
 ): { allowed: boolean; reason?: GenerationBlockedReason } {
   if (!window.hasEnded) return { allowed: false, reason: "session_not_ended" };
   if (jobs.some((j) => ACTIVE_STATUSES.has(j.status))) {
     return { allowed: false, reason: "job_in_progress" };
   }
-  if (jobs.some((j) => j.status === "done")) {
+  if (!regenerate && jobs.some((j) => j.status === "done")) {
     return { allowed: false, reason: "already_generated" };
   }
   return { allowed: true };
@@ -118,5 +124,5 @@ export const BLOCKED_MESSAGE: Record<GenerationBlockedReason, string> = {
     "This test is still open. The combined report can be generated once the session end time has passed.",
   job_in_progress: "A combined report for this test is already being generated.",
   already_generated:
-    "A combined report has already been generated for this test.",
+    "A combined report already exists for this test. Use Regenerate to build a fresh copy.",
 };

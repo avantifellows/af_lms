@@ -78,6 +78,7 @@ export async function POST(
     grade?: number;
     program?: string;
     stream?: string;
+    regenerate?: boolean;
   };
   try {
     body = await request.json();
@@ -90,12 +91,15 @@ export async function POST(
 
   try {
     // Gate before doing any work: the session must have closed, and this test
-    // must not already have a finished or in-flight report.
+    // must not already have an in-flight report. An existing finished report
+    // only blocks unless the caller explicitly asked to regenerate.
     const [window, existingJobs] = await Promise.all([
       getSessionWindow(body.session_id),
       listCombinedReportJobs(body.session_id, auth.school.code),
     ]);
-    const eligibility = evaluateGenerationEligibility(window, existingJobs);
+    const eligibility = evaluateGenerationEligibility(window, existingJobs, {
+      regenerate: body.regenerate === true,
+    });
     if (!eligibility.allowed && eligibility.reason) {
       return NextResponse.json(
         {
