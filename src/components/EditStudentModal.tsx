@@ -11,6 +11,7 @@ import {
   CBSE_BOARD,
   CATEGORY_OPTIONS,
   G10_BOARD_OPTIONS,
+  isValidRegistrationPhone,
   STUDENT_ADDITION_GENDER_OPTIONS,
   STUDENT_DOB_MAX,
   STUDENT_DOB_MIN,
@@ -40,6 +41,8 @@ interface EditStudentModalProps {
    * from the program the user is acting under.
    */
   programId?: number | null;
+  /** Server-inferred Phone Registration Mode cohort membership. */
+  isPhoneRegistrationStudent?: boolean;
 }
 
 const STREAM_OPTIONS = [
@@ -133,6 +136,7 @@ export default function EditStudentModal({
   onSave,
   grades,
   programId = null,
+  isPhoneRegistrationStudent = false,
 }: EditStudentModalProps) {
   const initialData = initialFormData(student);
   const [formData, setFormData] = useState(initialData);
@@ -181,8 +185,18 @@ export default function EditStudentModal({
       return;
     }
 
-    if ("phone" in changed && !/^[1-9]\d{9}$/.test(formData.phone)) {
-      setError("Parents Phone Number must be exactly 10 digits and cannot start with zero");
+    if (
+      "phone" in changed &&
+      !isValidRegistrationPhone(
+        formData.phone,
+        isPhoneRegistrationStudent ? "phone" : "approved",
+      )
+    ) {
+      setError(
+        isPhoneRegistrationStudent
+          ? "Parents Phone Number must be exactly 10 digits and start with 6-9"
+          : "Parents Phone Number must be exactly 10 digits and cannot start with zero",
+      );
       setLoading(false);
       return;
     }
@@ -253,7 +267,9 @@ export default function EditStudentModal({
       ...prev,
       [name]:
         name === "phone"
-          ? digitsOnly(value).replace(/^0+/, "").slice(0, 10)
+          ? (isPhoneRegistrationStudent
+            ? digitsOnly(value).slice(0, 10)
+            : digitsOnly(value).replace(/^0+/, "").slice(0, 10))
           : name === "father_name"
             ? lettersAndSpacesOnly(value)
             : value,
@@ -283,6 +299,11 @@ export default function EditStudentModal({
         className={inputClassName}
       />
       {fieldErrors[name] && <p className={errorClassName}>{fieldErrors[name]}</p>}
+      {name === "phone" && isPhoneRegistrationStudent && (
+        <p className="mt-1 text-xs text-text-muted">
+          Changing this phone also changes the Student ID. Portal login switches to the new number immediately.
+        </p>
+      )}
     </div>
   );
 

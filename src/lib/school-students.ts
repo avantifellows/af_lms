@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { CURRENT_ACADEMIC_YEAR } from "@/lib/constants";
+import { CURRENT_ACADEMIC_YEAR, PROGRAM_IDS } from "@/lib/constants";
 import {
   processStudents,
   type DataIssue,
@@ -70,6 +70,38 @@ export async function getSchoolRoster(
       p.program_id,
       sp.student_program_ids,
       dp.dropout_program_ids,
+      (
+        EXISTS (
+          SELECT 1
+          FROM enrollment_record er_phone_nvs
+          JOIN batch b_phone_nvs ON b_phone_nvs.id = er_phone_nvs.group_id
+          JOIN enrollment_record er_phone_school ON er_phone_school.user_id = s.user_id
+            AND er_phone_school.group_type = 'school'
+            AND er_phone_school.is_current = true
+          JOIN school sch_phone ON sch_phone.id = er_phone_school.group_id
+          WHERE er_phone_nvs.user_id = s.user_id
+            AND er_phone_nvs.group_type = 'batch'
+            AND er_phone_nvs.is_current = true
+            AND b_phone_nvs.program_id = $3
+            AND sch_phone.af_school_category = 'JNV'
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM enrollment_record er_phone_auth
+          JOIN "group" phone_auth_group_link
+            ON phone_auth_group_link.type = 'auth_group'
+            AND phone_auth_group_link.child_id = er_phone_auth.group_id
+          JOIN auth_group phone_auth_group
+            ON phone_auth_group.id = phone_auth_group_link.child_id
+          WHERE er_phone_auth.user_id = s.user_id
+            AND er_phone_auth.group_type = 'auth_group'
+            AND er_phone_auth.is_current = true
+            AND phone_auth_group.name = 'EnableStudents'
+        )
+        AND regexp_replace(COALESCE(s.student_id, ''), '[^0-9]', '', 'g') =
+          regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g')
+        AND regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g') ~ '^[6-9][0-9]{9}$'
+      ) AS is_phone_registration_student,
       EXISTS (
         SELECT 1
         FROM lms_student_write_audits dropout
@@ -156,7 +188,7 @@ export async function getSchoolRoster(
     ) dp ON true
     WHERE g.type = 'school' AND g.child_id = $1
     ORDER BY gr.number, u.first_name, u.last_name`,
-    [schoolId, CURRENT_ACADEMIC_YEAR],
+    [schoolId, CURRENT_ACADEMIC_YEAR, PROGRAM_IDS.NVS],
   );
   return processStudents(rows);
 }

@@ -44,6 +44,7 @@ const defaultProps = {
   onClose: vi.fn(),
   onSave: vi.fn(),
   grades,
+  isPhoneRegistrationStudent: false,
   // The roster's selected program — what the Edit gate authorized against.
   programId: 64 as number | null,
 };
@@ -122,6 +123,42 @@ describe("EditStudentModal", () => {
     fireEvent.change(getByName("stream"), { target: { value: "medical" } });
     expect(screen.queryByText(/New Batch/)).not.toBeInTheDocument();
     expect(document.querySelector('[name="batch_group_id"]')).toBeNull();
+  });
+
+  it("explains that a Phone Registration Mode correction changes Portal login", () => {
+    renderModal({ isPhoneRegistrationStudent: true });
+
+    expect(
+      screen.getByText(
+        "Changing this phone also changes the Student ID. Portal login switches to the new number immediately.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show Phone Registration Mode guidance for other Students", () => {
+    renderModal();
+
+    expect(
+      screen.queryByText(
+        "Changing this phone also changes the Student ID. Portal login switches to the new number immediately.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses the Phone Registration Mode 6-9 phone rule in the Edit UI", async () => {
+    const user = userEvent.setup();
+    renderModal({ isPhoneRegistrationStudent: true });
+
+    await user.clear(getByName("phone"));
+    await user.type(getByName("phone"), "5876543210");
+    await user.click(screen.getByText("Save Changes"));
+
+    expect(
+      await screen.findByText(
+        "Parents Phone Number must be exactly 10 digits and start with 6-9",
+      ),
+    ).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("keeps the local database date when serialization uses the prior UTC day", () => {
