@@ -26,6 +26,14 @@ _Avoid_: Cohort, section
 An Avanti Fellows delivery model within a school, such as CoE, Nodal, or NVS.
 _Avoid_: Course, stream
 
+**Registration Mode**:
+The complete set of rules used by JNV NVS Add Student and Bulk Upload for new Students, including accepted fields, Student ID creation, duplicate checks, and the upload template.
+_Avoid_: Template type, upload mode, School-selected mode
+
+**Phone Registration Mode**:
+The temporary Registration Mode in which JNV NVS registration does not collect PEN, Grade 10 Roll Number, or Annual Family Income and uses the 10-digit parent phone number, starting from 6 through 9, as the Student ID.
+_Avoid_: Phone-only login, temporary Student ID
+
 **Centre Exam Track**:
 An Exam Track assigned to one Centre for one Grade. A Centre and Grade can have one or more Centre Exam Tracks.
 _Avoid_: Centre Stream, Program, generic JEE
@@ -215,6 +223,16 @@ _Avoid_: Academic Mentor-Mentee Mapping, shared mentorship mapping, evergreen as
 ## Relationships
 
 - A **School** has many **Students** (via `group` → `group_user`)
+- The active **Registration Mode** applies to every new JNV NVS Student created through Add Student or Bulk Upload; a School user does not select it
+- A **Phone Registration Mode** Student uses the normalized parent phone number as the Student ID in the `EnableStudents` auth group and continues to authenticate with Student ID plus Date of Birth
+- Portal authentication resolves a **Phone Registration Mode** Student inside the selected auth group before checking Student ID and Date of Birth
+- A **Phone Registration Mode** Student is identified from JNV NVS membership, `EnableStudents` membership, and equality between Student ID and normalized parent phone; the Student does not store a separate Registration Mode value
+- Two Students cannot share one phone-based Student ID inside `EnableStudents`; the second Student must use another parent or guardian phone
+- A scoped Admin, Program Manager, or Program Admin can correct the parent phone for a **Phone Registration Mode** Student; the contact phone and Student ID change together and the old and new values are audited
+- Until the generic DB Service student-update import is made auth-group-aware, phone correction for a **Phone Registration Mode** Student is supported only through LMS
+- Adding PEN, Grade 10 Roll Number, and Annual Family Income after HQ approval does not replace a **Phone Registration Mode** Student's phone-based Student ID
+- After HQ approval, a blank PEN or Grade 10 Roll Number can be filled once for an eligible NVS Student and then locks again; at least one of the two identifiers is required, while Annual Family Income remains optional and editable
+- A repeated phone in one Bulk Upload rejects every affected row, including the first; an existing match never overwrites or transfers a Student
 - A **School** has many **Batches**
 - A **School** can have many **Centres**
 - A **Centre** can be linked to one **School**, but not every **Centre** is school-linked
