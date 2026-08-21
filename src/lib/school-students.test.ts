@@ -65,7 +65,7 @@ describe("getSchoolRoster", () => {
     expect(sql).toContain("AS can_undo_nvs_dropout");
     expect(sql).toContain("s.pen_number");
     expect(sql).toContain("er_batch.end_date DESC NULLS LAST");
-    expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR]);
+    expect(params).toEqual(["school-1", CURRENT_ACADEMIC_YEAR, 64]);
   });
 
   it("returns deduplicated students plus data issues via processStudents", async () => {

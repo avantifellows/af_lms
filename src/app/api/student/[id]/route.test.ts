@@ -2,16 +2,36 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/student-addition-access", () => ({
-  requireStudentEditAccess: vi.fn(),
+const {
+  mockQuery,
+  mockRequireStudentEditAccessFn,
+  mockRequireStudentAdditionStudentAccessFn,
+} = vi.hoisted(() => ({
+  mockQuery: vi.fn(),
+  mockRequireStudentEditAccessFn: vi.fn(),
+  mockRequireStudentAdditionStudentAccessFn: vi.fn(),
 }));
+vi.mock("@/lib/db", () => ({ query: mockQuery }));
+vi.mock("@/lib/student-addition-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/student-addition-access")>(
+    "@/lib/student-addition-access",
+  );
+  return {
+    ...actual,
+    requireStudentEditAccess: mockRequireStudentEditAccessFn,
+    requireStudentAdditionStudentAccess: mockRequireStudentAdditionStudentAccessFn,
+  };
+});
 vi.mock("@/lib/lms-enrollment-date", () => ({
   deriveLmsEnrollmentPeriod: vi.fn(),
 }));
 
 import { getServerSession } from "next-auth";
 import { PATCH } from "./route";
-import { requireStudentEditAccess } from "@/lib/student-addition-access";
+import {
+  requireStudentAdditionStudentAccess,
+  requireStudentEditAccess,
+} from "@/lib/student-addition-access";
 import { deriveLmsEnrollmentPeriod } from "@/lib/lms-enrollment-date";
 import {
   jsonRequest,
@@ -22,6 +42,7 @@ import {
 
 const mockSession = vi.mocked(getServerSession);
 const mockRequireStudentEditAccess = vi.mocked(requireStudentEditAccess);
+const mockRequireStudentAdditionStudentAccess = vi.mocked(requireStudentAdditionStudentAccess);
 const mockDeriveLmsEnrollmentPeriod = vi.mocked(deriveLmsEnrollmentPeriod);
 const mockFetch = vi.fn();
 
@@ -30,7 +51,24 @@ beforeEach(() => {
   process.env.DB_SERVICE_URL = "https://db.example.test/api";
   process.env.DB_SERVICE_TOKEN = "test-token";
   vi.stubGlobal("fetch", mockFetch);
+  mockQuery.mockResolvedValue([{
+    has_jnv_nvs_membership: false,
+    has_enable_students_membership: false,
+    student_id_matches_phone: false,
+  }]);
   mockRequireStudentEditAccess.mockResolvedValue({
+    ok: true,
+    programId: 64,
+    permission: {} as never,
+    actor: {
+      user_id: 501,
+      email: "pm@example.org",
+      login_type: "google",
+      role: "program_manager",
+    },
+    school: { code: "JNV001", udise_code: "12345678901" },
+  });
+  mockRequireStudentAdditionStudentAccess.mockResolvedValue({
     ok: true,
     programId: 64,
     permission: {} as never,
@@ -116,6 +154,8 @@ describe("PATCH /api/student/[id]", () => {
       program_id: 64,
       start_date: "2026-07-01",
       academic_year: "2026-2027",
+      registration_mode: "approved",
+      registration_mode_version: "1",
       first_name: "Ravi Kumar",
       last_name: "",
       father_name: "Suresh Kumar",
